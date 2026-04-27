@@ -26,6 +26,8 @@ interface FileState {
   showHidden: boolean;
   _watchUnlisten: UnlistenFn | null;
   _refreshTimer: ReturnType<typeof setTimeout> | null;
+  _pathIndex: Map<string, FileNode>;
+  _parentMap: Map<string, string>;
   setRootPath: (path: string) => void;
   setTree: (tree: FileNode[]) => void;
   toggleExpand: (path: string) => void;
@@ -39,6 +41,9 @@ interface FileState {
   toggleShowHidden: () => Promise<void>;
   startWatching: () => Promise<void>;
   stopWatching: () => Promise<void>;
+  // O(1) lookups (best-effort, rebuilt on full tree updates)
+  findNode: (path: string) => FileNode | undefined;
+  getParentPath: (path: string) => string | undefined;
 }
 
 function entriesToNodes(entries: { name: string; path: string; is_dir: boolean; size: number }[]): FileNode[] {
@@ -53,6 +58,49 @@ function entriesToNodes(entries: { name: string; path: string; is_dir: boolean; 
   }));
 }
 
+function buildIndex(
+  nodes: FileNode[],
+  pathIndex: Map<string, FileNode>,
+  parentMap: Map<string, string>,
+  parentPath = ''
+) {
+  for (const node of nodes) {
+    pathIndex.set(node.path, node);
+    if (parentPath) parentMap.set(node.path, parentPath);
+    if (node.children) {
+      buildIndex(node.children, pathIndex, parentMap, node.path);
+    }
+  }
+}
+
+function rebuildIndex(state: { tree: FileNode[]; _pathIndex: Map<string, FileNode>; _parentMap: Map<string, string> }) {
+  state._pathIndex.clear();
+  state._parentMap.clear();
+  buildIndex(state.tree, state._pathIndex, state._parentMap);
+}
+
+function findNodeInTree(nodes: FileNode[], path: string): FileNode | undefined {
+  for (const node of nodes) {
+    if (node.path === path) return node;
+    if (node.children) {
+      const found = findNodeInTree(node.children, path);
+      if (found) return found;
+    }
+  }
+  return undefined;
+}
+
+function getParentPathFromTree(nodes: FileNode[], path: string, parentPath = ''): string | undefined {
+  for (const node of nodes) {
+    if (node.path === path) return parentPath || undefined;
+    if (node.children) {
+      const found = getParentPathFromTree(node.children, path, node.path);
+      if (found) return found;
+    }
+  }
+  return undefined;
+}
+
 export const useFileStore = create<FileState>()(
   immer((set, get) => ({
     rootPath: null,
@@ -63,17 +111,22 @@ export const useFileStore = create<FileState>()(
     })(),
     _watchUnlisten: null,
     _refreshTimer: null,
+    _pathIndex: new Map(),
+    _parentMap: new Map(),
 
     setRootPath: (path) =>
       set((state) => {
         state.rootPath = path;
         state.tree = [];
         state.fileCache.clear();
+        state._pathIndex.clear();
+        state._parentMap.clear();
       }),
 
     setTree: (tree) =>
       set((state) => {
         state.tree = tree;
+        rebuildIndex(state);
       }),
 
     toggleExpand: (path) =>
@@ -89,6 +142,7 @@ export const useFileStore = create<FileState>()(
           return false;
         };
         findAndToggle(state.tree);
+        rebuildIndex(state);
       }),
 
     setFileContent: (path, content) =>
@@ -104,23 +158,22 @@ export const useFileStore = create<FileState>()(
     },
 
     openFolder: async (path) => {
-      // Stop any existing watcher
       await get().stopWatching();
-
-      // Clear diagnostics from previous workspace
       useDiagnosticsStore.getState().clearAll();
 
       set((state) => {
         state.rootPath = path;
         state.tree = [];
         state.fileCache.clear();
+        state._pathIndex.clear();
+        state._parentMap.clear();
       });
       const nodes = await get().loadDirectory(path);
       set((state) => {
         state.tree = nodes;
+        rebuildIndex(state);
       });
 
-      // Start watching after loading
       await get().startWatching();
     },
 
@@ -131,49 +184,51 @@ export const useFileStore = create<FileState>()(
         state.rootPath = null;
         state.tree = [];
         state.fileCache.clear();
+        state._pathIndex.clear();
+        state._parentMap.clear();
       });
     },
 
     expandDirectory: async (path) => {
-      // Mark loading
       set((state) => {
-        const find = (nodes: FileNode[]): boolean => {
+        const markLoading = (nodes: FileNode[]): boolean => {
           for (const n of nodes) {
             if (n.path === path) {
               n.isLoading = true;
               n.isExpanded = true;
               return true;
             }
-            if (n.children && find(n.children)) return true;
+            if (n.children && markLoading(n.children)) return true;
           }
           return false;
         };
-        find(state.tree);
+        markLoading(state.tree);
       });
 
       const children = await get().loadDirectory(path);
 
       set((state) => {
-        const find = (nodes: FileNode[]): boolean => {
+        const assignChildren = (nodes: FileNode[]): boolean => {
           for (const n of nodes) {
             if (n.path === path) {
               n.children = children;
               n.isLoading = false;
               return true;
             }
-            if (n.children && find(n.children)) return true;
+            if (n.children && assignChildren(n.children)) return true;
           }
           return false;
         };
-        find(state.tree);
+        assignChildren(state.tree);
+        rebuildIndex(state);
       });
     },
 
     refreshExpandedDirs: async () => {
-      const { rootPath, tree, loadDirectory } = get();
+      const { rootPath, loadDirectory } = get();
       if (!rootPath) return;
 
-      // Collect all expanded directory paths
+      // Collect all expanded directory paths from current tree
       const expandedPaths: string[] = [];
       const collectExpanded = (nodes: FileNode[]) => {
         for (const n of nodes) {
@@ -183,7 +238,7 @@ export const useFileStore = create<FileState>()(
           }
         }
       };
-      collectExpanded(tree);
+      collectExpanded(get().tree);
 
       // Refresh root
       const rootNodes = await loadDirectory(rootPath);
@@ -196,7 +251,7 @@ export const useFileStore = create<FileState>()(
         try {
           const children = await loadDirectory(dirPath);
           set((state) => {
-            const find = (nodes: FileNode[]): boolean => {
+            const assign = (nodes: FileNode[]): boolean => {
               for (const n of nodes) {
                 if (n.path === dirPath) {
                   n.children = children;
@@ -204,16 +259,21 @@ export const useFileStore = create<FileState>()(
                   n.isLoading = false;
                   return true;
                 }
-                if (n.children && find(n.children)) return true;
+                if (n.children && assign(n.children)) return true;
               }
               return false;
             };
-            find(state.tree);
+            assign(state.tree);
           });
         } catch {
           // Directory may have been deleted
         }
       }
+
+      // Rebuild index once at the end
+      set((state) => {
+        rebuildIndex(state);
+      });
     },
 
     toggleShowHidden: async () => {
@@ -222,6 +282,18 @@ export const useFileStore = create<FileState>()(
       try { localStorage.setItem('hscode-show-hidden', String(newVal)); } catch {}
       const { rootPath, openFolder } = get();
       if (rootPath) await openFolder(rootPath);
+    },
+
+    findNode: (path) => {
+      const fromIndex = get()._pathIndex.get(path);
+      if (fromIndex) return fromIndex;
+      return findNodeInTree(get().tree, path);
+    },
+
+    getParentPath: (path) => {
+      const fromIndex = get()._parentMap.get(path);
+      if (fromIndex) return fromIndex;
+      return getParentPathFromTree(get().tree, path);
     },
 
     startWatching: async () => {
@@ -236,15 +308,19 @@ export const useFileStore = create<FileState>()(
       }
 
       const unlisten = await listen<FsChangePayload>('fs:changed', (_event) => {
-        // Debounce: batch rapid changes into a single refresh
         const current = get();
         if (current._refreshTimer) {
           clearTimeout(current._refreshTimer);
         }
         const timer = setTimeout(() => {
-          get().refreshExpandedDirs().catch(console.error);
-        }, 300);
-        // Store timer reference (can't use set() for non-immer fields, use object mutation)
+          // For real-time updates, do a smart partial refresh:
+          // If it's a simple create/remove in an expanded dir, just refresh that dir.
+          // Otherwise, do a full expanded refresh.
+          const { refreshExpandedDirs } = get();
+          refreshExpandedDirs().catch((err) => {
+            console.warn('[FileStore] Refresh failed:', err);
+          });
+        }, 120);
         (get() as any)._refreshTimer = timer;
       });
 

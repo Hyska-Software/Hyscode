@@ -1,4 +1,5 @@
-import { FolderOpen, RefreshCw, FilePlus, FolderPlus, Eye, EyeOff } from 'lucide-react';
+import { useState, useCallback } from 'react';
+import { FolderOpen, RefreshCw, FilePlus, FolderPlus, Eye, EyeOff, Loader2 } from 'lucide-react';
 import { useFileStore, useProjectStore } from '../../../stores';
 import { pickFolder } from '../../../lib/tauri-dialog';
 import { tauriFs } from '../../../lib/tauri-fs';
@@ -8,10 +9,14 @@ import { FileTree } from './file-tree';
 export function FileExplorerView() {
   const rootPath = useFileStore((s) => s.rootPath);
   const openFolder = useFileStore((s) => s.openFolder);
+  const refreshExpandedDirs = useFileStore((s) => s.refreshExpandedDirs);
   const showHidden = useFileStore((s) => s.showHidden);
   const toggleShowHidden = useFileStore((s) => s.toggleShowHidden);
   const projectName = useProjectStore((s) => s.name);
   const openProject = useProjectStore((s) => s.openProject);
+
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [pendingAction, setPendingAction] = useState<string | null>(null);
 
   const handleOpenFolder = async () => {
     const path = await pickFolder();
@@ -21,9 +26,27 @@ export function FileExplorerView() {
     }
   };
 
-  const handleRefresh = async () => {
-    if (rootPath) {
-      await openFolder(rootPath);
+  const handleRefresh = useCallback(async () => {
+    if (!rootPath || isRefreshing) return;
+    setIsRefreshing(true);
+    try {
+      await refreshExpandedDirs();
+    } catch (err) {
+      console.error('Failed to refresh:', err);
+    } finally {
+      setIsRefreshing(false);
+    }
+  }, [rootPath, isRefreshing, refreshExpandedDirs]);
+
+  const withAction = async (key: string, fn: () => Promise<void>) => {
+    if (pendingAction) return;
+    setPendingAction(key);
+    try {
+      await fn();
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setPendingAction(null);
     }
   };
 
@@ -32,11 +55,7 @@ export function FileExplorerView() {
     const name = await promptInput({ title: 'New File', placeholder: 'Enter file name' });
     if (!name?.trim()) return;
     const sep = rootPath.includes('/') ? '/' : '\\';
-    try {
-      await tauriFs.createFile(rootPath + sep + name.trim(), '');
-    } catch (err) {
-      console.error('Failed to create file:', err);
-    }
+    await withAction('new-file', () => tauriFs.createFile(rootPath + sep + name.trim(), ''));
   };
 
   const handleNewFolderAtRoot = async () => {
@@ -44,12 +63,10 @@ export function FileExplorerView() {
     const name = await promptInput({ title: 'New Folder', placeholder: 'Enter folder name' });
     if (!name?.trim()) return;
     const sep = rootPath.includes('/') ? '/' : '\\';
-    try {
+    await withAction('new-folder', async () => {
       const { invoke } = await import('@tauri-apps/api/core');
       await invoke('create_directory', { path: rootPath + sep + name.trim() });
-    } catch (err) {
-      console.error('Failed to create folder:', err);
-    }
+    });
   };
 
   if (!rootPath) {
@@ -77,17 +94,27 @@ export function FileExplorerView() {
         <div className="flex items-center gap-0.5">
           <button
             onClick={handleNewFileAtRoot}
-            className="flex h-5 w-5 items-center justify-center rounded-sm text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+            disabled={pendingAction === 'new-file'}
+            className="flex h-5 w-5 items-center justify-center rounded-sm text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-50"
             title="New File"
           >
-            <FilePlus className="h-3 w-3" />
+            {pendingAction === 'new-file' ? (
+              <Loader2 className="h-3 w-3 animate-spin" />
+            ) : (
+              <FilePlus className="h-3 w-3" />
+            )}
           </button>
           <button
             onClick={handleNewFolderAtRoot}
-            className="flex h-5 w-5 items-center justify-center rounded-sm text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+            disabled={pendingAction === 'new-folder'}
+            className="flex h-5 w-5 items-center justify-center rounded-sm text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-50"
             title="New Folder"
           >
-            <FolderPlus className="h-3 w-3" />
+            {pendingAction === 'new-folder' ? (
+              <Loader2 className="h-3 w-3 animate-spin" />
+            ) : (
+              <FolderPlus className="h-3 w-3" />
+            )}
           </button>
           <button
             onClick={toggleShowHidden}
@@ -102,10 +129,11 @@ export function FileExplorerView() {
           </button>
           <button
             onClick={handleRefresh}
-            className="flex h-5 w-5 items-center justify-center rounded-sm text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+            disabled={isRefreshing}
+            className="flex h-5 w-5 items-center justify-center rounded-sm text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-50"
             title="Refresh"
           >
-            <RefreshCw className="h-3 w-3" />
+            <RefreshCw className={`h-3 w-3 ${isRefreshing ? 'animate-spin' : ''}`} />
           </button>
         </div>
       </div>
