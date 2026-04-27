@@ -20,6 +20,7 @@ export interface ReviewComment {
   message: string;
   suggestion?: string;
   resolved: boolean;
+  createdAt: number;
 }
 
 export interface ReviewFileEntry {
@@ -27,6 +28,8 @@ export interface ReviewFileEntry {
   status: string;
   commentCount: number;
   reviewed: boolean;
+  additions: number;
+  deletions: number;
 }
 
 export interface ReviewSummary {
@@ -35,6 +38,58 @@ export interface ReviewSummary {
   totalComments: number;
   bySeverity: Record<ReviewSeverity, number>;
   score: number | null;
+  totalAdditions: number;
+  totalDeletions: number;
+}
+
+export interface ReviewThread {
+  id: string;
+  comments: ReviewComment[];
+}
+
+// ─── Persistence helpers ────────────────────────────────────────────────────
+
+const STORAGE_KEY = 'hyscode:review:data';
+
+interface PersistedReviewData {
+  comments: ReviewComment[];
+  reviewedFiles: string[];
+  version: number;
+}
+
+function loadPersistedData(projectPath: string | null): PersistedReviewData | null {
+  if (!projectPath) return null;
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return null;
+    const all = JSON.parse(raw) as Record<string, PersistedReviewData>;
+    return all[projectPath] ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function savePersistedData(projectPath: string, data: PersistedReviewData) {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    const all = raw ? (JSON.parse(raw) as Record<string, PersistedReviewData>) : {};
+    all[projectPath] = data;
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(all));
+  } catch {
+    // ignore
+  }
+}
+
+function clearPersistedData(projectPath: string) {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return;
+    const all = JSON.parse(raw) as Record<string, PersistedReviewData>;
+    delete all[projectPath];
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(all));
+  } catch {
+    // ignore
+  }
 }
 
 // ─── Store ──────────────────────────────────────────────────────────────────
@@ -67,18 +122,23 @@ interface ReviewState {
   setError: (error: string | null) => void;
 
   // Comment actions
-  addComment: (comment: ReviewComment) => void;
-  addComments: (comments: ReviewComment[]) => void;
+  addComment: (comment: Omit<ReviewComment, 'id' | 'createdAt'>) => string;
+  addComments: (comments: Omit<ReviewComment, 'id' | 'createdAt'>[]) => void;
   resolveComment: (id: string) => void;
   unresolveComment: (id: string) => void;
+  deleteComment: (id: string) => void;
   clearComments: () => void;
 
   // File review tracking
   markFileReviewed: (path: string) => void;
   unmarkFileReviewed: (path: string) => void;
+  markAllReviewed: () => void;
 
   // Summary
   recalcSummary: () => void;
+
+  // Export
+  exportReview: () => string;
 
   // Reset
   reset: () => void;
@@ -94,6 +154,8 @@ const EMPTY_SUMMARY: ReviewSummary = {
   totalComments: 0,
   bySeverity: { p0: 0, p1: 0, p2: 0 },
   score: null,
+  totalAdditions: 0,
+  totalDeletions: 0,
 };
 
 export const useReviewStore = create<ReviewState>()(
@@ -145,26 +207,45 @@ export const useReviewStore = create<ReviewState>()(
           }
         }
 
-        // Preserve reviewed flags and comment counts from any previously
-        // restored snapshot (per-project persistence).
-        const prevFiles = get().files;
-        const prevComments = get().comments;
+        // Load persisted reviewed flags
+        const persisted = loadPersistedData(rootPath);
+        const persistedReviewed = new Set(persisted?.reviewedFiles ?? []);
 
-        const entries: ReviewFileEntry[] = unique.map((f) => {
-          const prev = prevFiles.find((pf) => pf.path === f.path);
-          const commentCount = prevComments.filter((c) => c.filePath === f.path).length;
-          return {
-            path: f.path,
-            status: f.status,
-            commentCount,
-            reviewed: prev?.reviewed ?? false,
-          };
-        });
+        // Preserve comment counts from existing comments or persisted
+        const prevComments = get().comments.length > 0 ? get().comments : (persisted?.comments ?? []);
+
+        // Fetch diff stats for each file
+        const entries: ReviewFileEntry[] = await Promise.all(
+          unique.map(async (f) => {
+            const commentCount = prevComments.filter((c) => c.filePath === f.path).length;
+            let additions = 0;
+            let deletions = 0;
+            try {
+              const diffText = await useGitStore.getState().getDiff(f.path, false);
+              // Parse unified diff for +/- counts (naive but fast)
+              for (const line of diffText.split('\n')) {
+                if (line.startsWith('+') && !line.startsWith('+++')) additions++;
+                else if (line.startsWith('-') && !line.startsWith('---')) deletions++;
+              }
+            } catch {
+              // ignore
+            }
+            return {
+              path: f.path,
+              status: f.status,
+              commentCount,
+              reviewed: persistedReviewed.has(f.path),
+              additions,
+              deletions,
+            };
+          }),
+        );
 
         set((s) => {
           s.files = entries;
-          s.status = entries.length > 0 ? 'idle' : 'idle';
+          s.status = 'idle';
           s.selectedFile = entries[0]?.path ?? null;
+          s.comments = prevComments;
         });
 
         get().recalcSummary();
@@ -177,23 +258,29 @@ export const useReviewStore = create<ReviewState>()(
     },
 
     addComment: (comment) => {
+      const id = crypto.randomUUID();
+      const full: ReviewComment = { ...comment, id, createdAt: Date.now() };
       set((s) => {
-        s.comments.push(comment);
-        const file = s.files.find((f) => f.path === comment.filePath);
+        s.comments.push(full);
+        const file = s.files.find((f) => f.path === full.filePath);
         if (file) file.commentCount++;
       });
       get().recalcSummary();
+      _persistState();
+      return id;
     },
 
     addComments: (comments) => {
       set((s) => {
         for (const c of comments) {
-          s.comments.push(c);
-          const file = s.files.find((f) => f.path === c.filePath);
+          const full: ReviewComment = { ...c, id: crypto.randomUUID(), createdAt: Date.now() };
+          s.comments.push(full);
+          const file = s.files.find((f) => f.path === full.filePath);
           if (file) file.commentCount++;
         }
       });
       get().recalcSummary();
+      _persistState();
     },
 
     resolveComment: (id) => {
@@ -202,6 +289,7 @@ export const useReviewStore = create<ReviewState>()(
         if (c) c.resolved = true;
       });
       get().recalcSummary();
+      _persistState();
     },
 
     unresolveComment: (id) => {
@@ -210,6 +298,20 @@ export const useReviewStore = create<ReviewState>()(
         if (c) c.resolved = false;
       });
       get().recalcSummary();
+      _persistState();
+    },
+
+    deleteComment: (id) => {
+      set((s) => {
+        const idx = s.comments.findIndex((c) => c.id === id);
+        if (idx === -1) return;
+        const c = s.comments[idx];
+        s.comments.splice(idx, 1);
+        const file = s.files.find((f) => f.path === c.filePath);
+        if (file) file.commentCount = Math.max(0, file.commentCount - 1);
+      });
+      get().recalcSummary();
+      _persistState();
     },
 
     clearComments: () => {
@@ -218,6 +320,7 @@ export const useReviewStore = create<ReviewState>()(
         for (const f of s.files) f.commentCount = 0;
       });
       get().recalcSummary();
+      _persistState();
     },
 
     markFileReviewed: (path) => {
@@ -226,6 +329,7 @@ export const useReviewStore = create<ReviewState>()(
         if (file) file.reviewed = true;
       });
       get().recalcSummary();
+      _persistState();
     },
 
     unmarkFileReviewed: (path) => {
@@ -234,6 +338,15 @@ export const useReviewStore = create<ReviewState>()(
         if (file) file.reviewed = false;
       });
       get().recalcSummary();
+      _persistState();
+    },
+
+    markAllReviewed: () => {
+      set((s) => {
+        for (const f of s.files) f.reviewed = true;
+      });
+      get().recalcSummary();
+      _persistState();
     },
 
     recalcSummary: () => {
@@ -246,11 +359,15 @@ export const useReviewStore = create<ReviewState>()(
       const unresolvedCount = comments.filter((c) => !c.resolved).length;
       const totalFiles = files.length;
       const reviewedFiles = files.filter((f) => f.reviewed).length;
+      const totalAdditions = files.reduce((sum, f) => sum + f.additions, 0);
+      const totalDeletions = files.reduce((sum, f) => sum + f.deletions, 0);
 
-      // Score: 100 - (P0*30 + P1*10 + P2*2), clamped 0-100
+      // Score: 100 - (P0*25 + P1*8 + P2*1), clamped 0-100
+      // Bonus: +5 if all files reviewed
       let score: number | null = null;
-      if (comments.length > 0) {
-        score = Math.max(0, Math.min(100, 100 - (bySeverity.p0 * 30 + bySeverity.p1 * 10 + bySeverity.p2 * 2)));
+      if (comments.length > 0 || totalFiles > 0) {
+        score = Math.max(0, Math.min(100, 100 - (bySeverity.p0 * 25 + bySeverity.p1 * 8 + bySeverity.p2 * 1)));
+        if (reviewedFiles === totalFiles && totalFiles > 0) score = Math.min(100, score + 5);
       }
 
       set((s) => {
@@ -260,11 +377,47 @@ export const useReviewStore = create<ReviewState>()(
           totalComments: unresolvedCount,
           bySeverity,
           score,
+          totalAdditions,
+          totalDeletions,
         };
       });
     },
 
+    exportReview: () => {
+      const { comments, summary } = get();
+      const lines: string[] = [];
+      lines.push('# Code Review Report');
+      lines.push('');
+      lines.push(`**Files reviewed:** ${summary.reviewedFiles}/${summary.totalFiles}`);
+      lines.push(`**Open comments:** ${summary.totalComments}`);
+      lines.push(`**Score:** ${summary.score ?? 'N/A'}/100`);
+      lines.push('');
+      lines.push('## Comments');
+      lines.push('');
+
+      const byFile = new Map<string, ReviewComment[]>();
+      for (const c of comments.filter((c) => !c.resolved).sort((a, b) => a.line - b.line)) {
+        const list = byFile.get(c.filePath) ?? [];
+        list.push(c);
+        byFile.set(c.filePath, list);
+      }
+
+      for (const [filePath, list] of byFile) {
+        lines.push(`### ${filePath}`);
+        lines.push('');
+        for (const c of list) {
+          lines.push(`- **${c.severity.toUpperCase()}** L${c.line} (${c.category}): ${c.message}`);
+          if (c.suggestion) lines.push(`  - Suggestion: ${c.suggestion}`);
+        }
+        lines.push('');
+      }
+
+      return lines.join('\n');
+    },
+
     reset: () => {
+      const rootPath = getRootPath();
+      if (rootPath) clearPersistedData(rootPath);
       set((s) => {
         s.source = 'working';
         s.targetBranch = 'main';
@@ -276,5 +429,15 @@ export const useReviewStore = create<ReviewState>()(
         s.summary = { ...EMPTY_SUMMARY };
       });
     },
+
   })),
 );
+
+// Internal persistence helper
+function _persistState() {
+  const rootPath = getRootPath();
+  if (!rootPath) return;
+  const state = useReviewStore.getState();
+  const reviewedFiles = state.files.filter((f) => f.reviewed).map((f) => f.path);
+  savePersistedData(rootPath, { comments: state.comments, reviewedFiles, version: 1 });
+}

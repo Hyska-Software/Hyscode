@@ -5,15 +5,17 @@ import {
   FileCode2,
   ChevronLeft,
   ChevronRight,
-  Eye,
   SplitSquareHorizontal,
   Plus,
   X,
   Send,
+  Copy,
+  ExternalLink,
 } from 'lucide-react';
 import { useReviewStore } from '@/stores/review-store';
 import { useGitStore } from '@/stores/git-store';
 import { useSettingsStore } from '@/stores/settings-store';
+import { useEditorStore } from '@/stores/editor-store';
 import { defineAllMonacoThemes, getMonacoThemeName } from '@/lib/monaco-themes';
 import { cn } from '@/lib/utils';
 import type { ReviewComment, ReviewSeverity } from '@/stores/review-store';
@@ -48,7 +50,6 @@ const SEVERITY_CONFIG: Record<ReviewSeverity, { label: string; color: string; bg
 const CATEGORIES = ['bug', 'style', 'performance', 'security', 'logic', 'readability', 'other'] as const;
 
 // ─── Inline Comment Form ─────────────────────────────────────────────────────
-// Floats inside the editor container anchored to a specific line
 
 interface InlineFormProps {
   line: number;
@@ -72,7 +73,6 @@ function InlineCommentForm({ line, top, filePath, onClose }: InlineFormProps) {
   const handleSubmit = () => {
     if (!message.trim()) return;
     addComment({
-      id: crypto.randomUUID(),
       filePath,
       line,
       severity,
@@ -90,7 +90,6 @@ function InlineCommentForm({ line, top, filePath, onClose }: InlineFormProps) {
       className="rounded-lg border border-border/50 bg-surface shadow-xl"
       onMouseDown={(e) => e.stopPropagation()}
     >
-      {/* Header */}
       <div className="flex items-center justify-between border-b border-border/30 px-3 py-1.5">
         <div className="flex items-center gap-1.5">
           <Plus className="h-3 w-3 text-accent" />
@@ -102,7 +101,6 @@ function InlineCommentForm({ line, top, filePath, onClose }: InlineFormProps) {
       </div>
 
       <div className="p-2.5 space-y-2">
-        {/* Severity + Category */}
         <div className="flex items-center gap-1.5 flex-wrap">
           <div className="flex items-center gap-0.5 rounded bg-surface-raised p-0.5">
             {(['p0', 'p1', 'p2'] as ReviewSeverity[]).map((s) => {
@@ -132,7 +130,6 @@ function InlineCommentForm({ line, top, filePath, onClose }: InlineFormProps) {
           </select>
         </div>
 
-        {/* Message */}
         <textarea
           ref={msgRef}
           value={message}
@@ -146,7 +143,6 @@ function InlineCommentForm({ line, top, filePath, onClose }: InlineFormProps) {
           className="w-full resize-none rounded bg-surface-raised border border-border/40 px-2 py-1.5 text-[10px] text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:border-accent/50 leading-relaxed"
         />
 
-        {/* Suggestion */}
         <input
           value={suggestion}
           onChange={(e) => setSuggestion(e.target.value)}
@@ -155,7 +151,6 @@ function InlineCommentForm({ line, top, filePath, onClose }: InlineFormProps) {
           className="w-full rounded bg-surface-raised border border-border/40 px-2 py-1 text-[10px] text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:border-accent/50"
         />
 
-        {/* Actions */}
         <div className="flex items-center justify-end gap-1.5">
           <button
             onClick={onClose}
@@ -177,16 +172,17 @@ function InlineCommentForm({ line, top, filePath, onClose }: InlineFormProps) {
   );
 }
 
-// ─── Inline Comment Annotation ──────────────────────────────────────────────
+// ─── Comment Gutter Item ────────────────────────────────────────────────────
 
-function InlineComment({ comment }: { comment: ReviewComment }) {
+function CommentGutterItem({ comment }: { comment: ReviewComment }) {
   const { label, color, bg, border } = SEVERITY_CONFIG[comment.severity];
   const resolveComment = useReviewStore((s) => s.resolveComment);
   const unresolveComment = useReviewStore((s) => s.unresolveComment);
+  const deleteComment = useReviewStore((s) => s.deleteComment);
 
   return (
     <div className={cn(
-      'mx-2 my-1 rounded-md border px-3 py-2 transition-opacity',
+      'rounded-md border px-2.5 py-2 transition-opacity',
       comment.resolved ? 'opacity-50' : '',
       bg,
       border,
@@ -197,18 +193,27 @@ function InlineComment({ comment }: { comment: ReviewComment }) {
           <span className="text-[9px] text-muted-foreground">{comment.category}</span>
           <span className="text-[9px] text-muted-foreground/50">L{comment.line}{comment.endLine ? `-${comment.endLine}` : ''}</span>
         </div>
-        <button
-          onClick={() => comment.resolved ? unresolveComment(comment.id) : resolveComment(comment.id)}
-          className={cn(
-            'flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[9px] font-medium transition-colors',
-            comment.resolved
-              ? 'text-green-400 hover:bg-green-500/15'
-              : 'text-muted-foreground hover:bg-muted hover:text-foreground',
-          )}
-        >
-          <CheckCircle2 className="h-2.5 w-2.5" />
-          {comment.resolved ? 'Resolved' : 'Resolve'}
-        </button>
+        <div className="flex items-center gap-0.5">
+          <button
+            onClick={() => comment.resolved ? unresolveComment(comment.id) : resolveComment(comment.id)}
+            className={cn(
+              'flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[9px] font-medium transition-colors',
+              comment.resolved
+                ? 'text-green-400 hover:bg-green-500/15'
+                : 'text-muted-foreground hover:bg-muted hover:text-foreground',
+            )}
+          >
+            <CheckCircle2 className="h-2.5 w-2.5" />
+            {comment.resolved ? 'Resolved' : 'Resolve'}
+          </button>
+          <button
+            onClick={() => deleteComment(comment.id)}
+            className="flex items-center justify-center rounded px-1 py-0.5 text-muted-foreground hover:text-red-400 hover:bg-red-500/10 transition-colors"
+            title="Delete"
+          >
+            <X className="h-2.5 w-2.5" />
+          </button>
+        </div>
       </div>
       <p className="text-[11px] leading-relaxed text-foreground/80">{comment.message}</p>
       {comment.suggestion && (
@@ -231,6 +236,7 @@ export function ReviewDiffPanel() {
   const setSelectedFile = useReviewStore((s) => s.setSelectedFile);
   const getFileContent = useGitStore((s) => s.getFileContent);
   const themeId = useSettingsStore((s) => s.themeId);
+  const openTab = useEditorStore((s) => s.openTab);
   const monacoTheme = getMonacoThemeName(themeId);
 
   const [original, setOriginal] = useState('');
@@ -238,17 +244,14 @@ export function ReviewDiffPanel() {
   const [loading, setLoading] = useState(false);
   const [sideBySide, setSideBySide] = useState(false);
 
-  // Hover gutter state
   const editorContainerRef = useRef<HTMLDivElement>(null);
   const hoverClearTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [hoverLine, setHoverLine] = useState<number | null>(null);
   const [hoverTop, setHoverTop] = useState(0);
 
-  // Inline form state
   const [formLine, setFormLine] = useState<number | null>(null);
   const [formTop, setFormTop] = useState(0);
 
-  // Register Monaco hover/mouse events
   const handleEditorMount = useCallback((editor: any) => {
     const mod = editor.getModifiedEditor();
 
@@ -279,23 +282,19 @@ export function ReviewDiffPanel() {
 
   const closeForm = useCallback(() => setFormLine(null), []);
 
-  // Comments for current file
   const fileComments = useMemo(
     () => comments.filter((c) => c.filePath === selectedFile).sort((a, b) => a.line - b.line),
     [comments, selectedFile],
   );
 
-  // Current file index for navigation
   const currentIndex = files.findIndex((f) => f.path === selectedFile);
   const currentFile = files[currentIndex] ?? null;
 
-  // Reset overlay state when file changes
   useEffect(() => {
     setFormLine(null);
     setHoverLine(null);
   }, [selectedFile]);
 
-  // Load diff content when file changes
   useEffect(() => {
     if (!selectedFile) {
       setOriginal('');
@@ -326,6 +325,22 @@ export function ReviewDiffPanel() {
     return () => { cancelled = true; };
   }, [selectedFile, getFileContent]);
 
+  // Keyboard shortcuts
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.altKey && e.key === 'ArrowLeft') {
+        e.preventDefault();
+        if (currentIndex > 0) setSelectedFile(files[currentIndex - 1].path);
+      }
+      if (e.altKey && e.key === 'ArrowRight') {
+        e.preventDefault();
+        if (currentIndex < files.length - 1) setSelectedFile(files[currentIndex + 1].path);
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [currentIndex, files, setSelectedFile]);
+
   const goToPrev = () => {
     if (currentIndex > 0) {
       setSelectedFile(files[currentIndex - 1].path);
@@ -338,10 +353,25 @@ export function ReviewDiffPanel() {
     }
   };
 
+  const handleCopyPath = () => {
+    if (selectedFile) navigator.clipboard.writeText(selectedFile);
+  };
+
+  const handleOpenInEditor = () => {
+    if (!selectedFile) return;
+    const fileName = selectedFile.split(/[\\/]/).pop() ?? selectedFile;
+    openTab({
+      id: selectedFile,
+      fileName,
+      filePath: selectedFile,
+      language: detectLang(selectedFile),
+    });
+  };
+
   if (!selectedFile || !currentFile) {
     return (
       <div className="flex h-full flex-col items-center justify-center text-muted-foreground">
-        <Eye className="mb-3 h-8 w-8 opacity-20" />
+        <FileCode2 className="mb-3 h-8 w-8 opacity-20" />
         <span className="text-[11px]">Select a file to review</span>
       </div>
     );
@@ -350,10 +380,9 @@ export function ReviewDiffPanel() {
   const fileName = selectedFile.split(/[\\/]/).pop() ?? selectedFile;
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex h-full flex-col bg-surface rounded-lg">
       {/* File header bar */}
       <div className="flex shrink-0 items-center gap-2 border-b border-border/30 px-3 py-1.5">
-        {/* Nav arrows */}
         <div className="flex items-center gap-0.5">
           <button
             onClick={goToPrev}
@@ -371,17 +400,37 @@ export function ReviewDiffPanel() {
           </button>
         </div>
 
-        {/* File info */}
         <FileCode2 className="h-3 w-3 text-muted-foreground" />
         <span className="truncate text-[11px] font-medium text-foreground">{fileName}</span>
         <span className="text-[9px] text-muted-foreground uppercase">{detectLang(selectedFile)}</span>
+
+        {/* File diff stats */}
+        {(currentFile.additions > 0 || currentFile.deletions > 0) && (
+          <span className="hidden sm:flex items-center gap-1 text-[9px] tabular-nums">
+            {currentFile.additions > 0 && <span className="text-green-400">+{currentFile.additions}</span>}
+            {currentFile.deletions > 0 && <span className="text-red-400">-{currentFile.deletions}</span>}
+          </span>
+        )}
 
         <span className="text-[9px] text-muted-foreground tabular-nums">
           {currentIndex + 1}/{files.length}
         </span>
 
-        {/* Actions */}
         <div className="ml-auto flex items-center gap-1">
+          <button
+            onClick={handleCopyPath}
+            className="flex h-5 w-5 items-center justify-center rounded text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+            title="Copy path"
+          >
+            <Copy className="h-3 w-3" />
+          </button>
+          <button
+            onClick={handleOpenInEditor}
+            className="flex h-5 w-5 items-center justify-center rounded text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+            title="Open in editor"
+          >
+            <ExternalLink className="h-3 w-3" />
+          </button>
           <button
             onClick={() => setSideBySide(!sideBySide)}
             className={cn(
@@ -409,27 +458,20 @@ export function ReviewDiffPanel() {
         </div>
       </div>
 
-      {/* Inline comment annotations */}
-      {fileComments.length > 0 && (
-        <div className="shrink-0 max-h-[35%] overflow-auto border-b border-border/20 py-1">
-          {fileComments.map((c) => (
-            <InlineComment key={c.id} comment={c} />
-          ))}
-        </div>
-      )}
-
-      {/* Editor container — relative so the gutter button & form can be absolutely positioned */}
-      <div ref={editorContainerRef} className="relative flex-1 overflow-hidden">
-        {loading ? (
-          <div className="flex h-full items-center justify-center">
-            <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-          </div>
-        ) : (
-          <Suspense fallback={
+      {/* Main area: editor + comments gutter */}
+      <div className="flex flex-1 overflow-hidden">
+        {/* Editor */}
+        <div ref={editorContainerRef} className="relative flex-1 overflow-hidden">
+          {loading ? (
             <div className="flex h-full items-center justify-center">
               <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
             </div>
-          }>
+          ) : (
+            <Suspense fallback={
+              <div className="flex h-full items-center justify-center">
+                <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+              </div>
+            }>
             <MonacoDiffEditor
               original={original}
               modified={modified}
@@ -437,6 +479,7 @@ export function ReviewDiffPanel() {
               theme={monacoTheme}
               beforeMount={defineAllMonacoThemes}
               onMount={handleEditorMount}
+              className="h-full w-full"
               options={{
                 fontFamily: "'Geist Mono', 'JetBrains Mono', 'Fira Code', monospace",
                 fontSize: 13,
@@ -451,38 +494,53 @@ export function ReviewDiffPanel() {
                 overviewRulerBorder: false,
               }}
             />
-          </Suspense>
-        )}
+            </Suspense>
+          )}
 
-        {/* Gutter + button — appears on line hover, anchored to hovered line Y */}
-        {hoverLine !== null && formLine === null && (
-          <button
-            style={{ position: 'absolute', top: hoverTop, left: 4, zIndex: 40 }}
-            className="flex h-5 w-5 items-center justify-center rounded bg-accent/80 text-white shadow-md hover:bg-accent transition-colors"
-            onMouseEnter={() => {
-              if (hoverClearTimer.current) {
-                clearTimeout(hoverClearTimer.current);
-                hoverClearTimer.current = null;
-              }
-            }}
-            onMouseLeave={() => {
-              hoverClearTimer.current = setTimeout(() => setHoverLine(null), 150);
-            }}
-            onClick={() => openForm(hoverLine, hoverTop)}
-            title={`Add comment on line ${hoverLine}`}
-          >
-            <Plus className="h-3 w-3" />
-          </button>
-        )}
+          {/* Gutter + button */}
+          {hoverLine !== null && formLine === null && (
+            <button
+              style={{ position: 'absolute', top: hoverTop, left: 4, zIndex: 40 }}
+              className="flex h-5 w-5 items-center justify-center rounded bg-accent/80 text-white shadow-md hover:bg-accent transition-colors"
+              onMouseEnter={() => {
+                if (hoverClearTimer.current) {
+                  clearTimeout(hoverClearTimer.current);
+                  hoverClearTimer.current = null;
+                }
+              }}
+              onMouseLeave={() => {
+                hoverClearTimer.current = setTimeout(() => setHoverLine(null), 150);
+              }}
+              onClick={() => openForm(hoverLine, hoverTop)}
+              title={`Add comment on line ${hoverLine}`}
+            >
+              <Plus className="h-3 w-3" />
+            </button>
+          )}
 
-        {/* Inline comment form anchored below the clicked line */}
-        {formLine !== null && selectedFile && (
-          <InlineCommentForm
-            line={formLine}
-            top={formTop}
-            filePath={selectedFile}
-            onClose={closeForm}
-          />
+          {formLine !== null && selectedFile && (
+            <InlineCommentForm
+              line={formLine}
+              top={formTop}
+              filePath={selectedFile}
+              onClose={closeForm}
+            />
+          )}
+        </div>
+
+        {/* Comments gutter */}
+        {fileComments.length > 0 && (
+          <div className="hidden lg:flex w-72 flex-col border-l border-border/20 bg-surface">
+            <div className="flex shrink-0 items-center gap-1.5 border-b border-border/20 px-3 py-1.5">
+              <span className="text-[10px] font-medium text-foreground">Comments</span>
+              <span className="text-[9px] text-muted-foreground tabular-nums">{fileComments.length}</span>
+            </div>
+            <div className="flex-1 overflow-auto space-y-1 p-2">
+              {fileComments.map((c) => (
+                <CommentGutterItem key={c.id} comment={c} />
+              ))}
+            </div>
+          </div>
         )}
       </div>
     </div>
