@@ -1,15 +1,13 @@
-import { Check, Undo2, Diff } from 'lucide-react';
+import { Check, Undo2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { HarnessBridge } from '@/lib/harness-bridge';
 import type { AgentEditSession } from '@/stores/agent-store';
 
 interface InlineReviewBarProps {
   session: AgentEditSession;
-  onToggleDiff?: () => void;
-  showingDiff?: boolean;
 }
 
-export function InlineReviewBar({ session, onToggleDiff, showingDiff }: InlineReviewBarProps) {
+export function InlineReviewBar({ session }: InlineReviewBarProps) {
   if (session.phase !== 'pending_review') return null;
 
   const handleAccept = () => {
@@ -32,17 +30,6 @@ export function InlineReviewBar({ session, onToggleDiff, showingDiff }: InlineRe
         )}
       </span>
       <div className="flex items-center gap-1.5">
-        {onToggleDiff && (
-          <Button
-            variant="ghost"
-            size="xs"
-            onClick={onToggleDiff}
-            className={showingDiff ? 'bg-muted' : ''}
-          >
-            <Diff className="mr-1 h-3 w-3" />
-            Diff
-          </Button>
-        )}
         <Button variant="ghost" size="xs" onClick={handleReject}>
           <Undo2 className="mr-1 h-3 w-3" />
           Reject

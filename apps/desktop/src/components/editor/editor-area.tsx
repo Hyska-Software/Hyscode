@@ -94,16 +94,28 @@ export function EditorArea() {
       : null,
   );
 
-  // Toggle for full diff view
-  const [showFullDiff, setShowFullDiff] = useState(false);
+  // When an active edit session is resolved, reload file content to sync editor
+  const prevEditSessionRef = useRef(editSession);
+  useEffect(() => {
+    const prev = prevEditSessionRef.current;
+    prevEditSessionRef.current = editSession;
+    if (prev && !editSession && activeTab) {
+      const cached = useFileStore.getState().fileCache.get(activeTab.filePath);
+      if (cached !== undefined) {
+        setContent(cached);
+        contentRef.current = cached;
+        // Also update Monaco model if editor is mounted
+        const editor = editorInstanceRef.current;
+        const model = editor?.getModel();
+        if (model && model.getValue() !== cached) {
+          model.setValue(cached);
+        }
+      }
+    }
+  }, [editSession, activeTab]);
 
   // ── Editor context menu (right-click) ──────────────────────────────────────
   const [editorCtxMenu, setEditorCtxMenu] = useState<{ x: number; y: number } | null>(null);
-
-  // Reset full diff toggle when active tab or session changes
-  useEffect(() => {
-    setShowFullDiff(false);
-  }, [activeTab?.id, editSession?.id]);
 
   // Monaco instance refs for decorations
   const editorInstanceRef = useRef<monacoEditor.editor.IStandaloneCodeEditor | null>(null);
@@ -427,25 +439,26 @@ export function EditorArea() {
             <PptxViewer filePath={activeTab.filePath} />
           ) : loading ? (
             <EditorLoading />
-          ) : showFullDiff && editSession ? (
-            <AgentDiffViewer change={{
-              id: editSession.id,
-              filePath: editSession.filePath,
-              toolName: editSession.toolName,
-              toolCallId: editSession.toolCallId,
-              originalContent: editSession.originalContent,
-              newContent: editSession.newContent,
-              status: 'pending',
-            }} />
+          ) : editSession ? (
+            <div className="flex flex-1 flex-col overflow-hidden">
+              <InlineReviewBar session={editSession} />
+              <div className="flex-1 overflow-hidden">
+                <AgentDiffViewer
+                  key={editSession.id}
+                  change={{
+                    id: editSession.id,
+                    filePath: editSession.filePath,
+                    toolName: editSession.toolName,
+                    toolCallId: editSession.toolCallId,
+                    originalContent: editSession.originalContent,
+                    newContent: editSession.newContent,
+                    status: 'pending',
+                  }}
+                />
+              </div>
+            </div>
           ) : (
             <>
-              {editSession && (
-                <InlineReviewBar
-                  session={editSession}
-                  onToggleDiff={() => setShowFullDiff((v) => !v)}
-                  showingDiff={showFullDiff}
-                />
-              )}
               <div className="flex-1 overflow-hidden">
                 <Suspense fallback={<EditorLoading />}>
                   <MonacoEditor
