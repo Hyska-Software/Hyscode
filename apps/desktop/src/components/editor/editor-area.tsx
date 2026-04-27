@@ -415,30 +415,6 @@ export function EditorArea() {
               filePath={activeTab.diffProps.filePath}
               staged={activeTab.diffProps.staged}
             />
-          ) : activeTab.viewerType === 'markdown' ? (
-            loading ? (
-              <EditorLoading />
-            ) : (
-              <MarkdownViewer
-                content={content ?? ''}
-                mode={activeTab.markdownMode ?? 'preview'}
-                onModeChange={(mode) => setMarkdownMode(activeTab.id, mode)}
-                onChange={handleEditorChange}
-                language={activeTab.language}
-              />
-            )
-          ) : activeTab.viewerType === 'image' ? (
-            <ImageViewer filePath={activeTab.filePath} />
-          ) : activeTab.viewerType === 'pdf' ? (
-            <PdfViewer filePath={activeTab.filePath} />
-          ) : activeTab.viewerType === 'spreadsheet' ? (
-            <SpreadsheetViewer filePath={activeTab.filePath} />
-          ) : activeTab.viewerType === 'docx' ? (
-            <DocxViewer filePath={activeTab.filePath} />
-          ) : activeTab.viewerType === 'pptx' ? (
-            <PptxViewer filePath={activeTab.filePath} />
-          ) : loading ? (
-            <EditorLoading />
           ) : editSession ? (
             <div className="flex flex-1 flex-col overflow-hidden">
               <InlineReviewBar session={editSession} />
@@ -457,6 +433,31 @@ export function EditorArea() {
                 />
               </div>
             </div>
+          ) : activeTab.viewerType === 'markdown' ? (
+            loading ? (
+              <EditorLoading />
+            ) : (
+              <MarkdownViewer
+                content={content ?? ''}
+                mode={activeTab.markdownMode ?? 'preview'}
+                onModeChange={(mode) => setMarkdownMode(activeTab.id, mode)}
+                onChange={handleEditorChange}
+                language={activeTab.language}
+                filePath={activeTab.filePath}
+              />
+            )
+          ) : activeTab.viewerType === 'image' ? (
+            <ImageViewer filePath={activeTab.filePath} />
+          ) : activeTab.viewerType === 'pdf' ? (
+            <PdfViewer filePath={activeTab.filePath} />
+          ) : activeTab.viewerType === 'spreadsheet' ? (
+            <SpreadsheetViewer filePath={activeTab.filePath} />
+          ) : activeTab.viewerType === 'docx' ? (
+            <DocxViewer filePath={activeTab.filePath} />
+          ) : activeTab.viewerType === 'pptx' ? (
+            <PptxViewer filePath={activeTab.filePath} />
+          ) : loading ? (
+            <EditorLoading />
           ) : (
             <>
               <div className="flex-1 overflow-hidden">

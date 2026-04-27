@@ -5,6 +5,8 @@ import rehypeHighlight from 'rehype-highlight';
 import { Code, Eye, Loader2 } from 'lucide-react';
 import { useSettingsStore } from '../../../stores';
 import { defineAllMonacoThemes, getMonacoThemeName } from '../../../lib/monaco-themes';
+import { registerAllLanguages, disableNativeTypeScriptValidation } from '@hyscode/lsp-client';
+import { LspBridge } from '../../../lib/lsp-bridge';
 
 const MonacoEditor = lazy(() => import('@monaco-editor/react'));
 
@@ -14,6 +16,7 @@ interface MarkdownViewerProps {
   onModeChange: (mode: 'preview' | 'code') => void;
   onChange?: (value: string) => void;
   language?: string;
+  filePath?: string;
 }
 
 export function MarkdownViewer({
@@ -22,9 +25,29 @@ export function MarkdownViewer({
   onModeChange,
   onChange,
   language,
+  filePath,
 }: MarkdownViewerProps) {
   const themeId = useSettingsStore((s) => s.themeId);
   const monacoTheme = getMonacoThemeName(themeId);
+
+  // Editor settings — same as main editor
+  const editorFontSize = useSettingsStore((s) => s.fontSize);
+  const editorFontFamily = useSettingsStore((s) => s.fontFamily);
+  const editorLineHeight = useSettingsStore((s) => s.lineHeight);
+  const editorTabSize = useSettingsStore((s) => s.tabSize);
+  const editorInsertSpaces = useSettingsStore((s) => s.insertSpaces);
+  const editorWordWrap = useSettingsStore((s) => s.wordWrap);
+  const editorMinimap = useSettingsStore((s) => s.minimap);
+  const editorLineNumbers = useSettingsStore((s) => s.lineNumbers);
+  const editorCursorStyle = useSettingsStore((s) => s.cursorStyle);
+  const editorRenderWhitespace = useSettingsStore((s) => s.renderWhitespace);
+  const editorBracketPairColorization = useSettingsStore((s) => s.bracketPairColorization);
+  const editorScrollBeyondLastLine = useSettingsStore((s) => s.scrollBeyondLastLine);
+  const editorSmoothScrolling = useSettingsStore((s) => s.smoothScrolling);
+  const editorAutoClosingBrackets = useSettingsStore((s) => s.autoClosingBrackets);
+  const editorAutoClosingQuotes = useSettingsStore((s) => s.autoClosingQuotes);
+  const editorFormatOnPaste = useSettingsStore((s) => s.formatOnPaste);
+  const editorFormatOnType = useSettingsStore((s) => s.formatOnType);
 
   const handleEditorChange = useCallback(
     (value: string | undefined) => {
@@ -83,21 +106,43 @@ export function MarkdownViewer({
             }
           >
             <MonacoEditor
+              path={filePath}
               language={language ?? 'markdown'}
               value={content}
               onChange={handleEditorChange}
               theme={monacoTheme}
-              beforeMount={defineAllMonacoThemes}
+              beforeMount={(monaco) => {
+                defineAllMonacoThemes(monaco);
+                registerAllLanguages(monaco);
+                disableNativeTypeScriptValidation(monaco);
+                LspBridge.setMonaco(monaco);
+              }}
               options={{
-                fontFamily: "'Geist Mono', 'JetBrains Mono', 'Fira Code', monospace",
-                fontSize: 14,
-                lineHeight: 1.6,
-                minimap: { enabled: false },
-                scrollBeyondLastLine: false,
-                smoothScrolling: true,
-                wordWrap: 'on',
-                tabSize: 2,
+                fontFamily: `'${editorFontFamily}', 'JetBrains Mono', 'Fira Code', monospace`,
+                fontSize: editorFontSize,
+                lineHeight: editorLineHeight,
+                minimap: { enabled: editorMinimap, scale: 1 },
+                scrollBeyondLastLine: editorScrollBeyondLastLine,
+                smoothScrolling: editorSmoothScrolling,
+                cursorBlinking: 'smooth',
+                cursorSmoothCaretAnimation: 'on',
+                cursorStyle: editorCursorStyle,
+                bracketPairColorization: { enabled: editorBracketPairColorization },
+                guides: { bracketPairs: editorBracketPairColorization, indentation: true },
+                wordWrap: editorWordWrap,
+                lineNumbers: editorLineNumbers,
+                tabSize: editorTabSize,
+                insertSpaces: editorInsertSpaces,
+                renderWhitespace: editorRenderWhitespace,
+                autoClosingBrackets: editorAutoClosingBrackets,
+                autoClosingQuotes: editorAutoClosingQuotes,
+                formatOnPaste: editorFormatOnPaste,
+                formatOnType: editorFormatOnType,
                 padding: { top: 8 },
+                overviewRulerLanes: 3,
+                overviewRulerBorder: false,
+                lineDecorationsWidth: 12,
+                glyphMargin: true,
               }}
             />
           </Suspense>
