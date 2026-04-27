@@ -35,7 +35,7 @@ type ToolCategory = 'filesystem' | 'terminal' | 'git' | 'code' | 'browser' | 'mc
 ```json
 {
   "name": "read_file",
-  "description": "Read the contents of a file. You can specify a line range to read only part of the file. Line numbers are 1-indexed.",
+  "description": "Read the contents of a file. You can specify a line range to read only part of the file, or a max line limit. Line numbers are 1-indexed. Use limit to cap total lines when exploring large files.",
   "inputSchema": {
     "type": "object",
     "properties": {
@@ -50,6 +50,10 @@ type ToolCategory = 'filesystem' | 'terminal' | 'git' | 'code' | 'browser' | 'mc
       "end_line": {
         "type": "integer",
         "description": "Ending line number (1-indexed, inclusive). Omit to read to end."
+      },
+      "limit": {
+        "type": "integer",
+        "description": "Maximum number of lines to return. Overrides end_line if both are set. Useful for large files."
       }
     },
     "required": ["path"]
@@ -57,7 +61,37 @@ type ToolCategory = 'filesystem' | 'terminal' | 'git' | 'code' | 'browser' | 'mc
 }
 ```
 
-**Output**: File content as string, with line numbers prepended. Returns error if file doesn't exist.
+**Output**: File content as string, with line numbers prepended and a header showing the range when truncated. Returns error if file doesn't exist.
+
+---
+
+### 1b. read_multiple_files
+
+**Category**: filesystem | **Approval**: no
+
+```json
+{
+  "name": "read_multiple_files",
+  "description": "Read the contents of multiple files at once. Returns each file with its path and numbered content. Use this instead of multiple read_file calls to save iterations.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "paths": {
+        "type": "array",
+        "items": { "type": "string" },
+        "description": "Array of absolute or workspace-relative file paths"
+      },
+      "max_lines_per_file": {
+        "type": "integer",
+        "description": "Maximum lines to read per file (default: 200). Set higher for larger files."
+      }
+    },
+    "required": ["paths"]
+  }
+}
+```
+
+**Output**: Concatenated file contents with `--- path ---` headers. Errors for individual files are inlined rather than failing the entire call.
 
 ---
 
@@ -95,7 +129,7 @@ type ToolCategory = 'filesystem' | 'terminal' | 'git' | 'code' | 'browser' | 'mc
 ```json
 {
   "name": "edit_file",
-  "description": "Make a targeted edit to a file by replacing an exact string with a new string. The old_string must match exactly (including whitespace and indentation). Include enough context lines to uniquely identify the location.",
+  "description": "Make a targeted edit to a file by replacing an exact string with a new string. The old_string must match exactly (including whitespace and indentation). Include enough context lines to uniquely identify the location. Set replace_all=true to replace every occurrence.",
   "inputSchema": {
     "type": "object",
     "properties": {
@@ -105,11 +139,15 @@ type ToolCategory = 'filesystem' | 'terminal' | 'git' | 'code' | 'browser' | 'mc
       },
       "old_string": {
         "type": "string",
-        "description": "The exact text to find and replace. Must match exactly one location in the file."
+        "description": "The exact text to find and replace. Must match exactly one location in the file (unless replace_all is true)."
       },
       "new_string": {
         "type": "string",
         "description": "The text to replace old_string with"
+      },
+      "replace_all": {
+        "type": "boolean",
+        "description": "If true, replace every occurrence of old_string in the file. Default: false."
       }
     },
     "required": ["path", "old_string", "new_string"]
@@ -117,7 +155,77 @@ type ToolCategory = 'filesystem' | 'terminal' | 'git' | 'code' | 'browser' | 'mc
 }
 ```
 
-**Output**: Success message with line range affected. Error if old_string not found or matches multiple locations.
+**Output**: Success message with line range affected or count of replacements when replace_all is used. Error if old_string not found or matches multiple locations (unless replace_all is true).
+
+---
+
+### 3b. replace_lines
+
+**Category**: filesystem | **Approval**: yes
+
+```json
+{
+  "name": "replace_lines",
+  "description": "Replace a specific range of lines in a file with new content. Line numbers are 1-indexed and inclusive. Use this when you need to edit a specific block of lines without matching by string content.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "path": {
+        "type": "string",
+        "description": "Absolute or workspace-relative path to the file"
+      },
+      "start_line": {
+        "type": "integer",
+        "description": "Starting line number to replace (1-indexed, inclusive)"
+      },
+      "end_line": {
+        "type": "integer",
+        "description": "Ending line number to replace (1-indexed, inclusive). Omit to replace only start_line."
+      },
+      "new_content": {
+        "type": "string",
+        "description": "The new content to insert in place of the specified lines"
+      }
+    },
+    "required": ["path", "start_line", "new_content"]
+  }
+}
+```
+
+**Output**: Success message with line range replaced. Error if line numbers are out of range.
+
+---
+
+### 3c. insert_lines
+
+**Category**: filesystem | **Approval**: yes
+
+```json
+{
+  "name": "insert_lines",
+  "description": "Insert new content at a specific line position in a file. Line numbers are 1-indexed. Content is inserted AFTER the specified line. Use line=0 to insert at the beginning of the file.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "path": {
+        "type": "string",
+        "description": "Absolute or workspace-relative path to the file"
+      },
+      "line": {
+        "type": "integer",
+        "description": "Line number after which to insert (1-indexed). Use 0 to insert at the top of the file."
+      },
+      "content": {
+        "type": "string",
+        "description": "The content to insert (can be multiple lines)"
+      }
+    },
+    "required": ["path", "line", "content"]
+  }
+}
+```
+
+**Output**: Success message with insertion point. Error if line is out of range.
 
 ---
 
@@ -155,7 +263,7 @@ type ToolCategory = 'filesystem' | 'terminal' | 'git' | 'code' | 'browser' | 'mc
 ```json
 {
   "name": "list_directory",
-  "description": "List the contents of a directory. Returns file and folder names. Folders end with /.",
+  "description": "List the contents of a directory. Returns file and folder names. Folders end with /. Supports recursive listing with file sizes when include_stats is true.",
   "inputSchema": {
     "type": "object",
     "properties": {
@@ -170,6 +278,10 @@ type ToolCategory = 'filesystem' | 'terminal' | 'git' | 'code' | 'browser' | 'mc
       "max_depth": {
         "type": "integer",
         "description": "Maximum depth for recursive listing (default: 3)"
+      },
+      "include_stats": {
+        "type": "boolean",
+        "description": "Include file sizes and modification times (default: false)"
       }
     },
     "required": ["path"]
@@ -186,25 +298,37 @@ type ToolCategory = 'filesystem' | 'terminal' | 'git' | 'code' | 'browser' | 'mc
 ```json
 {
   "name": "search_code",
-  "description": "Search for text or regex patterns across files in the workspace. Returns matching lines with file paths and line numbers.",
+  "description": "Search for text or regex patterns across files in the workspace. Returns matching lines with file paths, line numbers, and optional context lines around each match.",
   "inputSchema": {
     "type": "object",
     "properties": {
       "pattern": {
         "type": "string",
-        "description": "Text or regex pattern to search for (case-insensitive)"
+        "description": "Text or regex pattern to search for"
       },
       "include_pattern": {
         "type": "string",
         "description": "Glob pattern to filter files (e.g., '**/*.ts')"
       },
+      "exclude_pattern": {
+        "type": "string",
+        "description": "Glob pattern to exclude files (e.g., '**/node_modules/**')"
+      },
       "is_regex": {
         "type": "boolean",
         "description": "Whether pattern is a regex (default: false)"
       },
+      "case_sensitive": {
+        "type": "boolean",
+        "description": "Case-sensitive search (default: false)"
+      },
       "max_results": {
         "type": "integer",
-        "description": "Maximum number of matches to return (default: 50)"
+        "description": "Maximum number of matches to return (default: 50, max: 200)"
+      },
+      "context_lines": {
+        "type": "integer",
+        "description": "Number of lines of context to show around each match (default: 0)"
       }
     },
     "required": ["pattern"]

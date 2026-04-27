@@ -31,8 +31,15 @@ const RISK_DISPLAY: Record<RiskLevel, { label: string; color: string; borderColo
 };
 
 function inferRiskLevel(toolName: string): RiskLevel {
-  const safeTools = new Set(['read_file', 'list_directory', 'search_files', 'search_text', 'get_file_info', 'list_code_symbols', 'get_diagnostics', 'grep_search']);
-  const destructiveTools = new Set(['run_terminal_command', 'git_commit', 'git_push', 'delete_file', 'git_reset']);
+  const safeTools = new Set([
+    'read_file', 'read_multiple_files', 'list_directory', 'search_code', 'find_files',
+    'get_file_info', 'list_code_symbols', 'get_diagnostics', 'grep_search',
+    'gather_context', 'drop_context', 'list_context', 'web_search', 'web_fetch',
+  ]);
+  const destructiveTools = new Set([
+    'run_terminal_command', 'run_code', 'git_commit', 'git_push',
+    'delete_file', 'git_reset', 'docker_run',
+  ]);
   if (safeTools.has(toolName)) return 'safe';
   if (destructiveTools.has(toolName)) return 'destructive';
   return 'moderate';

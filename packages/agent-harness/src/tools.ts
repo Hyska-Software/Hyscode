@@ -101,11 +101,12 @@ function isPrivateHost(hostname: string): boolean {
 
 export const readFileTool = defineTool(
   'read_file',
-  'Read the contents of a file. You can specify a line range to read only part of the file. Line numbers are 1-indexed.',
+  'Read the contents of a file. You can specify a line range to read only part of the file, or a max line limit. Line numbers are 1-indexed. Use limit to cap total lines when exploring large files.',
   {
     path: { type: 'string', description: 'Absolute or workspace-relative path to the file' },
     start_line: { type: 'integer', description: 'Starting line number (1-indexed, inclusive). Omit to read from beginning.' },
     end_line: { type: 'integer', description: 'Ending line number (1-indexed, inclusive). Omit to read to end.' },
+    limit: { type: 'integer', description: 'Maximum number of lines to return. Overrides end_line if both are set. Useful for large files.' },
   },
   ['path'],
   'filesystem',
@@ -114,20 +115,24 @@ export const readFileTool = defineTool(
     try {
       const filePath = resolvePath(input.path as string, ctx.workspacePath);
       const content = await ctx.invoke<string>('read_file', { path: filePath });
+      const lines = content.split('\n');
 
-      // Apply line range if specified
-      if (input.start_line || input.end_line) {
-        const lines = content.split('\n');
-        const start = ((input.start_line as number) || 1) - 1;
-        const end = (input.end_line as number) || lines.length;
-        const sliced = lines.slice(start, end);
-        const numbered = sliced.map((line, i) => `${start + i + 1} | ${line}`).join('\n');
-        return { success: true, output: numbered };
+      // Apply line range / limit
+      const start = ((input.start_line as number) || 1) - 1;
+      let end = lines.length;
+      if (input.end_line) {
+        end = Math.min(input.end_line as number, lines.length);
       }
-
-      // Add line numbers
-      const numbered = content.split('\n').map((line, i) => `${i + 1} | ${line}`).join('\n');
-      return { success: true, output: numbered };
+      if (input.limit) {
+        end = Math.min(start + (input.limit as number), end, lines.length);
+      }
+      const sliced = lines.slice(start, end);
+      const totalLines = lines.length;
+      const header = totalLines > sliced.length
+        ? `--- Showing lines ${start + 1}-${end} of ${totalLines} ---\n`
+        : '';
+      const numbered = sliced.map((line, i) => `${start + i + 1} | ${line}`).join('\n');
+      return { success: true, output: header + numbered };
     } catch (err) {
       return { success: false, output: '', error: String(err) };
     }
@@ -175,11 +180,12 @@ export const writeFileTool = defineTool(
 
 export const editFileTool = defineTool(
   'edit_file',
-  'Make a targeted edit to a file by replacing an exact string with a new string. The old_string must match exactly (including whitespace and indentation). Include enough context lines to uniquely identify the location.',
+  'Make a targeted edit to a file by replacing an exact string with a new string. The old_string must match exactly (including whitespace and indentation). Include enough context lines to uniquely identify the location. Set replace_all=true to replace every occurrence.',
   {
     path: { type: 'string', description: 'Absolute or workspace-relative path to the file' },
-    old_string: { type: 'string', description: 'The exact text to find and replace. Must match exactly one location in the file.' },
+    old_string: { type: 'string', description: 'The exact text to find and replace. Must match exactly one location in the file (unless replace_all is true).' },
     new_string: { type: 'string', description: 'The text to replace old_string with' },
+    replace_all: { type: 'boolean', description: 'If true, replace every occurrence of old_string in the file. Default: false.' },
   },
   ['path', 'old_string', 'new_string'],
   'filesystem',
@@ -190,10 +196,12 @@ export const editFileTool = defineTool(
       const rawContent = await ctx.invoke<string>('read_file', { path: filePath });
       const oldStr = input.old_string as string;
       const newStr = input.new_string as string;
+      const replaceAll = (input.replace_all as boolean) ?? false;
 
       // Normalize line endings to LF for matching (files may have CRLF on Windows)
       const content = rawContent.replace(/\r\n/g, '\n');
       const normalizedOldStr = oldStr.replace(/\r\n/g, '\n');
+      const normalizedNewStr = newStr.replace(/\r\n/g, '\n');
 
       // Find occurrences
       const occurrences = content.split(normalizedOldStr).length - 1;
@@ -204,15 +212,17 @@ export const editFileTool = defineTool(
           error: `old_string not found in file. Make sure the string matches the file content exactly (including whitespace and indentation). Read the file first to confirm the exact content.`,
         };
       }
-      if (occurrences > 1) {
+      if (occurrences > 1 && !replaceAll) {
         return {
           success: false,
           output: '',
-          error: `old_string matches ${occurrences} locations. Include more surrounding context lines to make it unique.`,
+          error: `old_string matches ${occurrences} locations. Include more surrounding context lines to make it unique, or set replace_all=true if you intend to replace all occurrences.`,
         };
       }
 
-      const newContent = content.replace(normalizedOldStr, newStr.replace(/\r\n/g, '\n'));
+      const newContent = replaceAll
+        ? content.split(normalizedOldStr).join(normalizedNewStr)
+        : content.replace(normalizedOldStr, normalizedNewStr);
       await ctx.invoke('write_file', { path: filePath, content: newContent });
 
       // Notify UI about the file change
@@ -224,12 +234,134 @@ export const editFileTool = defineTool(
         newContent,
       });
 
-      // Find the line range affected
-      const beforeLines = content.slice(0, content.indexOf(normalizedOldStr)).split('\n').length;
+      // Find line ranges affected
       const newLines = newStr.split('\n').length;
+      if (replaceAll) {
+        return {
+          success: true,
+          output: `File edited: ${input.path} (${occurrences} replacement${occurrences > 1 ? 's' : ''} applied)`,
+        };
+      }
+      const beforeLines = content.slice(0, content.indexOf(normalizedOldStr)).split('\n').length;
       return {
         success: true,
         output: `File edited: ${input.path} (lines ${beforeLines}-${beforeLines + newLines - 1})`,
+      };
+    } catch (err) {
+      return { success: false, output: '', error: String(err) };
+    }
+  },
+);
+
+export const replaceLinesTool = defineTool(
+  'replace_lines',
+  'Replace a specific range of lines in a file with new content. Line numbers are 1-indexed and inclusive. Use this when you need to edit a specific block of lines without matching by string content.',
+  {
+    path: { type: 'string', description: 'Absolute or workspace-relative path to the file' },
+    start_line: { type: 'integer', description: 'Starting line number to replace (1-indexed, inclusive)' },
+    end_line: { type: 'integer', description: 'Ending line number to replace (1-indexed, inclusive). Omit to replace only start_line.' },
+    new_content: { type: 'string', description: 'The new content to insert in place of the specified lines' },
+  },
+  ['path', 'start_line', 'new_content'],
+  'filesystem',
+  true,
+  async (input, ctx) => {
+    try {
+      const filePath = resolvePath(input.path as string, ctx.workspacePath);
+      const rawContent = await ctx.invoke<string>('read_file', { path: filePath });
+      const content = rawContent.replace(/\r\n/g, '\n');
+      const lines = content.split('\n');
+
+      const startLine = (input.start_line as number) - 1; // 0-based
+      const endLine = input.end_line ? (input.end_line as number) - 1 : startLine;
+
+      if (startLine < 0 || startLine >= lines.length) {
+        return {
+          success: false,
+          output: '',
+          error: `start_line ${input.start_line} is out of range (file has ${lines.length} lines).`,
+        };
+      }
+      if (endLine < startLine || endLine >= lines.length) {
+        return {
+          success: false,
+          output: '',
+          error: `end_line ${input.end_line} is out of range or before start_line (file has ${lines.length} lines).`,
+        };
+      }
+
+      const newContentLines = ((input.new_content as string) ?? '').replace(/\r\n/g, '\n').split('\n');
+
+      const before = lines.slice(0, startLine);
+      const after = lines.slice(endLine + 1);
+      const newContent = [...before, ...newContentLines, ...after].join('\n');
+
+      await ctx.invoke('write_file', { path: filePath, content: newContent });
+
+      ctx.onFileChange?.({
+        toolCallId: ctx.toolCallId,
+        toolName: 'replace_lines',
+        filePath,
+        originalContent: content,
+        newContent,
+      });
+
+      return {
+        success: true,
+        output: `Lines replaced: ${input.path} (lines ${startLine + 1}-${endLine + 1}) → ${newContentLines.length} line${newContentLines.length !== 1 ? 's' : ''}`,
+      };
+    } catch (err) {
+      return { success: false, output: '', error: String(err) };
+    }
+  },
+);
+
+export const insertLinesTool = defineTool(
+  'insert_lines',
+  'Insert new content at a specific line position in a file. Line numbers are 1-indexed. Content is inserted AFTER the specified line. Use line=0 to insert at the beginning of the file.',
+  {
+    path: { type: 'string', description: 'Absolute or workspace-relative path to the file' },
+    line: { type: 'integer', description: 'Line number after which to insert (1-indexed). Use 0 to insert at the top of the file.' },
+    content: { type: 'string', description: 'The content to insert (can be multiple lines)' },
+  },
+  ['path', 'line', 'content'],
+  'filesystem',
+  true,
+  async (input, ctx) => {
+    try {
+      const filePath = resolvePath(input.path as string, ctx.workspacePath);
+      const rawContent = await ctx.invoke<string>('read_file', { path: filePath });
+      const content = rawContent.replace(/\r\n/g, '\n');
+      const lines = content.split('\n');
+
+      const lineNum = input.line as number;
+      if (lineNum < 0 || lineNum > lines.length) {
+        return {
+          success: false,
+          output: '',
+          error: `line ${lineNum} is out of range (file has ${lines.length} lines, valid insert positions: 0–${lines.length}).`,
+        };
+      }
+
+      const newLines = ((input.content as string) ?? '').replace(/\r\n/g, '\n').split('\n');
+      const before = lines.slice(0, lineNum);
+      const after = lines.slice(lineNum);
+      const newContent = [...before, ...newLines, ...after].join('\n');
+
+      await ctx.invoke('write_file', { path: filePath, content: newContent });
+
+      ctx.onFileChange?.({
+        toolCallId: ctx.toolCallId,
+        toolName: 'insert_lines',
+        filePath,
+        originalContent: content,
+        newContent,
+      });
+
+      const startLine = lineNum + 1;
+      return {
+        success: true,
+        output: `Inserted ${newLines.length} line${newLines.length !== 1 ? 's' : ''} at ${input.path}:${startLine}`,
       };
     } catch (err) {
       return { success: false, output: '', error: String(err) };
@@ -271,11 +403,12 @@ export const createFileTool = defineTool(
 
 export const listDirectoryTool = defineTool(
   'list_directory',
-  'List the contents of a directory. Returns file and folder names. Folders end with /. Supports recursive listing.',
+  'List the contents of a directory. Returns file and folder names. Folders end with /. Supports recursive listing with file sizes when include_stats is true.',
   {
     path: { type: 'string', description: 'Absolute or workspace-relative path to the directory' },
     recursive: { type: 'boolean', description: 'If true, list all files recursively (default: false)' },
     max_depth: { type: 'integer', description: 'Maximum depth for recursive listing (default: 3)' },
+    include_stats: { type: 'boolean', description: 'Include file sizes and modification times (default: false)' },
   },
   ['path'],
   'filesystem',
@@ -285,28 +418,42 @@ export const listDirectoryTool = defineTool(
       const dirPath = resolvePath(input.path as string, ctx.workspacePath);
       const recursive = (input.recursive as boolean) ?? false;
       const maxDepth = Math.min((input.max_depth as number) || 3, 10);
+      const includeStats = (input.include_stats as boolean) ?? false;
+
+      async function getEntries(path: string): Promise<Array<{ name: string; is_dir: boolean; size?: number; modified?: number }>> {
+        if (includeStats) {
+          return ctx.invoke('list_dir_with_stats', { path });
+        }
+        return ctx.invoke('list_dir', { path });
+      }
+
+      function formatSize(bytes?: number): string {
+        if (bytes === undefined) return '';
+        if (bytes < 1024) return `${bytes}B`;
+        if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)}KB`;
+        return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
+      }
 
       if (!recursive) {
-        const entries = await ctx.invoke<Array<{ name: string; is_dir: boolean }>>(
-          'list_dir',
-          { path: dirPath },
-        );
+        const entries = await getEntries(dirPath);
         const formatted = entries
-          .map((e) => (e.is_dir ? `${e.name}/` : e.name))
+          .map((e) => {
+            const suffix = e.is_dir ? '/' : '';
+            const stats = includeStats && !e.is_dir ? `  (${formatSize(e.size)})` : '';
+            return `${e.name}${suffix}${stats}`;
+          })
           .join('\n');
-        return { success: true, output: formatted };
+        return { success: true, output: formatted || '(empty directory)' };
       }
 
       // Recursive listing
       const lines: string[] = [];
       async function walk(currentPath: string, depth: number, prefix: string) {
         if (depth > maxDepth) return;
-        const entries = await ctx.invoke<Array<{ name: string; is_dir: boolean }>>(
-          'list_dir',
-          { path: currentPath },
-        );
+        const entries = await getEntries(currentPath);
         for (const e of entries) {
-          lines.push(`${prefix}${e.name}${e.is_dir ? '/' : ''}`);
+          const stats = includeStats && !e.is_dir ? `  (${formatSize(e.size)})` : '';
+          lines.push(`${prefix}${e.name}${e.is_dir ? '/' : ''}${stats}`);
           if (e.is_dir && depth < maxDepth) {
             await walk(`${currentPath}/${e.name}`, depth + 1, `${prefix}  `);
           }
@@ -322,35 +469,77 @@ export const listDirectoryTool = defineTool(
 
 export const searchCodeTool = defineTool(
   'search_code',
-  'Search for text or regex patterns across files in the workspace. Returns matching lines with file paths and line numbers.',
+  'Search for text or regex patterns across files in the workspace. Returns matching lines with file paths, line numbers, and optional context lines around each match. Use context_lines to see surrounding code.',
   {
-    pattern: { type: 'string', description: 'Text or regex pattern to search for (case-insensitive by default)' },
+    pattern: { type: 'string', description: 'Text or regex pattern to search for' },
     include_pattern: { type: 'string', description: "Glob pattern to filter files (e.g., '**/*.ts')" },
+    exclude_pattern: { type: 'string', description: "Glob pattern to exclude files (e.g., '**/node_modules/**')" },
     is_regex: { type: 'boolean', description: 'Whether pattern is a regex (default: false)' },
-    max_results: { type: 'integer', description: 'Maximum number of matches to return (default: 50)' },
+    case_sensitive: { type: 'boolean', description: 'Case-sensitive search (default: false)' },
+    max_results: { type: 'integer', description: 'Maximum number of matches to return (default: 50, max: 200)' },
+    context_lines: { type: 'integer', description: 'Number of lines of context to show around each match (default: 0)' },
   },
   ['pattern'],
   'filesystem',
   false,
   async (input, ctx) => {
     try {
-      const results = await ctx.invoke<Array<{ path: string; line_number: number; line_content: string }>>(
+      const maxResults = Math.min((input.max_results as number) || 50, 200);
+      const contextLines = Math.min(Math.max(0, (input.context_lines as number) || 0), 5);
+
+      const results = await ctx.invoke<Array<{
+        path: string;
+        line_number: number;
+        line_content: string;
+        context_before?: string[];
+        context_after?: string[];
+      }>>(
         'search_files',
         {
           root: ctx.workspacePath,
           query: input.pattern as string,
           includePattern: (input.include_pattern as string) ?? undefined,
+          excludePattern: (input.exclude_pattern as string) ?? undefined,
           isRegex: (input.is_regex as boolean) ?? false,
-          maxResults: (input.max_results as number) ?? 50,
+          caseSensitive: (input.case_sensitive as boolean) ?? false,
+          maxResults,
+          contextLines,
         },
       );
       if (!results.length) {
         return { success: true, output: 'No matches found.' };
       }
-      const formatted = results
-        .map((r) => `${r.path}:${r.line_number}: ${r.line_content}`)
-        .join('\n');
-      return { success: true, output: formatted };
+
+      // Group by file for cleaner output
+      const byFile = new Map<string, typeof results>();
+      for (const r of results) {
+        const arr = byFile.get(r.path) ?? [];
+        arr.push(r);
+        byFile.set(r.path, arr);
+      }
+
+      const lines: string[] = [];
+      lines.push(`Found ${results.length} match${results.length > 1 ? 'es' : ''} in ${byFile.size} file${byFile.size > 1 ? 's' : ''}\n`);
+
+      for (const [path, matches] of byFile) {
+        lines.push(`--- ${path} ---`);
+        for (const m of matches) {
+          if (m.context_before?.length) {
+            for (const cb of m.context_before) {
+              lines.push(`  ${cb}`);
+            }
+          }
+          lines.push(`> ${m.line_number}: ${m.line_content}`);
+          if (m.context_after?.length) {
+            for (const ca of m.context_after) {
+              lines.push(`  ${ca}`);
+            }
+          }
+        }
+        lines.push('');
+      }
+
+      return { success: true, output: lines.join('\n') };
     } catch (err) {
       return { success: false, output: '', error: String(err) };
     }
@@ -1790,6 +1979,97 @@ export const detectProjectTypeTool = defineTool(
   },
 );
 
+export const readMultipleFilesTool = defineTool(
+  'read_multiple_files',
+  'Read the contents of multiple files at once. Returns each file with its path and numbered content. Use this instead of multiple read_file calls to save iterations.',
+  {
+    paths: {
+      type: 'array',
+      items: { type: 'string' },
+      description: 'Array of absolute or workspace-relative file paths',
+    },
+    max_lines_per_file: {
+      type: 'integer',
+      description: 'Maximum lines to read per file (default: 200). Set higher for larger files.',
+    },
+  },
+  ['paths'],
+  'filesystem',
+  false,
+  async (input, ctx) => {
+    try {
+      const paths = input.paths as string[];
+      const maxLines = (input.max_lines_per_file as number) || 200;
+      const outputs: string[] = [];
+
+      for (const p of paths) {
+        try {
+          const filePath = resolvePath(p, ctx.workspacePath);
+          const content = await ctx.invoke<string>('read_file', { path: filePath });
+          const lines = content.split('\n');
+          const truncated = lines.length > maxLines;
+          const shown = truncated ? lines.slice(0, maxLines) : lines;
+          const numbered = shown.map((line, i) => `${i + 1} | ${line}`).join('\n');
+          outputs.push(`--- ${p} ---\n${numbered}${truncated ? `\n... (${lines.length - maxLines} more lines)` : ''}`);
+        } catch (err) {
+          outputs.push(`--- ${p} ---\nError: ${String(err)}`);
+        }
+      }
+
+      return { success: true, output: outputs.join('\n\n') };
+    } catch (err) {
+      return { success: false, output: '', error: String(err) };
+    }
+  },
+);
+
+export const runCodeTool = defineTool(
+  'run_code',
+  'Execute a code snippet in a sandboxed environment. Supports JavaScript/TypeScript, Python, and shell scripts. Has no network access and limited CPU/memory. Use for quick calculations, data processing, or testing logic.',
+  {
+    code: { type: 'string', description: 'The code to execute' },
+    language: {
+      type: 'string',
+      enum: ['javascript', 'typescript', 'python', 'bash'],
+      description: 'Programming language of the code',
+    },
+    timeout_ms: {
+      type: 'integer',
+      description: 'Execution timeout in milliseconds (default: 10000, max: 30000)',
+    },
+  },
+  ['code', 'language'],
+  'code',
+  true,
+  async (input, ctx) => {
+    try {
+      const language = input.language as string;
+      const code = input.code as string;
+      const timeout = Math.min((input.timeout_ms as number) || 10_000, 30_000);
+
+      const result = await ctx.invoke<{ stdout: string; stderr: string; exit_code: number }>('run_code', {
+        language,
+        code,
+        timeout,
+        cwd: ctx.workspacePath,
+      });
+
+      const lines: string[] = [];
+      if (result.stdout) lines.push(result.stdout);
+      if (result.stderr) lines.push(`stderr:\n${result.stderr}`);
+
+      return {
+        success: result.exit_code === 0,
+        output: lines.join('\n') || `Exited with code ${result.exit_code}`,
+        error: result.exit_code !== 0 ? `Exit code: ${result.exit_code}` : undefined,
+        metadata: { exitCode: result.exit_code, language },
+      };
+    } catch (err) {
+      return { success: false, output: '', error: `Execution failed: ${String(err)}` };
+    }
+  },
+);
+
 // ─── Export All Tools ───────────────────────────────────────────────────────
 
 export function getAllBuiltinTools(): ToolHandler[] {
@@ -1798,6 +2078,8 @@ export function getAllBuiltinTools(): ToolHandler[] {
     readFileTool,
     writeFileTool,
     editFileTool,
+    replaceLinesTool,
+    insertLinesTool,
     createFileTool,
     deleteFileTool,
     renameFileTool,
@@ -1806,12 +2088,16 @@ export function getAllBuiltinTools(): ToolHandler[] {
     searchCodeTool,
     findFilesTool,
     getFileInfoTool,
+    readMultipleFilesTool,
     // Context gathering
     gatherContextTool,
     dropContextTool,
     listContextTool,
     // Terminal
     runTerminalCommandTool,
+    // Code
+    getDiagnosticsTool,
+    runCodeTool,
     // Git
     gitStatusTool,
     gitDiffTool,
@@ -1827,8 +2113,6 @@ export function getAllBuiltinTools(): ToolHandler[] {
     gitResetTool,
     gitBlameTool,
     gitShowTool,
-    // Code
-    getDiagnosticsTool,
     // Browser
     webFetchTool,
     webSearchTool,

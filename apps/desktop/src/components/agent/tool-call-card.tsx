@@ -18,6 +18,11 @@ import {
   Network,
   ExternalLink,
   Sparkles,
+  ChevronDown,
+  ChevronRight,
+  Code2,
+  Trash2,
+  CheckCircle2,
   type LucideIcon,
 } from 'lucide-react';
 import { useState, memo, useMemo } from 'react';
@@ -66,54 +71,168 @@ function formatDuration(startedAt?: number, completedAt?: number): string | null
   return `${(ms / 1000).toFixed(1)}s`;
 }
 
-// ─── File Edit Card  (write_file / create_file / edit_file) ───────────────────
-// Matches the IDE-style block in the image: header row + status line + code block
+function highlightCode(raw: string, lang: string): string {
+  if (!raw) return '';
+  try {
+    if (lang && hljs.getLanguage(lang)) {
+      return hljs.highlight(raw, { language: lang, ignoreIllegals: true }).value;
+    }
+    return escapeHtml(raw);
+  } catch {
+    return escapeHtml(raw);
+  }
+}
+
+// ─── Inline Diff Viewer ───────────────────────────────────────────────────────
+
+interface DiffLine {
+  type: 'add' | 'del' | 'ctx';
+  line: string;
+  oldNum?: number;
+  newNum?: number;
+}
+
+function computeInlineDiff(oldText: string, newText: string): DiffLine[] {
+  const oldLines = oldText.split('\n');
+  const newLines = newText.split('\n');
+  const result: DiffLine[] = [];
+  let i = 0, j = 0;
+  let oldNum = 1, newNum = 1;
+
+  while (i < oldLines.length || j < newLines.length) {
+    if (i < oldLines.length && j < newLines.length && oldLines[i] === newLines[j]) {
+      result.push({ type: 'ctx', line: oldLines[i], oldNum, newNum });
+      i++; j++; oldNum++; newNum++;
+    } else {
+      // Simple heuristic: check if next line matches
+      const nextOldMatch = j + 1 < newLines.length && i < oldLines.length && oldLines[i] === newLines[j + 1];
+      const nextNewMatch = i + 1 < oldLines.length && j < newLines.length && oldLines[i + 1] === newLines[j];
+
+      if (nextOldMatch && !nextNewMatch) {
+        result.push({ type: 'add', line: newLines[j], newNum });
+        j++; newNum++;
+      } else if (nextNewMatch && !nextOldMatch) {
+        result.push({ type: 'del', line: oldLines[i], oldNum });
+        i++; oldNum++;
+      } else {
+        if (i < oldLines.length) {
+          result.push({ type: 'del', line: oldLines[i], oldNum });
+          i++; oldNum++;
+        }
+        if (j < newLines.length) {
+          result.push({ type: 'add', line: newLines[j], newNum });
+          j++; newNum++;
+        }
+      }
+    }
+  }
+  return result;
+}
+
+function InlineDiff({ oldText, newText, lang }: { oldText: string; newText: string; lang: string }) {
+  const lines = useMemo(() => computeInlineDiff(oldText, newText), [oldText, newText]);
+  const [expanded, setExpanded] = useState(true);
+
+  return (
+    <div className="overflow-hidden rounded-b-lg">
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="flex w-full items-center gap-1 px-3 py-1 text-[10px] text-muted-foreground/50 hover:bg-white/[0.02] transition-colors"
+      >
+        {expanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+        <span>Diff ({lines.filter(l => l.type !== 'ctx').length} changes)</span>
+      </button>
+      {expanded && (
+        <div className="max-h-[320px] overflow-auto">
+          <table className="w-full text-[11px] font-mono leading-[1.6]">
+            <tbody>
+              {lines.map((l, idx) => (
+                <tr
+                  key={idx}
+                  className={cn(
+                    l.type === 'add' && 'bg-green-500/[0.08]',
+                    l.type === 'del' && 'bg-red-500/[0.08]',
+                  )}
+                >
+                  <td className="w-8 select-none pr-2 text-right text-muted-foreground/25">
+                    {l.oldNum ?? ''}
+                  </td>
+                  <td className="w-8 select-none pr-2 text-right text-muted-foreground/25">
+                    {l.newNum ?? ''}
+                  </td>
+                  <td className="w-4 select-none text-center">
+                    {l.type === 'add' ? '+' : l.type === 'del' ? '-' : ' '}
+                  </td>
+                  <td className="pr-4">
+                    <span
+                      className={cn(
+                        l.type === 'add' && 'text-green-300/80',
+                        l.type === 'del' && 'text-red-300/80',
+                        l.type === 'ctx' && 'text-foreground/50',
+                      )}
+                      dangerouslySetInnerHTML={{
+                        __html: l.type === 'ctx'
+                          ? escapeHtml(l.line)
+                          : highlightCode(l.line, lang),
+                      }}
+                    />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── File Edit Card (write_file / create_file / edit_file) ────────────────────
 
 function FileEditCard({ toolCall }: { toolCall: ToolCallDisplay }) {
   const path = (toolCall.input.path as string) ?? '';
-  const rawContent = ((toolCall.input.new_string ?? toolCall.input.content ?? '') as string);
+  const rawContent = (
+    (toolCall.input.new_string ?? toolCall.input.new_content ?? toolCall.input.content ?? '') as string
+  );
+  const oldContent = (toolCall.input.old_string as string) ?? '';
   const lang = detectLang(path);
   const isRunning = toolCall.status === 'running';
   const isDone    = toolCall.status === 'success';
   const isError   = toolCall.status === 'error';
   const duration  = formatDuration(toolCall.startedAt, toolCall.completedAt);
+  const isEdit    = toolCall.name === 'edit_file';
+  const isCreate  = toolCall.name === 'create_file';
+  const isReplaceLines = toolCall.name === 'replace_lines';
+  const isInsertLines  = toolCall.name === 'insert_lines';
 
-  // Syntax-highlight
-  const highlightedCode = useMemo(() => {
-    if (!rawContent) return '';
-    try {
-      if (lang && hljs.getLanguage(lang)) {
-        return hljs.highlight(rawContent, { language: lang, ignoreIllegals: true }).value;
-      }
-      return escapeHtml(rawContent);
-    } catch {
-      return escapeHtml(rawContent);
-    }
-  }, [rawContent, lang]);
+  const highlightedCode = useMemo(() => highlightCode(rawContent, lang), [rawContent, lang]);
 
-  // Status text
   let statusText: string | null = null;
   if (isDone) {
-    if (toolCall.name === 'edit_file')        statusText = 'Edit applied successfully.';
-    else if (toolCall.name === 'create_file') statusText = 'File created successfully.';
-    else                                       statusText = 'Write applied successfully.';
+    if (isEdit)         statusText = 'Edit applied successfully.';
+    else if (isCreate)  statusText = 'File created successfully.';
+    else if (isReplaceLines) statusText = 'Lines replaced successfully.';
+    else if (isInsertLines)  statusText = 'Lines inserted successfully.';
+    else                 statusText = 'Write applied successfully.';
   } else if (isError) {
     statusText = toolCall.error ?? 'Operation failed.';
   }
 
   const OpIcon: LucideIcon =
-    toolCall.name === 'edit_file'   ? Pencil :
-    toolCall.name === 'create_file' ? Plus   : FileText;
+    isEdit   ? Pencil :
+    isCreate ? Plus   : FileText;
 
   return (
     <div className="agent-fade-in my-2 overflow-hidden rounded-lg border border-border/20">
-      {/* Running shimmer */}
       {isRunning && <div className="h-[2px] w-full agent-shimmer-bar opacity-30" />}
 
       {/* Header */}
       <div className="flex items-center gap-2 border-b border-border/15 bg-surface-raised/30 px-3 py-[7px]">
         <OpIcon className="h-3.5 w-3.5 shrink-0 text-muted-foreground/45" />
         <span className="flex-1 truncate font-mono text-[11px] text-muted-foreground/65">{path}</span>
+        {isCreate && (
+          <span className="shrink-0 rounded px-1 py-[1px] text-[9px] font-medium text-green-400/80 bg-green-500/10">NEW</span>
+        )}
         {duration && (
           <span className="shrink-0 text-[9px] tabular-nums text-muted-foreground/30">{duration}</span>
         )}
@@ -129,8 +248,10 @@ function FileEditCard({ toolCall }: { toolCall: ToolCallDisplay }) {
         </div>
       )}
 
-      {/* Code block */}
-      {rawContent && (
+      {/* Diff or Code block */}
+      {isEdit && oldContent && isDone ? (
+        <InlineDiff oldText={oldContent} newText={rawContent} lang={lang} />
+      ) : rawContent ? (
         <div className="bg-[#0d1117]/80">
           <pre className="max-h-[280px] overflow-auto px-4 py-3 text-[11.5px] leading-[1.7] select-text cursor-text">
             <code
@@ -139,13 +260,12 @@ function FileEditCard({ toolCall }: { toolCall: ToolCallDisplay }) {
             />
           </pre>
         </div>
-      )}
+      ) : null}
     </div>
   );
 }
 
-// ─── File Reference Row  (read_file / search_code) ────────────────────────────
-// Single-line reference: icon + path, no card
+// ─── File Reference Row (read_file / search_code / find_files / get_file_info) ─
 
 function FileReferenceRow({ toolCall }: { toolCall: ToolCallDisplay }) {
   const path = (
@@ -154,20 +274,74 @@ function FileReferenceRow({ toolCall }: { toolCall: ToolCallDisplay }) {
     ''
   );
   const isRunning = toolCall.status === 'running';
+  const isDone    = toolCall.status === 'success';
+  const isError   = toolCall.status === 'error';
+  const [showOutput, setShowOutput] = useState(false);
+
+  // For read_file, we can show a preview of the output
+  const hasOutput = !!toolCall.output && toolCall.output.length > 0;
+  const isReadFile = toolCall.name === 'read_file';
+  const isSearch = toolCall.name === 'search_code';
+  const isFind = toolCall.name === 'find_files';
+
+  const outputPreview = useMemo(() => {
+    if (!hasOutput) return null;
+    const lines = toolCall.output!.split('\n');
+    if (isSearch || isFind) {
+      return lines.slice(0, 8).join('\n') + (lines.length > 8 ? `\n... ${lines.length - 8} more lines` : '');
+    }
+    return lines.slice(0, 6).join('\n') + (lines.length > 6 ? `\n... ${lines.length - 6} more lines` : '');
+  }, [hasOutput, toolCall.output, isSearch, isFind]);
 
   return (
-    <div className="agent-fade-in flex items-center gap-2 py-[5px] pl-0.5">
-      {isRunning ? (
-        <Loader2 className="h-3 w-3 shrink-0 animate-spin text-muted-foreground/40" />
-      ) : (
-        <Search className="h-3 w-3 shrink-0 text-muted-foreground/35" />
+    <div className="agent-fade-in my-1 overflow-hidden rounded-lg border border-border/10 bg-surface-raised/10">
+      <div className="flex items-center gap-2 px-3 py-[6px]">
+        {isRunning ? (
+          <Loader2 className="h-3 w-3 shrink-0 animate-spin text-muted-foreground/40" />
+        ) : isError ? (
+          <X className="h-3 w-3 shrink-0 text-red-400" />
+        ) : isDone ? (
+          <CheckCircle2 className="h-3 w-3 shrink-0 text-green-400/60" />
+        ) : (
+          <Clock className="h-3 w-3 text-yellow-400/40 shrink-0" />
+        )}
+        {isReadFile ? (
+          <FileText className="h-3 w-3 shrink-0 text-muted-foreground/40" />
+        ) : isSearch ? (
+          <Search className="h-3 w-3 shrink-0 text-muted-foreground/40" />
+        ) : isFind ? (
+          <FolderOpen className="h-3 w-3 shrink-0 text-muted-foreground/40" />
+        ) : (
+          <FileText className="h-3 w-3 shrink-0 text-muted-foreground/40" />
+        )}
+        <span className="font-mono text-[11px] text-muted-foreground/60 truncate">{path}</span>
+        {hasOutput && isDone && (
+          <button
+            onClick={() => setShowOutput(!showOutput)}
+            className="shrink-0 rounded px-1.5 py-0.5 text-[9px] text-muted-foreground/40 hover:bg-white/[0.03] hover:text-muted-foreground/70 transition-colors"
+          >
+            {showOutput ? 'hide' : 'preview'}
+          </button>
+        )}
+      </div>
+
+      {showOutput && outputPreview && (
+        <div className="border-t border-border/10 bg-[#0d1117]/60">
+          <pre className="max-h-[200px] overflow-auto px-4 py-2 text-[11px] leading-[1.6] font-mono text-foreground/60 select-text cursor-text">
+            {outputPreview}
+          </pre>
+        </div>
       )}
-      <span className="font-mono text-[11px] text-muted-foreground/55 truncate">{path}</span>
+      {isError && toolCall.error && (
+        <div className="border-t border-red-500/10 bg-red-950/10 px-3 py-1.5">
+          <span className="text-[10px] text-red-300/70">{toolCall.error}</span>
+        </div>
+      )}
     </div>
   );
 }
 
-// ─── Terminal Card  (run_terminal_command / *command*) ────────────────────────
+// ─── Terminal Card (run_terminal_command / *command*) ──────────────────────────
 
 function TerminalCard({ toolCall }: { toolCall: ToolCallDisplay }) {
   const command  = (toolCall.input.command as string) ?? '';
@@ -202,7 +376,6 @@ function TerminalCard({ toolCall }: { toolCall: ToolCallDisplay }) {
             {showOutput ? 'hide' : 'output'}
           </button>
         )}
-        {/* Jump to agent terminal */}
         <button
           onClick={() => {
             const agentSession = useTerminalStore.getState().getAgentSession();
@@ -234,7 +407,71 @@ function TerminalCard({ toolCall }: { toolCall: ToolCallDisplay }) {
   );
 }
 
-// ─── Browser Card  (web_search / web_fetch) ─────────────────────────────────
+// ─── Run Code Card ────────────────────────────────────────────────────────────
+
+function RunCodeCard({ toolCall }: { toolCall: ToolCallDisplay }) {
+  const language = (toolCall.input.language as string) ?? '';
+  const isRunning = toolCall.status === 'running';
+  const isDone    = toolCall.status === 'success';
+  const isError   = toolCall.status === 'error';
+  const duration  = formatDuration(toolCall.startedAt, toolCall.completedAt);
+  const [showOutput, setShowOutput] = useState(false);
+
+  const code = (toolCall.input.code as string) ?? '';
+  const codePreview = code.split('\n').slice(0, 3).join('\n') + (code.split('\n').length > 3 ? '...' : '');
+  const lang = language;
+  const highlighted = useMemo(() => highlightCode(codePreview, lang), [codePreview, lang]);
+
+  return (
+    <div className="agent-fade-in my-2 overflow-hidden rounded-lg border border-border/20">
+      {isRunning && <div className="h-[2px] w-full agent-shimmer-bar opacity-30" />}
+
+      <div className="flex items-center gap-2 bg-surface-raised/30 px-3 py-[7px]">
+        <Code2 className="h-3.5 w-3.5 shrink-0 text-amber-400/50" />
+        <span className="text-[11px] font-medium text-foreground/65">Run {language}</span>
+        {duration && (
+          <span className="shrink-0 text-[9px] tabular-nums text-muted-foreground/30">{duration}</span>
+        )}
+        {isRunning && <Loader2 className="h-3 w-3 animate-spin text-muted-foreground/40 shrink-0" />}
+        {isError && (
+          <div className="flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full bg-red-500/15">
+            <X className="h-2 w-2 text-red-400" />
+          </div>
+        )}
+        {isDone && (
+          <button
+            onClick={() => setShowOutput(!showOutput)}
+            className="shrink-0 rounded px-1.5 py-0.5 text-[9px] text-muted-foreground/40 hover:bg-white/[0.03] hover:text-muted-foreground/70 transition-colors"
+          >
+            {showOutput ? 'hide' : 'output'}
+          </button>
+        )}
+      </div>
+
+      {/* Code preview */}
+      <div className="border-t border-border/10 bg-[#0d1117]/50 px-3 py-2">
+        <pre className="text-[10px] leading-[1.6] font-mono text-foreground/40 select-text cursor-text">
+          <code dangerouslySetInnerHTML={{ __html: highlighted }} />
+        </pre>
+      </div>
+
+      {showOutput && toolCall.output && (
+        <div className="bg-[#0d1117]/80 border-t border-border/15">
+          <pre className="max-h-[200px] overflow-auto px-4 py-3 text-[11px] leading-[1.65] font-mono text-foreground/70 select-text cursor-text">
+            {toolCall.output}
+          </pre>
+        </div>
+      )}
+      {isError && toolCall.error && (
+        <div className="border-t border-red-500/10 bg-red-950/10 px-4 py-2">
+          <pre className="text-[11px] font-mono text-red-300/70 whitespace-pre-wrap">{toolCall.error}</pre>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Browser Card (web_search / web_fetch) ────────────────────────────────────
 
 function BrowserCard({ toolCall }: { toolCall: ToolCallDisplay }) {
   const isRunning = toolCall.status === 'running';
@@ -252,7 +489,6 @@ function BrowserCard({ toolCall }: { toolCall: ToolCallDisplay }) {
     <div className="agent-fade-in my-2 overflow-hidden rounded-lg border border-border/20">
       {isRunning && <div className="h-[2px] w-full agent-shimmer-bar opacity-30" />}
 
-      {/* Header */}
       <div className="flex items-center gap-2 bg-surface-raised/30 px-3 py-[7px]">
         <Globe className="h-3.5 w-3.5 shrink-0 text-sky-400/50" />
         <span className="text-[11px] font-medium text-foreground/65">{label}</span>
@@ -276,7 +512,6 @@ function BrowserCard({ toolCall }: { toolCall: ToolCallDisplay }) {
         )}
       </div>
 
-      {/* Output */}
       {showOutput && toolCall.output && (
         <div className="bg-[#0d1117]/80 border-t border-border/15">
           <pre className="max-h-[300px] overflow-auto px-4 py-3 text-[11px] leading-[1.65] font-mono text-foreground/70 select-text cursor-text">
@@ -293,18 +528,45 @@ function BrowserCard({ toolCall }: { toolCall: ToolCallDisplay }) {
   );
 }
 
-// ─── Generic Tool Row  (git, skill, mcp, etc.) ────────────────────────────────
+// ─── Generic Tool Row (git, skill, mcp, etc.) ─────────────────────────────────
 
 const GENERIC_ICONS: Record<string, LucideIcon> = {
   git_status:      GitBranch,
   git_diff:        GitBranch,
   git_commit:      GitBranch,
+  git_add:         GitBranch,
+  git_log:         GitBranch,
+  git_checkout:    GitBranch,
+  git_push:        GitBranch,
+  git_pull:        GitBranch,
+  git_fetch:       GitBranch,
+  git_stash:       GitBranch,
+  git_merge:       GitBranch,
+  git_reset:       GitBranch,
+  git_blame:       GitBranch,
+  git_show:        GitBranch,
   activate_skill:  Sparkles,
   list_skills:     Zap,
   mcp_call:        Globe,
   mcp_query:       Network,
   database_query:  Database,
   list_directory:  FolderOpen,
+  delete_file:     Trash2,
+  rename_file:     FileText,
+  copy_file:       FileText,
+  get_file_info:   FileText,
+  find_files:      FolderOpen,
+  read_multiple_files: FileText,
+  run_code:        Code2,
+  detect_project_type: Zap,
+  get_diagnostics: Code2,
+  gather_context:  FileText,
+  drop_context:    FileText,
+  list_context:    FileText,
+  manage_tasks:    CheckCircle2,
+  request_mode_switch: Zap,
+  ask_user:        Sparkles,
+  create_skill:    Sparkles,
 };
 
 function getGenericLabel(name: string): string {
@@ -322,6 +584,8 @@ function getGenericSummary(toolCall: ToolCallDisplay): string {
   if (p) return p.split(/[\\/]/).slice(-2).join('/');
   const cmd = toolCall.input.command as string | undefined;
   if (cmd) return cmd.length > 50 ? cmd.slice(0, 50) + '…' : cmd;
+  const paths = toolCall.input.paths as string[] | undefined;
+  if (paths?.length) return `${paths.length} file${paths.length > 1 ? 's' : ''}`;
   return '';
 }
 
@@ -331,26 +595,51 @@ function GenericToolRow({ toolCall }: { toolCall: ToolCallDisplay }) {
   const isDone    = toolCall.status === 'success';
   const isError   = toolCall.status === 'error';
   const summary   = getGenericSummary(toolCall);
+  const [showOutput, setShowOutput] = useState(false);
+  const hasOutput = !!toolCall.output && toolCall.output.length > 0;
 
   return (
-    <div className="agent-fade-in flex items-center gap-2 py-[5px] pl-0.5">
-      {isRunning ? (
-        <Loader2 className="h-3 w-3 shrink-0 animate-spin text-muted-foreground/40" />
-      ) : isDone ? (
-        <div className="flex h-3.5 w-3.5 items-center justify-center rounded-full bg-green-500/10">
-          <Check className="h-2 w-2 text-green-400" />
+    <div className="agent-fade-in my-1 overflow-hidden rounded-lg border border-border/10 bg-surface-raised/10">
+      <div className="flex items-center gap-2 px-3 py-[6px]">
+        {isRunning ? (
+          <Loader2 className="h-3 w-3 shrink-0 animate-spin text-muted-foreground/40" />
+        ) : isDone ? (
+          <div className="flex h-3.5 w-3.5 items-center justify-center rounded-full bg-green-500/10">
+            <Check className="h-2 w-2 text-green-400" />
+          </div>
+        ) : isError ? (
+          <div className="flex h-3.5 w-3.5 items-center justify-center rounded-full bg-red-500/10">
+            <X className="h-2 w-2 text-red-400" />
+          </div>
+        ) : (
+          <Clock className="h-3 w-3 text-yellow-400/40 shrink-0" />
+        )}
+        <ToolIcon className="h-3 w-3 shrink-0 text-muted-foreground/40" />
+        <span className="text-[11px] text-foreground/60">{getGenericLabel(toolCall.name)}</span>
+        {summary && (
+          <span className="ml-0.5 max-w-[160px] truncate font-mono text-[10px] text-muted-foreground/35">{summary}</span>
+        )}
+        {hasOutput && isDone && (
+          <button
+            onClick={() => setShowOutput(!showOutput)}
+            className="ml-auto shrink-0 rounded px-1.5 py-0.5 text-[9px] text-muted-foreground/40 hover:bg-white/[0.03] hover:text-muted-foreground/70 transition-colors"
+          >
+            {showOutput ? 'hide' : 'output'}
+          </button>
+        )}
+      </div>
+
+      {showOutput && hasOutput && (
+        <div className="border-t border-border/10 bg-[#0d1117]/60">
+          <pre className="max-h-[180px] overflow-auto px-4 py-2 text-[11px] leading-[1.6] font-mono text-foreground/60 select-text cursor-text">
+            {toolCall.output}
+          </pre>
         </div>
-      ) : isError ? (
-        <div className="flex h-3.5 w-3.5 items-center justify-center rounded-full bg-red-500/10">
-          <X className="h-2 w-2 text-red-400" />
-        </div>
-      ) : (
-        <Clock className="h-3 w-3 text-yellow-400/40 shrink-0" />
       )}
-      <ToolIcon className="h-3 w-3 shrink-0 text-muted-foreground/40" />
-      <span className="text-[11px] text-foreground/60">{getGenericLabel(toolCall.name)}</span>
-      {summary && (
-        <span className="ml-0.5 max-w-[160px] truncate font-mono text-[10px] text-muted-foreground/35">{summary}</span>
+      {isError && toolCall.error && (
+        <div className="border-t border-red-500/10 bg-red-950/10 px-3 py-1.5">
+          <span className="text-[10px] text-red-300/70">{toolCall.error}</span>
+        </div>
       )}
     </div>
   );
@@ -365,10 +654,10 @@ interface ToolCallCardProps {
 export function ToolCallCard({ toolCall }: ToolCallCardProps) {
   const { name } = toolCall;
 
-  if (['write_file', 'create_file', 'edit_file'].includes(name)) {
+  if (['write_file', 'create_file', 'edit_file', 'replace_lines', 'insert_lines'].includes(name)) {
     return <FileEditCard toolCall={toolCall} />;
   }
-  if (['read_file', 'search_code'].includes(name)) {
+  if (['read_file', 'search_code', 'find_files', 'get_file_info', 'read_multiple_files', 'list_directory'].includes(name)) {
     return <FileReferenceRow toolCall={toolCall} />;
   }
   if (/terminal|command/.test(name)) {
@@ -377,22 +666,52 @@ export function ToolCallCard({ toolCall }: ToolCallCardProps) {
   if (['web_search', 'web_fetch'].includes(name)) {
     return <BrowserCard toolCall={toolCall} />;
   }
+  if (name === 'run_code') {
+    return <RunCodeCard toolCall={toolCall} />;
+  }
   return <GenericToolRow toolCall={toolCall} />;
 }
 
 // ─── Tool Call Group ──────────────────────────────────────────────────────────
-// Transparent wrapper — no header card, just renders tool calls inline
 
 interface ToolCallGroupProps {
   toolCalls: ToolCallDisplay[];
 }
 
 export const ToolCallGroup = memo(function ToolCallGroup({ toolCalls }: ToolCallGroupProps) {
+  const [expanded, setExpanded] = useState(true);
+  if (toolCalls.length === 0) return null;
+
+  const running = toolCalls.filter(tc => tc.status === 'running').length;
+  const done = toolCalls.filter(tc => tc.status === 'success').length;
+  const error = toolCalls.filter(tc => tc.status === 'error').length;
+
   return (
-    <div className="agent-fade-in">
-      {toolCalls.map((tc) => (
-        <ToolCallCard key={tc.id} toolCall={tc} />
-      ))}
+    <div className="agent-fade-in my-1 rounded-lg border border-border/10 bg-surface-raised/[0.04]">
+      {/* Group header */}
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="flex w-full items-center gap-2 px-3 py-1.5 text-left hover:bg-white/[0.02] transition-colors"
+      >
+        {expanded ? <ChevronDown className="h-3 w-3 text-muted-foreground/40" /> : <ChevronRight className="h-3 w-3 text-muted-foreground/40" />}
+        <Wrench className="h-3 w-3 text-muted-foreground/40" />
+        <span className="text-[11px] text-muted-foreground/60">
+          {toolCalls.length} tool call{toolCalls.length > 1 ? 's' : ''}
+        </span>
+        <span className="flex items-center gap-1 text-[10px]">
+          {running > 0 && <span className="text-amber-400/60">{running} running</span>}
+          {done > 0 && <span className="text-green-400/60">{done} done</span>}
+          {error > 0 && <span className="text-red-400/60">{error} failed</span>}
+        </span>
+      </button>
+
+      {expanded && (
+        <div className="px-2 pb-1.5">
+          {toolCalls.map((tc) => (
+            <ToolCallCard key={tc.id} toolCall={tc} />
+          ))}
+        </div>
+      )}
     </div>
   );
 });

@@ -318,6 +318,14 @@ export class ToolRouter {
         return `${toolName}: ${input.path}`;
       case 'edit_file':
         return `edit_file: ${input.path}`;
+      case 'replace_lines':
+        return `replace_lines: ${input.path} (lines ${input.start_line}${input.end_line ? `-${input.end_line}` : ''})`;
+      case 'insert_lines':
+        return `insert_lines: ${input.path} (after line ${input.line})`;
+      case 'read_multiple_files':
+        return `read_multiple_files: ${Array.isArray(input.paths) ? (input.paths as string[]).join(', ') : input.paths}`;
+      case 'run_code':
+        return `run_code: ${input.language}`;
       case 'run_terminal_command':
         return `run: ${input.command}`;
       case 'git_commit':
