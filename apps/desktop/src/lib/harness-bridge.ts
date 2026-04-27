@@ -1396,11 +1396,11 @@ export class HarnessBridge {
     // Directory tree (top-level only, cheap)
     try {
       const entries = await tauriInvokeRaw<Array<{ name: string; is_dir: boolean }>>(
-        'list_dir',
+        'list_dir_all',
         { path: env.workspacePath },
       );
       const tree = entries
-        .filter((e) => !e.name.startsWith('.') && e.name !== 'node_modules' && e.name !== 'target')
+        .filter((e) => e.name !== 'node_modules' && e.name !== 'target')
         .map((e) => (e.is_dir ? `${e.name}/` : e.name))
         .join('\n');
       env.directoryTree = tree;

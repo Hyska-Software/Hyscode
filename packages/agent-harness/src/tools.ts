@@ -409,6 +409,7 @@ export const listDirectoryTool = defineTool(
     recursive: { type: 'boolean', description: 'If true, list all files recursively (default: false)' },
     max_depth: { type: 'integer', description: 'Maximum depth for recursive listing (default: 3)' },
     include_stats: { type: 'boolean', description: 'Include file sizes and modification times (default: false)' },
+    show_hidden: { type: 'boolean', description: 'Include hidden files and directories (default: false)' },
   },
   ['path'],
   'filesystem',
@@ -419,12 +420,13 @@ export const listDirectoryTool = defineTool(
       const recursive = (input.recursive as boolean) ?? false;
       const maxDepth = Math.min((input.max_depth as number) || 3, 10);
       const includeStats = (input.include_stats as boolean) ?? false;
+      const showHidden = (input.show_hidden as boolean) ?? false;
 
       async function getEntries(path: string): Promise<Array<{ name: string; is_dir: boolean; size?: number; modified?: number }>> {
         if (includeStats) {
-          return ctx.invoke('list_dir_with_stats', { path });
+          return ctx.invoke('list_dir_with_stats', { path, show_hidden: showHidden });
         }
-        return ctx.invoke('list_dir', { path });
+        return ctx.invoke('list_dir', { path, show_hidden: showHidden });
       }
 
       function formatSize(bytes?: number): string {
@@ -478,6 +480,7 @@ export const searchCodeTool = defineTool(
     case_sensitive: { type: 'boolean', description: 'Case-sensitive search (default: false)' },
     max_results: { type: 'integer', description: 'Maximum number of matches to return (default: 50, max: 200)' },
     context_lines: { type: 'integer', description: 'Number of lines of context to show around each match (default: 0)' },
+    show_hidden: { type: 'boolean', description: 'Include hidden files and directories in search (default: false)' },
   },
   ['pattern'],
   'filesystem',
@@ -486,6 +489,7 @@ export const searchCodeTool = defineTool(
     try {
       const maxResults = Math.min((input.max_results as number) || 50, 200);
       const contextLines = Math.min(Math.max(0, (input.context_lines as number) || 0), 5);
+      const showHidden = (input.show_hidden as boolean) ?? false;
 
       const results = await ctx.invoke<Array<{
         path: string;
@@ -504,6 +508,7 @@ export const searchCodeTool = defineTool(
           caseSensitive: (input.case_sensitive as boolean) ?? false,
           maxResults,
           contextLines,
+          show_hidden: showHidden,
         },
       );
       if (!results.length) {

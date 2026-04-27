@@ -159,7 +159,7 @@ fn is_binary_file(name: &str) -> bool {
 }
 
 #[tauri::command]
-pub fn search_files(root: String, query: String, is_regex: Option<bool>, max_results: Option<usize>) -> Result<Vec<SearchResult>, String> {
+pub fn search_files(root: String, query: String, is_regex: Option<bool>, max_results: Option<usize>, show_hidden: Option<bool>) -> Result<Vec<SearchResult>, String> {
     let root_path = PathBuf::from(&root);
     if !root_path.is_dir() {
         return Err(format!("Not a directory: {}", root));
@@ -167,6 +167,7 @@ pub fn search_files(root: String, query: String, is_regex: Option<bool>, max_res
 
     let use_regex = is_regex.unwrap_or(false);
     let limit = max_results.unwrap_or(200);
+    let show_hidden = show_hidden.unwrap_or(false);
     let mut results = Vec::new();
 
     // Pre-compile regex if requested
@@ -185,6 +186,7 @@ pub fn search_files(root: String, query: String, is_regex: Option<bool>, max_res
         regex_opt: &Option<regex::Regex>,
         results: &mut Vec<SearchResult>,
         limit: usize,
+        show_hidden: bool,
     ) -> std::io::Result<()> {
         if results.len() >= limit {
             return Ok(());
@@ -198,7 +200,7 @@ pub fn search_files(root: String, query: String, is_regex: Option<bool>, max_res
             let entry = entry?;
             let name = entry.file_name().to_string_lossy().to_string();
 
-            if name.starts_with('.') || IGNORED_DIRS.contains(&name.as_str()) {
+            if (!show_hidden && name.starts_with('.')) || IGNORED_DIRS.contains(&name.as_str()) {
                 continue;
             }
 
@@ -206,7 +208,7 @@ pub fn search_files(root: String, query: String, is_regex: Option<bool>, max_res
             let ft = entry.file_type()?;
 
             if ft.is_dir() {
-                walk(&path, query, regex_opt, results, limit)?;
+                walk(&path, query, regex_opt, results, limit, show_hidden)?;
             } else if ft.is_file() && !is_binary_file(&name) {
                 if let Ok(content) = fs::read_to_string(&path) {
                     for (i, line) in content.lines().enumerate() {
@@ -232,7 +234,7 @@ pub fn search_files(root: String, query: String, is_regex: Option<bool>, max_res
         Ok(())
     }
 
-    walk(&root_path, &query, &regex_opt, &mut results, limit)
+    walk(&root_path, &query, &regex_opt, &mut results, limit, show_hidden)
         .map_err(|e| format!("Search error: {}", e))?;
 
     Ok(results)
@@ -256,13 +258,14 @@ pub fn rename_path(from: String, to: String) -> Result<(), String> {
 /// Recursively search for files matching a glob-like pattern.
 /// Supports: `*` (any chars except `/`), `**` (any path segments), `?` (single char).
 #[tauri::command]
-pub fn find_files(base_path: String, pattern: String, max_results: Option<usize>) -> Result<Vec<String>, String> {
+pub fn find_files(base_path: String, pattern: String, max_results: Option<usize>, show_hidden: Option<bool>) -> Result<Vec<String>, String> {
     let root = PathBuf::from(&base_path);
     if !root.is_dir() {
         return Err(format!("Not a directory: {}", base_path));
     }
 
     let limit = max_results.unwrap_or(50).min(200);
+    let show_hidden = show_hidden.unwrap_or(false);
     let mut results = Vec::new();
 
     // Convert glob pattern to regex
@@ -276,6 +279,7 @@ pub fn find_files(base_path: String, pattern: String, max_results: Option<usize>
         re: &regex::Regex,
         results: &mut Vec<String>,
         limit: usize,
+        show_hidden: bool,
     ) -> std::io::Result<()> {
         if results.len() >= limit {
             return Ok(());
@@ -288,7 +292,7 @@ pub fn find_files(base_path: String, pattern: String, max_results: Option<usize>
             let entry = entry?;
             let name = entry.file_name().to_string_lossy().to_string();
 
-            if name.starts_with('.') || IGNORED_DIRS.contains(&name.as_str()) {
+            if (!show_hidden && name.starts_with('.')) || IGNORED_DIRS.contains(&name.as_str()) {
                 continue;
             }
 
@@ -302,7 +306,7 @@ pub fn find_files(base_path: String, pattern: String, max_results: Option<usize>
                 .replace('\\', "/");
 
             if ft.is_dir() {
-                walk_find(&path, root, re, results, limit)?;
+                walk_find(&path, root, re, results, limit, show_hidden)?;
             } else if ft.is_file() {
                 // Match against relative path and also just the filename
                 if re.is_match(&rel) || re.is_match(&name) {
@@ -313,7 +317,7 @@ pub fn find_files(base_path: String, pattern: String, max_results: Option<usize>
         Ok(())
     }
 
-    walk_find(&root, &root, &re, &mut results, limit)
+    walk_find(&root, &root, &re, &mut results, limit, show_hidden)
         .map_err(|e| format!("Find error: {}", e))?;
 
     results.sort();
