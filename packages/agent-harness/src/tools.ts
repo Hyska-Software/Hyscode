@@ -366,6 +366,8 @@ export const runTerminalCommandTool = defineTool(
     command: { type: 'string', description: 'The command to execute' },
     cwd: { type: 'string', description: 'Working directory (default: workspace root)' },
     timeout_ms: { type: 'integer', description: 'Timeout in milliseconds (default: 30000)' },
+    new_terminal: { type: 'boolean', description: 'If true, forces creation of a new terminal session instead of reusing the existing Agent Terminal.' },
+    session_name: { type: 'string', description: 'Optional name for the terminal session (used when new_terminal is true).' },
   },
   ['command'],
   'terminal',
@@ -377,6 +379,7 @@ export const runTerminalCommandTool = defineTool(
         : ctx.workspacePath;
       const command = input.command as string;
       const timeoutMs = (input.timeout_ms as number) || 30_000;
+      const forceNewTerminal = !!input.new_terminal;
 
       // If no event listener available, return a clear error
       if (!ctx.listen) {
@@ -387,11 +390,24 @@ export const runTerminalCommandTool = defineTool(
         };
       }
 
-      // Use the shared agent terminal PTY if available, otherwise spawn a disposable one
-      const useSharedPty = !!ctx.agentTerminalPtyId;
-      const ptyId = useSharedPty
-        ? ctx.agentTerminalPtyId!
-        : await ctx.invoke<string>('pty_spawn', { cwd });
+      const isWin = typeof navigator !== 'undefined' && navigator.userAgent?.includes('Win');
+      let ptyId: string;
+      let useSharedPty = false;
+
+      // Decide whether to use the shared agent terminal or spawn a disposable one
+      if (!forceNewTerminal && ctx.agentTerminalPtyId) {
+        // Health-check the shared PTY before committing to it
+        const alive = await ctx.invoke<boolean>('pty_exists', { ptyId: ctx.agentTerminalPtyId }).catch(() => false);
+        if (alive) {
+          ptyId = ctx.agentTerminalPtyId;
+          useSharedPty = true;
+        } else {
+          // Shared PTY died — fall back to a disposable one for this command
+          ptyId = await ctx.invoke<string>('pty_spawn', { cwd });
+        }
+      } else {
+        ptyId = await ctx.invoke<string>('pty_spawn', { cwd });
+      }
 
       // Collect output via pty:data events
       let output = '';
@@ -415,7 +431,6 @@ export const runTerminalCommandTool = defineTool(
       });
 
       // For the shared PTY, cd into the target cwd first if it differs from workspace root
-      const isWin = typeof navigator !== 'undefined' && navigator.userAgent?.includes('Win');
       if (useSharedPty && cwd !== ctx.workspacePath) {
         const cdCmd = isWin ? `cd "${cwd}"\r\n` : `cd "${cwd}"\n`;
         await ctx.invoke('pty_write', { ptyId, data: cdCmd });
@@ -434,7 +449,20 @@ export const runTerminalCommandTool = defineTool(
       const wrappedCommand = isWin
         ? `& { ${command} }; Write-Output '${exitMarker}'; Write-Output "EXIT_CODE:$${exitCodeVar}"\r\n`
         : `${command}; echo '${exitMarker}'; echo "EXIT_CODE:${exitCodeVar}"\n`;
-      await ctx.invoke('pty_write', { ptyId, data: wrappedCommand });
+
+      try {
+        await ctx.invoke('pty_write', { ptyId, data: wrappedCommand });
+      } catch (writeErr) {
+        // If the PTY vanished between our health-check and the write, try one last disposable fallback
+        const errMsg = String(writeErr);
+        if (errMsg.includes('not found') && useSharedPty) {
+          useSharedPty = false;
+          ptyId = await ctx.invoke<string>('pty_spawn', { cwd });
+          await ctx.invoke('pty_write', { ptyId, data: wrappedCommand });
+        } else {
+          throw writeErr;
+        }
+      }
 
       // Wait for exit marker or timeout
       const startTime = Date.now();
@@ -495,7 +523,7 @@ export const runTerminalCommandTool = defineTool(
         success: exitCode === 0 || exitCode === null,
         output: output || `Command completed with exit code ${exitCode}`,
         error: exitCode !== null && exitCode !== 0 ? `Exit code: ${exitCode}` : undefined,
-        metadata: { cwd, exitCode, timeoutMs },
+        metadata: { cwd, exitCode, timeoutMs, usedSharedPty: useSharedPty },
       };
     } catch (err) {
       return { success: false, output: '', error: String(err) };

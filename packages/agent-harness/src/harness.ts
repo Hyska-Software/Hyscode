@@ -198,6 +198,11 @@ export class Harness {
     this.agentTerminalPtyId = ptyId;
   }
 
+  /** Read the currently-wired agent terminal PTY id. */
+  getAgentTerminalPtyId(): string | undefined {
+    return this.agentTerminalPtyId;
+  }
+
   /** Update the terminal command callback (called by the bridge at init). */
   setOnTerminalCommand(cb: ((command: string, output: string, exitCode: number | null) => void) | undefined): void {
     this.onTerminalCommand = cb;

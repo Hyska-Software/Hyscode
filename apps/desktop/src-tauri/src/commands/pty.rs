@@ -204,6 +204,13 @@ pub async fn pty_resize(
     Ok(())
 }
 
+/// Check if a PTY session exists in state.
+#[tauri::command]
+pub async fn pty_exists(pty_id: String, state: State<'_, PtyState>) -> Result<bool, String> {
+    let sessions = state.0.lock().map_err(|e| format!("Lock error: {e}"))?;
+    Ok(sessions.contains_key(&pty_id))
+}
+
 /// Kill a PTY session and remove it from state.
 #[tauri::command]
 pub async fn pty_kill(pty_id: String, state: State<'_, PtyState>) -> Result<(), String> {

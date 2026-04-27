@@ -111,8 +111,8 @@ export class HarnessBridge {
   private currentIterationToolCalls: Array<{ id: string; name: string; input: Record<string, unknown> }> = [];
 
   // ─── Agent Terminal Integration ───────────────────────────────────
-  /** The terminal store session id for the agent terminal */
-  private _agentTerminalSessionId: string | null = null;
+  /** Pool of terminal store session ids owned by the agent */
+  private _agentTerminalSessionIds: string[] = [];
   /** Last terminal command executed by the agent (persists across turns within a conversation) */
   private _lastTerminalCommand: { command: string; output: string; exitCode: number | null } | null = null;
 
@@ -206,6 +206,18 @@ export class HarnessBridge {
       skillLoader,
       ruleLoader,
     });
+
+    // Listen for PTY exits so we can mark agent sessions as dead and avoid reuse
+    tauriListen<{ pty_id: string }>('pty:exit', (e) => {
+      const deadPtyId = e.payload.pty_id;
+      const ts = useTerminalStore.getState();
+      const session = ts.sessions.find((s) => s.ptyId === deadPtyId && s.isAgentSession);
+      if (session) {
+        ts.markPtyDead(session.id);
+        // Remove from our active pool so the next command spawns a fresh one
+        this._agentTerminalSessionIds = this._agentTerminalSessionIds.filter((id) => id !== session.id);
+      }
+    }).catch(() => {});
   }
 
   private static _homePathCache: string | null = null;
@@ -1679,21 +1691,40 @@ ${hints.map(h => `- ${h}`).join('\n')}
   // ─── Agent Terminal Integration ──────────────────────────────────────
 
   /**
-   * Ensure a visible "Agent Terminal" session exists in the terminal store.
-   * If one already exists, reuse it. Then tell the Harness to use its PTY id
-   * so `run_terminal_command` streams live in the visible terminal tab.
+   * Ensure at least one healthy agent terminal session exists.
+   * Reuses an existing healthy session when possible; otherwise creates a fresh one.
+   * Updates the Harness with the active PTY id.
    */
   private async ensureAgentTerminal(): Promise<void> {
     try {
       const termStore = useTerminalStore.getState();
       const workspacePath = this.harness.getWorkspacePath() as string;
 
-      // ensureAgentSession finds existing agent session or creates a new one
-      const sessionId = termStore.ensureAgentSession();
-      this._agentTerminalSessionId = sessionId;
+      // Reuse a healthy session if we already have one in the pool
+      let sessionId = this._agentTerminalSessionIds.find((id) => {
+        const s = termStore.sessions.find((sess) => sess.id === id);
+        return s && !s.isDead && s.ptyId;
+      });
+
+      // Also look for any other healthy agent session in the store
+      if (!sessionId) {
+        const healthy = termStore.findHealthyAgentSession();
+        if (healthy) {
+          sessionId = healthy.id;
+          if (!this._agentTerminalSessionIds.includes(sessionId)) {
+            this._agentTerminalSessionIds.push(sessionId);
+          }
+        }
+      }
+
+      // Nothing healthy — create a fresh agent session
+      if (!sessionId) {
+        sessionId = termStore.ensureAgentSession({ reuseHealthy: false });
+        this._agentTerminalSessionIds.push(sessionId);
+      }
 
       // Get the session to read its PTY id
-      let session = termStore.sessions.find(s => s.id === sessionId);
+      let session = termStore.sessions.find((s) => s.id === sessionId);
 
       // If no PTY has been spawned yet (component hasn't mounted), spawn one directly
       if (!session?.ptyId) {
@@ -1703,7 +1734,7 @@ ${hints.map(h => `- ${h}`).join('\n')}
           env: null,
         });
         useTerminalStore.getState().setPtyId(sessionId, ptyId);
-        session = useTerminalStore.getState().sessions.find(s => s.id === sessionId);
+        session = useTerminalStore.getState().sessions.find((s) => s.id === sessionId);
       }
 
       if (session?.ptyId) {
@@ -1714,22 +1745,56 @@ ${hints.map(h => `- ${h}`).join('\n')}
       this.harness.setOnTerminalCommand((command: string, output: string, exitCode: number | null) => {
         this._lastTerminalCommand = { command, output, exitCode };
 
-        // Also update the terminal store's command history for the agent session
-        if (this._agentTerminalSessionId) {
-          const ts = useTerminalStore.getState();
-          ts.setLastCommand(this._agentTerminalSessionId, command, output.slice(0, 2000), exitCode);
-          ts.appendCommandHistory(this._agentTerminalSessionId, {
-            command,
-            output: output.slice(0, 2000), // cap stored output size
-            exitCode,
-            timestamp: Date.now(),
-            source: 'agent',
-          });
+        // Update history on every healthy agent session we know about
+        const ts = useTerminalStore.getState();
+        for (const sid of this._agentTerminalSessionIds) {
+          const s = ts.sessions.find((sess) => sess.id === sid);
+          if (s && !s.isDead) {
+            ts.setLastCommand(sid, command, output.slice(0, 2000), exitCode);
+            ts.appendCommandHistory(sid, {
+              command,
+              output: output.slice(0, 2000),
+              exitCode,
+              timestamp: Date.now(),
+              source: 'agent',
+            });
+          }
         }
       });
     } catch (err) {
       // Agent terminal is best-effort — fall back to hidden PTY behavior
       console.warn('[HarnessBridge] Failed to ensure agent terminal:', err);
+    }
+  }
+
+  /**
+   * Health-check the current shared agent PTY. If it died, spawn a new one
+   * and wire it into the Harness so the next tool call uses a live session.
+   */
+  async refreshAgentTerminal(): Promise<void> {
+    try {
+      const termStore = useTerminalStore.getState();
+
+      // Find the currently-wired PTY id
+      const currentPtyId = this.harness.getAgentTerminalPtyId?.();
+
+      // If we have a PTY, verify it still exists in the Rust backend
+      if (currentPtyId) {
+        const alive = await tauriInvokeRaw<boolean>('pty_exists', { ptyId: currentPtyId }).catch(() => false);
+        if (alive) return; // still good
+
+        // PTY is dead — mark it in the store
+        const deadSession = termStore.sessions.find((s) => s.ptyId === currentPtyId);
+        if (deadSession) {
+          termStore.markPtyDead(deadSession.id);
+          this._agentTerminalSessionIds = this._agentTerminalSessionIds.filter((id) => id !== deadSession.id);
+        }
+      }
+
+      // No live PTY — ensure a fresh one
+      await this.ensureAgentTerminal();
+    } catch (err) {
+      console.warn('[HarnessBridge] Failed to refresh agent terminal:', err);
     }
   }
 }

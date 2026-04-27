@@ -62,6 +62,7 @@ interface TauriCommands {
   pty_write: { args: { ptyId: string; data: string }; ret: void };
   pty_resize: { args: { ptyId: string; cols: number; rows: number }; ret: void };
   pty_kill: { args: { ptyId: string }; ret: void };
+  pty_exists: { args: { ptyId: string }; ret: boolean };
 
   // Keychain
   keychain_set: { args: { service: string; account: string; password: string }; ret: void };

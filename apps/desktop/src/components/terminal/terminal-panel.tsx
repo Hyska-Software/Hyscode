@@ -26,13 +26,14 @@ export function TerminalPanel() {
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Auto-focus agent terminal when agent starts streaming
+  // Auto-focus the most recent agent terminal when agent starts streaming
   useEffect(() => {
     if (isStreaming) {
-      const agentSession = sessions.find((s) => s.isAgentSession);
-      if (agentSession && activeSessionId !== agentSession.id) {
+      const agentSessions = sessions.filter((s) => s.isAgentSession);
+      const latestAgent = agentSessions[agentSessions.length - 1];
+      if (latestAgent && activeSessionId !== latestAgent.id) {
         prevActiveRef.current = activeSessionId;
-        setActiveSession(agentSession.id);
+        setActiveSession(latestAgent.id);
       }
     } else if (prevActiveRef.current) {
       // Restore previous tab when streaming ends
@@ -97,8 +98,8 @@ export function TerminalPanel() {
               >
                 <TabIcon className={`h-3 w-3 shrink-0 ${isAgent ? 'text-primary' : ''}`} />
                 <span className="truncate max-w-[100px]">{session.name}</span>
-                {/* Don't allow closing the agent terminal while agent is running */}
-                {!isAgent && (
+                {/* Allow closing dead agent sessions or user terminals. Protect only the active agent terminal while streaming. */}
+                {(!isAgent || session.isDead || (isStreaming && activeSessionId !== session.id)) && (
                 <span
                   role="button"
                   onClick={(e) => handleClose(e, session.id, session.ptyId)}

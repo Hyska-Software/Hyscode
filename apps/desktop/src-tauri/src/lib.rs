@@ -86,6 +86,7 @@ pub fn run() {
             commands::pty::pty_write,
             commands::pty::pty_resize,
             commands::pty::pty_kill,
+            commands::pty::pty_exists,
             // Extension commands
             commands::extension::extension_install,
             commands::extension::extension_install_zip,

@@ -23,6 +23,7 @@ export function TerminalInstance({ sessionId, isActive }: TerminalInstanceProps)
   const inputBufferRef = useRef<string>('');
 
     const setPtyId = useTerminalStore((s) => s.setPtyId);
+    const markPtyDead = useTerminalStore((s) => s.markPtyDead);
     const setLastCommand = useTerminalStore((s) => s.setLastCommand);
     const appendCommandHistory = useTerminalStore((s) => s.appendCommandHistory);
     const rootPath = useProjectStore((s) => s.rootPath);
@@ -162,6 +163,7 @@ export function TerminalInstance({ sessionId, isActive }: TerminalInstanceProps)
         const unlistenExit = await listen<{ pty_id: string }>('pty:exit', (e) => {
           if (e.payload.pty_id === ptyId && !cancelled) {
             term.writeln('\r\n\x1b[90m[Process exited]\x1b[0m');
+            markPtyDead(sessionId);
           }
         });
         unlistenFns.push(unlistenExit);
