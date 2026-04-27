@@ -801,12 +801,12 @@ export const getDiagnosticsTool = defineTool(
 
 export const webFetchTool = defineTool(
   'web_fetch',
-  'Fetch the text content of a web page or API endpoint. Useful for reading documentation, API responses, or web content relevant to the task.',
+  'Fetch and read the full content of any web page or API endpoint. Extracts clean readable text (removes ads, scripts, nav). Returns title, URL, HTTP status, and the page text. Use this to read documentation, blog posts, GitHub source code, Stack Overflow answers, or any web content. Call this tool directly — it works.',
   {
-    url: { type: 'string', description: 'The URL to fetch.' },
+    url: { type: 'string', description: 'The full URL to fetch (e.g. https://docs.python.org/3/library/os.html).' },
     max_length: {
       type: 'number',
-      description: 'Max characters to return (default: 10000).',
+      description: 'Maximum characters to return (default: 10000). Increase if the page is long.',
     },
   },
   ['url'],
@@ -835,12 +835,83 @@ export const webFetchTool = defineTool(
         return { success: false, output: '', error: 'Fetching internal/private addresses is not allowed.' };
       }
 
-      const result = await ctx.invoke<string>('web_fetch', { url, maxLength: maxLen });
-      const text = result?.slice(0, maxLen) ?? '';
+      const result = await ctx.invoke<{
+        title?: string;
+        url: string;
+        text: string;
+        length: number;
+        truncated: boolean;
+        metadata?: { content_type?: string; status: number };
+      }>('web_fetch', { url, maxLength: maxLen });
+
+      const lines: string[] = [];
+      if (result.title) {
+        lines.push(`Title: ${result.title}`);
+      }
+      lines.push(`URL: ${result.url}`);
+      if (result.metadata) {
+        lines.push(`Status: ${result.metadata.status}${result.metadata.content_type ? ` | ${result.metadata.content_type}` : ''}`);
+      }
+      lines.push('---');
+      lines.push(result.text);
+
       return {
         success: true,
-        output: text || '(empty response)',
-        metadata: { url, length: text.length, truncated: text.length >= maxLen },
+        output: lines.join('\n'),
+        metadata: { url, length: result.length, truncated: result.truncated },
+      };
+    } catch (err) {
+      return { success: false, output: '', error: String(err) };
+    }
+  },
+);
+
+export const webSearchTool = defineTool(
+  'web_search',
+  'Search the web using DuckDuckGo. Returns a list of search results with titles, URLs, and snippets. Use this to find documentation, error solutions, API references, or general information. This tool is fully functional — call it directly. After getting results, use web_fetch to read the full content of a specific page.',
+  {
+    query: { type: 'string', description: 'The search query. Be specific for better results.' },
+    max_results: {
+      type: 'number',
+      description: 'Maximum number of results to return (default: 5, max: 10).',
+    },
+  },
+  ['query'],
+  'browser',
+  false,
+  async (input, ctx) => {
+    try {
+      const query = input.query as string;
+      const maxResults = Math.min(Math.max(1, (input.max_results as number) || 5), 10);
+
+      const result = await ctx.invoke<{
+        query: string;
+        results: Array<{ title: string; url: string; snippet: string }>;
+      }>('web_search', { query, maxResults });
+
+      if (result.results.length === 0) {
+        return { success: true, output: `No results found for "${query}".` };
+      }
+
+      const lines: string[] = [
+        `Search: "${result.query}"`,
+        `Results: ${result.results.length}`,
+        '',
+      ];
+
+      result.results.forEach((r, i) => {
+        lines.push(`${i + 1}. ${r.title}`);
+        lines.push(`   URL: ${r.url}`);
+        if (r.snippet) {
+          lines.push(`   ${r.snippet}`);
+        }
+        lines.push('');
+      });
+
+      return {
+        success: true,
+        output: lines.join('\n'),
+        metadata: { query: result.query, resultCount: result.results.length },
       };
     } catch (err) {
       return { success: false, output: '', error: String(err) };
@@ -1732,6 +1803,7 @@ export function getAllBuiltinTools(): ToolHandler[] {
     getDiagnosticsTool,
     // Browser
     webFetchTool,
+    webSearchTool,
     // Meta
     activateSkillTool,
     listSkillsTool,

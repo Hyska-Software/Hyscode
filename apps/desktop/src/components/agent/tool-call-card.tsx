@@ -17,6 +17,7 @@ import {
   Database,
   Network,
   ExternalLink,
+  Sparkles,
   type LucideIcon,
 } from 'lucide-react';
 import { useState, memo, useMemo } from 'react';
@@ -233,13 +234,72 @@ function TerminalCard({ toolCall }: { toolCall: ToolCallDisplay }) {
   );
 }
 
+// ─── Browser Card  (web_search / web_fetch) ─────────────────────────────────
+
+function BrowserCard({ toolCall }: { toolCall: ToolCallDisplay }) {
+  const isRunning = toolCall.status === 'running';
+  const isDone    = toolCall.status === 'success';
+  const isError   = toolCall.status === 'error';
+  const duration  = formatDuration(toolCall.startedAt, toolCall.completedAt);
+  const [showOutput, setShowOutput] = useState(false);
+
+  const query = (toolCall.input.query as string) ?? '';
+  const url   = (toolCall.input.url as string) ?? '';
+  const label = toolCall.name === 'web_search' ? 'Web Search' : 'Web Fetch';
+  const target = query || url || '';
+
+  return (
+    <div className="agent-fade-in my-2 overflow-hidden rounded-lg border border-border/20">
+      {isRunning && <div className="h-[2px] w-full agent-shimmer-bar opacity-30" />}
+
+      {/* Header */}
+      <div className="flex items-center gap-2 bg-surface-raised/30 px-3 py-[7px]">
+        <Globe className="h-3.5 w-3.5 shrink-0 text-sky-400/50" />
+        <span className="text-[11px] font-medium text-foreground/65">{label}</span>
+        <span className="flex-1 truncate font-mono text-[11px] text-muted-foreground/55">{target}</span>
+        {duration && (
+          <span className="shrink-0 text-[9px] tabular-nums text-muted-foreground/30">{duration}</span>
+        )}
+        {isRunning && <Loader2 className="h-3 w-3 animate-spin text-muted-foreground/40 shrink-0" />}
+        {isError && (
+          <div className="flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full bg-red-500/15">
+            <X className="h-2 w-2 text-red-400" />
+          </div>
+        )}
+        {isDone && (
+          <button
+            onClick={() => setShowOutput(!showOutput)}
+            className="shrink-0 rounded px-1.5 py-0.5 text-[9px] text-muted-foreground/40 hover:bg-white/[0.03] hover:text-muted-foreground/70 transition-colors"
+          >
+            {showOutput ? 'hide' : 'results'}
+          </button>
+        )}
+      </div>
+
+      {/* Output */}
+      {showOutput && toolCall.output && (
+        <div className="bg-[#0d1117]/80 border-t border-border/15">
+          <pre className="max-h-[300px] overflow-auto px-4 py-3 text-[11px] leading-[1.65] font-mono text-foreground/70 select-text cursor-text">
+            {toolCall.output}
+          </pre>
+        </div>
+      )}
+      {isError && toolCall.error && (
+        <div className="border-t border-red-500/10 bg-red-950/10 px-4 py-2">
+          <pre className="text-[11px] font-mono text-red-300/70 whitespace-pre-wrap">{toolCall.error}</pre>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Generic Tool Row  (git, skill, mcp, etc.) ────────────────────────────────
 
 const GENERIC_ICONS: Record<string, LucideIcon> = {
   git_status:      GitBranch,
   git_diff:        GitBranch,
   git_commit:      GitBranch,
-  activate_skill:  Zap,
+  activate_skill:  Sparkles,
   list_skills:     Zap,
   mcp_call:        Globe,
   mcp_query:       Network,
@@ -254,6 +314,10 @@ function getGenericLabel(name: string): string {
 function getGenericSummary(toolCall: ToolCallDisplay): string {
   const q = toolCall.input.query as string | undefined;
   if (q) return q.length > 50 ? q.slice(0, 50) + '…' : q;
+  const url = toolCall.input.url as string | undefined;
+  if (url) return url.length > 50 ? url.slice(0, 50) + '…' : url;
+  const skillName = toolCall.input.skill_name as string | undefined;
+  if (skillName) return skillName;
   const p = toolCall.input.path as string | undefined;
   if (p) return p.split(/[\\/]/).slice(-2).join('/');
   const cmd = toolCall.input.command as string | undefined;
@@ -309,6 +373,9 @@ export function ToolCallCard({ toolCall }: ToolCallCardProps) {
   }
   if (/terminal|command/.test(name)) {
     return <TerminalCard toolCall={toolCall} />;
+  }
+  if (['web_search', 'web_fetch'].includes(name)) {
+    return <BrowserCard toolCall={toolCall} />;
   }
   return <GenericToolRow toolCall={toolCall} />;
 }

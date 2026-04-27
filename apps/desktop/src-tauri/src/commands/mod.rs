@@ -1,4 +1,5 @@
 pub mod ai;
+pub mod browser;
 pub mod claude_agent;
 pub mod db;
 pub mod devices;

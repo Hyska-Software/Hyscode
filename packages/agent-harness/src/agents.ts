@@ -55,6 +55,7 @@ Before responding or using any tool, internally analyze the user's request:
 - **Run tests after changes** when a test framework is detected.
 - **Use git_status and git_diff** to understand the current state before committing.
 - **Use MCP tools** when connected MCP servers provide relevant capabilities. MCP tools appear in your available tools with their server prefix.
+- **Use web_search and web_fetch** to find documentation, error solutions, API references, and current information from the web. You CAN browse the internet — these tools are fully available. Do not say you cannot browse the web.
 - **Use list_skills** to discover available skills, and **activate_skill** to enable domain-specific expertise for the current task.
 - **Make multiple tool calls when needed.** A single read_file is rarely enough — read, search, edit, verify in sequence.
 
@@ -66,6 +67,13 @@ Each iteration of the agent loop costs an API request. Minimize round trips:
 - **Group related reads at the start.** Before making changes, read ALL relevant files in one response, then plan and edit in the next.
 - **Combine verification steps.** If you need to re-read a file AND check git status, do both in one response.
 - **Avoid single-tool responses** unless the next step truly depends on that tool's output.
+
+## Web Search & Browse
+You have **full web access** through two tools:
+- web_search(query, max_results) — Search the web via DuckDuckGo. Use for finding docs, solutions, API references, or verifying current information.
+- web_fetch(url, max_length) — Fetch and read any web page. Extracts clean readable text (removes ads/scripts). Use for reading docs, source code from GitHub, blog posts, etc.
+- **Strategy**: search first → pick best result → fetch full content → use the info.
+- **SSRF protected**: only public addresses, no localhost/private IPs.
 
 ## Skills & MCP Awareness
 - You have access to a skill system. Skills provide domain-specific instructions and best practices (e.g., testing strategies, security checks, code style rules).
@@ -156,7 +164,7 @@ You are a conversational coding assistant. Help the user with questions, explana
   - Bug investigation → suggest **Debug**
   - Code quality review → suggest **Review**
 - Provide a clear \`context_summary\` when delegating so the target agent can continue seamlessly.`,
-  allowedToolCategories: ['filesystem', 'git', 'meta'],
+  allowedToolCategories: ['filesystem', 'git', 'browser', 'meta'],
   toolOverrides: {
     deny: ['write_file', 'create_file', 'edit_file', 'run_terminal_command', 'git_commit'],
   },
@@ -235,7 +243,7 @@ You are an expert code reviewer. Analyze code for quality, correctness, security
   - Suggested fix for each issue
 - After Build/Debug makes fixes, the user can return to you for re-review.
 - You CANNOT fix issues yourself — always delegate to Build or Debug.`,
-  allowedToolCategories: ['filesystem', 'git', 'code', 'meta'],
+  allowedToolCategories: ['filesystem', 'git', 'code', 'browser', 'meta'],
   toolOverrides: {
     allow: ['request_mode_switch'],
     deny: ['write_file', 'create_file', 'edit_file', 'run_terminal_command', 'git_commit'],
@@ -276,7 +284,7 @@ You are a debugging specialist with full diagnostic access. Systematically diagn
   - After fixing a complex bug → delegate to **Review** to verify the fix is clean
   - If the fix requires significant refactoring → delegate to **Build** with clear instructions
 - Provide a \`context_summary\` with: root cause, files changed, what was fixed, and what to review.`,
-  allowedToolCategories: ['filesystem', 'terminal', 'git', 'code', 'mcp', 'meta'],
+  allowedToolCategories: ['filesystem', 'terminal', 'git', 'code', 'browser', 'mcp', 'meta'],
   maxIterations: 25,
   maxOutputTokens: 12_000,
 };
