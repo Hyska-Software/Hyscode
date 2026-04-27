@@ -69,6 +69,16 @@ export interface CommitDetail {
   total_deletions: number;
 }
 
+export interface GitBlameHunk {
+  start_line: number;
+  lines_in_hunk: number;
+  author: string;
+  email: string;
+  timestamp: number;
+  short_hash: string;
+  message: string;
+}
+
 // ── Store ────────────────────────────────────────────────────────────────────
 
 interface GitState {
@@ -128,6 +138,7 @@ interface GitState {
   discardAll: () => Promise<void>;
   getCommitDetail: (hash: string) => Promise<CommitDetail>;
   getCommitFileDiff: (hash: string, filePath: string) => Promise<string>;
+  getBlame: (filePath: string, line?: number) => Promise<GitBlameHunk[]>;
   // Pull Request
   createPullRequest: (opts: {
     title: string;
@@ -437,6 +448,12 @@ export const useGitStore = create<GitState>()(
       const rootPath = getRootPath();
       if (!rootPath) throw new Error('No project open');
       return invoke<string>('git_commit_file_diff', { repoPath: rootPath, hash, filePath });
+    },
+
+    getBlame: async (filePath: string, line?: number) => {
+      const rootPath = getRootPath();
+      if (!rootPath) throw new Error('No project open');
+      return invoke<GitBlameHunk[]>('git_blame', { repoPath: rootPath, filePath, line: line ?? null });
     },
 
     createPullRequest: async (opts) => {

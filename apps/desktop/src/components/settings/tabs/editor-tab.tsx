@@ -152,6 +152,12 @@ export function EditorTab() {
             onChange={(v) => store.set('smoothScrolling', v)}
           />
         </Row>
+        <Row label="Git Blame Inline">
+          <Toggle
+            checked={store.gitBlameInline}
+            onChange={(v) => store.set('gitBlameInline', v)}
+          />
+        </Row>
       </Section>
 
       {/* Advanced */}

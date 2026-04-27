@@ -92,6 +92,7 @@ interface SettingsState {
   formatOnType: boolean;
   autoSave: AutoSave;
   autoSaveDelay: number;
+  gitBlameInline: boolean;
 
   // ─ Terminal ─
   terminalFontSize: number;
@@ -219,6 +220,7 @@ export const useSettingsStore = create<SettingsState>()(
       formatOnType: false,
       autoSave: 'off',
       autoSaveDelay: 1000,
+      gitBlameInline: true,
 
       // Terminal
       terminalFontSize: 13,

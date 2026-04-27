@@ -73,6 +73,17 @@ pub struct CommitFileChange {
     pub deletions: u32,
 }
 
+#[derive(Serialize, Clone)]
+pub struct GitBlameHunk {
+    pub start_line: u32,
+    pub lines_in_hunk: u32,
+    pub author: String,
+    pub email: String,
+    pub timestamp: i64,
+    pub short_hash: String,
+    pub message: String,
+}
+
 #[derive(Serialize)]
 pub struct CommitDetail {
     pub hash: String,
@@ -1080,10 +1091,8 @@ pub fn git_reset(repo_path: String, mode: String, target: String) -> Result<Stri
 }
 
 #[tauri::command]
-pub fn git_blame(repo_path: String, file_path: String, line: Option<u32>) -> Result<String, String> {
+pub fn git_blame(repo_path: String, file_path: String, line: Option<u32>) -> Result<Vec<GitBlameHunk>, String> {
     let repo = open_repo(&repo_path)?;
-    let workdir = repo.workdir().ok_or("No working directory")?;
-    let _full_path = workdir.join(&file_path);
 
     let mut opts = git2::BlameOptions::new();
     if let Some(l) = line {
@@ -1095,26 +1104,35 @@ pub fn git_blame(repo_path: String, file_path: String, line: Option<u32>) -> Res
     let blame = repo.blame_file(std::path::Path::new(&file_path), Some(&mut opts))
         .map_err(|e| format!("Blame error: {}", e))?;
 
-    let mut output = String::new();
+    let mut hunks = Vec::new();
     for hunk in blame.iter() {
         let sig = hunk.final_signature();
-        let name = sig.name().unwrap_or("");
+        let author = sig.name().unwrap_or("").to_string();
+        let email = sig.email().unwrap_or("").to_string();
         let when = sig.when();
-        let time = chrono::DateTime::from_timestamp(when.seconds(), 0)
-            .map(|d| d.format("%Y-%m-%d").to_string())
+        let timestamp = when.seconds();
+        let commit_id = hunk.final_commit_id().to_string();
+        let short_hash = commit_id[..8.min(commit_id.len())].to_string();
+        let lines_in_hunk = hunk.lines_in_hunk() as u32;
+        let start_line = hunk.final_start_line() as u32;
+
+        let message = repo.find_commit(hunk.final_commit_id())
+            .ok()
+            .and_then(|c| c.message().map(|m| m.to_string()))
             .unwrap_or_default();
-        let commit_id = &hunk.final_commit_id().to_string()[..8];
-        let lines_in_hunk = hunk.lines_in_hunk();
-        output.push_str(&format!(
-            "{} {:<20} ({:<15}) lines:{}\n",
-            commit_id,
-            name,
-            time,
+
+        hunks.push(GitBlameHunk {
+            start_line,
             lines_in_hunk,
-        ));
+            author,
+            email,
+            timestamp,
+            short_hash,
+            message,
+        });
     }
 
-    Ok(output)
+    Ok(hunks)
 }
 
 #[tauri::command]

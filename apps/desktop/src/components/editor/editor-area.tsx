@@ -22,6 +22,7 @@ import { useExtensionStore } from '../../stores/extension-store';
 import { tauriFs } from '../../lib/tauri-fs';
 import { saveFileDialog } from '../../lib/tauri-dialog';
 import { useGitDecorations } from '../../hooks/use-git-decorations';
+import { useGitBlameDecorations } from '../../hooks/use-git-blame-decorations';
 import { useAgentDecorations } from '../../hooks/use-agent-decorations';
 import { useDiagnosticsSync } from '../../hooks/use-diagnostics-sync';
 import { defineAllMonacoThemes, getMonacoThemeName } from '../../lib/monaco-themes';
@@ -200,6 +201,14 @@ export function EditorArea() {
 
   // Apply git diff decorations to gutter + minimap
   useGitDecorations(
+    editorInstanceRef,
+    monacoInstanceRef,
+    activeTab?.type === 'file' ? (activeTab?.filePath ?? null) : null,
+    editorVersion,
+  );
+
+  // Apply git blame inline annotations to each line
+  useGitBlameDecorations(
     editorInstanceRef,
     monacoInstanceRef,
     activeTab?.type === 'file' ? (activeTab?.filePath ?? null) : null,
