@@ -2,7 +2,7 @@
 // Singleton that owns the Harness instance and wires its events → Zustand stores.
 // Lives outside React to avoid re-renders during streaming.
 
-import { Harness, SkillLoader, RuleLoader, applyPolicyOverride } from '@hyscode/agent-harness';
+import { Harness, SkillLoader, RuleLoader, applyPolicyOverride, getModePolicy } from '@hyscode/agent-harness';
 import type {
   HarnessEvent,
   AgentType,
@@ -283,8 +283,24 @@ export class HarnessBridge {
     const providerId = settings.activeProviderId ?? '';
     const modelId = settings.activeModelId ?? '';
 
+    // Determine approval mode: use mode policy default, but respect user's custom rules
+    const modePolicy = getModePolicy(store.mode as AgentType);
+    const approvalConfig = settings.approvalMode === 'custom'
+      ? {
+          mode: 'custom' as const,
+          categoryOverrides: Object.fromEntries(
+            Object.entries(settings.customApprovalRules.categoryRules)
+              .map(([k, autoApprove]) => [k, !autoApprove]),
+          ) as Record<string, boolean>,
+          toolOverrides: Object.fromEntries(
+            Object.entries(settings.customApprovalRules.toolRules)
+              .map(([k, autoApprove]) => [k, !autoApprove]),
+          ),
+        }
+      : { mode: modePolicy.approvalMode };
+
     // Sync settings → harness config
-    this.harness.setConfig({ providerId, modelId, maxIterations: settings.maxIterations });
+    this.harness.setConfig({ providerId, modelId, maxIterations: settings.maxIterations, approval: approvalConfig });
     // mode IS the agent type — single source of truth
     this.harness.setAgentType(store.mode as AgentType);
 

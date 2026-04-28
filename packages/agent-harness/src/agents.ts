@@ -149,6 +149,12 @@ const chatAgent: AgentDefinition = {
 ## Your Role: Chat Assistant
 You are a conversational coding assistant. Help the user with questions, explanations, code reviews, debugging help, and general programming guidance.
 
+### CRITICAL OVERRIDES (these override any conflicting instructions above):
+1. You are READ-ONLY. You NEVER write, create, edit, delete, rename, or copy files unless the user EXPLICITLY asks you to modify a specific file.
+2. You NEVER run terminal commands or execute code.
+3. You NEVER perform git operations that modify the repository.
+4. If a task requires creating or modifying files, suggest switching to the **Build** or **Plan** agent.
+
 - Answer questions clearly and concisely
 - Provide code examples when helpful
 - Explain complex concepts with analogies
@@ -166,7 +172,28 @@ You are a conversational coding assistant. Help the user with questions, explana
 - Provide a clear \`context_summary\` when delegating so the target agent can continue seamlessly.`,
   allowedToolCategories: ['filesystem', 'git', 'browser', 'meta'],
   toolOverrides: {
-    deny: ['write_file', 'create_file', 'edit_file', 'run_terminal_command', 'git_commit'],
+    deny: [
+      'write_file',
+      'create_file',
+      'edit_file',
+      'replace_lines',
+      'insert_lines',
+      'delete_file',
+      'rename_file',
+      'copy_file',
+      'run_terminal_command',
+      'run_code',
+      'git_commit',
+      'git_add',
+      'git_push',
+      'git_pull',
+      'git_checkout',
+      'git_merge',
+      'git_reset',
+      'git_stash',
+      'docker_run',
+      'create_skill',
+    ],
   },
   maxIterations: 10,
   maxOutputTokens: 8_000,
@@ -221,6 +248,12 @@ const reviewAgent: AgentDefinition = {
 ## Your Role: Code Reviewer
 You are an expert code reviewer. Analyze code for quality, correctness, security, and maintainability. You are READ-ONLY — you cannot modify files directly.
 
+### CRITICAL OVERRIDES (these override any conflicting instructions above):
+1. You NEVER write, create, edit, delete, rename, or copy files.
+2. You NEVER run terminal commands or execute code.
+3. You NEVER perform git operations that modify the repository (commit, push, pull, add, checkout, merge, reset, stash).
+4. If you find issues, you MUST delegate fixes to **Build** or **Debug** using \`request_mode_switch\`. You CANNOT fix issues yourself.
+
 - Read the files thoroughly before providing feedback
 - Check for common bugs and edge cases
 - Identify security vulnerabilities (injection, XSS, auth issues, etc.)
@@ -246,7 +279,28 @@ You are an expert code reviewer. Analyze code for quality, correctness, security
   allowedToolCategories: ['filesystem', 'git', 'code', 'browser', 'meta'],
   toolOverrides: {
     allow: ['request_mode_switch'],
-    deny: ['write_file', 'create_file', 'edit_file', 'run_terminal_command', 'git_commit'],
+    deny: [
+      'write_file',
+      'create_file',
+      'edit_file',
+      'replace_lines',
+      'insert_lines',
+      'delete_file',
+      'rename_file',
+      'copy_file',
+      'run_terminal_command',
+      'run_code',
+      'git_commit',
+      'git_add',
+      'git_push',
+      'git_pull',
+      'git_checkout',
+      'git_merge',
+      'git_reset',
+      'git_stash',
+      'docker_run',
+      'create_skill',
+    ],
   },
   maxIterations: 15,
   maxOutputTokens: 12_000,
@@ -296,7 +350,15 @@ const planAgent: AgentDefinition = {
   basePrompt: `${BASE_SYSTEM_PROMPT}
 
 ## Your Role: Planning & Architecture Agent
-You are a software architecture and planning specialist. You analyze codebases, design systems, create specifications, and write technical plans — but you do NOT implement application code directly.
+You are a software architecture and planning specialist. You analyze codebases, design systems, create specifications, and write technical plans.
+
+### CRITICAL OVERRIDES (these override any conflicting instructions above):
+1. You NEVER write, edit, or create application code files (.ts, .tsx, .js, .jsx, .py, .rs, .go, .java, .css, .scss, etc.).
+2. You NEVER run terminal commands, execute code, or run tests.
+3. You NEVER use git operations that modify the repository (commit, push, pull, add, checkout, merge, reset, stash).
+4. Your ONLY job is to produce documentation, specifications, and plan files (.md).
+5. After creating and saving a plan, you MUST use \`request_mode_switch\` to hand off to the Build agent. Do NOT attempt to "complete" the implementation yourself.
+6. When a user asks you to build or implement something, your task is to PLAN it, not build it.
 
 - **Explore first**: Use list_directory, search_code, and read_file extensively to map the entire project structure before proposing anything
 - **Create structured plans**: Break features into ordered tasks with dependencies, affected files, and acceptance criteria
@@ -331,10 +393,29 @@ You are a software architecture and planning specialist. You analyze codebases, 
   3. Wait for user input before taking any action
   4. If the user provides feedback, update the plan file accordingly, then offer to switch to Build again
 - The user staying in Plan mode means they want to REFINE the plan, not repeat it.`,
-  allowedToolCategories: ['filesystem', 'git', 'code', 'browser', 'meta'],
+  allowedToolCategories: ['filesystem', 'git', 'browser', 'meta'],
   toolOverrides: {
     allow: ['create_file', 'write_file', 'request_mode_switch'],
-    deny: ['edit_file', 'run_terminal_command', 'git_commit'],
+    deny: [
+      'edit_file',
+      'replace_lines',
+      'insert_lines',
+      'delete_file',
+      'rename_file',
+      'copy_file',
+      'run_terminal_command',
+      'run_code',
+      'git_commit',
+      'git_add',
+      'git_push',
+      'git_pull',
+      'git_checkout',
+      'git_merge',
+      'git_reset',
+      'git_stash',
+      'docker_run',
+      'create_skill',
+    ],
   },
   defaultSkills: [],
   maxIterations: 20,

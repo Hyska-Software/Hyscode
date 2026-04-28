@@ -181,7 +181,7 @@ export class Harness {
     this.abortController?.abort();
   }
 
-  setConfig(patch: Partial<Pick<HarnessConfig, 'providerId' | 'modelId' | 'maxIterations'>>): void {
+  setConfig(patch: Partial<Pick<HarnessConfig, 'providerId' | 'modelId' | 'maxIterations' | 'approval'>>): void {
     if (patch.providerId !== undefined) this.config.providerId = patch.providerId;
     if (patch.modelId !== undefined) {
       this.config.modelId = patch.modelId;
@@ -190,6 +190,10 @@ export class Harness {
     if (patch.maxIterations !== undefined) {
       this.config.maxIterations = patch.maxIterations;
       this._effectivePolicy = null; // Invalidate — iteration limit changed
+    }
+    if (patch.approval !== undefined) {
+      this.config.approval = patch.approval;
+      this.toolRouter.setApprovalConfig(patch.approval);
     }
   }
 
