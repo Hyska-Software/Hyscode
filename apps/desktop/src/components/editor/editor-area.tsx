@@ -25,6 +25,7 @@ import { useGitDecorations } from '../../hooks/use-git-decorations';
 import { useGitBlameDecorations } from '../../hooks/use-git-blame-decorations';
 import { useAgentDecorations } from '../../hooks/use-agent-decorations';
 import { useDiagnosticsSync } from '../../hooks/use-diagnostics-sync';
+import { useInlineCompletion } from '../../hooks/use-inline-completion';
 import { defineAllMonacoThemes, getMonacoThemeName } from '../../lib/monaco-themes';
 import { LspBridge, detectLanguage, detectLspLanguage } from '../../lib/lsp-bridge';
 import { registerAllLanguages, disableNativeTypeScriptValidation } from '@hyscode/lsp-client';
@@ -68,6 +69,22 @@ export function EditorArea() {
   const autoSave = useSettingsStore((s) => s.autoSave);
   const autoSaveDelay = useSettingsStore((s) => s.autoSaveDelay);
   const themeId = useSettingsStore((s) => s.themeId);
+  const inlineCompletionEnabled = useSettingsStore((s) => s.inlineCompletionEnabled);
+  const inlineCompletionMaxTokens = useSettingsStore((s) => s.inlineCompletionMaxTokens);
+  const inlineCompletionTemperature = useSettingsStore((s) => s.inlineCompletionTemperature);
+  const inlineCompletionProviderId = useSettingsStore((s) => s.inlineCompletionProviderId);
+  const inlineCompletionModelId = useSettingsStore((s) => s.inlineCompletionModelId);
+
+  useEffect(() => {
+    console.log('[EditorArea] inline completion settings:', {
+      enabled: inlineCompletionEnabled,
+      providerId: inlineCompletionProviderId,
+      modelId: inlineCompletionModelId,
+      maxTokens: inlineCompletionMaxTokens,
+      temperature: inlineCompletionTemperature,
+    });
+  }, [inlineCompletionEnabled, inlineCompletionProviderId, inlineCompletionModelId, inlineCompletionMaxTokens, inlineCompletionTemperature]);
+
   const monacoTheme = getMonacoThemeName(themeId);
   const extensionThemesVersion = useExtensionStore((s) => s.extensionThemesVersion);
 
@@ -225,6 +242,20 @@ export function EditorArea() {
 
   // Sync Monaco diagnostics to the file tree
   useDiagnosticsSync(monacoInstanceRef);
+
+  // AI-powered inline completion (ghost text)
+  useInlineCompletion({
+    editorRef: editorInstanceRef,
+    monacoRef: monacoInstanceRef,
+    filePath: activeTab?.type === 'file' ? (activeTab?.filePath ?? null) : null,
+    language: activeTab?.type === 'file' ? (activeTab?.language ?? null) : null,
+    enabled: inlineCompletionEnabled && activeTab?.type === 'file' && activeTab?.viewerType === 'code',
+    editorVersion,
+    maxTokens: inlineCompletionMaxTokens,
+    temperature: inlineCompletionTemperature,
+    providerId: inlineCompletionProviderId,
+    modelId: inlineCompletionModelId,
+  });
 
   // Push agent edit content to the Monaco model without remounting
   useEffect(() => {
@@ -482,6 +513,8 @@ export function EditorArea() {
                       monacoInstanceRef.current = monaco;
                       setEditorVersion((v) => v + 1);
 
+                      console.log('[EditorArea] Monaco mounted, inlineSuggest options:', editor.getOption(monaco.editor.EditorOption.inlineSuggest));
+
                       // Disable Monaco's built-in context menu so we show our own
                       editor.updateOptions({ contextmenu: false });
 
@@ -522,6 +555,12 @@ export function EditorArea() {
                       autoClosingQuotes: editorAutoClosingQuotes,
                       formatOnPaste: editorFormatOnPaste,
                       formatOnType: editorFormatOnType,
+                      inlineSuggest: {
+                        enabled: inlineCompletionEnabled,
+                        mode: 'subwordSmart',
+                        showToolbar: 'always',
+                        suppressSuggestions: false,
+                      },
                       padding: { top: 8 },
                       overviewRulerLanes: 3,
                       overviewRulerBorder: false,

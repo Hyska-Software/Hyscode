@@ -138,6 +138,14 @@ interface SettingsState {
   maxTokens: number;
   topP: number | null;
 
+  // ─ Inline Completion (AI-powered autocomplete) ─
+  inlineCompletionEnabled: boolean;
+  inlineCompletionProviderId: string | null;
+  inlineCompletionModelId: string | null;
+  inlineCompletionDelay: number;
+  inlineCompletionMaxTokens: number;
+  inlineCompletionTemperature: number;
+
   // ─ Per-provider enabled models ─
   /** Maps provider id → array of enabled model ids */
   enabledModels: Record<string, string[]>;
@@ -264,6 +272,14 @@ export const useSettingsStore = create<SettingsState>()(
       temperature: 0.0,
       maxTokens: 8192,
       topP: null,
+
+      // Inline Completion
+      inlineCompletionEnabled: true,
+      inlineCompletionProviderId: null,
+      inlineCompletionModelId: null,
+      inlineCompletionDelay: 300,
+      inlineCompletionMaxTokens: 128,
+      inlineCompletionTemperature: 0.2,
 
       // Per-provider enabled models (default: empty = all enabled)
       enabledModels: {},

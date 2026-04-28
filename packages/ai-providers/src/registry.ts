@@ -114,13 +114,17 @@ export class ProviderRegistry {
 
     if (providerId) {
       const p = this.providers.get(providerId);
+      console.log('[ProviderRegistry] requested providerId:', providerId, 'found:', !!p, 'foundId:', p?.id);
       if (!p) throw new ProviderError(`Provider "${providerId}" not found`, 'registry');
       provider = p;
     } else {
       const def = this.getDefault();
+      console.log('[ProviderRegistry] using default provider:', def.provider.id, 'model:', def.modelId);
       provider = def.provider;
       if (!model) model = def.modelId;
     }
+
+    console.log('[ProviderRegistry] final provider:', provider.id, 'model:', model, 'isConfigured:', provider.isConfigured());
 
     if (!provider.isConfigured()) {
       throw new ProviderError(`Provider "${provider.id}" is not configured (missing API key?)`, provider.id);

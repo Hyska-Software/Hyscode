@@ -334,6 +334,104 @@ export function AiTab() {
         </Row>
       </Section>
 
+      {/* ─── Inline Completion ─────────────────────────────────────── */}
+      <Section title="Inline Completion">
+        <Row
+          label="Enable AI autocomplete"
+          description="Show ghost-text suggestions powered by AI while typing"
+        >
+          <Toggle
+            checked={store.inlineCompletionEnabled}
+            onChange={(v) => store.set('inlineCompletionEnabled', v)}
+          />
+        </Row>
+
+        {store.inlineCompletionEnabled && (
+          <>
+            <Row label="Provider" description="Leave on Active to use the provider selected above">
+              <SelectInput
+                value={store.inlineCompletionProviderId ?? '__active__'}
+                onChange={(v) => store.set('inlineCompletionProviderId', v === '__active__' ? null : v)}
+                options={[
+                  { value: '__active__', label: 'Active provider' },
+                  ...PROVIDERS.map((p) => ({ value: p.id, label: p.name })),
+                ]}
+              />
+            </Row>
+
+            <Row label="Model" description="Leave on Active to use the model selected above">
+              {store.inlineCompletionProviderId === 'openrouter' ? (
+                <div className="flex items-center gap-1.5">
+                  <input
+                    type="text"
+                    value={store.inlineCompletionModelId ?? ''}
+                    onChange={(e) => store.set('inlineCompletionModelId', e.target.value || null)}
+                    placeholder="provider/model-name"
+                    className="h-7 w-52 rounded-md bg-muted px-2 text-[11px] text-foreground outline-none placeholder:text-muted-foreground/50"
+                  />
+                </div>
+              ) : (
+                <SelectInput
+                  value={store.inlineCompletionModelId ?? '__active__'}
+                  onChange={(v) => store.set('inlineCompletionModelId', v === '__active__' ? null : v)}
+                  options={[
+                    { value: '__active__', label: 'Active model' },
+                    ...(store.inlineCompletionProviderId
+                      ? enabledForProvider(store.inlineCompletionProviderId).map((m) => ({
+                          value: m.id,
+                          label: m.name,
+                        }))
+                      : enabledForProvider(store.activeProviderId ?? '').map((m) => ({
+                          value: m.id,
+                          label: m.name,
+                        }))),
+                  ]}
+                />
+              )}
+            </Row>
+
+            <Row
+              label="Debounce delay"
+              description="Milliseconds to wait after typing before requesting a completion"
+            >
+              <NumberInput
+                value={store.inlineCompletionDelay}
+                onChange={(v) => store.set('inlineCompletionDelay', v)}
+                min={0}
+                max={2000}
+                step={50}
+              />
+            </Row>
+
+            <Row
+              label="Max completion tokens"
+              description="Maximum length of a single completion suggestion"
+            >
+              <NumberInput
+                value={store.inlineCompletionMaxTokens}
+                onChange={(v) => store.set('inlineCompletionMaxTokens', v)}
+                min={16}
+                max={512}
+                step={16}
+              />
+            </Row>
+
+            <Row
+              label="Temperature"
+              description="Lower = more deterministic completions, higher = more creative"
+            >
+              <NumberInput
+                value={store.inlineCompletionTemperature}
+                onChange={(v) => store.set('inlineCompletionTemperature', v)}
+                min={0}
+                max={1}
+                step={0.05}
+              />
+            </Row>
+          </>
+        )}
+      </Section>
+
       {/* ─── Custom Approval Rules ─────────────────────────────────── */}
       {store.approvalMode === 'custom' && (
         <CustomApprovalRulesSection />

@@ -29,6 +29,11 @@ export async function withRetry<T>(
     } catch (err) {
       lastError = err;
 
+      // Never retry aborted requests — the caller explicitly cancelled.
+      if (err instanceof Error && (err.name === 'AbortError' || err.message === 'Request aborted')) {
+        throw err;
+      }
+
       if (err instanceof ProviderError) {
         // Auth errors should not be retried
         if (err.statusCode === 401 || err.statusCode === 403) {
@@ -54,51 +59,81 @@ export async function withRetry<T>(
 
 /**
  * Parse SSE (Server-Sent Events) stream into individual events.
- * Handles standard SSE format: `data: {...}\n\n`
+ * Accumulates data per event frame (blank-line-delimited) per the SSE spec.
+ * Handles both `data: value` and `data:value` (space is optional per spec).
+ * Multi-line events (multiple `data:` lines in one frame) are joined with `\n`.
  */
 export async function* parseSSEStream(
   response: Response,
   signal?: AbortSignal,
 ): AsyncIterable<string> {
+  console.log('[parseSSEStream] starting, status:', response.status, 'headers:', Object.fromEntries(response.headers.entries()));
   const reader = response.body?.getReader();
   if (!reader) throw new Error('Response body is not readable');
 
   const decoder = new TextDecoder();
   let buffer = '';
 
+  function extractFrameData(frame: string): string | null {
+    const dataLines: string[] = [];
+    for (const line of frame.split('\n')) {
+      const trimmed = line.trimEnd();
+      if (trimmed.startsWith(':')) continue; // SSE comment
+      if (trimmed.startsWith('data:')) {
+        // Strip the single optional space after the colon.
+        const value = trimmed.slice(5).replace(/^ /, '');
+        dataLines.push(value);
+      }
+    }
+    return dataLines.length > 0 ? dataLines.join('\n') : null;
+  }
+
+  function* processBuffer(): Iterable<string> {
+    // Extract complete SSE event frames (separated by \n\n).
+    let frameEnd: number;
+    while ((frameEnd = buffer.indexOf('\n\n')) !== -1) {
+      const frame = buffer.slice(0, frameEnd);
+      buffer = buffer.slice(frameEnd + 2);
+
+      const data = extractFrameData(frame);
+      if (data === null) continue;
+      console.log('[parseSSEStream] yielding data:', JSON.stringify(data));
+      if (data === '[DONE]') return;
+      yield data;
+    }
+  }
+
   try {
     while (true) {
       if (signal?.aborted) {
+        console.log('[parseSSEStream] aborted by signal');
         reader.cancel();
         return;
       }
 
       const { done, value } = await reader.read();
-      if (done) break;
+      console.log('[parseSSEStream] read done=', done, 'valueLength=', value?.length);
+      if (done) {
+        console.log('[parseSSEStream] stream done');
+        break;
+      }
 
       buffer += decoder.decode(value, { stream: true });
+      console.log('[parseSSEStream] buffer:', JSON.stringify(buffer));
 
-      const lines = buffer.split('\n');
-      // Keep the last potentially incomplete line in the buffer
-      buffer = lines.pop() ?? '';
-
-      for (const line of lines) {
-        const trimmed = line.trim();
-        if (!trimmed || trimmed.startsWith(':')) continue; // skip empty lines and comments
-        if (trimmed.startsWith('data: ')) {
-          const data = trimmed.slice(6);
-          if (data === '[DONE]') return;
-          yield data;
-        }
-      }
+      yield* processBuffer();
     }
 
-    // Process remaining buffer
+    // Flush decoder and process any remaining complete frames.
+    buffer += decoder.decode();
+    yield* processBuffer();
+
+    // Handle a final partial frame with no trailing \n\n.
     if (buffer.trim()) {
-      const trimmed = buffer.trim();
-      if (trimmed.startsWith('data: ')) {
-        const data = trimmed.slice(6);
-        if (data !== '[DONE]') yield data;
+      const data = extractFrameData(buffer);
+      if (data !== null && data !== '[DONE]') {
+        console.log('[parseSSEStream] yielding final partial data:', JSON.stringify(data));
+        yield data;
       }
     }
   } finally {

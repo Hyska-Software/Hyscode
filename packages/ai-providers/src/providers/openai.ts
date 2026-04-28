@@ -125,31 +125,32 @@ function toOpenAITools(tools: ToolDefinition[]): OpenAITool[] {
 
 // ─── SSE Parsing ────────────────────────────────────────────────────────────
 
-function parseOpenAIChunk(data: string): StreamChunk | null {
+function parseOpenAIChunk(data: string): StreamChunk[] {
   let parsed: Record<string, unknown>;
   try {
     parsed = JSON.parse(data);
   } catch {
-    return null;
+    return [];
   }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const usage = parsed.usage as any;
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const choices = parsed.choices as any[];
   if (!choices?.length) {
-    // Could be a usage-only chunk
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const usage = parsed.usage as any;
+    // Usage-only chunk (no choices).
     if (usage) {
-      return {
+      return [{
         type: 'usage',
         usage: {
           inputTokens: usage.prompt_tokens ?? 0,
           outputTokens: usage.completion_tokens ?? 0,
           totalTokens: usage.total_tokens ?? 0,
         },
-      };
+      }];
     }
-    return null;
+    return [];
   }
 
   const choice = choices[0];
@@ -162,29 +163,42 @@ function parseOpenAIChunk(data: string): StreamChunk | null {
       tool_calls: 'tool_use',
       length: 'max_tokens',
     };
-    return { type: 'done', stopReason: reasonMap[finishReason] ?? 'end_turn' };
+    const chunks: StreamChunk[] = [];
+    // OpenAI may include usage in the same chunk as finish_reason — emit it first.
+    if (usage) {
+      chunks.push({
+        type: 'usage',
+        usage: {
+          inputTokens: usage.prompt_tokens ?? 0,
+          outputTokens: usage.completion_tokens ?? 0,
+          totalTokens: usage.total_tokens ?? 0,
+        },
+      });
+    }
+    chunks.push({ type: 'done', stopReason: reasonMap[finishReason] ?? 'end_turn' });
+    return chunks;
   }
 
   if (delta?.reasoning_content) {
-    return { type: 'thinking_delta', text: delta.reasoning_content };
+    return [{ type: 'thinking_delta', text: delta.reasoning_content }];
   }
 
   if (delta?.content) {
-    return { type: 'text_delta', text: delta.content };
+    return [{ type: 'text_delta', text: delta.content }];
   }
 
   if (delta?.tool_calls) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const tc = delta.tool_calls[0] as any;
     if (tc.function?.name) {
-      return { type: 'tool_call_start', id: tc.id ?? '', name: tc.function.name };
+      return [{ type: 'tool_call_start', id: tc.id ?? '', name: tc.function.name }];
     }
     if (tc.function?.arguments) {
-      return { type: 'tool_call_delta', id: tc.id ?? '', input: tc.function.arguments };
+      return [{ type: 'tool_call_delta', id: tc.id ?? '', input: tc.function.arguments }];
     }
   }
 
-  return null;
+  return [];
 }
 
 // ─── Provider Implementation ────────────────────────────────────────────────
@@ -307,33 +321,38 @@ export class OpenAIProvider implements AIProvider {
       );
     }
 
+    console.log('[OpenAIProvider] response status:', response.status, 'ok:', response.ok);
+
     // Track tool call IDs across delta chunks.
     // OpenAI never sends tool_call_end — we must synthesize it when a new
     // tool starts or the stream finishes with stopReason 'tool_use'.
     let currentToolCallId = '';
 
     for await (const data of parseSSEStream(response, params.signal)) {
-      const chunk = parseOpenAIChunk(data);
-      if (!chunk) continue;
+      console.log('[OpenAIProvider] raw SSE data:', data);
+      const chunks = parseOpenAIChunk(data);
+      console.log('[OpenAIProvider] parsed chunk:', chunks);
 
-      if (chunk.type === 'tool_call_start' && chunk.id) {
-        // A new tool call starting means the previous one is done
-        if (currentToolCallId) {
-          yield { type: 'tool_call_end' as const, id: currentToolCallId };
+      for (const chunk of chunks) {
+        if (chunk.type === 'tool_call_start' && chunk.id) {
+          // A new tool call starting means the previous one is done
+          if (currentToolCallId) {
+            yield { type: 'tool_call_end' as const, id: currentToolCallId };
+          }
+          currentToolCallId = chunk.id;
+        } else if (chunk.type === 'tool_call_delta' && !chunk.id) {
+          yield { ...chunk, id: currentToolCallId };
+          continue;
+        } else if (chunk.type === 'done' && chunk.stopReason === 'tool_use') {
+          // Emit tool_call_end for the last active tool before the done signal
+          if (currentToolCallId) {
+            yield { type: 'tool_call_end' as const, id: currentToolCallId };
+            currentToolCallId = '';
+          }
         }
-        currentToolCallId = chunk.id;
-      } else if (chunk.type === 'tool_call_delta' && !chunk.id) {
-        yield { ...chunk, id: currentToolCallId };
-        continue;
-      } else if (chunk.type === 'done' && chunk.stopReason === 'tool_use') {
-        // Emit tool_call_end for the last active tool before the done signal
-        if (currentToolCallId) {
-          yield { type: 'tool_call_end' as const, id: currentToolCallId };
-          currentToolCallId = '';
-        }
+
+        yield chunk;
       }
-
-      yield chunk;
     }
   }
 }
