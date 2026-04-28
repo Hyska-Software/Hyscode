@@ -1,0 +1,1005 @@
+{
+  "defmodule": {
+    "prefix": ["defmodule", "mod"],
+    "body": [
+      "defmodule ${1:MyApp.ModuleName} do",
+      "  @moduledoc \"\"\"",
+      "  ${2:Documentação do módulo.}",
+      "  \"\"\"",
+      "",
+      "  $0",
+      "end"
+    ],
+    "description": "Declaração de módulo Elixir"
+  },
+
+  "defmodule GenServer": {
+    "prefix": ["genserver", "defmodule-genserver"],
+    "body": [
+      "defmodule ${1:MyApp.Worker} do",
+      "  @moduledoc \"\"\"",
+      "  ${2:GenServer worker.}",
+      "  \"\"\"",
+      "  use GenServer",
+      "",
+      "  # ─── Client API ───────────────────────────────────────────────────────",
+      "",
+      "  def start_link(opts \\\\ []) do",
+      "    GenServer.start_link(__MODULE__, opts, name: __MODULE__)",
+      "  end",
+      "",
+      "  def ${3:action}(${4:arg}) do",
+      "    GenServer.call(__MODULE__, {${5::action}, ${4:arg}})",
+      "  end",
+      "",
+      "  # ─── Server Callbacks ─────────────────────────────────────────────────",
+      "",
+      "  @impl true",
+      "  def init(opts) do",
+      "    {:ok, %{$0}}",
+      "  end",
+      "",
+      "  @impl true",
+      "  def handle_call({${5::action}, ${4:arg}}, _from, state) do",
+      "    {:reply, :ok, state}",
+      "  end",
+      "",
+      "  @impl true",
+      "  def handle_cast(_msg, state) do",
+      "    {:noreply, state}",
+      "  end",
+      "",
+      "  @impl true",
+      "  def handle_info(_msg, state) do",
+      "    {:noreply, state}",
+      "  end",
+      "end"
+    ],
+    "description": "Módulo GenServer completo"
+  },
+
+  "defmodule Supervisor": {
+    "prefix": ["supervisor", "defmodule-supervisor"],
+    "body": [
+      "defmodule ${1:MyApp.Supervisor} do",
+      "  use Supervisor",
+      "",
+      "  def start_link(init_arg) do",
+      "    Supervisor.start_link(__MODULE__, init_arg, name: __MODULE__)",
+      "  end",
+      "",
+      "  @impl true",
+      "  def init(_init_arg) do",
+      "    children = [",
+      "      ${0:# {MyApp.Worker, []}}",
+      "    ]",
+      "",
+      "    Supervisor.init(children, strategy: :one_for_one)",
+      "  end",
+      "end"
+    ],
+    "description": "Módulo Supervisor"
+  },
+
+  "defmodule Agent": {
+    "prefix": ["agent", "defmodule-agent"],
+    "body": [
+      "defmodule ${1:MyApp.Store} do",
+      "  use Agent",
+      "",
+      "  def start_link(initial_value) do",
+      "    Agent.start_link(fn -> initial_value end, name: __MODULE__)",
+      "  end",
+      "",
+      "  def get do",
+      "    Agent.get(__MODULE__, & &1)",
+      "  end",
+      "",
+      "  def update(new_value) do",
+      "    Agent.update(__MODULE__, fn _state -> new_value end)",
+      "  end",
+      "end"
+    ],
+    "description": "Módulo Agent"
+  },
+
+  "defmodule Task": {
+    "prefix": ["task-module"],
+    "body": [
+      "Task.async(fn ->",
+      "  $0",
+      "end)",
+      "|> Task.await()"
+    ],
+    "description": "Task.async com Task.await"
+  },
+
+  "def": {
+    "prefix": ["def", "defn"],
+    "body": [
+      "def ${1:function_name}(${2:args}) do",
+      "  $0",
+      "end"
+    ],
+    "description": "Função pública"
+  },
+
+  "defp": {
+    "prefix": ["defp", "defpn"],
+    "body": [
+      "defp ${1:function_name}(${2:args}) do",
+      "  $0",
+      "end"
+    ],
+    "description": "Função privada"
+  },
+
+  "defmacro": {
+    "prefix": ["defmacro"],
+    "body": [
+      "defmacro ${1:macro_name}(${2:args}) do",
+      "  quote do",
+      "    $0",
+      "  end",
+      "end"
+    ],
+    "description": "Macro pública"
+  },
+
+  "def guard": {
+    "prefix": ["defguard"],
+    "body": [
+      "defguard ${1:is_valid}(${2:value}) when ${0:is_integer(value) and value > 0}"
+    ],
+    "description": "Guard personalizada"
+  },
+
+  "@moduledoc": {
+    "prefix": ["moduledoc", "@moduledoc"],
+    "body": [
+      "@moduledoc \"\"\"",
+      "${1:Documentação do módulo.}",
+      "\"\"\""
+    ],
+    "description": "@moduledoc heredoc"
+  },
+
+  "@doc": {
+    "prefix": ["doc", "@doc"],
+    "body": [
+      "@doc \"\"\"",
+      "${1:Documentação da função.}",
+      "",
+      "## Exemplos",
+      "",
+      "    iex> ${2:MyModule.function(arg)}",
+      "    ${3::ok}",
+      "\"\"\""
+    ],
+    "description": "@doc com exemplo iex"
+  },
+
+  "@spec": {
+    "prefix": ["spec", "@spec"],
+    "body": [
+      "@spec ${1:function_name}(${2:arg_type}) :: ${3:return_type}"
+    ],
+    "description": "@spec de tipo"
+  },
+
+  "@type": {
+    "prefix": ["type", "@type"],
+    "body": [
+      "@type ${1:t} :: ${0:%{key: value}}"
+    ],
+    "description": "@type customizado"
+  },
+
+  "@typep": {
+    "prefix": ["typep", "@typep"],
+    "body": [
+      "@typep ${1:t} :: ${0:%{key: value}}"
+    ],
+    "description": "@typep privado"
+  },
+
+  "@behaviour": {
+    "prefix": ["behaviour"],
+    "body": [
+      "@behaviour ${1:MyApp.Behaviour}"
+    ],
+    "description": "@behaviour declaration"
+  },
+
+  "@impl": {
+    "prefix": ["impl", "@impl"],
+    "body": [
+      "@impl true"
+    ],
+    "description": "@impl true antes de callback"
+  },
+
+  "struct": {
+    "prefix": ["defstruct", "struct"],
+    "body": [
+      "defmodule ${1:MyApp.Struct} do",
+      "  @moduledoc false",
+      "",
+      "  @enforce_keys [${2::id}]",
+      "  defstruct [",
+      "    :${2:id},",
+      "    ${3::name},",
+      "    ${0}",
+      "  ]",
+      "",
+      "  @type t :: %__MODULE__{",
+      "    ${2:id}: ${4:integer()},",
+      "    ${3:name}: ${5:String.t()}",
+      "  }",
+      "end"
+    ],
+    "description": "defstruct com @type"
+  },
+
+  "if": {
+    "prefix": ["if"],
+    "body": [
+      "if ${1:condition} do",
+      "  $0",
+      "end"
+    ],
+    "description": "if/end"
+  },
+
+  "if/else": {
+    "prefix": ["ife", "if-else"],
+    "body": [
+      "if ${1:condition} do",
+      "  ${2:# true branch}",
+      "else",
+      "  ${0:# false branch}",
+      "end"
+    ],
+    "description": "if/else/end"
+  },
+
+  "unless": {
+    "prefix": ["unless"],
+    "body": [
+      "unless ${1:condition} do",
+      "  $0",
+      "end"
+    ],
+    "description": "unless/end"
+  },
+
+  "case": {
+    "prefix": ["case"],
+    "body": [
+      "case ${1:expression} do",
+      "  ${2::ok} ->",
+      "    ${3::handled}",
+      "",
+      "  {:error, reason} ->",
+      "    ${0:{:error, reason}}",
+      "end"
+    ],
+    "description": "case/do/end"
+  },
+
+  "cond": {
+    "prefix": ["cond"],
+    "body": [
+      "cond do",
+      "  ${1:condition1} ->",
+      "    ${2::result1}",
+      "",
+      "  ${3:condition2} ->",
+      "    ${4::result2}",
+      "",
+      "  true ->",
+      "    ${0::default}",
+      "end"
+    ],
+    "description": "cond/do/end"
+  },
+
+  "with": {
+    "prefix": ["with"],
+    "body": [
+      "with {:ok, ${1:result1}} <- ${2:step1()},",
+      "     {:ok, ${3:result2}} <- ${4:step2()} do",
+      "  {:ok, $0}",
+      "else",
+      "  {:error, reason} -> {:error, reason}",
+      "end"
+    ],
+    "description": "with/do/else/end"
+  },
+
+  "fn": {
+    "prefix": ["fn"],
+    "body": [
+      "fn ${1:arg} -> ${0:body} end"
+    ],
+    "description": "Função anônima inline"
+  },
+
+  "fn block": {
+    "prefix": ["fnb", "fn-block"],
+    "body": [
+      "fn ${1:arg} ->",
+      "  ${0:body}",
+      "end"
+    ],
+    "description": "Função anônima bloco"
+  },
+
+  "for comprehension": {
+    "prefix": ["for"],
+    "body": [
+      "for ${1:item} <- ${2:list}, ${3:filter} do",
+      "  $0",
+      "end"
+    ],
+    "description": "List comprehension com for"
+  },
+
+  "receive": {
+    "prefix": ["receive"],
+    "body": [
+      "receive do",
+      "  {${1::message}, ${2:payload}} ->",
+      "    ${0:# handle}",
+      "after",
+      "  ${3:5000} ->",
+      "    {:error, :timeout}",
+      "end"
+    ],
+    "description": "receive/after/end"
+  },
+
+  "try/rescue": {
+    "prefix": ["try", "try-rescue"],
+    "body": [
+      "try do",
+      "  ${1:expression}",
+      "rescue",
+      "  ${2:e in RuntimeError} ->",
+      "    ${0:{:error, Exception.message(e)}}",
+      "end"
+    ],
+    "description": "try/rescue/end"
+  },
+
+  "Enum.map": {
+    "prefix": ["emap", "enum-map"],
+    "body": [
+      "Enum.map(${1:list}, fn ${2:item} ->",
+      "  $0",
+      "end)"
+    ],
+    "description": "Enum.map/2"
+  },
+
+  "Enum.filter": {
+    "prefix": ["efilter", "enum-filter"],
+    "body": [
+      "Enum.filter(${1:list}, fn ${2:item} ->",
+      "  $0",
+      "end)"
+    ],
+    "description": "Enum.filter/2"
+  },
+
+  "Enum.reduce": {
+    "prefix": ["ereduce", "enum-reduce"],
+    "body": [
+      "Enum.reduce(${1:list}, ${2:%{}}, fn ${3:item}, ${4:acc} ->",
+      "  $0",
+      "end)"
+    ],
+    "description": "Enum.reduce/3"
+  },
+
+  "Enum.each": {
+    "prefix": ["eeach", "enum-each"],
+    "body": [
+      "Enum.each(${1:list}, fn ${2:item} ->",
+      "  $0",
+      "end)"
+    ],
+    "description": "Enum.each/2"
+  },
+
+  "Enum.flat_map": {
+    "prefix": ["eflatmap"],
+    "body": [
+      "Enum.flat_map(${1:list}, fn ${2:item} ->",
+      "  $0",
+      "end)"
+    ],
+    "description": "Enum.flat_map/2"
+  },
+
+  "pipe operator": {
+    "prefix": ["pipe", "|>"],
+    "body": [
+      "${1:value}",
+      "|> ${2:function1()}",
+      "|> ${3:function2()}",
+      "|> $0"
+    ],
+    "description": "Encadeamento com pipe |>"
+  },
+
+  "Map.put": {
+    "prefix": ["mapput"],
+    "body": [
+      "Map.put(${1:map}, :${2:key}, ${3:value})"
+    ],
+    "description": "Map.put/3"
+  },
+
+  "Map.update": {
+    "prefix": ["mapupdate"],
+    "body": [
+      "Map.update(${1:map}, :${2:key}, ${3:default}, fn ${4:val} -> $0 end)"
+    ],
+    "description": "Map.update/4"
+  },
+
+  "Keyword list": {
+    "prefix": ["kw", "keyword"],
+    "body": [
+      "[${1:key}: ${0:value}]"
+    ],
+    "description": "Keyword list"
+  },
+
+  "pattern match ok/error": {
+    "prefix": ["match-result"],
+    "body": [
+      "case ${1:expression} do",
+      "  {:ok, ${2:result}} -> ${3:{:ok, result}}",
+      "  {:error, reason} -> ${0:{:error, reason}}",
+      "end"
+    ],
+    "description": "Pattern match {:ok, _} / {:error, _}"
+  },
+
+  "Logger": {
+    "prefix": ["log", "logger"],
+    "body": [
+      "require Logger",
+      "",
+      "Logger.${1|debug,info,warning,error|}(\"${0:message}\")"
+    ],
+    "description": "Logger com require"
+  },
+
+  "Logger debug": {
+    "prefix": ["logd"],
+    "body": [
+      "Logger.debug(\"${0:message}\")"
+    ],
+    "description": "Logger.debug/1"
+  },
+
+  "Logger info": {
+    "prefix": ["logi"],
+    "body": [
+      "Logger.info(\"${0:message}\")"
+    ],
+    "description": "Logger.info/1"
+  },
+
+  "Logger warning": {
+    "prefix": ["logw"],
+    "body": [
+      "Logger.warning(\"${0:message}\")"
+    ],
+    "description": "Logger.warning/1"
+  },
+
+  "Logger error": {
+    "prefix": ["loge"],
+    "body": [
+      "Logger.error(\"${0:message}\")"
+    ],
+    "description": "Logger.error/1"
+  },
+
+  "ExUnit test module": {
+    "prefix": ["exunit", "test-module"],
+    "body": [
+      "defmodule ${1:MyApp.ModuleTest} do",
+      "  use ExUnit.Case, async: true",
+      "",
+      "  alias ${2:MyApp.Module}",
+      "",
+      "  describe \"${3:context}\" do",
+      "    test \"${4:description}\" do",
+      "      $0",
+      "    end",
+      "  end",
+      "end"
+    ],
+    "description": "Módulo de testes ExUnit"
+  },
+
+  "describe": {
+    "prefix": ["describe"],
+    "body": [
+      "describe \"${1:context}\" do",
+      "  $0",
+      "end"
+    ],
+    "description": "Bloco describe"
+  },
+
+  "test": {
+    "prefix": ["test"],
+    "body": [
+      "test \"${1:description}\" do",
+      "  $0",
+      "end"
+    ],
+    "description": "test/2 ExUnit"
+  },
+
+  "test with context": {
+    "prefix": ["testc"],
+    "body": [
+      "test \"${1:description}\", %{${2:key}: ${3:value}} do",
+      "  $0",
+      "end"
+    ],
+    "description": "test com contexto"
+  },
+
+  "setup": {
+    "prefix": ["setup"],
+    "body": [
+      "setup do",
+      "  $0",
+      "  :ok",
+      "end"
+    ],
+    "description": "setup ExUnit"
+  },
+
+  "setup_all": {
+    "prefix": ["setup_all"],
+    "body": [
+      "setup_all do",
+      "  $0",
+      "  :ok",
+      "end"
+    ],
+    "description": "setup_all ExUnit"
+  },
+
+  "assert": {
+    "prefix": ["assert"],
+    "body": [
+      "assert ${1:left} == ${0:right}"
+    ],
+    "description": "assert/1"
+  },
+
+  "assert match": {
+    "prefix": ["assertm", "assert-match"],
+    "body": [
+      "assert {:ok, ${1:result}} = ${0:expression}"
+    ],
+    "description": "assert pattern match"
+  },
+
+  "refute": {
+    "prefix": ["refute"],
+    "body": [
+      "refute ${0:expression}"
+    ],
+    "description": "refute/1"
+  },
+
+  "assert_raise": {
+    "prefix": ["assert_raise"],
+    "body": [
+      "assert_raise ${1:RuntimeError}, fn ->",
+      "  $0",
+      "end"
+    ],
+    "description": "assert_raise/2"
+  },
+
+  "Ecto Schema": {
+    "prefix": ["schema", "ecto-schema"],
+    "body": [
+      "defmodule ${1:MyApp.Schema} do",
+      "  use Ecto.Schema",
+      "  import Ecto.Changeset",
+      "",
+      "  @primary_key {:id, :binary_id, autogenerate: true}",
+      "  @foreign_key_type :binary_id",
+      "",
+      "  schema \"${2:table_name}\" do",
+      "    field :${3:name}, :${4|string,integer,boolean,float,map,array|}",
+      "",
+      "    timestamps(type: :utc_datetime_usec)",
+      "  end",
+      "",
+      "  @doc false",
+      "  def changeset(schema, attrs) do",
+      "    schema",
+      "    |> cast(attrs, [${5::name}])",
+      "    |> validate_required([${5::name}])",
+      "    $0",
+      "  end",
+      "end"
+    ],
+    "description": "Ecto Schema com changeset"
+  },
+
+  "Ecto changeset": {
+    "prefix": ["changeset"],
+    "body": [
+      "def changeset(${1:schema}, attrs) do",
+      "  ${1:schema}",
+      "  |> cast(attrs, [${2::field}])",
+      "  |> validate_required([${2::field}])",
+      "  $0",
+      "end"
+    ],
+    "description": "Ecto changeset function"
+  },
+
+  "Ecto belongs_to": {
+    "prefix": ["belongs_to"],
+    "body": [
+      "belongs_to :${1:assoc}, ${2:MyApp.Schema}"
+    ],
+    "description": "Ecto belongs_to"
+  },
+
+  "Ecto has_many": {
+    "prefix": ["has_many"],
+    "body": [
+      "has_many :${1:assoc}, ${2:MyApp.Schema}"
+    ],
+    "description": "Ecto has_many"
+  },
+
+  "Ecto has_one": {
+    "prefix": ["has_one"],
+    "body": [
+      "has_one :${1:assoc}, ${2:MyApp.Schema}"
+    ],
+    "description": "Ecto has_one"
+  },
+
+  "Ecto Query": {
+    "prefix": ["query", "ecto-query"],
+    "body": [
+      "import Ecto.Query",
+      "",
+      "from(${1:s} in ${2:MyApp.Schema},",
+      "  where: ${1:s}.${3:field} == ^${4:value},",
+      "  select: ${1:s}",
+      ")"
+    ],
+    "description": "Ecto Query DSL"
+  },
+
+  "Phoenix Controller": {
+    "prefix": ["controller", "phx-controller"],
+    "body": [
+      "defmodule ${1:MyAppWeb}.${2:Resource}Controller do",
+      "  use ${1:MyAppWeb}, :controller",
+      "",
+      "  alias ${3:MyApp.Context}",
+      "",
+      "  def index(conn, _params) do",
+      "    items = ${3:Context}.list_${4:items}()",
+      "    render(conn, :index, ${4:items}: items)",
+      "  end",
+      "",
+      "  def show(conn, %{\"id\" => id}) do",
+      "    item = ${3:Context}.get_${5:item}!(id)",
+      "    render(conn, :show, ${5:item}: item)",
+      "  end",
+      "",
+      "  def create(conn, %{\"${5:item}\" => ${5:item}_params}) do",
+      "    case ${3:Context}.create_${5:item}(${5:item}_params) do",
+      "      {:ok, ${5:item}} ->",
+      "        conn",
+      "        |> put_flash(:info, \"${2:Resource} criado com sucesso.\")",
+      "        |> redirect(to: ~p\"/${4:items}/#{${5:item}}\")",
+      "",
+      "      {:error, %Ecto.Changeset{} = changeset} ->",
+      "        render(conn, :new, changeset: changeset)",
+      "    end",
+      "  end",
+      "",
+      "  $0",
+      "end"
+    ],
+    "description": "Phoenix Controller com CRUD básico"
+  },
+
+  "Phoenix LiveView": {
+    "prefix": ["liveview", "phx-liveview"],
+    "body": [
+      "defmodule ${1:MyAppWeb}.${2:Resource}Live do",
+      "  use ${1:MyAppWeb}, :live_view",
+      "",
+      "  @impl true",
+      "  def mount(_params, _session, socket) do",
+      "    {:ok, assign(socket, ${3:key}: ${4:value})}",
+      "  end",
+      "",
+      "  @impl true",
+      "  def handle_params(params, _url, socket) do",
+      "    {:noreply, $0}",
+      "  end",
+      "",
+      "  @impl true",
+      "  def handle_event(\"${5:event}\", params, socket) do",
+      "    {:noreply, socket}",
+      "  end",
+      "",
+      "  @impl true",
+      "  def render(assigns) do",
+      "    ~H\"\"\"",
+      "    <div>",
+      "      ${6:<!-- conteúdo -->}",
+      "    </div>",
+      "    \"\"\"",
+      "  end",
+      "end"
+    ],
+    "description": "Phoenix LiveView completo"
+  },
+
+  "Phoenix LiveComponent": {
+    "prefix": ["livecomponent", "phx-livecomponent"],
+    "body": [
+      "defmodule ${1:MyAppWeb}.${2:Component}Component do",
+      "  use ${1:MyAppWeb}, :live_component",
+      "",
+      "  @impl true",
+      "  def update(assigns, socket) do",
+      "    {:ok, assign(socket, assigns)}",
+      "  end",
+      "",
+      "  @impl true",
+      "  def handle_event(\"${3:event}\", params, socket) do",
+      "    {:noreply, socket}",
+      "  end",
+      "",
+      "  @impl true",
+      "  def render(assigns) do",
+      "    ~H\"\"\"",
+      "    <div id={@id}>",
+      "      $0",
+      "    </div>",
+      "    \"\"\"",
+      "  end",
+      "end"
+    ],
+    "description": "Phoenix LiveComponent"
+  },
+
+  "Phoenix Context": {
+    "prefix": ["context", "phx-context"],
+    "body": [
+      "defmodule ${1:MyApp}.${2:Context} do",
+      "  @moduledoc \"\"\"",
+      "  The ${2:Context} context.",
+      "  \"\"\"",
+      "",
+      "  import Ecto.Query, warn: false",
+      "  alias ${1:MyApp}.Repo",
+      "  alias ${1:MyApp}.${2:Context}.${3:Schema}",
+      "",
+      "  def list_${4:schemas} do",
+      "    Repo.all(${3:Schema})",
+      "  end",
+      "",
+      "  def get_${5:schema}!(id), do: Repo.get!(${3:Schema}, id)",
+      "",
+      "  def create_${5:schema}(attrs \\\\ %{}) do",
+      "    %${3:Schema}{}",
+      "    |> ${3:Schema}.changeset(attrs)",
+      "    |> Repo.insert()",
+      "  end",
+      "",
+      "  def update_${5:schema}(%${3:Schema}{} = ${5:schema}, attrs) do",
+      "    ${5:schema}",
+      "    |> ${3:Schema}.changeset(attrs)",
+      "    |> Repo.update()",
+      "  end",
+      "",
+      "  def delete_${5:schema}(%${3:Schema}{} = ${5:schema}) do",
+      "    Repo.delete(${5:schema})",
+      "  end",
+      "",
+      "  def change_${5:schema}(%${3:Schema}{} = ${5:schema}, attrs \\\\ %{}) do",
+      "    ${3:Schema}.changeset(${5:schema}, attrs)",
+      "  end",
+      "end"
+    ],
+    "description": "Phoenix Context com CRUD completo"
+  },
+
+  "Application": {
+    "prefix": ["application"],
+    "body": [
+      "defmodule ${1:MyApp.Application} do",
+      "  use Application",
+      "",
+      "  @impl true",
+      "  def start(_type, _args) do",
+      "    children = [",
+      "      $0",
+      "    ]",
+      "",
+      "    opts = [strategy: :one_for_one, name: ${1:MyApp}.Supervisor]",
+      "    Supervisor.start_link(children, opts)",
+      "  end",
+      "end"
+    ],
+    "description": "Application callback"
+  },
+
+  "Protocol": {
+    "prefix": ["defprotocol"],
+    "body": [
+      "defprotocol ${1:MyProtocol} do",
+      "  @doc \"${2:Description}\"",
+      "  def ${3:function}(${4:term})",
+      "  $0",
+      "end"
+    ],
+    "description": "defprotocol"
+  },
+
+  "Protocol implementation": {
+    "prefix": ["defimpl"],
+    "body": [
+      "defimpl ${1:MyProtocol}, for: ${2:MyStruct} do",
+      "  def ${3:function}(%${2:MyStruct}{} = ${4:s}) do",
+      "    $0",
+      "  end",
+      "end"
+    ],
+    "description": "defimpl para protocolo"
+  },
+
+  "use": {
+    "prefix": ["use"],
+    "body": [
+      "use ${1:Module}, ${0:option: :value}"
+    ],
+    "description": "use/2"
+  },
+
+  "alias": {
+    "prefix": ["alias"],
+    "body": [
+      "alias ${1:MyApp.Module}"
+    ],
+    "description": "alias/1"
+  },
+
+  "alias multi": {
+    "prefix": ["aliasm"],
+    "body": [
+      "alias ${1:MyApp}.{${2:Module1}, ${3:Module2}}"
+    ],
+    "description": "alias multi"
+  },
+
+  "import": {
+    "prefix": ["import"],
+    "body": [
+      "import ${1:Module}, only: [${2:function}: ${3:1}]"
+    ],
+    "description": "import com only"
+  },
+
+  "require": {
+    "prefix": ["require"],
+    "body": [
+      "require ${1:Logger}"
+    ],
+    "description": "require/1"
+  },
+
+  "sigil ~r regex": {
+    "prefix": ["sigil-r", "~r"],
+    "body": [
+      "~r/${1:pattern}/${2:flags}"
+    ],
+    "description": "Regex sigil ~r"
+  },
+
+  "sigil ~w word list": {
+    "prefix": ["sigil-w", "~w"],
+    "body": [
+      "~w(${1:word1 word2 word3})${2|a,s|}"
+    ],
+    "description": "Word list sigil ~w"
+  },
+
+  "Mix project": {
+    "prefix": ["mix-project", "mixexs"],
+    "body": [
+      "defmodule ${1:MyApp}.MixProject do",
+      "  use Mix.Project",
+      "",
+      "  def project do",
+      "    [",
+      "      app: :${2:my_app},",
+      "      version: \"0.1.0\",",
+      "      elixir: \"~> 1.15\",",
+      "      start_permanent: Mix.env() == :prod,",
+      "      deps: deps()",
+      "    ]",
+      "  end",
+      "",
+      "  def application do",
+      "    [",
+      "      extra_applications: [:logger],",
+      "      mod: {${1:MyApp}.Application, []}",
+      "    ]",
+      "  end",
+      "",
+      "  defp deps do",
+      "    [",
+      "      $0",
+      "    ]",
+      "  end",
+      "end"
+    ],
+    "description": "mix.exs completo"
+  },
+
+  "Mix task": {
+    "prefix": ["mix-task"],
+    "body": [
+      "defmodule Mix.Tasks.${1:TaskName} do",
+      "  use Mix.Task",
+      "",
+      "  @shortdoc \"${2:Descrição curta}\"",
+      "",
+      "  @moduledoc \"\"\"",
+      "  ${3:Documentação do Mix task.}",
+      "  \"\"\"",
+      "",
+      "  @impl Mix.Task",
+      "  def run(args) do",
+      "    $0",
+      "  end",
+      "end"
+    ],
+    "description": "Mix custom task"
+  },
+
+  "IO.inspect": {
+    "prefix": ["inspect", "ioi"],
+    "body": [
+      "IO.inspect(${1:value}, label: \"${0:debug}\")"
+    ],
+    "description": "IO.inspect com label"
+  },
+
+  "IO.puts": {
+    "prefix": ["puts", "iop"],
+    "body": [
+      "IO.puts(\"${0:message}\")"
+    ],
+    "description": "IO.puts/1"
+  }
+}

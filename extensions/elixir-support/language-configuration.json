@@ -1,0 +1,59 @@
+{
+  "comments": {
+    "lineComment": "#"
+  },
+  "brackets": [
+    ["{", "}"],
+    ["[", "]"],
+    ["(", ")"]
+  ],
+  "autoClosingPairs": [
+    { "open": "{", "close": "}" },
+    { "open": "[", "close": "]" },
+    { "open": "(", "close": ")" },
+    { "open": "\"", "close": "\"", "notIn": ["string", "comment"] },
+    { "open": "'", "close": "'", "notIn": ["string", "comment"] },
+    { "open": "\"\"\"", "close": "\"\"\"", "notIn": ["string", "comment"] },
+    { "open": "'''", "close": "'''", "notIn": ["string", "comment"] },
+    { "open": "~s{", "close": "}", "notIn": ["string", "comment"] },
+    { "open": "~S{", "close": "}", "notIn": ["string", "comment"] },
+    { "open": "~r{", "close": "}", "notIn": ["string", "comment"] },
+    { "open": "~r/", "close": "/", "notIn": ["string", "comment"] },
+    { "open": "~w{", "close": "}", "notIn": ["string", "comment"] },
+    { "open": "~L{", "close": "}", "notIn": ["string", "comment"] }
+  ],
+  "autoCloseBefore": ";:,=}])>\"' \n\t",
+  "surroundingPairs": [
+    ["{", "}"],
+    ["[", "]"],
+    ["(", ")"],
+    ["\"", "\""],
+    ["'", "'"]
+  ],
+  "colorizedBracketPairs": [
+    ["(", ")"],
+    ["[", "]"],
+    ["{", "}"]
+  ],
+  "folding": {
+    "markers": {
+      "start": "^\\s*#\\s*region\\b",
+      "end": "^\\s*#\\s*endregion\\b"
+    }
+  },
+  "wordPattern": "(-?\\d*\\.\\d\\w*)|([^\\`\\~\\!\\@\\#\\%\\^\\&\\*\\(\\)\\-\\=\\+\\[\\{\\]\\}\\\\\\|\\;\\:\\'\\\"\\,\\.\\<\\>\\/\\?\\s]+)",
+  "indentationRules": {
+    "increaseIndentPattern": "^\\s*(defmodule|defprotocol|defimpl|defstruct|def|defp|defmacro|defmacrop|defguard|defguardp|defdelegate|defexception|defoverridable|if|unless|else|elsif|case|cond|with|for|receive|try|catch|rescue|after|fn|do|->|quote|use|import|require|alias)\\b.*$|^.*\\bdo\\s*$|^.*\\bdo\\s*#.*$",
+    "decreaseIndentPattern": "^\\s*(end|else|rescue|catch|after|until)\\b"
+  },
+  "onEnterRules": [
+    {
+      "beforeText": "^(\\s*)(defmodule|defprotocol|defimpl|def|defp|defmacro|if|unless|case|cond|with|for|receive|try|fn)\\b.*do\\s*$",
+      "action": { "indent": "indent" }
+    },
+    {
+      "beforeText": "^(\\s*)(end)\\s*$",
+      "action": { "indent": "outdent" }
+    }
+  ]
+}

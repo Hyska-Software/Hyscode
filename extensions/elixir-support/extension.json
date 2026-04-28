@@ -1,0 +1,247 @@
+{
+  "name": "elixir-support",
+  "displayName": "Elixir & Phoenix",
+  "version": "1.0.0",
+  "description": "Suporte completo a Elixir e Phoenix — IntelliSense via ElixirLS, snippets, formatação, diagnósticos, comandos mix (run/test/format/credo/dialyzer/ecto/release), LiveView, HEEx e gerenciamento de dependências",
+  "publisher": "hyscode",
+  "engines": { "hyscode": ">=0.1.0" },
+  "categories": ["Languages", "Snippets"],
+  "keywords": ["elixir", "phoenix", "liveview", "heex", "ecto", "mix", "otp", "erlang", "genserver", "supervisor", "elixir-ls"],
+  "license": "MIT",
+  "activationEvents": [
+    "onLanguage:elixir",
+    "onLanguage:heex",
+    "onLanguage:eex",
+    "workspaceContains:mix.exs",
+    "workspaceContains:.formatter.exs"
+  ],
+  "main": "main.js",
+  "contributes": {
+    "languages": [
+      {
+        "id": "elixir",
+        "aliases": ["Elixir", "elixir"],
+        "extensions": [".ex", ".exs"],
+        "filenames": [".formatter.exs", ".iex.exs"],
+        "mimetypes": ["text/x-elixir"],
+        "configuration": "language-configuration.json"
+      },
+      {
+        "id": "heex",
+        "aliases": ["HEEx", "heex", "HTML (HEEx)"],
+        "extensions": [".heex", ".html.heex"],
+        "configuration": "language-configuration-heex.json"
+      },
+      {
+        "id": "eex",
+        "aliases": ["EEx", "eex", "Embedded Elixir"],
+        "extensions": [".eex", ".html.eex", ".txt.eex", ".json.eex"],
+        "configuration": "language-configuration.json"
+      },
+      {
+        "id": "surface",
+        "aliases": ["Surface", "surface"],
+        "extensions": [".sface"],
+        "configuration": "language-configuration-heex.json"
+      }
+    ],
+    "languageServers": [
+      {
+        "id": "elixir-ls",
+        "languageIds": ["elixir", "heex", "eex", "surface"],
+        "command": "elixir-ls",
+        "args": [],
+        "rootPatterns": ["mix.exs"],
+        "initializationOptions": {
+          "dialyzerEnabled": true,
+          "dialyzerWarnOpts": [],
+          "fetchDeps": false,
+          "enableTestLenses": true,
+          "suggestSpecs": true,
+          "signatureAfterComplete": true,
+          "autoBuild": true
+        }
+      }
+    ],
+    "snippets": [
+      { "language": "elixir", "path": "snippets/elixir.json" },
+      { "language": "heex", "path": "snippets/heex.json" },
+      { "language": "eex", "path": "snippets/heex.json" }
+    ],
+    "commands": [
+      { "id": "elixir.run",             "title": "Run File",                    "category": "Elixir" },
+      { "id": "elixir.iex",             "title": "Open IEx",                    "category": "Elixir" },
+      { "id": "elixir.iexMix",          "title": "Open IEx (iex -S mix)",       "category": "Elixir" },
+      { "id": "elixir.newFile",         "title": "New Elixir File",             "category": "Elixir" },
+      { "id": "mix.compile",            "title": "Compile",                     "category": "Mix" },
+      { "id": "mix.run",                "title": "Run (mix run)",               "category": "Mix" },
+      { "id": "mix.test",               "title": "Run Tests",                   "category": "Mix" },
+      { "id": "mix.testFile",           "title": "Run Tests (current file)",    "category": "Mix" },
+      { "id": "mix.testWatch",          "title": "Run Tests (watch)",           "category": "Mix" },
+      { "id": "mix.fmt",                "title": "Format (mix format)",         "category": "Mix" },
+      { "id": "mix.fmtCheck",           "title": "Format Check",                "category": "Mix" },
+      { "id": "mix.credo",              "title": "Credo (lint)",                "category": "Mix" },
+      { "id": "mix.credoStrict",        "title": "Credo Strict",                "category": "Mix" },
+      { "id": "mix.dialyzer",           "title": "Dialyzer (type analysis)",    "category": "Mix" },
+      { "id": "mix.depsGet",            "title": "deps.get",                    "category": "Mix Deps" },
+      { "id": "mix.depsUpdate",         "title": "deps.update (package)",       "category": "Mix Deps" },
+      { "id": "mix.depsUpdateAll",      "title": "deps.update --all",           "category": "Mix Deps" },
+      { "id": "mix.depsCompile",        "title": "deps.compile",                "category": "Mix Deps" },
+      { "id": "mix.depsList",           "title": "deps (list)",                 "category": "Mix Deps" },
+      { "id": "mix.new",                "title": "New Project (mix new)",       "category": "Mix" },
+      { "id": "mix.phxNew",             "title": "New Phoenix Project",         "category": "Phoenix" },
+      { "id": "mix.phxServer",          "title": "Server (mix phx.server)",     "category": "Phoenix" },
+      { "id": "mix.phxRoutes",          "title": "Routes",                      "category": "Phoenix" },
+      { "id": "mix.phxDigest",          "title": "Assets Digest",               "category": "Phoenix" },
+      { "id": "mix.ectoCreate",         "title": "ecto.create",                 "category": "Ecto" },
+      { "id": "mix.ectoDrop",           "title": "ecto.drop",                   "category": "Ecto" },
+      { "id": "mix.ectoMigrate",        "title": "ecto.migrate",                "category": "Ecto" },
+      { "id": "mix.ectoRollback",       "title": "ecto.rollback",               "category": "Ecto" },
+      { "id": "mix.ectoReset",          "title": "ecto.reset",                  "category": "Ecto" },
+      { "id": "mix.ectoSetup",          "title": "ecto.setup",                  "category": "Ecto" },
+      { "id": "mix.ectoGenMigration",   "title": "ecto.gen.migration",          "category": "Ecto" },
+      { "id": "mix.release",            "title": "Release (mix release)",       "category": "Mix" },
+      { "id": "mix.releaseInit",        "title": "Release Init",                "category": "Mix" },
+      { "id": "mix.installElixirLS",    "title": "Install ElixirLS",            "category": "Elixir" }
+    ],
+    "keybindings": [
+      {
+        "command": "elixir.iexMix",
+        "key": "ctrl+shift+r",
+        "when": "editorTextFocus && editorLangId == elixir"
+      },
+      {
+        "command": "mix.test",
+        "key": "ctrl+shift+t",
+        "when": "editorTextFocus && editorLangId == elixir"
+      },
+      {
+        "command": "mix.fmt",
+        "key": "ctrl+shift+f",
+        "when": "editorTextFocus && editorLangId == elixir"
+      },
+      {
+        "command": "mix.phxServer",
+        "key": "ctrl+shift+s",
+        "when": "editorTextFocus && editorLangId == elixir"
+      }
+    ],
+    "menus": {
+      "editor/context": [
+        { "command": "elixir.iexMix",   "group": "1_elixir", "when": "editorLangId == elixir" },
+        { "command": "mix.testFile",    "group": "1_elixir", "when": "editorLangId == elixir" },
+        { "command": "mix.fmt",         "group": "2_elixir", "when": "editorLangId == elixir" },
+        { "command": "mix.credo",       "group": "2_elixir", "when": "editorLangId == elixir" }
+      ],
+      "commandPalette": [
+        { "command": "elixir.run" },
+        { "command": "elixir.iex" },
+        { "command": "elixir.iexMix" },
+        { "command": "elixir.newFile" },
+        { "command": "mix.compile" },
+        { "command": "mix.run" },
+        { "command": "mix.test" },
+        { "command": "mix.testFile" },
+        { "command": "mix.testWatch" },
+        { "command": "mix.fmt" },
+        { "command": "mix.fmtCheck" },
+        { "command": "mix.credo" },
+        { "command": "mix.credoStrict" },
+        { "command": "mix.dialyzer" },
+        { "command": "mix.depsGet" },
+        { "command": "mix.depsUpdate" },
+        { "command": "mix.depsUpdateAll" },
+        { "command": "mix.depsCompile" },
+        { "command": "mix.depsList" },
+        { "command": "mix.new" },
+        { "command": "mix.phxNew" },
+        { "command": "mix.phxServer" },
+        { "command": "mix.phxRoutes" },
+        { "command": "mix.phxDigest" },
+        { "command": "mix.ectoCreate" },
+        { "command": "mix.ectoDrop" },
+        { "command": "mix.ectoMigrate" },
+        { "command": "mix.ectoRollback" },
+        { "command": "mix.ectoReset" },
+        { "command": "mix.ectoSetup" },
+        { "command": "mix.ectoGenMigration" },
+        { "command": "mix.release" },
+        { "command": "mix.releaseInit" },
+        { "command": "mix.installElixirLS" }
+      ]
+    },
+    "statusBarItems": [
+      {
+        "id": "elixir-support.indicator",
+        "text": "💧 Elixir",
+        "tooltip": "Elixir Support ativo — ElixirLS",
+        "command": "elixir.iexMix",
+        "alignment": "right",
+        "priority": 47
+      }
+    ],
+    "settingsTabs": [
+      {
+        "id": "elixir-support.settings",
+        "label": "Elixir",
+        "icon": "code"
+      }
+    ],
+    "configuration": {
+      "title": "Elixir",
+      "properties": {
+        "elixir.elixirPath": {
+          "type": "string",
+          "default": "elixir",
+          "description": "Caminho para o executável elixir"
+        },
+        "elixir.iexPath": {
+          "type": "string",
+          "default": "iex",
+          "description": "Caminho para o executável iex"
+        },
+        "elixir.mixPath": {
+          "type": "string",
+          "default": "mix",
+          "description": "Caminho para o executável mix"
+        },
+        "elixir.elixirLSPath": {
+          "type": "string",
+          "default": "elixir-ls",
+          "description": "Caminho para o executável ElixirLS"
+        },
+        "elixir.formatOnSave": {
+          "type": "boolean",
+          "default": true,
+          "description": "Executar mix format automaticamente ao salvar"
+        },
+        "elixir.credoOnSave": {
+          "type": "boolean",
+          "default": false,
+          "description": "Executar mix credo ao salvar"
+        },
+        "elixir.dialyzerEnabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Habilitar análise Dialyzer via ElixirLS"
+        },
+        "elixir.fetchDepsOnOpen": {
+          "type": "boolean",
+          "default": false,
+          "description": "Executar mix deps.get automaticamente ao abrir workspace"
+        },
+        "elixir.testSeed": {
+          "type": "string",
+          "default": "",
+          "description": "Seed fixo para mix test (vazio = aleatório)"
+        },
+        "elixir.mixEnv": {
+          "type": "string",
+          "default": "dev",
+          "enum": ["dev", "test", "prod"],
+          "description": "MIX_ENV padrão"
+        }
+      }
+    }
+  }
+}

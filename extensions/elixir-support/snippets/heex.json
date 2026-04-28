@@ -1,0 +1,254 @@
+{
+  "HEEx component": {
+    "prefix": ["comp", "component"],
+    "body": [
+      "<.${1:component_name} ${2:attr}={${3:value}}>",
+      "  $0",
+      "</.${1:component_name}>"
+    ],
+    "description": "HEEx function component"
+  },
+
+  "HEEx self-closing component": {
+    "prefix": ["comps"],
+    "body": [
+      "<.${1:component_name} ${2:attr}={${3:value}} />"
+    ],
+    "description": "HEEx self-closing component"
+  },
+
+  "Phoenix.Component def": {
+    "prefix": ["phx-component"],
+    "body": [
+      "attr :${1:id}, :string, required: true",
+      "attr :${2:label}, :string, default: nil",
+      "",
+      "def ${3:component_name}(assigns) do",
+      "  ~H\"\"\"",
+      "  <div id={@${1:id}}>",
+      "    <%= @${2:label} %>",
+      "    $0",
+      "  </div>",
+      "  \"\"\"",
+      "end"
+    ],
+    "description": "Phoenix.Component function"
+  },
+
+  "HEEx if": {
+    "prefix": ["heex-if", "phx-if"],
+    "body": [
+      "<%= if ${1:condition} do %>",
+      "  $0",
+      "<% end %>"
+    ],
+    "description": "HEEx if block"
+  },
+
+  "HEEx if/else": {
+    "prefix": ["heex-ife"],
+    "body": [
+      "<%= if ${1:condition} do %>",
+      "  ${2:<!-- true branch -->}",
+      "<% else %>",
+      "  ${0:<!-- false branch -->}",
+      "<% end %>"
+    ],
+    "description": "HEEx if/else"
+  },
+
+  "HEEx for": {
+    "prefix": ["heex-for", "phx-for"],
+    "body": [
+      "<%= for ${1:item} <- @${2:items} do %>",
+      "  $0",
+      "<% end %>"
+    ],
+    "description": "HEEx for loop"
+  },
+
+  "HEEx :for": {
+    "prefix": [":for"],
+    "body": [
+      ":for={${1:item} <- @${2:items}}"
+    ],
+    "description": "HEEx :for attribute"
+  },
+
+  "HEEx :if": {
+    "prefix": [":if"],
+    "body": [
+      ":if={${0:condition}}"
+    ],
+    "description": "HEEx :if attribute"
+  },
+
+  "HEEx link": {
+    "prefix": ["phx-link", "link"],
+    "body": [
+      "<.link href={~p\"/${1:path}\"}>",
+      "  ${0:texto}",
+      "</.link>"
+    ],
+    "description": "Phoenix link component"
+  },
+
+  "HEEx navigate link": {
+    "prefix": ["phx-navigate"],
+    "body": [
+      "<.link navigate={~p\"/${1:path}\"}>",
+      "  ${0:texto}",
+      "</.link>"
+    ],
+    "description": "LiveView navigate link"
+  },
+
+  "phx-click": {
+    "prefix": ["phx-click"],
+    "body": [
+      "phx-click=\"${1:event_name}\""
+    ],
+    "description": "phx-click event binding"
+  },
+
+  "phx-change": {
+    "prefix": ["phx-change"],
+    "body": [
+      "phx-change=\"${1:event_name}\""
+    ],
+    "description": "phx-change event binding"
+  },
+
+  "phx-submit": {
+    "prefix": ["phx-submit"],
+    "body": [
+      "phx-submit=\"${1:save}\""
+    ],
+    "description": "phx-submit event binding"
+  },
+
+  "phx-value": {
+    "prefix": ["phx-value"],
+    "body": [
+      "phx-value-${1:key}={${0:value}}"
+    ],
+    "description": "phx-value-* binding"
+  },
+
+  "HEEx form": {
+    "prefix": ["phx-form"],
+    "body": [
+      "<.form for={@${1:form}} phx-submit=\"${2:save}\" phx-change=\"${3:validate}\">",
+      "  <.input field={@${1:form}[:${4:name}]} type=\"text\" label=\"${5:Nome}\" />",
+      "  <.button type=\"submit\">${6:Salvar}</.button>",
+      "</.form>"
+    ],
+    "description": "Phoenix form component"
+  },
+
+  "HEEx input": {
+    "prefix": ["phx-input"],
+    "body": [
+      "<.input field={@${1:form}[:${2:field}]} type=\"${3|text,email,password,number,date,select,checkbox,textarea|}\" label=\"${4:Label}\" />"
+    ],
+    "description": "Phoenix input component"
+  },
+
+  "HEEx table": {
+    "prefix": ["phx-table"],
+    "body": [
+      "<.table id=\"${1:items}\" rows={@${1:items}}>",
+      "  <:col :let={${2:item}} label=\"${3:Nome}\">{${2:item}.${4:name}}</:col>",
+      "  <:action :let={${2:item}}>",
+      "    <.link navigate={~p\"/${1:items}/#{${2:item}}\"}>Ver</.link>",
+      "  </:action>",
+      "</.table>"
+    ],
+    "description": "Phoenix table component"
+  },
+
+  "HEEx modal": {
+    "prefix": ["phx-modal"],
+    "body": [
+      "<.modal id=\"${1:confirm-modal}\">",
+      "  <:title>${2:Confirmar Ação}</:title>",
+      "  $0",
+      "</.modal>"
+    ],
+    "description": "Phoenix modal component"
+  },
+
+  "HEEx flash": {
+    "prefix": ["phx-flash"],
+    "body": [
+      "<.flash_group flash={@flash} />"
+    ],
+    "description": "Flash messages group"
+  },
+
+  "LiveView assign": {
+    "prefix": ["assign"],
+    "body": [
+      "assign(socket, ${1:key}: ${0:value})"
+    ],
+    "description": "socket assign"
+  },
+
+  "LiveView assign_new": {
+    "prefix": ["assign_new"],
+    "body": [
+      "assign_new(socket, :${1:key}, fn -> ${0:value} end)"
+    ],
+    "description": "assign_new/3"
+  },
+
+  "LiveView push_patch": {
+    "prefix": ["push_patch"],
+    "body": [
+      "push_patch(socket, to: ~p\"/${0:path}\")"
+    ],
+    "description": "push_patch/2"
+  },
+
+  "LiveView push_navigate": {
+    "prefix": ["push_navigate"],
+    "body": [
+      "push_navigate(socket, to: ~p\"/${0:path}\")"
+    ],
+    "description": "push_navigate/2"
+  },
+
+  "LiveView put_flash": {
+    "prefix": ["put_flash"],
+    "body": [
+      "put_flash(socket, :${1|info,error,warning|}, \"${0:Mensagem}\")"
+    ],
+    "description": "put_flash/3"
+  },
+
+  "EEx expression": {
+    "prefix": ["eex=", "eex-expr"],
+    "body": [
+      "<%= ${0:expression} %>"
+    ],
+    "description": "EEx expression tag"
+  },
+
+  "EEx block": {
+    "prefix": ["eex", "eex-block"],
+    "body": [
+      "<% ${0:expression} %>"
+    ],
+    "description": "EEx block tag"
+  },
+
+  "HEEx raw slot": {
+    "prefix": ["slot"],
+    "body": [
+      "<:${1:slot_name} :let={${2:assigns}}>",
+      "  $0",
+      "</:${1:slot_name}>"
+    ],
+    "description": "HEEx named slot"
+  }
+}
