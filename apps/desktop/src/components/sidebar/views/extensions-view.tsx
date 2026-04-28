@@ -20,8 +20,11 @@ import {
   GitFork,
   ArrowUpCircle,
   Link,
+  Store,
+  Download,
+  HardDrive,
 } from 'lucide-react';
-import { useExtensionStore, type ExtensionFilter, type InstalledExtension } from '../../../stores/extension-store';
+import { useExtensionStore, type ExtensionFilter, type InstalledExtension, type StoreItem, STORE_CACHE_TTL_MS } from '../../../stores/extension-store';
 import { TabBadge } from '../../ui/tab-badge';
 
 // ── Filter Tabs ──────────────────────────────────────────────────────────────
@@ -370,6 +373,210 @@ function ExtensionRow({
   );
 }
 
+// ── Store View ────────────────────────────────────────────────────────────────
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  const kb = bytes / 1024;
+  if (kb < 1024) return `${kb.toFixed(1)} KB`;
+  return `${(kb / 1024).toFixed(1)} MB`;
+}
+
+function StoreRow({
+  item,
+  isInstalled,
+  isInstalling,
+  onInstall,
+}: {
+  item: StoreItem;
+  isInstalled: boolean;
+  isInstalling: boolean;
+  onInstall: () => void;
+}) {
+  return (
+    <div className="flex items-center gap-2 px-2 py-1.5 hover:bg-muted/50 transition-colors group">
+      <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-muted">
+        <Package className="h-3.5 w-3.5 text-muted-foreground" />
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-1.5">
+          <span className="text-[11px] font-medium truncate text-foreground">
+            {item.displayName}
+          </span>
+          {isInstalled && (
+            <span className="shrink-0 flex items-center gap-0.5 rounded-full bg-accent/15 px-1.5 py-px text-[8px] font-medium text-accent">
+              <CheckCircle2 className="h-2 w-2" />
+              Installed
+            </span>
+          )}
+        </div>
+        <div className="truncate text-[10px] text-muted-foreground/70">
+          {formatBytes(item.size)}
+        </div>
+      </div>
+      <button
+        onClick={onInstall}
+        disabled={isInstalled || isInstalling}
+        className={`shrink-0 flex items-center gap-1 rounded-md px-2 py-0.5 text-[9px] font-medium transition-colors ${
+          isInstalled
+            ? 'text-accent/50 cursor-default'
+            : isInstalling
+              ? 'bg-accent/10 text-accent/60 cursor-not-allowed'
+              : 'bg-muted text-muted-foreground hover:bg-accent/10 hover:text-accent'
+        }`}
+        title={isInstalled ? 'Already installed' : `Install ${item.displayName}`}
+      >
+        {isInstalling ? (
+          <Loader2 className="h-3 w-3 animate-spin" />
+        ) : isInstalled ? (
+          <HardDrive className="h-3 w-3" />
+        ) : (
+          <Download className="h-3 w-3" />
+        )}
+      </button>
+    </div>
+  );
+}
+
+function StoreView() {
+  const storeItems = useExtensionStore((s) => s.storeItems);
+  const storeLoading = useExtensionStore((s) => s.storeLoading);
+  const storeError = useExtensionStore((s) => s.storeError);
+  const installingFromStore = useExtensionStore((s) => s.installingFromStore);
+  const storeFetchedAt = useExtensionStore((s) => s.storeFetchedAt);
+  const fetchStoreItems = useExtensionStore((s) => s.fetchStoreItems);
+  const installFromStore = useExtensionStore((s) => s.installFromStore);
+  const extensions = useExtensionStore((s) => s.extensions);
+  const error = useExtensionStore((s) => s.error);
+
+  const [storeSearch, setStoreSearch] = useState('');
+
+  const installedNames = new Set(extensions.map((e) => e.name));
+
+  useEffect(() => {
+    const isStale = !storeFetchedAt || Date.now() - storeFetchedAt > STORE_CACHE_TTL_MS;
+    if (isStale || storeItems.length === 0) {
+      void fetchStoreItems();
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const filtered = storeSearch.trim()
+    ? storeItems.filter((item) =>
+        item.displayName.toLowerCase().includes(storeSearch.toLowerCase()) ||
+        item.name.toLowerCase().includes(storeSearch.toLowerCase()),
+      )
+    : storeItems;
+
+  return (
+    <div className="flex h-full flex-col">
+      {/* Search */}
+      <div className="px-2 pt-1 pb-1 border-b border-border">
+        <div className="flex items-center gap-1.5 rounded-md bg-muted/50 px-2 py-1">
+          <Search className="h-3 w-3 shrink-0 text-muted-foreground/50" />
+          <input
+            type="text"
+            value={storeSearch}
+            onChange={(e) => setStoreSearch(e.target.value)}
+            placeholder="Search store..."
+            className="flex-1 bg-transparent text-[11px] text-foreground placeholder:text-muted-foreground/40 outline-none"
+          />
+          {storeSearch && (
+            <button
+              onClick={() => setStoreSearch('')}
+              className="text-muted-foreground/40 hover:text-muted-foreground transition-colors"
+            >
+              <X className="h-3 w-3" />
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Toolbar */}
+      <div className="flex items-center justify-between px-2 py-1 border-b border-border">
+        <span className="text-[9px] text-muted-foreground/60">
+          {storeItems.length > 0 ? `${storeItems.length} extensions available` : ''}
+        </span>
+        <button
+          onClick={() => void fetchStoreItems()}
+          disabled={storeLoading}
+          className="rounded p-0.5 text-muted-foreground/50 hover:text-foreground hover:bg-muted transition-colors disabled:opacity-40"
+          title="Refresh store"
+        >
+          <RefreshCw className={`h-3 w-3 ${storeLoading ? 'animate-spin' : ''}`} />
+        </button>
+      </div>
+
+      {/* Install error */}
+      {error && (
+        <div className="flex items-start gap-1.5 px-2 py-1.5 text-[10px] text-red-400 bg-red-500/5 border-b border-red-500/10">
+          <AlertCircle className="h-3 w-3 shrink-0 mt-0.5" />
+          <span className="break-words">{error}</span>
+        </div>
+      )}
+
+      {/* Store error */}
+      {storeError && !storeLoading && (
+        <div className="flex items-center gap-1.5 px-2 py-1.5 text-[10px] text-red-400 bg-red-500/5 border-b border-red-500/10">
+          <AlertCircle className="h-3 w-3 shrink-0" />
+          <span className="truncate">{storeError}</span>
+        </div>
+      )}
+
+      {/* Installing indicator */}
+      {installingFromStore && (
+        <div className="flex items-center gap-1.5 px-2 py-1.5 text-[10px] text-accent bg-accent/5 border-b border-accent/10">
+          <Loader2 className="h-3 w-3 animate-spin shrink-0" />
+          <span className="truncate">Installing…</span>
+        </div>
+      )}
+
+      {/* List */}
+      <div className="flex-1 overflow-auto">
+        {storeLoading && filtered.length === 0 && (
+          <div className="flex items-center justify-center py-12">
+            <Loader2 className="h-5 w-5 animate-spin text-muted-foreground/40" />
+          </div>
+        )}
+
+        {!storeLoading && filtered.length === 0 && storeItems.length > 0 && (
+          <div className="flex flex-col items-center justify-center py-8 text-muted-foreground">
+            <Filter className="mb-2 h-5 w-5 opacity-20" />
+            <p className="text-[10px]">No matching extensions</p>
+          </div>
+        )}
+
+        {!storeLoading && storeItems.length === 0 && !storeError && (
+          <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
+            <Store className="mb-3 h-8 w-8 opacity-20" />
+            <p className="text-[11px] font-medium">Store unavailable</p>
+            <p className="mt-1 text-[10px] text-muted-foreground/60 text-center px-4">
+              Could not load extensions from the store.
+            </p>
+            <button
+              onClick={() => void fetchStoreItems()}
+              className="mt-3 flex items-center gap-1.5 rounded-md bg-muted px-3 py-1.5 text-[10px] font-medium text-muted-foreground hover:bg-muted/80 transition-colors"
+            >
+              <RefreshCw className="h-3 w-3" />
+              Retry
+            </button>
+          </div>
+        )}
+
+        {filtered.map((item) => (
+          <StoreRow
+            key={item.sha}
+            item={item}
+            isInstalled={installedNames.has(item.name)}
+            isInstalling={installingFromStore === item.name}
+            onInstall={() => void installFromStore(item)}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // ── Main View ────────────────────────────────────────────────────────────────
 
 export function ExtensionsView() {
@@ -391,6 +598,7 @@ export function ExtensionsView() {
   const selectExtension = useExtensionStore((s) => s.selectExtension);
   const getFiltered = useExtensionStore((s) => s.getFiltered);
 
+  const [viewMode, setViewMode] = useState<'installed' | 'store'>('installed');
   const [showGitForm, setShowGitForm] = useState(false);
   const [gitUrl, setGitUrl] = useState('');
   const [gitBranch, setGitBranch] = useState('');
@@ -416,8 +624,8 @@ export function ExtensionsView() {
     try {
       const { open } = await import('@tauri-apps/plugin-dialog');
       const selected = await open({
-        title: 'Install Extension from .zip',
-        filters: [{ name: 'Extension Package', extensions: ['zip'] }],
+        title: 'Install Extension from .zip / .rar',
+        filters: [{ name: 'Extension Package', extensions: ['zip', 'rar'] }],
       });
       if (selected && typeof selected === 'string') {
         await installFromZip(selected);
@@ -470,7 +678,45 @@ export function ExtensionsView() {
 
   return (
     <div className="flex h-full flex-col">
-      {/* Search Bar */}
+      {/* View Mode Tabs: Installed / Store */}
+      <div className="flex items-center border-b border-border px-2 pt-1">
+        <button
+          onClick={() => setViewMode('installed')}
+          className={`flex items-center gap-1.5 px-2 py-1.5 text-[10px] font-medium border-b-2 -mb-px transition-colors ${
+            viewMode === 'installed'
+              ? 'border-accent text-accent'
+              : 'border-transparent text-muted-foreground/60 hover:text-muted-foreground'
+          }`}
+        >
+          <Blocks className="h-3 w-3" />
+          Installed
+          {extensions.length > 0 && (
+            <span className={`rounded-full px-1 py-px text-[8px] ${
+              viewMode === 'installed' ? 'bg-accent/20 text-accent' : 'bg-muted text-muted-foreground/60'
+            }`}>
+              {extensions.length}
+            </span>
+          )}
+        </button>
+        <button
+          onClick={() => setViewMode('store')}
+          className={`flex items-center gap-1.5 px-2 py-1.5 text-[10px] font-medium border-b-2 -mb-px transition-colors ${
+            viewMode === 'store'
+              ? 'border-accent text-accent'
+              : 'border-transparent text-muted-foreground/60 hover:text-muted-foreground'
+          }`}
+        >
+          <Store className="h-3 w-3" />
+          Store
+        </button>
+      </div>
+
+      {/* Store View */}
+      {viewMode === 'store' && <StoreView />}
+
+      {/* Installed View */}
+      {viewMode === 'installed' && (
+        <>
       <div className="px-2 pt-1 pb-1">
         <div className="flex items-center gap-1.5 rounded-md bg-muted/50 px-2 py-1">
           <Search className="h-3 w-3 shrink-0 text-muted-foreground/50" />
@@ -542,7 +788,7 @@ export function ExtensionsView() {
           <button
             onClick={handleInstallZip}
             className="rounded p-0.5 text-muted-foreground/50 hover:text-foreground hover:bg-muted transition-colors"
-            title="Install from .zip"
+            title="Install from .zip / .rar"
           >
             <FileArchive className="h-3 w-3" />
           </button>
@@ -649,7 +895,7 @@ export function ExtensionsView() {
             <Blocks className="mb-3 h-8 w-8 opacity-20" />
             <p className="text-[11px] font-medium">No extensions installed</p>
             <p className="mt-1 text-[10px] text-muted-foreground/60 text-center px-4">
-              Install extensions from a git repository, .zip file, or folder.
+              Install extensions from a git repository, .zip / .rar archive, or folder.
             </p>
             <div className="mt-3 flex flex-wrap justify-center gap-2">
               <button
@@ -664,7 +910,7 @@ export function ExtensionsView() {
                 className="flex items-center gap-1.5 rounded-md bg-muted px-3 py-1.5 text-[10px] font-medium text-muted-foreground hover:bg-muted/80 transition-colors"
               >
                 <FileArchive className="h-3 w-3" />
-                Install .zip
+                Install .zip / .rar
               </button>
               <button
                 onClick={handleInstallFolder}
@@ -683,6 +929,8 @@ export function ExtensionsView() {
           </div>
         )}
       </div>
+      </>
+      )}
     </div>
   );
 }

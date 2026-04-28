@@ -46,6 +46,28 @@ export interface InstalledExtension {
 
 export type ExtensionFilter = 'all' | 'enabled' | 'disabled' | 'themes' | 'languages';
 
+// ── Store (Marketplace) Types ─────────────────────────────────────────────────
+
+export interface StoreItem {
+  name: string;        // slug derived from filename, e.g. "angular-support"
+  displayName: string; // formatted, e.g. "Angular Support"
+  fileName: string;    // e.g. "angular-support.rar"
+  downloadUrl: string; // raw GitHub download URL
+  size: number;        // bytes
+  sha: string;         // git blob sha for deduplication
+}
+
+const STORE_REPO_API = 'https://api.github.com/repos/hyskasoftware/Hyscode-Extensions/contents/';
+export const STORE_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
+function formatStoreName(fileName: string): string {
+  const slug = fileName.replace(/\.rar$/i, '');
+  return slug
+    .split('-')
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(' ');
+}
+
 export interface GitUpdateInfo {
   extensionName: string;
   repoUrl: string;
@@ -122,6 +144,13 @@ interface ExtensionState {
   checkingUpdates: boolean;
   installingFromGit: boolean;
 
+  // Extension store (marketplace)
+  storeItems: StoreItem[];
+  storeLoading: boolean;
+  storeError: string | null;
+  installingFromStore: string | null;
+  storeFetchedAt: number | null;
+
   // Actions
   loadExtensions: () => Promise<void>;
   installFromFolder: (sourcePath: string) => Promise<void>;
@@ -137,6 +166,8 @@ interface ExtensionState {
   selectExtension: (name: string | null) => void;
   rebuildContributions: () => void;
   loadExtensionThemes: (themes: Array<ThemeContribution & { extensionName: string }>) => Promise<void>;
+  fetchStoreItems: () => Promise<void>;
+  installFromStore: (item: StoreItem) => Promise<void>;
   // Computed-like helpers
   getFiltered: () => InstalledExtension[];
 }
@@ -158,6 +189,11 @@ export const useExtensionStore = create<ExtensionState>()(
     gitSources: {},
     checkingUpdates: false,
     installingFromGit: false,
+    storeItems: [],
+    storeLoading: false,
+    storeError: null,
+    installingFromStore: null,
+    storeFetchedAt: null,
 
     loadExtensions: async () => {
       const previousExtensions = get().extensions;
@@ -400,6 +436,61 @@ export const useExtensionStore = create<ExtensionState>()(
       set((s) => {
         s.selectedExtension = name;
       });
+    },
+
+    fetchStoreItems: async () => {
+      set((s) => { s.storeLoading = true; s.storeError = null; });
+      try {
+        const res = await fetch(STORE_REPO_API);
+        if (!res.ok) {
+          throw new Error(`GitHub API returned ${res.status}`);
+        }
+        const data = await res.json() as Array<{
+          name: string;
+          download_url: string;
+          size: number;
+          sha: string;
+        }>;
+        const items: StoreItem[] = data
+          .filter((f) => f.name.toLowerCase().endsWith('.rar'))
+          .map((f) => ({
+            name: f.name.replace(/\.rar$/i, ''),
+            displayName: formatStoreName(f.name),
+            fileName: f.name,
+            downloadUrl: f.download_url,
+            size: f.size,
+            sha: f.sha,
+          }))
+          .sort((a, b) => a.displayName.localeCompare(b.displayName));
+        set((s) => {
+          s.storeItems = items;
+          s.storeLoading = false;
+          s.storeFetchedAt = Date.now();
+        });
+      } catch (err) {
+        set((s) => { s.storeLoading = false; s.storeError = String(err); });
+      }
+    },
+
+    installFromStore: async (item: StoreItem) => {
+      set((s) => { s.installingFromStore = item.name; s.error = null; });
+      try {
+        const ext = await invoke<InstalledExtension>('extension_install_from_store', {
+          downloadUrl: item.downloadUrl,
+        });
+        set((s) => {
+          s.extensions = s.extensions.filter((e) => e.name !== ext.name);
+          s.extensions.push(ext);
+          s.extensions.sort((a, b) =>
+            (a.displayName || a.name).toLowerCase().localeCompare((b.displayName || b.name).toLowerCase())
+          );
+          s.installingFromStore = null;
+        });
+        get().rebuildContributions();
+        void reloadExtension(ext);
+      } catch (err) {
+        set((s) => { s.installingFromStore = null; s.error = String(err); });
+      }
     },
 
     getFiltered: () => {

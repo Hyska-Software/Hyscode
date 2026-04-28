@@ -100,6 +100,7 @@ pub fn run() {
             commands::extension::extension_update_git,
             commands::extension::extension_get_git_sources,
             commands::extension::extension_remove_git_source,
+            commands::extension::extension_install_from_store,
             // LSP commands
             commands::lsp::lsp_start,
             commands::lsp::lsp_send,
