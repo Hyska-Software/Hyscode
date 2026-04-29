@@ -3,6 +3,7 @@
   "displayName": "Todo Tree",
   "description": "Exibe TODO, FIXME, BUG, HACK e outros marcadores como árvore navegável com destaque no editor",
   "version": "0.1.0",
+  "icon": "icon.svg",
   "publisher": "hyscode",
   "engines": {
     "hyscode": ">=0.1.0"

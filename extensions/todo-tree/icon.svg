@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+  <rect width="128" height="128" rx="22" fill="#120e00"/>
+  <!-- Tree trunk -->
+  <line x1="64" y1="112" x2="64" y2="62" stroke="#d97706" stroke-width="5" stroke-linecap="round"/>
+  <!-- Branches -->
+  <line x1="64" y1="82" x2="34" y2="60" stroke="#d97706" stroke-width="4" stroke-linecap="round"/>
+  <line x1="64" y1="72" x2="90" y2="54" stroke="#d97706" stroke-width="4" stroke-linecap="round"/>
+  <line x1="64" y1="62" x2="50" y2="40" stroke="#d97706" stroke-width="4" stroke-linecap="round"/>
+  <!-- Checkbox 1 (checked, filled) -->
+  <rect x="18" y="44" width="15" height="15" rx="3" fill="#fbbf24"/>
+  <polyline points="21,52 25,56 30,48" stroke="#120e00" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- Checkbox 2 (unchecked) -->
+  <rect x="74" y="38" width="15" height="15" rx="3" fill="none" stroke="#fbbf24" stroke-width="2.5"/>
+  <!-- Checkbox 3 (checked, outline) -->
+  <rect x="37" y="23" width="15" height="15" rx="3" fill="none" stroke="#fbbf24" stroke-width="2.5"/>
+  <polyline points="40,31 44,35 49,27" stroke="#fbbf24" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

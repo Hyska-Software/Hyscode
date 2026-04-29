@@ -61,6 +61,40 @@ fn save_states(states: &ExtensionStates) -> Result<(), String> {
     Ok(())
 }
 
+fn load_icon_as_data_uri(icon_name: &str, ext_path: &PathBuf) -> Option<String> {
+    // Basic security: reject paths that try to escape the extension directory
+    if icon_name.contains("..") {
+        return None;
+    }
+
+    let icon_path = ext_path.join(icon_name);
+    if !icon_path.exists() {
+        return None;
+    }
+
+    let file_ext = icon_path.extension()?.to_str()?.to_lowercase();
+
+    match file_ext.as_str() {
+        "svg" => {
+            // SVG is text — URL-encode as a compact data URI (no base64 overhead)
+            let content = fs::read_to_string(&icon_path).ok()?;
+            let encoded = urlencoding::encode(&content);
+            Some(format!("data:image/svg+xml,{}", encoded))
+        }
+        "png" => {
+            use base64::prelude::*;
+            let bytes = fs::read(&icon_path).ok()?;
+            Some(format!("data:image/png;base64,{}", BASE64_STANDARD.encode(&bytes)))
+        }
+        "jpg" | "jpeg" => {
+            use base64::prelude::*;
+            let bytes = fs::read(&icon_path).ok()?;
+            Some(format!("data:image/jpeg;base64,{}", BASE64_STANDARD.encode(&bytes)))
+        }
+        _ => None,
+    }
+}
+
 fn parse_manifest(manifest: &serde_json::Value, ext_path: &PathBuf) -> Result<ExtensionMeta, String> {
     let name = manifest
         .get("name")
@@ -100,7 +134,7 @@ fn parse_manifest(manifest: &serde_json::Value, ext_path: &PathBuf) -> Result<Ex
     let icon = manifest
         .get("icon")
         .and_then(|v| v.as_str())
-        .map(String::from);
+        .and_then(|icon_name| load_icon_as_data_uri(icon_name, ext_path));
 
     let categories: Vec<String> = manifest
         .get("categories")

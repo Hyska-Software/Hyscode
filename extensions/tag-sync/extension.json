@@ -2,6 +2,7 @@
   "name": "tag-sync",
   "displayName": "Tag Sync (BETA)",
   "version": "1.0.0",
+  "icon": "icon.svg",
   "description": "Renomeia automaticamente a tag HTML/JSX de fechamento ao editar a tag de abertura (e vice-versa), evitando tags desbalanceadas",
   "publisher": "hyscode",
   "engines": {

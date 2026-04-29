@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+  <rect width="128" height="128" rx="22" fill="#030c1a"/>
+  <!-- Outer circle -->
+  <circle cx="64" cy="64" r="40" fill="none" stroke="#38bdf8" stroke-width="4"/>
+  <!-- Arrow shaft -->
+  <line x1="24" y1="64" x2="88" y2="64" stroke="#38bdf8" stroke-width="5" stroke-linecap="round"/>
+  <!-- Arrowhead -->
+  <polyline points="74,50 88,64 74,78" stroke="#38bdf8" stroke-width="5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- Response dots (bottom arc) -->
+  <circle cx="54" cy="96" r="4" fill="#7dd3fc"/>
+  <circle cx="64" cy="100" r="4" fill="#38bdf8"/>
+  <circle cx="74" cy="96" r="4" fill="#7dd3fc"/>
+</svg>

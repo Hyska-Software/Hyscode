@@ -2,6 +2,7 @@
   "name": "rainbow-indent",
   "displayName": "Rainbow Indent (BETA)",
   "version": "1.0.0",
+  "icon": "icon.svg",
   "description": "Coloriza os níveis de indentação do código com cores alternadas para facilitar a leitura de blocos aninhados",
   "publisher": "hyscode",
   "engines": {

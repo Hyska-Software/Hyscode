@@ -2,6 +2,7 @@
   "name": "git-pulse",
   "displayName": "Git Pulse (BETA)",
   "version": "1.0.0",
+  "icon": "icon.svg",
   "description": "Superpoderes para Git na IDE — blame inline, histórico de arquivo, diff rápido, status de branch e navegação de commits na barra lateral",
   "publisher": "hyscode",
   "engines": {

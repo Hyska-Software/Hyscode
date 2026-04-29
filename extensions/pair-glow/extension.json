@@ -2,6 +2,7 @@
   "name": "pair-glow",
   "displayName": "Pair Glow (BETA)",
   "version": "1.0.0",
+  "icon": "icon.svg",
   "description": "Coloriza pares de colchetes, chaves e parênteses com cores únicas por nível de aninhamento para melhor legibilidade do código",
   "publisher": "hyscode",
   "engines": {

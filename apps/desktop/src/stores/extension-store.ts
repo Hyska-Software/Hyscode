@@ -459,6 +459,9 @@ export const useExtensionStore = create<ExtensionState>()(
     },
 
     fetchStoreItems: async () => {
+      // Prevent concurrent fetches
+      if (get().storeLoading) return;
+
       set((s) => { s.storeLoading = true; s.storeError = null; });
       try {
         const res = await fetch(STORE_REPO_API);
@@ -482,10 +485,27 @@ export const useExtensionStore = create<ExtensionState>()(
             sha: f.sha,
           }))
           .sort((a, b) => a.displayName.localeCompare(b.displayName));
+
         set((s) => {
           s.storeItems = items;
           s.storeLoading = false;
           s.storeFetchedAt = Date.now();
+
+          // Establish sha baseline for installed extensions that have no
+          // recorded sha yet (e.g. installed before tracking was added, or
+          // installed via folder/zip and also present in the store).
+          // Recording now means the NEXT sha change will be detected.
+          const installedNames = new Set(s.extensions.map((e) => e.name));
+          let baselineAdded = false;
+          for (const item of items) {
+            if (installedNames.has(item.name) && s.installedStoreShas[item.name] === undefined) {
+              s.installedStoreShas[item.name] = item.sha;
+              baselineAdded = true;
+            }
+          }
+          if (baselineAdded) {
+            saveStoreShas(s.installedStoreShas);
+          }
         });
       } catch (err) {
         set((s) => { s.storeLoading = false; s.storeError = String(err); });

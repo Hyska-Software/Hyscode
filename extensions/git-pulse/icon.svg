@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+  <rect width="128" height="128" rx="22" fill="#0d1f12"/>
+  <!-- Vertical line (main branch) -->
+  <line x1="44" y1="40" x2="44" y2="92" stroke="#4ade80" stroke-width="4"/>
+  <!-- Commit nodes -->
+  <circle cx="44" cy="30" r="9" fill="#0d1f12" stroke="#4ade80" stroke-width="4"/>
+  <circle cx="44" cy="100" r="9" fill="#0d1f12" stroke="#4ade80" stroke-width="4"/>
+  <circle cx="90" cy="56" r="9" fill="#0d1f12" stroke="#86efac" stroke-width="4"/>
+  <!-- Branch curve -->
+  <path d="M44 64 C44 64 66 64 90 56" stroke="#4ade80" stroke-width="4" fill="none"/>
+  <!-- Pulse dot -->
+  <circle cx="44" cy="30" r="4" fill="#4ade80"/>
+  <circle cx="44" cy="100" r="4" fill="#4ade80"/>
+  <circle cx="90" cy="56" r="4" fill="#86efac"/>
+</svg>

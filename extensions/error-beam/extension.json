@@ -2,6 +2,7 @@
   "name": "error-beam",
   "displayName": "Error Beam (BETA)",
   "version": "1.0.0",
+  "icon": "icon.svg",
   "description": "Exibe erros e avisos do diagnóstico inline diretamente ao lado da linha no editor, com painel de resumo e navegação rápida",
   "publisher": "hyscode",
   "engines": {

@@ -97,9 +97,17 @@ function ExtensionDetail({
         {/* Extension info */}
         <div className="space-y-1.5">
           <div className="flex items-center gap-2">
-            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-muted">
-              <Package className="h-5 w-5 text-muted-foreground" />
-            </div>
+            {ext.icon ? (
+              <img
+                src={ext.icon}
+                alt={ext.displayName || ext.name}
+                className="h-10 w-10 shrink-0 rounded-lg object-cover"
+              />
+            ) : (
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-muted">
+                <Package className="h-5 w-5 text-muted-foreground" />
+              </div>
+            )}
             <div className="min-w-0 flex-1">
               <h3 className="text-[12px] font-semibold text-foreground leading-tight">
                 {ext.displayName || ext.name}
@@ -325,8 +333,18 @@ function ExtensionRow({
       className="flex items-center gap-2 px-2 py-1.5 hover:bg-muted/50 transition-colors cursor-pointer group"
       onClick={onSelect}
     >
-      <div className="relative flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-muted">
-        <Package className="h-3.5 w-3.5 text-muted-foreground" />
+      <div className="relative shrink-0">
+        {ext.icon ? (
+          <img
+            src={ext.icon}
+            alt={ext.displayName || ext.name}
+            className="h-7 w-7 rounded-md object-cover"
+          />
+        ) : (
+          <div className="flex h-7 w-7 items-center justify-center rounded-md bg-muted">
+            <Package className="h-3.5 w-3.5 text-muted-foreground" />
+          </div>
+        )}
         {hasUpdate && (
           <span className="absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full bg-orange-400 ring-1 ring-background" />
         )}
@@ -351,8 +369,15 @@ function ExtensionRow({
             </span>
           )}
         </div>
-        <div className="truncate text-[10px] text-muted-foreground/70">
-          {ext.description || 'No description'}
+        <div className="flex items-center gap-1.5 truncate">
+          <span className="text-[10px] text-muted-foreground/70 truncate">
+            {ext.description || 'No description'}
+          </span>
+          {ext.version && ext.version !== '0.0.0' && (
+            <span className="shrink-0 text-[9px] text-muted-foreground/40 font-mono">
+              v{ext.version}
+            </span>
+          )}
         </div>
       </div>
       <button
@@ -493,8 +518,12 @@ function StoreView() {
   const storeUpdateNames = new Set(getStoreUpdates());
 
   useEffect(() => {
-    // Always fetch fresh from repo on mount
-    void fetchStoreItems();
+    // Re-fetch only if data is stale (> 30s) — ExtensionsView already fetched
+    // on mount, so this avoids a double-fetch when opening the store tab immediately.
+    const age = storeFetchedAt ? Date.now() - storeFetchedAt : Infinity;
+    if (age > 30_000) {
+      void fetchStoreItems();
+    }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -650,6 +679,7 @@ export function ExtensionsView() {
   const selectExtension = useExtensionStore((s) => s.selectExtension);
   const getFiltered = useExtensionStore((s) => s.getFiltered);
   const getStoreUpdates = useExtensionStore((s) => s.getStoreUpdates);
+  const fetchStoreItems = useExtensionStore((s) => s.fetchStoreItems);
 
   const storeUpdateNames = new Set(getStoreUpdates());
 
@@ -661,7 +691,11 @@ export function ExtensionsView() {
 
   useEffect(() => {
     loadExtensions();
-  }, [loadExtensions]);
+    // Fetch store items on mount so update badges work on the installed tab
+    // even before the user has opened the store tab.
+    void fetchStoreItems();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const handleInstallFolder = useCallback(async () => {
     try {

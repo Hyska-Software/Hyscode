@@ -2,6 +2,7 @@
   "name": "request-forge",
   "displayName": "Request Forge (BETA)",
   "version": "1.0.0",
+  "icon": "icon.svg",
   "description": "Cliente HTTP completo para a IDE — envie requisições REST/GraphQL, gerencie ambientes, visualize respostas formatadas e salve histórico diretamente nos arquivos .http",
   "publisher": "hyscode",
   "engines": {

@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+  <rect width="128" height="128" rx="22" fill="#0a0814"/>
+  <!-- Left curly brace { -->
+  <path d="M54 20 C44 20 40 26 40 36 L40 54 C40 60 34 64 28 64 C34 64 40 68 40 74 L40 92 C40 102 44 108 54 108"
+        stroke="#a78bfa" stroke-width="6" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- Right curly brace } -->
+  <path d="M74 20 C84 20 88 26 88 36 L88 54 C88 60 94 64 100 64 C94 64 88 68 88 74 L88 92 C88 102 84 108 74 108"
+        stroke="#f472b6" stroke-width="6" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
