@@ -1,0 +1,160 @@
+{
+  "name": "rainbow-indent",
+  "displayName": "Rainbow Indent (BETA)",
+  "version": "1.0.0",
+  "description": "Coloriza os níveis de indentação do código com cores alternadas para facilitar a leitura de blocos aninhados",
+  "publisher": "hyscode",
+  "engines": {
+    "hyscode": ">=0.1.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "keywords": [
+    "indent",
+    "indentation",
+    "rainbow",
+    "colorize",
+    "highlight",
+    "tabs",
+    "spaces",
+    "levels"
+  ],
+  "license": "MIT",
+  "activationEvents": [
+    "onStartup"
+  ],
+  "main": "main.js",
+  "contributes": {
+    "commands": [
+      {
+        "id": "rainbowIndent.toggle",
+        "title": "Rainbow Indent: Toggle",
+        "category": "Rainbow Indent",
+        "icon": "symbol-color"
+      },
+      {
+        "id": "rainbowIndent.cycleScheme",
+        "title": "Rainbow Indent: Cycle Color Scheme",
+        "category": "Rainbow Indent"
+      },
+      {
+        "id": "rainbowIndent.showStats",
+        "title": "Rainbow Indent: Show Indentation Stats",
+        "category": "Rainbow Indent"
+      },
+      {
+        "id": "rainbowIndent.fixIndentation",
+        "title": "Rainbow Indent: Fix Indentation",
+        "category": "Rainbow Indent"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "rainbowIndent.toggle",
+        "key": "ctrl+alt+i",
+        "when": ""
+      },
+      {
+        "command": "rainbowIndent.fixIndentation",
+        "key": "ctrl+alt+shift+i",
+        "when": "editorTextFocus"
+      }
+    ],
+    "menus": {
+      "editor/context": [
+        {
+          "command": "rainbowIndent.toggle",
+          "group": "navigation"
+        },
+        {
+          "command": "rainbowIndent.fixIndentation",
+          "group": "modification",
+          "when": "editorTextFocus"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "rainbowIndent.toggle"
+        },
+        {
+          "command": "rainbowIndent.cycleScheme"
+        },
+        {
+          "command": "rainbowIndent.showStats"
+        },
+        {
+          "command": "rainbowIndent.fixIndentation"
+        }
+      ]
+    },
+    "statusBarItems": [
+      {
+        "id": "rainbowIndent.indicator",
+        "text": "≡ Rainbow",
+        "tooltip": "Rainbow Indent — colorização de indentação ativa",
+        "command": "rainbowIndent.toggle",
+        "alignment": "right",
+        "priority": 20
+      }
+    ],
+    "settingsTabs": [
+      {
+        "id": "rainbow-indent.settings",
+        "label": "Rainbow Indent",
+        "icon": "symbol-color"
+      }
+    ],
+    "configuration": {
+      "title": "Rainbow Indent",
+      "properties": {
+        "rainbowIndent.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Ativar colorização de indentação"
+        },
+        "rainbowIndent.colors": {
+          "type": "array",
+          "default": [
+            "rgba(255,213,0,0.25)",
+            "rgba(218,112,214,0.25)",
+            "rgba(23,159,255,0.25)",
+            "rgba(255,107,107,0.25)",
+            "rgba(152,195,121,0.25)",
+            "rgba(198,120,221,0.25)"
+          ],
+          "description": "Cores por nível de indentação (aceita rgba)"
+        },
+        "rainbowIndent.errorColor": {
+          "type": "string",
+          "default": "rgba(255,0,0,0.3)",
+          "description": "Cor para indentação incorreta (tabs misturadas com espaços)"
+        },
+        "rainbowIndent.colorScheme": {
+          "type": "string",
+          "enum": [
+            "default",
+            "pastel",
+            "neon",
+            "dark"
+          ],
+          "default": "default",
+          "description": "Esquema de cores predefinido"
+        },
+        "rainbowIndent.highlightErrors": {
+          "type": "boolean",
+          "default": true,
+          "description": "Destacar indentação inconsistente (tabs vs espaços)"
+        },
+        "rainbowIndent.ignoredLanguages": {
+          "type": "array",
+          "default": [
+            "plaintext",
+            "markdown"
+          ],
+          "description": "Linguagens sem colorização de indentação"
+        }
+      }
+    }
+  }
+}

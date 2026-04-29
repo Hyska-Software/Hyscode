@@ -1,0 +1,139 @@
+{
+  "name": "tag-sync",
+  "displayName": "Tag Sync (BETA)",
+  "version": "1.0.0",
+  "description": "Renomeia automaticamente a tag HTML/JSX de fechamento ao editar a tag de abertura (e vice-versa), evitando tags desbalanceadas",
+  "publisher": "hyscode",
+  "engines": {
+    "hyscode": ">=0.1.0"
+  },
+  "categories": [
+    "Other",
+    "Languages"
+  ],
+  "keywords": [
+    "html",
+    "jsx",
+    "tsx",
+    "tag",
+    "rename",
+    "sync",
+    "auto",
+    "pair",
+    "xml"
+  ],
+  "license": "MIT",
+  "activationEvents": [
+    "onStartup"
+  ],
+  "main": "main.js",
+  "contributes": {
+    "commands": [
+      {
+        "id": "tagSync.toggle",
+        "title": "Tag Sync: Toggle",
+        "category": "Tag Sync",
+        "icon": "sync"
+      },
+      {
+        "id": "tagSync.syncNow",
+        "title": "Tag Sync: Sync Tags in File",
+        "category": "Tag Sync",
+        "icon": "check"
+      },
+      {
+        "id": "tagSync.showStatus",
+        "title": "Tag Sync: Show Status",
+        "category": "Tag Sync"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "tagSync.toggle",
+        "key": "ctrl+alt+t",
+        "when": ""
+      },
+      {
+        "command": "tagSync.syncNow",
+        "key": "ctrl+alt+y",
+        "when": "editorTextFocus"
+      }
+    ],
+    "menus": {
+      "editor/context": [
+        {
+          "command": "tagSync.syncNow",
+          "group": "modification",
+          "when": "editorTextFocus"
+        },
+        {
+          "command": "tagSync.toggle",
+          "group": "modification"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "tagSync.toggle"
+        },
+        {
+          "command": "tagSync.syncNow"
+        },
+        {
+          "command": "tagSync.showStatus"
+        }
+      ]
+    },
+    "statusBarItems": [
+      {
+        "id": "tagSync.indicator",
+        "text": "⇄ Tag Sync",
+        "tooltip": "Tag Sync — sincronização de tags ativa",
+        "command": "tagSync.toggle",
+        "alignment": "right",
+        "priority": 30
+      }
+    ],
+    "settingsTabs": [
+      {
+        "id": "tag-sync.settings",
+        "label": "Tag Sync",
+        "icon": "sync"
+      }
+    ],
+    "configuration": {
+      "title": "Tag Sync",
+      "properties": {
+        "tagSync.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Ativar sincronização automática de tags"
+        },
+        "tagSync.languages": {
+          "type": "array",
+          "default": [
+            "html",
+            "xml",
+            "jsx",
+            "tsx",
+            "vue",
+            "svelte",
+            "php",
+            "erb",
+            "handlebars"
+          ],
+          "description": "Linguagens onde a sincronização de tags é ativa"
+        },
+        "tagSync.syncOnType": {
+          "type": "boolean",
+          "default": true,
+          "description": "Sincronizar ao digitar (true) ou apenas ao salvar (false)"
+        },
+        "tagSync.excludeVoidElements": {
+          "type": "boolean",
+          "default": true,
+          "description": "Ignorar elementos void HTML (br, hr, img, input, etc.)"
+        }
+      }
+    }
+  }
+}

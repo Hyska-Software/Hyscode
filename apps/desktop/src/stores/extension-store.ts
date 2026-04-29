@@ -51,7 +51,7 @@ export type ExtensionFilter = 'all' | 'enabled' | 'disabled' | 'themes' | 'langu
 export interface StoreItem {
   name: string;        // slug derived from filename, e.g. "angular-support"
   displayName: string; // formatted, e.g. "Angular Support"
-  fileName: string;    // e.g. "angular-support.rar"
+  fileName: string;    // e.g. "angular-support.rar" or "angular-support.zip"
   downloadUrl: string; // raw GitHub download URL
   size: number;        // bytes
   sha: string;         // git blob sha for deduplication
@@ -61,7 +61,7 @@ const STORE_REPO_API = 'https://api.github.com/repos/hyskasoftware/Hyscode-Exten
 export const STORE_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
 function formatStoreName(fileName: string): string {
-  const slug = fileName.replace(/\.rar$/i, '');
+  const slug = fileName.replace(/\.(rar|zip)$/i, '');
   return slug
     .split('-')
     .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
@@ -452,9 +452,9 @@ export const useExtensionStore = create<ExtensionState>()(
           sha: string;
         }>;
         const items: StoreItem[] = data
-          .filter((f) => f.name.toLowerCase().endsWith('.rar'))
+          .filter((f) => /\.(rar|zip)$/i.test(f.name))
           .map((f) => ({
-            name: f.name.replace(/\.rar$/i, ''),
+            name: f.name.replace(/\.(rar|zip)$/i, ''),
             displayName: formatStoreName(f.name),
             fileName: f.name,
             downloadUrl: f.download_url,

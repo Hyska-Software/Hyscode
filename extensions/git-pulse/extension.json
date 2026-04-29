@@ -1,0 +1,203 @@
+{
+  "name": "git-pulse",
+  "displayName": "Git Pulse (BETA)",
+  "version": "1.0.0",
+  "description": "Superpoderes para Git na IDE — blame inline, histórico de arquivo, diff rápido, status de branch e navegação de commits na barra lateral",
+  "publisher": "hyscode",
+  "engines": {
+    "hyscode": ">=0.1.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "keywords": [
+    "git",
+    "blame",
+    "history",
+    "diff",
+    "commit",
+    "branch",
+    "annotations",
+    "lens"
+  ],
+  "license": "MIT",
+  "activationEvents": [
+    "onStartup"
+  ],
+  "main": "main.js",
+  "contributes": {
+    "commands": [
+      {
+        "id": "gitPulse.refresh",
+        "title": "Git Pulse: Refresh",
+        "category": "Git Pulse",
+        "icon": "refresh"
+      },
+      {
+        "id": "gitPulse.toggleBlame",
+        "title": "Git Pulse: Toggle Blame",
+        "category": "Git Pulse",
+        "icon": "git-commit"
+      },
+      {
+        "id": "gitPulse.showHistory",
+        "title": "Git Pulse: Show File History",
+        "category": "Git Pulse",
+        "icon": "history"
+      },
+      {
+        "id": "gitPulse.showDiff",
+        "title": "Git Pulse: Show Diff",
+        "category": "Git Pulse",
+        "icon": "diff"
+      },
+      {
+        "id": "gitPulse.copySha",
+        "title": "Git Pulse: Copy Commit SHA",
+        "category": "Git Pulse"
+      },
+      {
+        "id": "gitPulse.showBranchInfo",
+        "title": "Git Pulse: Show Branch Info",
+        "category": "Git Pulse"
+      },
+      {
+        "id": "gitPulse.openCommit",
+        "title": "Git Pulse: Open Commit",
+        "category": "Git Pulse"
+      },
+      {
+        "id": "gitPulse.showStatus",
+        "title": "Git Pulse: Show Working Tree Status",
+        "category": "Git Pulse"
+      }
+    ],
+    "views": [
+      {
+        "id": "gitPulse.panel",
+        "name": "Git Pulse",
+        "icon": "$(git-branch)"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "gitPulse.refresh",
+        "key": "ctrl+alt+g",
+        "when": ""
+      },
+      {
+        "command": "gitPulse.toggleBlame",
+        "key": "ctrl+alt+b",
+        "when": "editorTextFocus"
+      },
+      {
+        "command": "gitPulse.showDiff",
+        "key": "ctrl+alt+d",
+        "when": "editorTextFocus"
+      },
+      {
+        "command": "gitPulse.showHistory",
+        "key": "ctrl+alt+h",
+        "when": "editorTextFocus"
+      }
+    ],
+    "menus": {
+      "editor/context": [
+        {
+          "command": "gitPulse.toggleBlame",
+          "group": "git",
+          "when": "editorTextFocus"
+        },
+        {
+          "command": "gitPulse.showHistory",
+          "group": "git",
+          "when": "editorTextFocus"
+        },
+        {
+          "command": "gitPulse.showDiff",
+          "group": "git",
+          "when": "editorTextFocus"
+        },
+        {
+          "command": "gitPulse.copySha",
+          "group": "git"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "gitPulse.refresh"
+        },
+        {
+          "command": "gitPulse.toggleBlame"
+        },
+        {
+          "command": "gitPulse.showHistory"
+        },
+        {
+          "command": "gitPulse.showDiff"
+        },
+        {
+          "command": "gitPulse.copySha"
+        },
+        {
+          "command": "gitPulse.showBranchInfo"
+        },
+        {
+          "command": "gitPulse.showStatus"
+        }
+      ]
+    },
+    "statusBarItems": [
+      {
+        "id": "gitPulse.branch",
+        "text": "$(git-branch) —",
+        "tooltip": "Git Pulse — branch atual",
+        "command": "gitPulse.showBranchInfo",
+        "alignment": "left",
+        "priority": 90
+      }
+    ],
+    "settingsTabs": [
+      {
+        "id": "git-pulse.settings",
+        "label": "Git Pulse",
+        "icon": "git-branch"
+      }
+    ],
+    "configuration": {
+      "title": "Git Pulse",
+      "properties": {
+        "gitPulse.blameEnabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Ativar anotações de blame inline no editor"
+        },
+        "gitPulse.blameFormat": {
+          "type": "string",
+          "default": "{author}, {date} · {message}",
+          "description": "Formato da anotação de blame. Variáveis: {author}, {date}, {sha}, {message}"
+        },
+        "gitPulse.dateFormat": {
+          "type": "string",
+          "default": "relative",
+          "description": "Formato de data: 'relative' (ex: 3 dias atrás) ou 'absolute'"
+        },
+        "gitPulse.maxHistoryItems": {
+          "type": "number",
+          "default": 50,
+          "description": "Número máximo de commits no histórico"
+        },
+        "gitPulse.showStatusInStatusBar": {
+          "type": "boolean",
+          "default": true,
+          "description": "Mostrar branch atual na status bar"
+        },
+        "gitPulse.showDiffDecorations": {
+          "type": "boolean",
+          "default": true,
+          "description": "Mostrar indicadores de diff (adicionado/modificado/removido) na gutter do editor"
+        }
+      }
+    }
+  }
+}

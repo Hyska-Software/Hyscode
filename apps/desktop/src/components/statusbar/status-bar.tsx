@@ -19,7 +19,6 @@ export function StatusBar() {
   const tabs = useEditorStore((s) => s.tabs);
   const activeTab = tabs.find((t) => t.id === activeTabId);
 
-  const statusBarItems = useExtensionStore((s) => s.contributions.statusBarItems);
   const extensionCount = useExtensionStore((s) => s.extensions.filter((e) => e.enabled).length);
 
   const serverStatuses = useLspStore((s) => s.serverStatuses);
@@ -65,12 +64,6 @@ export function StatusBar() {
           </div>
         </div>
         <div className="flex items-center gap-3 text-muted-foreground">
-          {/* Extension status bar items */}
-          {statusBarItems.map((item) => (
-            <span key={`${item.extensionName}-${item.id}`} className="flex items-center gap-1">
-              {item.text}
-            </span>
-          ))}
           {extensionCount > 0 && (
             <span className="flex items-center gap-1" title={`${extensionCount} extension(s) active`}>
               <Blocks className="h-2.5 w-2.5" />

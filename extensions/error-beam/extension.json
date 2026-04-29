@@ -1,0 +1,200 @@
+{
+  "name": "error-beam",
+  "displayName": "Error Beam (BETA)",
+  "version": "1.0.0",
+  "description": "Exibe erros e avisos do diagnóstico inline diretamente ao lado da linha no editor, com painel de resumo e navegação rápida",
+  "publisher": "hyscode",
+  "engines": {
+    "hyscode": ">=0.1.0"
+  },
+  "categories": [
+    "Other",
+    "Linters"
+  ],
+  "keywords": [
+    "error",
+    "warning",
+    "diagnostic",
+    "lint",
+    "inline",
+    "lens",
+    "problem"
+  ],
+  "license": "MIT",
+  "activationEvents": [
+    "onStartup"
+  ],
+  "main": "main.js",
+  "contributes": {
+    "commands": [
+      {
+        "id": "errorBeam.toggle",
+        "title": "Error Beam: Toggle",
+        "category": "Error Beam",
+        "icon": "eye"
+      },
+      {
+        "id": "errorBeam.nextError",
+        "title": "Error Beam: Go to Next Error",
+        "category": "Error Beam",
+        "icon": "arrow-down"
+      },
+      {
+        "id": "errorBeam.prevError",
+        "title": "Error Beam: Go to Previous Error",
+        "category": "Error Beam",
+        "icon": "arrow-up"
+      },
+      {
+        "id": "errorBeam.showPanel",
+        "title": "Error Beam: Show Problems Panel",
+        "category": "Error Beam",
+        "icon": "warning"
+      },
+      {
+        "id": "errorBeam.clearAll",
+        "title": "Error Beam: Clear All Diagnostics",
+        "category": "Error Beam"
+      },
+      {
+        "id": "errorBeam.copyMessage",
+        "title": "Error Beam: Copy Error Message",
+        "category": "Error Beam"
+      },
+      {
+        "id": "errorBeam.refresh",
+        "title": "Error Beam: Refresh",
+        "category": "Error Beam",
+        "icon": "refresh"
+      }
+    ],
+    "views": [
+      {
+        "id": "errorBeam.panel",
+        "name": "Problems",
+        "icon": "$(warning)"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "errorBeam.toggle",
+        "key": "ctrl+shift+e",
+        "when": ""
+      },
+      {
+        "command": "errorBeam.nextError",
+        "key": "f8",
+        "when": ""
+      },
+      {
+        "command": "errorBeam.prevError",
+        "key": "shift+f8",
+        "when": ""
+      }
+    ],
+    "menus": {
+      "editor/context": [
+        {
+          "command": "errorBeam.nextError",
+          "group": "navigation"
+        },
+        {
+          "command": "errorBeam.copyMessage",
+          "group": "navigation",
+          "when": "editorTextFocus"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "errorBeam.toggle"
+        },
+        {
+          "command": "errorBeam.nextError"
+        },
+        {
+          "command": "errorBeam.prevError"
+        },
+        {
+          "command": "errorBeam.showPanel"
+        },
+        {
+          "command": "errorBeam.clearAll"
+        },
+        {
+          "command": "errorBeam.refresh"
+        }
+      ]
+    },
+    "statusBarItems": [
+      {
+        "id": "errorBeam.summary",
+        "text": "$(error) 0  $(warning) 0",
+        "tooltip": "Error Beam — clique para ver problemas",
+        "command": "errorBeam.showPanel",
+        "alignment": "left",
+        "priority": 80
+      }
+    ],
+    "settingsTabs": [
+      {
+        "id": "error-beam.settings",
+        "label": "Error Beam",
+        "icon": "warning"
+      }
+    ],
+    "configuration": {
+      "title": "Error Beam",
+      "properties": {
+        "errorBeam.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Ativar Error Beam"
+        },
+        "errorBeam.showErrors": {
+          "type": "boolean",
+          "default": true,
+          "description": "Mostrar erros inline"
+        },
+        "errorBeam.showWarnings": {
+          "type": "boolean",
+          "default": true,
+          "description": "Mostrar avisos inline"
+        },
+        "errorBeam.showInfos": {
+          "type": "boolean",
+          "default": false,
+          "description": "Mostrar informações inline"
+        },
+        "errorBeam.errorColor": {
+          "type": "string",
+          "default": "#f87171",
+          "description": "Cor do texto para erros"
+        },
+        "errorBeam.warningColor": {
+          "type": "string",
+          "default": "#fb923c",
+          "description": "Cor do texto para avisos"
+        },
+        "errorBeam.infoColor": {
+          "type": "string",
+          "default": "#60a5fa",
+          "description": "Cor do texto para informações"
+        },
+        "errorBeam.messageTemplate": {
+          "type": "string",
+          "default": "  ⚑ {message} [{source}]",
+          "description": "Template da mensagem inline. Variáveis: {message}, {source}, {code}, {severity}"
+        },
+        "errorBeam.fontStyle": {
+          "type": "string",
+          "enum": [
+            "normal",
+            "italic"
+          ],
+          "default": "italic",
+          "description": "Estilo da fonte para mensagens inline"
+        }
+      }
+    }
+  }
+}

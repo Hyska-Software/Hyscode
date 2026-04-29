@@ -1,0 +1,168 @@
+{
+  "name": "pair-glow",
+  "displayName": "Pair Glow (BETA)",
+  "version": "1.0.0",
+  "description": "Coloriza pares de colchetes, chaves e parênteses com cores únicas por nível de aninhamento para melhor legibilidade do código",
+  "publisher": "hyscode",
+  "engines": {
+    "hyscode": ">=0.1.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "keywords": [
+    "brackets",
+    "colorize",
+    "pairs",
+    "rainbow",
+    "indent",
+    "highlight",
+    "matching"
+  ],
+  "license": "MIT",
+  "activationEvents": [
+    "onStartup"
+  ],
+  "main": "main.js",
+  "contributes": {
+    "commands": [
+      {
+        "id": "pairGlow.toggle",
+        "title": "Pair Glow: Toggle",
+        "category": "Pair Glow",
+        "icon": "symbol-color"
+      },
+      {
+        "id": "pairGlow.toggleGuides",
+        "title": "Pair Glow: Toggle Indent Guides",
+        "category": "Pair Glow"
+      },
+      {
+        "id": "pairGlow.cycleColors",
+        "title": "Pair Glow: Cycle Color Scheme",
+        "category": "Pair Glow"
+      },
+      {
+        "id": "pairGlow.resetColors",
+        "title": "Pair Glow: Reset to Default Colors",
+        "category": "Pair Glow"
+      },
+      {
+        "id": "pairGlow.goToMatch",
+        "title": "Pair Glow: Go to Matching Bracket",
+        "category": "Pair Glow"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "pairGlow.toggle",
+        "key": "ctrl+alt+]",
+        "when": ""
+      },
+      {
+        "command": "pairGlow.goToMatch",
+        "key": "ctrl+shift+\\",
+        "when": "editorTextFocus"
+      }
+    ],
+    "menus": {
+      "editor/context": [
+        {
+          "command": "pairGlow.goToMatch",
+          "group": "navigation",
+          "when": "editorTextFocus"
+        },
+        {
+          "command": "pairGlow.toggle",
+          "group": "navigation"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "pairGlow.toggle"
+        },
+        {
+          "command": "pairGlow.toggleGuides"
+        },
+        {
+          "command": "pairGlow.cycleColors"
+        },
+        {
+          "command": "pairGlow.resetColors"
+        },
+        {
+          "command": "pairGlow.goToMatch"
+        }
+      ]
+    },
+    "statusBarItems": [
+      {
+        "id": "pairGlow.indicator",
+        "text": "❰❱ Pair Glow",
+        "tooltip": "Pair Glow — colorização de pares ativa",
+        "command": "pairGlow.toggle",
+        "alignment": "right",
+        "priority": 35
+      }
+    ],
+    "settingsTabs": [
+      {
+        "id": "pair-glow.settings",
+        "label": "Pair Glow",
+        "icon": "symbol-color"
+      }
+    ],
+    "configuration": {
+      "title": "Pair Glow",
+      "properties": {
+        "pairGlow.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Ativar colorização de pares"
+        },
+        "pairGlow.colors": {
+          "type": "array",
+          "default": [
+            "#ffd700",
+            "#da70d6",
+            "#179fff",
+            "#ff6b6b",
+            "#98c379",
+            "#c678dd"
+          ],
+          "description": "Cores dos pares por nível de aninhamento (hex)"
+        },
+        "pairGlow.showGuides": {
+          "type": "boolean",
+          "default": true,
+          "description": "Mostrar guias de indentação coloridas"
+        },
+        "pairGlow.highlightActiveScope": {
+          "type": "boolean",
+          "default": true,
+          "description": "Destacar o escopo ativo (par do cursor)"
+        },
+        "pairGlow.colorScheme": {
+          "type": "string",
+          "enum": [
+            "default",
+            "pastel",
+            "neon",
+            "monochrome"
+          ],
+          "default": "default",
+          "description": "Esquema de cores predefinido"
+        },
+        "pairGlow.bracketTypes": {
+          "type": "array",
+          "default": [
+            "()",
+            "[]",
+            "{}"
+          ],
+          "description": "Tipos de pares de colchetes a colorizar"
+        }
+      }
+    }
+  }
+}
