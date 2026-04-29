@@ -9,6 +9,8 @@ import {
   Trash2,
   Copy,
   ClipboardCopy,
+  ClipboardPaste,
+  Scissors,
   FolderSearch,
   Files,
 } from 'lucide-react';
@@ -98,6 +100,29 @@ function getDirDiagnosticsInfo(
 
 function formatBadge(count: number): string {
   return count > 9 ? '9+' : String(count);
+}
+
+async function getUniqueDestPath(targetDir: string, name: string, sep: string): Promise<string> {
+  let destPath = targetDir + sep + name;
+  try {
+    await tauriFs.statPath(destPath);
+    const dotIdx = name.lastIndexOf('.');
+    const base = dotIdx > 0 ? name.slice(0, dotIdx) : name;
+    const ext = dotIdx > 0 ? name.slice(dotIdx) : '';
+    let i = 1;
+    while (true) {
+      destPath = `${targetDir}${sep}${base} (${i})${ext}`;
+      try {
+        await tauriFs.statPath(destPath);
+        i++;
+      } catch {
+        break;
+      }
+    }
+  } catch {
+    // Original path doesn't exist, use it as-is
+  }
+  return destPath;
 }
 
 function sortNodes(nodes: FileNode[]): FileNode[] {
@@ -227,6 +252,8 @@ interface FileTreeNodeProps {
   // Keyboard focus
   focusedPath: string | null;
   onFocusNode: (path: string) => void;
+  // Clipboard
+  cutPaths: Set<string>;
 }
 
 function FileTreeNode({
@@ -234,7 +261,7 @@ function FileTreeNode({
   onRenameSubmit, onRenameCancel, onCreateSubmit, onCreateCancel,
   gitMap, diagnosticsMap, rootPath,
   draggedPath, dragOverPath, onDragStart, onDragOver, onDragLeave, onDrop, onDragEnd,
-  focusedPath, onFocusNode,
+  focusedPath, onFocusNode, cutPaths,
 }: FileTreeNodeProps) {
   const expandDirectory = useFileStore((s) => s.expandDirectory);
   const toggleExpand = useFileStore((s) => s.toggleExpand);
@@ -246,6 +273,7 @@ function FileTreeNode({
   const setAgentPreviewFile = useLayoutStore((s) => s.setAgentPreviewFile);
 
   const isFocused = focusedPath === node.path;
+  const isCut = cutPaths.has(node.path);
 
   const relPath = useMemo(() => {
     if (!rootPath) return node.path;
@@ -349,7 +377,7 @@ function FileTreeNode({
       onDragOver={node.isDir ? (e) => {
         e.preventDefault();
         e.stopPropagation();
-        e.dataTransfer.dropEffect = 'move';
+        e.dataTransfer.dropEffect = draggedPath ? 'move' : 'copy';
         onDragOver(e, node);
       } : undefined}
       onDragLeave={node.isDir ? (e) => onDragLeave(e, node) : undefined}
@@ -366,14 +394,14 @@ function FileTreeNode({
           onDragStart(node);
         }}
         onDragEnd={onDragEnd}
-        onDragOver={!node.isDir ? (e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; } : undefined}
+        onDragOver={!node.isDir ? (e) => { e.preventDefault(); e.dataTransfer.dropEffect = draggedPath ? 'move' : 'copy'; } : undefined}
         data-tree-path={node.path}
         className={`flex w-full items-center gap-1 rounded-sm px-1 py-[3px] text-[11px] transition-colors ${
           isDragOver
             ? 'bg-accent/20 ring-1 ring-inset ring-accent/50'
             : isActive ? 'bg-accent-muted' : 'hover:bg-surface-raised'
         } ${nameColorClass || 'text-foreground'} ${isHidden ? 'opacity-60' : ''} ${
-          isDragging ? 'opacity-30' : ''
+          isDragging || isCut ? 'opacity-30' : ''
         } ${isFocused ? 'outline outline-1 outline-accent/40' : ''}`}
         style={{ paddingLeft: `${depth * 12 + 4}px` }}
       >
@@ -463,6 +491,7 @@ function FileTreeNode({
               onDragEnd={onDragEnd}
               focusedPath={focusedPath}
               onFocusNode={onFocusNode}
+              cutPaths={cutPaths}
             />
           ))}
         </div>
@@ -519,6 +548,13 @@ export function FileTree() {
   const [dragOverPath, setDragOverPath] = useState<string | null>(null);
   const [focusedPath, setFocusedPath] = useState<string | null>(null);
   const [pendingOps, setPendingOps] = useState<Set<string>>(new Set());
+  const [clipboard, setClipboard] = useState<{ paths: string[]; op: 'copy' | 'cut' } | null>(null);
+  const clipboardRef = useRef(clipboard);
+  useEffect(() => { clipboardRef.current = clipboard; }, [clipboard]);
+  const cutPaths = useMemo(() => {
+    if (!clipboard || clipboard.op !== 'cut') return new Set<string>();
+    return new Set(clipboard.paths);
+  }, [clipboard]);
   const menuRef = useRef<HTMLDivElement>(null);
   const treeContainerRef = useRef<HTMLDivElement>(null);
 
@@ -549,6 +585,51 @@ export function FileTree() {
 
   // ── Keyboard Navigation ────────────────────────────────────────────────────
   const visibleNodes = useMemo(() => getVisibleNodes(tree), [tree]);
+
+  const getTargetParent = (node: FileNode | null): string => {
+    if (!node) return rootPath ?? '';
+    return node.isDir ? node.path : getParentPath(node.path);
+  };
+
+  const withPending = async <T,>(key: string, fn: () => Promise<T>): Promise<T | undefined> => {
+    setPendingOps((prev) => new Set(prev).add(key));
+    try {
+      return await fn();
+    } catch (err) {
+      console.error(err);
+      throw err;
+    } finally {
+      setPendingOps((prev) => {
+        const next = new Set(prev);
+        next.delete(key);
+        return next;
+      });
+    }
+  };
+
+  const handleCopyItem = (node: FileNode) => setClipboard({ paths: [node.path], op: 'copy' });
+  const handleCutItem = (node: FileNode) => setClipboard({ paths: [node.path], op: 'cut' });
+
+  const handlePaste = async (targetDir: string) => {
+    const cb = clipboardRef.current;
+    if (!cb || !targetDir) return;
+    const sep = getSep(targetDir);
+    for (const srcPath of cb.paths) {
+      if (srcPath === targetDir || targetDir.startsWith(srcPath + sep)) continue;
+      const fileName = srcPath.split(/[\\/]/).pop()!;
+      const destPath = await getUniqueDestPath(targetDir, fileName, sep);
+      try {
+        if (cb.op === 'copy') {
+          await withPending('paste-' + srcPath, () => tauriFs.copyPath(srcPath, destPath));
+        } else {
+          await withPending('paste-' + srcPath, () => tauriFs.renamePath(srcPath, destPath));
+        }
+      } catch (err) {
+        console.error('Paste failed:', err);
+      }
+    }
+    if (cb.op === 'cut') setClipboard(null);
+  };
 
   useEffect(() => {
     const container = treeContainerRef.current;
@@ -618,12 +699,26 @@ export function FileTree() {
         if (node) {
           handleDeleteNode(node);
         }
+      } else if (e.key === 'c' && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault();
+        const node = currentIdx >= 0 ? visibleNodes[currentIdx] : null;
+        if (node) handleCopyItem(node);
+      } else if (e.key === 'x' && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault();
+        const node = currentIdx >= 0 ? visibleNodes[currentIdx] : null;
+        if (node) handleCutItem(node);
+      } else if (e.key === 'v' && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault();
+        if (!clipboardRef.current) return;
+        const node = currentIdx >= 0 ? visibleNodes[currentIdx] : null;
+        const targetDir = node ? getTargetParent(node) : (rootPath ?? '');
+        if (targetDir) handlePaste(targetDir).catch(console.error);
       }
     };
 
     container.addEventListener('keydown', handler);
     return () => container.removeEventListener('keydown', handler);
-  }, [visibleNodes, focusedPath, renamingPath, creatingIn, expandDirectory, rootPath]);
+  }, [visibleNodes, focusedPath, renamingPath, creatingIn, expandDirectory, rootPath, handleCopyItem, handleCutItem, handlePaste, getTargetParent]);
 
   // ── Context menu interactions ─────────────────────────────────────────────
   useEffect(() => {
@@ -674,12 +769,15 @@ export function FileTree() {
   const draggedPathRef = useRef(draggedPath);
   useEffect(() => { draggedPathRef.current = draggedPath; }, [draggedPath]);
 
-  const handleDragOver = useCallback((_e: React.DragEvent, node: FileNode) => {
+  const handleDragOver = useCallback((e: React.DragEvent, node: FileNode) => {
     if (!node.isDir) return;
     const dragged = draggedPathRef.current;
-    if (!dragged) return;
-    const sep = getSep(dragged);
-    if (node.path === dragged || node.path.startsWith(dragged + sep)) return;
+    if (dragged) {
+      const sep = getSep(dragged);
+      if (node.path === dragged || node.path.startsWith(dragged + sep)) return;
+    } else if (!e.dataTransfer.types.includes('Files')) {
+      return;
+    }
     setDragOverPath((p) => (p === node.path ? p : node.path));
   }, []);
 
@@ -689,23 +787,43 @@ export function FileTree() {
     }
   }, []);
 
-  const handleDrop = useCallback(async (_e: React.DragEvent, targetNode: FileNode) => {
+  const handleExternalFileDrop = useCallback(async (files: File[], targetDir: string) => {
+    const sep = getSep(targetDir);
+    const targetNode = useFileStore.getState().findNode(targetDir);
+    if (targetNode && !targetNode.isExpanded) {
+      await expandDirectory(targetDir);
+    }
+    for (const file of files) {
+      const srcPath = (file as any).path as string | undefined;
+      if (!srcPath) continue;
+      const destPath = await getUniqueDestPath(targetDir, file.name, sep);
+      await withPending('import-' + file.name, () => tauriFs.copyPath(srcPath, destPath));
+    }
+  }, [expandDirectory]);
+
+  const handleDrop = useCallback(async (e: React.DragEvent, targetNode: FileNode) => {
     setDragOverPath(null);
     const dragged = draggedPathRef.current;
     setDraggedPath(null);
-    if (!dragged || !targetNode.isDir) return;
-    if (dragged === targetNode.path) return;
-    const sep = getSep(dragged);
-    if (targetNode.path.startsWith(dragged + sep)) return;
-    const fileName = dragged.split(/[\\/]/).pop()!;
-    const newPath = targetNode.path + sep + fileName;
-    if (newPath === dragged) return;
-    try {
-      await tauriFs.renamePath(dragged, newPath);
-    } catch (err) {
-      console.error('Failed to move:', err);
+    if (!targetNode.isDir) return;
+    if (dragged) {
+      if (dragged === targetNode.path) return;
+      const sep = getSep(dragged);
+      if (targetNode.path.startsWith(dragged + sep)) return;
+      const fileName = dragged.split(/[\\/]/).pop()!;
+      const newPath = targetNode.path + sep + fileName;
+      if (newPath === dragged) return;
+      try {
+        await tauriFs.renamePath(dragged, newPath);
+      } catch (err) {
+        console.error('Failed to move:', err);
+      }
+    } else {
+      const files = Array.from(e.dataTransfer.files);
+      if (!files.length) return;
+      handleExternalFileDrop(files, targetNode.path).catch(console.error);
     }
-  }, []);
+  }, [handleExternalFileDrop]);
 
   const handleDragEnd = useCallback(() => {
     setDraggedPath(null);
@@ -713,27 +831,6 @@ export function FileTree() {
   }, []);
 
   // ── Actions ────────────────────────────────────────────────────────────────
-
-  const getTargetParent = (node: FileNode | null): string => {
-    if (!node) return rootPath ?? '';
-    return node.isDir ? node.path : getParentPath(node.path);
-  };
-
-  const withPending = async <T,>(key: string, fn: () => Promise<T>): Promise<T | undefined> => {
-    setPendingOps((prev) => new Set(prev).add(key));
-    try {
-      return await fn();
-    } catch (err) {
-      console.error(err);
-      throw err;
-    } finally {
-      setPendingOps((prev) => {
-        const next = new Set(prev);
-        next.delete(key);
-        return next;
-      });
-    }
-  };
 
   const handleNewFile = async () => {
     const node = contextMenu?.node ?? null;
@@ -930,6 +1027,21 @@ export function FileTree() {
       tabIndex={0}
       className="relative flex min-h-full flex-col py-1 outline-none"
       onContextMenu={handleEmptyContextMenu}
+      onDragOver={(e) => {
+        if (draggedPath) return;
+        if (rootPath && e.dataTransfer.types.includes('Files')) {
+          e.preventDefault();
+          e.dataTransfer.dropEffect = 'copy';
+        }
+      }}
+      onDrop={(e) => {
+        if (draggedPath || !rootPath) return;
+        const files = Array.from(e.dataTransfer.files);
+        if (!files.length) return;
+        e.preventDefault();
+        setDragOverPath(null);
+        handleExternalFileDrop(files, rootPath).catch(console.error);
+      }}
     >
       {sortedTree.map((node) => (
         <FileTreeNode
@@ -955,6 +1067,7 @@ export function FileTree() {
           onDragEnd={handleDragEnd}
           focusedPath={focusedPath}
           onFocusNode={setFocusedPath}
+          cutPaths={cutPaths}
         />
       ))}
 
@@ -967,6 +1080,21 @@ export function FileTree() {
         >
           <ContextMenuItem icon={FilePlus} label="New File..." onClick={handleNewFile} />
           <ContextMenuItem icon={FolderPlus} label="New Folder..." onClick={handleNewFolder} />
+
+          <ContextMenuSeparator />
+          {hasNode && (
+            <ContextMenuItem icon={Scissors} label="Cut" shortcut="Ctrl+X" onClick={() => { handleCutItem(contextMenu!.node!); setContextMenu(null); }} />
+          )}
+          {hasNode && (
+            <ContextMenuItem icon={Copy} label="Copy" shortcut="Ctrl+C" onClick={() => { handleCopyItem(contextMenu!.node!); setContextMenu(null); }} />
+          )}
+          {clipboard && (
+            <ContextMenuItem icon={ClipboardPaste} label="Paste" shortcut="Ctrl+V" onClick={() => {
+              const t = contextMenu?.node ? getTargetParent(contextMenu.node) : (rootPath ?? '');
+              setContextMenu(null);
+              if (t) handlePaste(t).catch(console.error);
+            }} />
+          )}
 
           {hasNode && (
             <>
