@@ -199,6 +199,7 @@ interface ExtensionState {
   installFromStore: (item: StoreItem) => Promise<void>;
   updateExtensionFromStore: (item: StoreItem) => Promise<void>;
   getStoreUpdates: () => string[];
+  notifyIconThemeChanged: () => void;
   // Computed-like helpers
   getFiltered: () => InstalledExtension[];
 }
@@ -816,6 +817,10 @@ export const useExtensionStore = create<ExtensionState>()(
       const savedIconThemeId = useSettingsStore.getState().iconThemeId;
       setActiveIconThemeId(savedIconThemeId);
 
+      set((s) => { s.extensionIconThemesVersion++; });
+    },
+
+    notifyIconThemeChanged: () => {
       set((s) => { s.extensionIconThemesVersion++; });
     },
   })),

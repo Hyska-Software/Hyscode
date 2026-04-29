@@ -1,0 +1,17 @@
+{
+  "id": "material-icon-theme",
+  "name": "material-icon-theme",
+  "displayName": "Material Icon Theme",
+  "description": "Material Design icons for HysCode — replaces all file and folder icons",
+  "version": "1.0.0",
+  "author": "HysCode",
+  "contributes": {
+    "iconThemes": [
+      {
+        "id": "material-icons",
+        "label": "Material Icons",
+        "path": "material-icon-theme.json"
+      }
+    ]
+  }
+}

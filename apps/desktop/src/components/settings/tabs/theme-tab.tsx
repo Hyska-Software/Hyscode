@@ -2,7 +2,11 @@ import { Check } from 'lucide-react';
 import { useSettingsStore } from '../../../stores';
 import { useExtensionStore } from '../../../stores/extension-store';
 import { getCustomThemeMetas } from '../../../lib/monaco-themes';
-import { getRegisteredIconThemes, setActiveIconThemeId } from '../../../lib/icon-theme-registry';
+import {
+  getRegisteredIconThemes,
+  setActiveIconThemeId,
+  getIconPreviewSamples,
+} from '../../../lib/icon-theme-registry';
 import type { ThemeId } from '../../../stores/settings-store';
 
 interface ThemeOption {
@@ -183,11 +187,122 @@ function ThemeCard({
   );
 }
 
+// ── Icon Theme Card ────────────────────────────────────────────────────────────
+
+const PREVIEW_FILES = ['index.ts', 'styles.css', 'package.json', 'readme.md'];
+const PREVIEW_FOLDER = 'src';
+
+const FILE_PREVIEW_COLORS: Record<string, string> = {
+  ts: '#3b82f6', tsx: '#3b82f6',
+  js: '#f59e0b', jsx: '#f59e0b',
+  css: '#ec4899', scss: '#ec4899',
+  json: '#10b981',
+  md: '#94a3b8',
+  rs: '#f97316',
+};
+
+function DefaultFilePreviewIcon({ name }: { name: string }) {
+  const ext = name.split('.').pop()?.toLowerCase() ?? '';
+  const color = FILE_PREVIEW_COLORS[ext] ?? '#6b7280';
+  return (
+    <svg viewBox="0 0 12 14" className="h-3.5 w-3 shrink-0" fill="none">
+      <path
+        d="M1 2C1 1.45 1.45 1 2 1H8L11 4V12C11 12.55 10.55 13 10 13H2C1.45 13 1 12.55 1 12V2Z"
+        fill={color}
+        fillOpacity="0.2"
+        stroke={color}
+        strokeWidth="1"
+      />
+      <path d="M8 1L11 4H8V1Z" fill={color} fillOpacity="0.4" />
+    </svg>
+  );
+}
+
+function DefaultFolderPreviewIcon() {
+  return (
+    <svg viewBox="0 0 14 12" className="h-3 w-3.5 shrink-0" fill="none">
+      <path
+        d="M1 2.5C1 2 1.45 1.5 2 1.5H5L6.5 3H12C12.55 3 13 3.45 13 4V10C13 10.55 12.55 11 12 11H2C1.45 11 1 10.55 1 10V2.5Z"
+        fill="#fbbf24"
+        fillOpacity="0.3"
+        stroke="#fbbf24"
+        strokeWidth="1"
+      />
+    </svg>
+  );
+}
+
+function IconThemeCard({
+  id,
+  label,
+  source,
+  isActive,
+  onSelect,
+}: {
+  id: string;
+  label: string;
+  source: string;
+  isActive: boolean;
+  onSelect: () => void;
+}) {
+  const isDefault = id === 'default';
+  const samples = isDefault ? null : getIconPreviewSamples(id, PREVIEW_FILES, [PREVIEW_FOLDER]);
+
+  return (
+    <button
+      onClick={onSelect}
+      className={`relative flex flex-col gap-2.5 rounded-xl p-3 text-left transition-all ${
+        isActive
+          ? 'bg-accent/10 ring-2 ring-accent shadow-sm'
+          : 'bg-surface-raised/30 ring-1 ring-border/50 hover:bg-surface-raised/60 hover:ring-border'
+      }`}
+    >
+      {/* Icon preview pane */}
+      <div className="flex flex-col gap-[5px] rounded-lg border border-border/30 bg-background/50 p-2.5 min-h-[90px]">
+        <div className="flex items-center gap-1.5">
+          {samples?.folders[0]?.url ? (
+            <img src={samples.folders[0].url} className="h-3.5 w-3.5 shrink-0 object-contain" alt="" />
+          ) : (
+            <DefaultFolderPreviewIcon />
+          )}
+          <span className="text-[9px] font-medium text-muted-foreground/60">{PREVIEW_FOLDER}</span>
+        </div>
+        {PREVIEW_FILES.map((name, i) => {
+          const url = samples?.files[i]?.url ?? null;
+          return (
+            <div key={name} className="flex items-center gap-1.5 pl-4">
+              {url ? (
+                <img src={url} className="h-3.5 w-3.5 shrink-0 object-contain" alt="" />
+              ) : (
+                <DefaultFilePreviewIcon name={name} />
+              )}
+              <span className="text-[9px] text-muted-foreground/50">{name}</span>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Label row */}
+      <div className="flex flex-col gap-0.5 pr-6">
+        <span className="text-[11px] font-semibold text-foreground">{label}</span>
+        <span className="text-[10px] text-muted-foreground">{source}</span>
+      </div>
+
+      {isActive && (
+        <div className="absolute right-2.5 top-2.5 flex h-4 w-4 items-center justify-center rounded-full bg-accent">
+          <Check className="h-2.5 w-2.5 text-accent-foreground" />
+        </div>
+      )}
+    </button>
+  );
+}
+
 export function ThemeTab() {
   const themeId = useSettingsStore((s) => s.themeId);
   const setThemeId = useSettingsStore((s) => s.setThemeId);
   const iconThemeId = useSettingsStore((s) => s.iconThemeId);
   const setIconThemeId = useSettingsStore((s) => s.setIconThemeId);
+  const notifyIconThemeChanged = useExtensionStore((s) => s.notifyIconThemeChanged);
   // Re-render when extension themes finish loading
   useExtensionStore((s) => s.extensionThemesVersion);
   useExtensionStore((s) => s.extensionIconThemesVersion);
@@ -197,6 +312,7 @@ export function ThemeTab() {
   function handleSelectIconTheme(id: string) {
     setIconThemeId(id);
     setActiveIconThemeId(id);
+    notifyIconThemeChanged();
   }
 
   return (
@@ -244,67 +360,32 @@ export function ThemeTab() {
       )}
 
       {/* ── Icon Themes ──────────────────────────────────────────────────── */}
-      <div className="mt-2 border-t border-border pt-3">
-        <p className="text-[11px] font-medium text-foreground mb-1">Icon Theme</p>
-        <p className="text-[10px] text-muted-foreground mb-3">
+      <div className="mt-4 border-t border-border pt-4">
+        <p className="text-[12px] font-semibold text-foreground">Icon Theme</p>
+        <p className="text-[10px] text-muted-foreground mt-0.5 mb-3">
           Changes file and folder icons throughout the IDE.
         </p>
-      </div>
 
-      <div className="flex flex-col gap-1">
-        {/* Built-in default option */}
-        <IconThemeRow
-          id="default"
-          label="Default"
-          description="Built-in material-style icons"
-          isActive={iconThemeId === 'default'}
-          onSelect={() => handleSelectIconTheme('default')}
-        />
-        {extensionIconThemes.map((t) => (
-          <IconThemeRow
-            key={t.id}
-            id={t.id}
-            label={t.label}
-            description={`from ${t.extensionName}`}
-            isActive={iconThemeId === t.id}
-            onSelect={() => handleSelectIconTheme(t.id)}
+        <div className="grid grid-cols-2 gap-3">
+          <IconThemeCard
+            id="default"
+            label="Default"
+            source="Built-in"
+            isActive={iconThemeId === 'default'}
+            onSelect={() => handleSelectIconTheme('default')}
           />
-        ))}
+          {extensionIconThemes.map((t) => (
+            <IconThemeCard
+              key={t.id}
+              id={t.id}
+              label={t.label}
+              source={`from ${t.extensionName}`}
+              isActive={iconThemeId === t.id}
+              onSelect={() => handleSelectIconTheme(t.id)}
+            />
+          ))}
+        </div>
       </div>
     </div>
-  );
-}
-
-function IconThemeRow({
-  label,
-  description,
-  isActive,
-  onSelect,
-}: {
-  id: string;
-  label: string;
-  description: string;
-  isActive: boolean;
-  onSelect: () => void;
-}) {
-  return (
-    <button
-      onClick={onSelect}
-      className={`flex items-center gap-3 rounded-md px-3 py-2 text-left transition-colors ${
-        isActive
-          ? 'bg-accent/15 ring-1 ring-accent'
-          : 'hover:bg-muted/40'
-      }`}
-    >
-      <div className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-full border ${
-        isActive ? 'border-accent bg-accent' : 'border-muted-foreground/40'
-      }`}>
-        {isActive && <Check className="h-2.5 w-2.5 text-accent-foreground" />}
-      </div>
-      <div className="flex flex-col">
-        <span className="text-[11px] font-medium text-foreground">{label}</span>
-        <span className="text-[10px] text-muted-foreground">{description}</span>
-      </div>
-    </button>
   );
 }

@@ -250,3 +250,51 @@ export function resolveFolderIconUrl(folderName: string, isOpen: boolean): strin
 
   return null;
 }
+
+// ── Preview helpers ───────────────────────────────────────────────────────────
+
+export interface IconPreviewSamples {
+  files: Array<{ name: string; url: string | null }>;
+  folders: Array<{ name: string; url: string | null }>;
+}
+
+/**
+ * Resolve preview icon URLs for a specific theme WITHOUT changing the active
+ * theme. Used by the settings UI to show each theme card's icon samples.
+ * Returns `null` URLs for the `'default'` theme (caller renders built-ins).
+ */
+export function getIconPreviewSamples(
+  themeId: string,
+  fileNames: string[],
+  folderNames: string[],
+): IconPreviewSamples {
+  if (themeId === 'default') {
+    return {
+      files: fileNames.map((name) => ({ name, url: null })),
+      folders: folderNames.map((name) => ({ name, url: null })),
+    };
+  }
+
+  const theme = _themes.get(themeId);
+  if (!theme) {
+    return {
+      files: fileNames.map((name) => ({ name, url: null })),
+      folders: folderNames.map((name) => ({ name, url: null })),
+    };
+  }
+
+  const files = fileNames.map((name) => {
+    const lower = normalizeName(name);
+    const ext = lower.split('.').pop() ?? '';
+    const iconId = theme.fileNames[lower] ?? theme.fileExtensions[ext] ?? theme.file;
+    return { name, url: iconId ? (theme.iconDataUrls.get(iconId) ?? null) : null };
+  });
+
+  const folders = folderNames.map((name) => {
+    const lower = normalizeName(name);
+    const iconId = theme.folderNames[lower] ?? theme.folder;
+    return { name, url: iconId ? (theme.iconDataUrls.get(iconId) ?? null) : null };
+  });
+
+  return { files, folders };
+}
