@@ -26,6 +26,9 @@ let highlightsEnabled = true;
 /** @type {string} */
 let searchQuery = '';
 
+/** Settings cache — populated async on activate so getSetting() stays sync */
+let settingsCache = {};
+
 /**
  * @typedef {{ tag: string, text: string, file: string, line: number, col: number }} TodoItem
  */
@@ -33,25 +36,39 @@ let searchQuery = '';
 // ── Tag colours ──────────────────────────────────────────────────────────────
 
 const TAG_COLORS = {
-  TODO:  '#3b82f6', // blue
-  FIXME: '#f59e0b', // amber
-  BUG:   '#ef4444', // red
-  HACK:  '#a855f7', // purple
-  XXX:   '#ec4899', // pink
-  NOTE:  '#22c55e', // green
-  WARN:  '#f97316', // orange
-  PERF:  '#06b6d4', // cyan
+  TODO:       '#3b82f6',
+  FIXME:      '#f59e0b',
+  BUG:        '#ef4444',
+  HACK:       '#a855f7',
+  XXX:        '#ec4899',
+  NOTE:       '#22c55e',
+  WARN:       '#f97316',
+  PERF:       '#06b6d4',
+  REVIEW:     '#84cc16',
+  DEPRECATED: '#94a3b8',
+  OPTIMIZE:   '#14b8a6',
+  CHANGED:    '#f472b6',
+  IDEA:       '#fbbf24',
+  QUESTION:   '#60a5fa',
+  SAFETY:     '#fb7185',
 };
 
 const TAG_ICONS = {
-  TODO:  '$(check)',
-  FIXME: '$(warning)',
-  BUG:   '$(bug)',
-  HACK:  '$(lightbulb)',
-  XXX:   '$(warning)',
-  NOTE:  '$(bookmark)',
-  WARN:  '$(warning)',
-  PERF:  '$(lightbulb)',
+  TODO:       '$(check)',
+  FIXME:      '$(warning)',
+  BUG:        '$(bug)',
+  HACK:       '$(lightbulb)',
+  XXX:        '$(warning)',
+  NOTE:       '$(bookmark)',
+  WARN:       '$(warning)',
+  PERF:       '$(lightbulb)',
+  REVIEW:     '$(eye)',
+  DEPRECATED: '$(trash)',
+  OPTIMIZE:   '$(zap)',
+  CHANGED:    '$(edit)',
+  IDEA:       '$(lightbulb)',
+  QUESTION:   '$(question)',
+  SAFETY:     '$(shield)',
 };
 
 function register(id, handler) {
@@ -59,14 +76,38 @@ function register(id, handler) {
   disposables.push(d);
 }
 
+// ── Settings cache ────────────────────────────────────────────────────────────
+
+async function loadSettings() {
+  const keys = [
+    'todoTree.tags', 'todoTree.scanMode', 'todoTree.includeGlobs',
+    'todoTree.excludeGlobs', 'todoTree.highlightEnabled', 'todoTree.groupBy',
+    'todoTree.sortOrder', 'todoTree.statusBar', 'todoTree.maxResults',
+  ];
+  for (const key of keys) {
+    try {
+      const val = await api.settings.get(key);
+      if (val !== undefined && val !== null) settingsCache[key] = val;
+    } catch { /* ignore */ }
+  }
+}
+
+function getSetting(key, defaultValue) {
+  const v = settingsCache[key];
+  return (v !== undefined && v !== null) ? v : defaultValue;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Activate
 // ─────────────────────────────────────────────────────────────────────────────
 
-export function activate(context) {
-  console.log('[TodoTree] activate() called, context._api=', !!context._api, 'globalThis.hyscode=', !!globalThis.hyscode);
-  api = context._api || globalThis.hyscode;
-  console.log('[TodoTree] api=', !!api, 'api.views=', !!(api && api.views), 'api.views.updateView=', !!(api && api.views && api.views.updateView));
+export async function activate(context, _api) {
+  console.log('[TodoTree] activate() called');
+  api = _api || context._api || globalThis.hyscode;
+  console.log('[TodoTree] api=', !!api);
+
+  // Load settings async first so getSetting() works correctly
+  await loadSettings();
 
   highlightsEnabled = getSetting('todoTree.highlightEnabled', true);
 
@@ -74,15 +115,14 @@ export function activate(context) {
 
   register('todoTree.refresh', async () => {
     showScanningView();
-    const progress = api.notifications?.progress?.('Scanning TODOs...');
     try {
       allResults = await scanWorkspace();
       currentIndex = -1;
       updateStatusBar();
       renderView();
-      api.notifications?.info?.(`Found ${allResults.length} TODO items`);
-    } finally {
-      progress?.done?.();
+      api.notifications.showInfo(`Found ${allResults.length} TODO items`);
+    } catch (e) {
+      console.error('[TodoTree] scan error:', e);
     }
   });
 
@@ -96,10 +136,12 @@ export function activate(context) {
     if (!tag) return;
 
     const tags = getSetting('todoTree.tags', defaultTags());
-    if (!tags.includes(tag.toUpperCase())) {
-      tags.push(tag.toUpperCase());
-      api.settings?.set?.('todoTree.tags', tags);
-      api.notifications?.info?.(`Tag "${tag.toUpperCase()}" adicionada`);
+    const upper = tag.toUpperCase();
+    if (!tags.includes(upper)) {
+      tags.push(upper);
+      settingsCache['todoTree.tags'] = tags;
+      try { await api.settings.set?.('todoTree.tags', tags); } catch { /* noop */ }
+      api.notifications.showInfo(`Tag "${upper}" adicionada`);
     }
   });
 
@@ -114,8 +156,9 @@ export function activate(context) {
     if (!choice) return;
 
     const updated = tags.filter(t => t !== choice.label);
-    api.settings?.set?.('todoTree.tags', updated);
-    api.notifications?.info?.(`Tag "${choice.label}" removida`);
+    settingsCache['todoTree.tags'] = updated;
+    try { await api.settings.set?.('todoTree.tags', updated); } catch { /* noop */ }
+    api.notifications.showInfo(`Tag "${choice.label}" removida`);
   });
 
   // ── Navigation ────────────────────────────────────────────────────────────
@@ -123,7 +166,7 @@ export function activate(context) {
   register('todoTree.goToNext', () => {
     const items = filteredResults();
     if (items.length === 0) {
-      api.notifications?.warning?.('Nenhum TODO encontrado. Execute Refresh primeiro.');
+      api.notifications.showWarning('Nenhum TODO encontrado. Execute Refresh primeiro.');
       return;
     }
     currentIndex = (currentIndex + 1) % items.length;
@@ -133,7 +176,7 @@ export function activate(context) {
   register('todoTree.goToPrevious', () => {
     const items = filteredResults();
     if (items.length === 0) {
-      api.notifications?.warning?.('Nenhum TODO encontrado. Execute Refresh primeiro.');
+      api.notifications.showWarning('Nenhum TODO encontrado. Execute Refresh primeiro.');
       return;
     }
     currentIndex = (currentIndex - 1 + items.length) % items.length;
@@ -152,7 +195,7 @@ export function activate(context) {
 
   register('todoTree.exportTree', async () => {
     if (allResults.length === 0) {
-      api.notifications?.warning?.('Nenhum TODO encontrado. Execute Refresh primeiro.');
+      api.notifications.showWarning('Nenhum TODO encontrado. Execute Refresh primeiro.');
       return;
     }
 
@@ -160,23 +203,24 @@ export function activate(context) {
     const md = exportAsMarkdown(allResults, groupBy);
     const filename = 'TODO_REPORT.md';
 
-    await api.workspace.createFile(filename, md);
+    await api.workspace.writeFile(filename, md);
     await api.editor?.openFile?.(filename);
-    api.notifications?.info?.(`Relatório exportado: ${filename}`);
+    api.notifications.showInfo(`Relatório exportado: ${filename}`);
   });
 
   // ── Scope ─────────────────────────────────────────────────────────────────
 
   register('todoTree.switchScope', async () => {
     const choice = await api.window.showQuickPick([
-      { label: 'Workspace', description: 'workspace' },
-      { label: 'Open Files', description: 'openFiles' },
+      { label: 'Workspace',    description: 'workspace' },
+      { label: 'Open Files',   description: 'openFiles' },
       { label: 'Current File', description: 'currentFile' },
     ], { placeholder: 'Escopo de varredura' });
     if (!choice) return;
 
-    api.settings?.set?.('todoTree.scanMode', choice.description);
-    api.notifications?.info?.(`Escopo: ${choice.label}`);
+    settingsCache['todoTree.scanMode'] = choice.description;
+    try { await api.settings.set?.('todoTree.scanMode', choice.description); } catch { /* noop */ }
+    api.notifications.showInfo(`Escopo: ${choice.label}`);
   });
 
   // ── Filters ───────────────────────────────────────────────────────────────
@@ -191,27 +235,27 @@ export function activate(context) {
 
     activeFilter = choice.label === 'All' ? null : choice.label;
     renderView();
-    api.notifications?.info?.(activeFilter ? `Filtro: ${activeFilter}` : 'Filtro removido');
+    api.notifications.showInfo(activeFilter ? `Filtro: ${activeFilter}` : 'Filtro removido');
   });
 
   register('todoTree.clearFilter', () => {
     activeFilter = null;
     renderView();
-    api.notifications?.info?.('Filtro limpo');
+    api.notifications.showInfo('Filtro limpo');
   });
 
   // ── Toggle highlights ─────────────────────────────────────────────────────
 
   register('todoTree.toggleHighlights', () => {
     highlightsEnabled = !highlightsEnabled;
-    api.notifications?.info?.(highlightsEnabled ? 'Highlights ativados' : 'Highlights desativados');
+    api.notifications.showInfo(highlightsEnabled ? 'Highlights ativados' : 'Highlights desativados');
   });
 
   // ── Show counts ───────────────────────────────────────────────────────────
 
   register('todoTree.showCounts', () => {
     if (allResults.length === 0) {
-      api.notifications?.info?.('Nenhum TODO encontrado. Execute Refresh.');
+      api.notifications.showInfo('Nenhum TODO encontrado. Execute Refresh.');
       return;
     }
 
@@ -225,7 +269,7 @@ export function activate(context) {
       .map(([tag, count]) => `${tag}: ${count}`)
       .join('  |  ');
 
-    api.notifications?.info?.(`Total: ${allResults.length} — ${lines}`);
+    api.notifications.showInfo(`Total: ${allResults.length} — ${lines}`);
   });
 
   // ── Status bar ────────────────────────────────────────────────────────────
@@ -240,9 +284,7 @@ export function activate(context) {
       priority: 30,
     });
     disposables.push(statusBar);
-  } catch {
-    // ignore
-  }
+  } catch { /* ignore */ }
 
   // ── Search listener ───────────────────────────────────────────────────────
 
@@ -252,39 +294,45 @@ export function activate(context) {
       renderView();
     });
     disposables.push(d);
-  } catch {
-    // views API may not be available yet
-  }
+  } catch { /* views API may not be available yet */ }
 
-  // Show initial welcome state
-  console.log('[TodoTree] About to call showWelcomeView()');
-  showWelcomeView();
-  console.log('[TodoTree] showWelcomeView() returned');
+  // ── Settings tab ──────────────────────────────────────────────────────────
 
-  // Auto-scan on activation
-  setTimeout(() => {
-    api.commands?.execute?.('todoTree.refresh');
-  }, 2000);
-
-  // Settings tab
   if (api.settings?.updateTabContent) {
     api.settings.updateTabContent('todo-tree.settings', {
       sections: [
         {
           title: 'Scanning',
           items: [
-            { type: 'select', key: 'scanMode', label: 'Scan Mode', description: 'Scope of TODO scanning', defaultValue: 'workspace', options: [{ value: 'workspace', label: 'Workspace' }, { value: 'openFiles', label: 'Open Files' }, { value: 'currentFile', label: 'Current File' }] },
+            {
+              type: 'select', key: 'scanMode', label: 'Scan Mode',
+              description: 'Scope of TODO scanning', defaultValue: 'workspace',
+              options: [
+                { value: 'workspace',    label: 'Workspace' },
+                { value: 'openFiles',    label: 'Open Files' },
+                { value: 'currentFile',  label: 'Current File' },
+              ],
+            },
           ],
         },
         {
           title: 'Editor Highlights',
           items: [
-            { type: 'toggle', key: 'highlightEnabled', label: 'Enable Highlights', description: 'Highlight TODO tags directly in the editor', defaultValue: true },
+            { type: 'toggle', key: 'highlightEnabled', label: 'Enable Highlights',
+              description: 'Highlight TODO tags directly in the editor', defaultValue: true },
           ],
         },
       ],
     });
   }
+
+  // ── Initial view + auto-scan ──────────────────────────────────────────────
+
+  showWelcomeView();
+
+  setTimeout(() => {
+    api.commands?.execute?.('todoTree.refresh');
+  }, 2000);
 }
 
 export function deactivate() {
@@ -297,6 +345,7 @@ export function deactivate() {
   currentIndex = -1;
   activeFilter = null;
   searchQuery = '';
+  settingsCache = {};
   api = null;
 }
 
@@ -305,9 +354,7 @@ export function deactivate() {
 // ─────────────────────────────────────────────────────────────────────────────
 
 function showWelcomeView() {
-  console.log('[TodoTree] showWelcomeView() — api=', !!api, 'api.views=', !!(api && api.views));
   try {
-    console.log('[TodoTree] calling api.views.updateView(todoTree.panel)...');
     api.views.updateView('todoTree.panel', {
       type: 'welcome',
       welcome: {
@@ -319,9 +366,8 @@ function showWelcomeView() {
         ],
       },
     });
-    console.log('[TodoTree] api.views.updateView(todoTree.panel) SUCCESS');
   } catch (e) {
-    console.error('[TodoTree] api.views.updateView FAILED:', e);
+    console.error('[TodoTree] updateView FAILED:', e);
   }
 }
 
@@ -339,9 +385,7 @@ function showScanningView() {
         },
       ],
     });
-  } catch {
-    // views API not ready
-  }
+  } catch { /* views API not ready */ }
 }
 
 function renderView() {
@@ -349,17 +393,15 @@ function renderView() {
     const items = getVisibleItems();
     const groupBy = getSetting('todoTree.groupBy', 'tag');
 
-    // ── Compute tag counts ──────────────────────────────────────────────────
     const tagCounts = {};
     for (const item of allResults) {
       tagCounts[item.tag] = (tagCounts[item.tag] || 0) + 1;
     }
 
-    // ── Stats section ───────────────────────────────────────────────────────
     const stats = [
       { label: 'Total', value: allResults.length, icon: '$(check)', color: '#8b5cf6' },
     ];
-    const topTags = Object.entries(tagCounts).sort((a, b) => b[1] - a[1]).slice(0, 3);
+    const topTags = Object.entries(tagCounts).sort((a, b) => b[1] - a[1]).slice(0, 4);
     for (const [tag, count] of topTags) {
       stats.push({
         label: tag,
@@ -369,11 +411,9 @@ function renderView() {
       });
     }
 
-    // ── Build grouped tree sections ─────────────────────────────────────────
     const treeSections = [];
 
     if (items.length === 0 && allResults.length > 0) {
-      // Search / filter returned nothing
       treeSections.push({
         id: 'no-results',
         title: 'No Matches',
@@ -410,7 +450,7 @@ function renderView() {
       }
 
       for (const [file, fileItems] of Object.entries(groups).sort()) {
-        const shortName = file.split('/').pop() || file;
+        const shortName = file.split(/[/\\]/).pop() || file;
         treeSections.push({
           id: `file-${file}`,
           title: shortName,
@@ -422,7 +462,6 @@ function renderView() {
         });
       }
     } else {
-      // flat list
       treeSections.push({
         id: 'flat',
         title: 'All Items',
@@ -434,44 +473,33 @@ function renderView() {
       });
     }
 
-    // ── Compose full view ───────────────────────────────────────────────────
-    const viewContent = {
+    api.views.updateView('todoTree.panel', {
       type: 'sections',
       toolbar: [
         { id: 'refresh', label: 'Refresh', icon: '$(refresh)', tooltip: 'Scan workspace', command: 'todoTree.refresh' },
-        { id: 'filter', label: 'Filter by Tag', icon: '$(filter)', tooltip: 'Filter by tag', command: 'todoTree.filterByTag' },
-        { id: 'export', label: 'Export', icon: '$(export)', tooltip: 'Export as Markdown', command: 'todoTree.exportTree' },
+        { id: 'filter',  label: 'Filter',  icon: '$(filter)',  tooltip: 'Filter by tag',  command: 'todoTree.filterByTag' },
+        { id: 'export',  label: 'Export',  icon: '$(export)',  tooltip: 'Export as Markdown', command: 'todoTree.exportTree' },
       ],
       searchable: true,
       searchPlaceholder: 'Search TODOs...',
       badge: allResults.length > 0 ? { count: allResults.length, tooltip: `${allResults.length} TODO items found` } : undefined,
       sections: [
-        {
-          id: 'stats',
-          title: 'Overview',
-          collapsible: true,
-          collapsed: false,
-          type: 'stats',
-          stats,
-        },
+        { id: 'stats', title: 'Overview', collapsible: true, collapsed: false, type: 'stats', stats },
         ...treeSections,
       ],
       footer: activeFilter
-        ? { text: `Filtered: ${activeFilter} — click to clear`, command: 'todoTree.clearFilter' }
-        : { text: `${allResults.length} items in ${Object.keys(tagCounts).length} tags` },
-    };
-
-    api.views.updateView('todoTree.panel', viewContent);
+        ? { text: `Filtrado: ${activeFilter} — clique para limpar`, command: 'todoTree.clearFilter' }
+        : { text: `${allResults.length} itens em ${Object.keys(tagCounts).length} tags` },
+    });
   } catch (e) {
-    // views API may not be available
     console.warn('[TodoTree] Failed to render view:', e);
   }
 }
 
 function todoToViewItem(item) {
-  const shortFile = item.file.split('/').pop() || item.file;
+  const shortFile = item.file.split(/[/\\]/).pop() || item.file;
   return {
-    id: `${item.file}:${item.line}:${item.tag}`,
+    id: `${item.file}:${item.line}:${item.col}:${item.tag}`,
     label: item.text.slice(0, 80) || `${item.tag} at line ${item.line}`,
     description: `${shortFile}:${item.line}`,
     icon: TAG_ICONS[item.tag] || '$(check)',
@@ -483,7 +511,6 @@ function todoToViewItem(item) {
     badgeColor: TAG_COLORS[item.tag] || '#8b5cf6',
     contextMenu: [
       { id: 'goto', label: 'Go to Location', icon: '$(file-text)', command: 'todoTree.goToItem', commandArgs: [item.file, item.line] },
-      { id: 'copy', label: 'Copy Text', icon: '$(file)', command: 'todoTree.goToItem', commandArgs: [item.file, item.line] },
     ],
   };
 }
@@ -491,7 +518,6 @@ function todoToViewItem(item) {
 function getVisibleItems() {
   let items = filteredResults();
 
-  // Apply search query
   if (searchQuery && searchQuery.trim()) {
     const q = searchQuery.toLowerCase().trim();
     items = items.filter(item =>
@@ -509,14 +535,11 @@ function getVisibleItems() {
 // ─────────────────────────────────────────────────────────────────────────────
 
 async function scanWorkspace() {
-  const tags = getSetting('todoTree.tags', defaultTags());
+  const tags        = getSetting('todoTree.tags',         defaultTags());
   const excludeGlobs = getSetting('todoTree.excludeGlobs', defaultExcludes());
-  const maxResults = getSetting('todoTree.maxResults', 5000);
+  const maxResults  = getSetting('todoTree.maxResults',   5000);
 
   if (tags.length === 0) return [];
-
-  const tagPattern = tags.map(t => escapeRegex(t)).join('|');
-  const regex = new RegExp(`(?:^|[^a-zA-Z])(${tagPattern})[:\\s](.*)`, 'i');
 
   const results = [];
 
@@ -530,20 +553,10 @@ async function scanWorkspace() {
         const content = await api.workspace.readFile(file);
         if (!content) continue;
 
-        const lines = content.split('\n');
-        for (let i = 0; i < lines.length; i++) {
-          const match = regex.exec(lines[i]);
-          if (match) {
-            results.push({
-              tag: match[1].toUpperCase(),
-              text: match[2].trim(),
-              file,
-              line: i + 1,
-              col: match.index,
-            });
-
-            if (results.length >= maxResults) break;
-          }
+        const found = scanLines(content, file, tags);
+        for (const item of found) {
+          if (results.length >= maxResults) break;
+          results.push(item);
         }
       } catch {
         // skip unreadable files
@@ -551,6 +564,78 @@ async function scanWorkspace() {
     }
   } catch {
     // fallback: no workspace listing available
+  }
+
+  return results;
+}
+
+/**
+ * Scan all lines of a file and return matched TODO items.
+ *
+ * Supported formats:
+ *   // TODO: text
+ *   // TODO text
+ *   // TODO(user): text
+ *   // TODO(#123): text
+ *   # TODO: text            (Python / shell)
+ *   -- TODO: text           (SQL / Lua)
+ *   <!-- TODO: text -->     (HTML)
+ *   @todo text              (JSDoc)
+ *   @TODO: text
+ *
+ * @param {string}   source   Full file content
+ * @param {string}   filePath File path (for the result objects)
+ * @param {string[]} tags     List of tag names to search (e.g. ['TODO', 'FIXME'])
+ * @returns {TodoItem[]}
+ */
+function scanLines(source, filePath, tags) {
+  const results = [];
+  const lines = source.split('\n');
+
+  // Build tag alternation — case-insensitive via flag, word-boundary enforced
+  const tagAlt = tags.map(escapeRegex).join('|');
+
+  /**
+   * Pattern breakdown:
+   *  (?:^|[^a-zA-Z@])        — word boundary: start of line OR preceded by non-letter/non-@
+   *  (@?)                    — optional @ prefix for JSDoc style (@todo)
+   *  (TAG_ALT)               — the tag itself (captured, group 2)
+   *  (?:\([^)]{0,60}\))?     — optional (username) or (#123) annotation, max 60 chars
+   *  [ \t]*[:：]?[ \t]*      — optional colon (ASCII or fullwidth) + surrounding spaces
+   *  (.+)                    — the comment text (captured, group 3) — must have content
+   */
+  const re = new RegExp(
+    `(?:^|[^a-zA-Z@])(@?)(${tagAlt})(?:\\([^)]{0,60}\\))?[ \\t]*[:：]?[ \\t]*(.+)`,
+    'gi'
+  );
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+
+    // Reset lastIndex for each line (since we reuse the same `re` object with `g` flag)
+    re.lastIndex = 0;
+
+    let m;
+    while ((m = re.exec(line)) !== null) {
+      const rawTag = m[2].toUpperCase();          // group 2 = tag name
+      const text   = m[3].trim()                  // group 3 = message text
+        .replace(/\*+\/\s*$/, '')                 // strip trailing */ from block comments
+        .replace(/-->$/, '')                       // strip trailing --> from HTML comments
+        .trim();
+
+      if (!text) continue;
+
+      // Col: position of the tag in the line
+      // m.index points to the char before the tag (the [^a-zA-Z@] match) when not at start
+      const atPrefix = m[1] ? 1 : 0;             // group 1 = '@' or ''
+      const prefixLen = m[0].length - m[2].length - text.length - atPrefix;
+      const col = Math.max(0, m.index + (m[0][0].match(/[a-zA-Z@]/) ? 0 : 1));
+
+      results.push({ tag: rawTag, text, file: filePath, line: i + 1, col });
+
+      // Advance past this match to find further TODOs on the same line
+      re.lastIndex = m.index + m[0].length;
+    }
   }
 
   return results;
@@ -565,12 +650,12 @@ async function listAllFiles(excludeGlobs) {
       if (!entries) return;
 
       for (const entry of entries) {
-        const path = dir ? `${dir}/${entry.name || entry}` : (entry.name || entry);
-        const name = entry.name || entry;
+        const name = entry.name || (typeof entry === 'string' ? entry : '');
+        const path = dir ? `${dir}/${name}` : name;
 
-        if (shouldExclude(path, excludeGlobs)) continue;
+        if (!name || shouldExclude(path)) continue;
 
-        if (entry.isDirectory || (typeof entry === 'string' && name.endsWith('/'))) {
+        if (entry.isDirectory || name.endsWith('/')) {
           await walk(path.replace(/\/$/, ''));
         } else {
           if (isTextFile(name)) {
@@ -590,30 +675,39 @@ async function listAllFiles(excludeGlobs) {
 function isTextFile(name) {
   const exts = [
     '.js', '.ts', '.tsx', '.jsx', '.mjs', '.cjs',
-    '.py', '.rs', '.go', '.java', '.kt', '.scala',
+    '.py', '.rs', '.go', '.java', '.kt', '.kts', '.scala',
     '.c', '.cpp', '.h', '.hpp', '.cs',
     '.rb', '.php', '.swift', '.dart',
-    '.html', '.css', '.scss', '.less', '.sass',
-    '.yaml', '.yml', '.json', '.toml', '.ini', '.cfg',
-    '.md', '.txt', '.rst',
-    '.sh', '.bash', '.zsh', '.ps1', '.bat', '.cmd',
+    '.html', '.htm', '.css', '.scss', '.less', '.sass',
+    '.yaml', '.yml', '.json', '.jsonc', '.toml', '.ini', '.cfg', '.env',
+    '.md', '.mdx', '.txt', '.rst',
+    '.sh', '.bash', '.zsh', '.fish', '.ps1', '.bat', '.cmd',
     '.sql', '.graphql', '.gql',
     '.vue', '.svelte', '.astro',
     '.xml', '.svg',
-    '.env', '.gitignore', '.dockerignore',
+    '.gitignore', '.dockerignore', '.editorconfig',
     '.prisma', '.proto',
+    '.lua', '.r', '.ex', '.exs', '.erl', '.hrl',
+    '.clj', '.cljs', '.elm', '.ml', '.fs', '.fsx',
+    '.zig', '.nim', '.v',
   ];
-  return exts.some(ext => name.endsWith(ext));
+  const lower = name.toLowerCase();
+  return exts.some(ext => lower.endsWith(ext));
 }
 
-function shouldExclude(path, excludeGlobs) {
-  const normalised = path.replace(/\\/g, '/');
+function shouldExclude(path) {
+  const norm = path.replace(/\\/g, '/');
   const excludeSegments = [
     'node_modules', 'dist', 'build', '.git', 'target',
     '__pycache__', 'vendor', '.next', '.nuxt', 'coverage',
-    '.turbo', '.cache',
+    '.turbo', '.cache', '.yarn', 'out', '.svelte-kit',
+    '.vite', 'storybook-static', '.parcel-cache',
   ];
-  return excludeSegments.some(seg => normalised.includes(`/${seg}/`) || normalised.startsWith(`${seg}/`));
+  return excludeSegments.some(seg =>
+    norm.includes(`/${seg}/`) ||
+    norm.startsWith(`${seg}/`) ||
+    norm === seg
+  );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -621,11 +715,18 @@ function shouldExclude(path, excludeGlobs) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 function defaultTags() {
-  return ['TODO', 'FIXME', 'BUG', 'HACK', 'XXX', 'NOTE', 'WARN', 'PERF'];
+  return [
+    'TODO', 'FIXME', 'BUG', 'HACK', 'XXX',
+    'NOTE', 'WARN', 'PERF',
+    'REVIEW', 'DEPRECATED', 'OPTIMIZE', 'CHANGED', 'IDEA', 'QUESTION', 'SAFETY',
+  ];
 }
 
 function defaultExcludes() {
-  return ['**/node_modules/**', '**/dist/**', '**/build/**', '**/.git/**', '**/target/**', '**/__pycache__/**', '**/vendor/**'];
+  return [
+    '**/node_modules/**', '**/dist/**', '**/build/**', '**/.git/**',
+    '**/target/**', '**/__pycache__/**', '**/vendor/**', '**/coverage/**',
+  ];
 }
 
 function filteredResults() {
@@ -637,7 +738,7 @@ function goToItem(item) {
   if (!item) return;
   api.editor?.openFile?.(item.file);
   api.editor?.goToLine?.(item.line);
-  api.notifications?.info?.(`[${item.tag}] ${item.file}:${item.line} — ${item.text.slice(0, 60)}`);
+  api.notifications.showInfo(`[${item.tag}] ${item.file}:${item.line} — ${item.text.slice(0, 60)}`);
 }
 
 function updateStatusBar() {
@@ -645,19 +746,14 @@ function updateStatusBar() {
     const mode = getSetting('todoTree.statusBar', 'total');
     let text = `$(checklist) TODOs: ${allResults.length}`;
 
-    if (mode === 'perTag') {
+    if (mode === 'perTag' || mode === 'topThree') {
       const counts = {};
       for (const item of allResults) {
         counts[item.tag] = (counts[item.tag] || 0) + 1;
       }
-      const parts = Object.entries(counts).slice(0, 4).map(([t, c]) => `${t}:${c}`);
-      text = `$(checklist) ${parts.join(' ')}`;
-    } else if (mode === 'topThree') {
-      const counts = {};
-      for (const item of allResults) {
-        counts[item.tag] = (counts[item.tag] || 0) + 1;
-      }
-      const top = Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, 3);
+      const top = Object.entries(counts)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, mode === 'topThree' ? 3 : 99);
       text = `$(checklist) ${top.map(([t, c]) => `${t}:${c}`).join(' ')}`;
     }
 
@@ -669,9 +765,7 @@ function updateStatusBar() {
       alignment: 'right',
       priority: 30,
     });
-  } catch {
-    // ignore
-  }
+  } catch { /* ignore */ }
 }
 
 function exportAsMarkdown(items, groupBy) {
@@ -709,19 +803,6 @@ function exportAsMarkdown(items, groupBy) {
   }
 
   return md;
-}
-
-function getSetting(key, defaultValue) {
-  try {
-    const val = api.settings?.get?.(key);
-    // api.settings.get is async — if it returns a Promise, fall back to defaultValue
-    if (val === undefined || val === null || (typeof val === 'object' && typeof val.then === 'function')) {
-      return defaultValue;
-    }
-    return val;
-  } catch {
-    return defaultValue;
-  }
 }
 
 function escapeRegex(str) {

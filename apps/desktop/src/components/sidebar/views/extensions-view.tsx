@@ -24,7 +24,7 @@ import {
   Download,
   HardDrive,
 } from 'lucide-react';
-import { useExtensionStore, type ExtensionFilter, type InstalledExtension, type StoreItem, STORE_CACHE_TTL_MS } from '../../../stores/extension-store';
+import { useExtensionStore, type ExtensionFilter, type InstalledExtension, type StoreItem } from '../../../stores/extension-store';
 import { TabBadge } from '../../ui/tab-badge';
 
 // ── Filter Tabs ──────────────────────────────────────────────────────────────
@@ -307,14 +307,18 @@ function ExtensionDetail({
 
 function ExtensionRow({
   ext,
+  storeUpdateNames,
   onSelect,
 }: {
   ext: InstalledExtension;
+  storeUpdateNames: Set<string>;
   onSelect: () => void;
 }) {
   const toggleExtension = useExtensionStore((s) => s.toggleExtension);
   const gitUpdates = useExtensionStore((s) => s.gitUpdates);
-  const hasUpdate = gitUpdates[ext.name]?.hasUpdate ?? false;
+  const hasGitUpdate = gitUpdates[ext.name]?.hasUpdate ?? false;
+  const hasStoreUpdate = storeUpdateNames.has(ext.name);
+  const hasUpdate = hasGitUpdate || hasStoreUpdate;
 
   return (
     <div
@@ -386,12 +390,18 @@ function StoreRow({
   item,
   isInstalled,
   isInstalling,
+  hasUpdate,
+  isUpdating,
   onInstall,
+  onUpdate,
 }: {
   item: StoreItem;
   isInstalled: boolean;
   isInstalling: boolean;
+  hasUpdate: boolean;
+  isUpdating: boolean;
   onInstall: () => void;
+  onUpdate: () => void;
 }) {
   return (
     <div className="flex items-center gap-2 px-2 py-1.5 hover:bg-muted/50 transition-colors group">
@@ -403,10 +413,16 @@ function StoreRow({
           <span className="text-[11px] font-medium truncate text-foreground">
             {item.displayName}
           </span>
-          {isInstalled && (
+          {isInstalled && !hasUpdate && (
             <span className="shrink-0 flex items-center gap-0.5 rounded-full bg-accent/15 px-1.5 py-px text-[8px] font-medium text-accent">
               <CheckCircle2 className="h-2 w-2" />
               Installed
+            </span>
+          )}
+          {hasUpdate && (
+            <span className="shrink-0 flex items-center gap-0.5 rounded-full bg-orange-500/15 px-1.5 py-px text-[8px] font-medium text-orange-400">
+              <RefreshCw className="h-2 w-2" />
+              Update
             </span>
           )}
         </div>
@@ -414,26 +430,45 @@ function StoreRow({
           {formatBytes(item.size)}
         </div>
       </div>
-      <button
-        onClick={onInstall}
-        disabled={isInstalled || isInstalling}
-        className={`shrink-0 flex items-center gap-1 rounded-md px-2 py-0.5 text-[9px] font-medium transition-colors ${
-          isInstalled
-            ? 'text-accent/50 cursor-default'
-            : isInstalling
-              ? 'bg-accent/10 text-accent/60 cursor-not-allowed'
-              : 'bg-muted text-muted-foreground hover:bg-accent/10 hover:text-accent'
-        }`}
-        title={isInstalled ? 'Already installed' : `Install ${item.displayName}`}
-      >
-        {isInstalling ? (
-          <Loader2 className="h-3 w-3 animate-spin" />
-        ) : isInstalled ? (
-          <HardDrive className="h-3 w-3" />
-        ) : (
-          <Download className="h-3 w-3" />
-        )}
-      </button>
+      {hasUpdate ? (
+        <button
+          onClick={onUpdate}
+          disabled={isUpdating}
+          className={`shrink-0 flex items-center gap-1 rounded-md px-2 py-0.5 text-[9px] font-medium transition-colors ${
+            isUpdating
+              ? 'bg-orange-500/10 text-orange-400/60 cursor-not-allowed'
+              : 'bg-orange-500/10 text-orange-400 hover:bg-orange-500/20'
+          }`}
+          title={`Update ${item.displayName}`}
+        >
+          {isUpdating ? (
+            <Loader2 className="h-3 w-3 animate-spin" />
+          ) : (
+            <RefreshCw className="h-3 w-3" />
+          )}
+        </button>
+      ) : (
+        <button
+          onClick={onInstall}
+          disabled={isInstalled || isInstalling}
+          className={`shrink-0 flex items-center gap-1 rounded-md px-2 py-0.5 text-[9px] font-medium transition-colors ${
+            isInstalled
+              ? 'text-accent/50 cursor-default'
+              : isInstalling
+                ? 'bg-accent/10 text-accent/60 cursor-not-allowed'
+                : 'bg-muted text-muted-foreground hover:bg-accent/10 hover:text-accent'
+          }`}
+          title={isInstalled ? 'Already installed' : `Install ${item.displayName}`}
+        >
+          {isInstalling ? (
+            <Loader2 className="h-3 w-3 animate-spin" />
+          ) : isInstalled ? (
+            <HardDrive className="h-3 w-3" />
+          ) : (
+            <Download className="h-3 w-3" />
+          )}
+        </button>
+      )}
     </div>
   );
 }
@@ -443,21 +478,23 @@ function StoreView() {
   const storeLoading = useExtensionStore((s) => s.storeLoading);
   const storeError = useExtensionStore((s) => s.storeError);
   const installingFromStore = useExtensionStore((s) => s.installingFromStore);
+  const updatingFromStore = useExtensionStore((s) => s.updatingFromStore);
   const storeFetchedAt = useExtensionStore((s) => s.storeFetchedAt);
   const fetchStoreItems = useExtensionStore((s) => s.fetchStoreItems);
   const installFromStore = useExtensionStore((s) => s.installFromStore);
+  const updateExtensionFromStore = useExtensionStore((s) => s.updateExtensionFromStore);
+  const getStoreUpdates = useExtensionStore((s) => s.getStoreUpdates);
   const extensions = useExtensionStore((s) => s.extensions);
   const error = useExtensionStore((s) => s.error);
 
   const [storeSearch, setStoreSearch] = useState('');
 
   const installedNames = new Set(extensions.map((e) => e.name));
+  const storeUpdateNames = new Set(getStoreUpdates());
 
   useEffect(() => {
-    const isStale = !storeFetchedAt || Date.now() - storeFetchedAt > STORE_CACHE_TTL_MS;
-    if (isStale || storeItems.length === 0) {
-      void fetchStoreItems();
-    }
+    // Always fetch fresh from repo on mount
+    void fetchStoreItems();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -495,7 +532,11 @@ function StoreView() {
       {/* Toolbar */}
       <div className="flex items-center justify-between px-2 py-1 border-b border-border">
         <span className="text-[9px] text-muted-foreground/60">
-          {storeItems.length > 0 ? `${storeItems.length} extensions available` : ''}
+          {storeItems.length > 0
+            ? `${storeItems.length} available${storeUpdateNames.size > 0 ? ` · ${storeUpdateNames.size} update${storeUpdateNames.size > 1 ? 's' : ''}` : ''}`
+            : storeFetchedAt
+              ? 'No extensions found'
+              : ''}
         </span>
         <button
           onClick={() => void fetchStoreItems()}
@@ -528,6 +569,14 @@ function StoreView() {
         <div className="flex items-center gap-1.5 px-2 py-1.5 text-[10px] text-accent bg-accent/5 border-b border-accent/10">
           <Loader2 className="h-3 w-3 animate-spin shrink-0" />
           <span className="truncate">Installing…</span>
+        </div>
+      )}
+
+      {/* Updating indicator */}
+      {updatingFromStore && (
+        <div className="flex items-center gap-1.5 px-2 py-1.5 text-[10px] text-orange-400 bg-orange-500/5 border-b border-orange-500/10">
+          <Loader2 className="h-3 w-3 animate-spin shrink-0" />
+          <span className="truncate">Updating…</span>
         </div>
       )}
 
@@ -569,7 +618,10 @@ function StoreView() {
             item={item}
             isInstalled={installedNames.has(item.name)}
             isInstalling={installingFromStore === item.name}
+            hasUpdate={storeUpdateNames.has(item.name)}
+            isUpdating={updatingFromStore === item.name}
             onInstall={() => void installFromStore(item)}
+            onUpdate={() => void updateExtensionFromStore(item)}
           />
         ))}
       </div>
@@ -597,6 +649,9 @@ export function ExtensionsView() {
   const setFilter = useExtensionStore((s) => s.setFilter);
   const selectExtension = useExtensionStore((s) => s.selectExtension);
   const getFiltered = useExtensionStore((s) => s.getFiltered);
+  const getStoreUpdates = useExtensionStore((s) => s.getStoreUpdates);
+
+  const storeUpdateNames = new Set(getStoreUpdates());
 
   const [viewMode, setViewMode] = useState<'installed' | 'store'>('installed');
   const [showGitForm, setShowGitForm] = useState(false);
@@ -879,6 +934,7 @@ export function ExtensionsView() {
           <ExtensionRow
             key={ext.name}
             ext={ext}
+            storeUpdateNames={storeUpdateNames}
             onSelect={() => selectExtension(ext.name)}
           />
         ))}

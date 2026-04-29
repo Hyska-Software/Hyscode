@@ -54,11 +54,25 @@ export interface StoreItem {
   fileName: string;    // e.g. "angular-support.rar" or "angular-support.zip"
   downloadUrl: string; // raw GitHub download URL
   size: number;        // bytes
-  sha: string;         // git blob sha for deduplication
+  sha: string;         // git blob sha for deduplication / update detection
 }
 
 const STORE_REPO_API = 'https://api.github.com/repos/hyskasoftware/Hyscode-Extensions/contents/';
 export const STORE_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
+// ── Store-sha persistence (localStorage) ─────────────────────────────────────
+
+const STORE_SHAS_KEY = 'hyscode.storeInstalledShas';
+
+function loadStoreShas(): Record<string, string> {
+  try {
+    return JSON.parse(localStorage.getItem(STORE_SHAS_KEY) ?? '{}') as Record<string, string>;
+  } catch { return {}; }
+}
+
+function saveStoreShas(shas: Record<string, string>) {
+  try { localStorage.setItem(STORE_SHAS_KEY, JSON.stringify(shas)); } catch { /* ignore */ }
+}
 
 function formatStoreName(fileName: string): string {
   const slug = fileName.replace(/\.(rar|zip)$/i, '');
@@ -149,7 +163,9 @@ interface ExtensionState {
   storeLoading: boolean;
   storeError: string | null;
   installingFromStore: string | null;
+  updatingFromStore: string | null;
   storeFetchedAt: number | null;
+  installedStoreShas: Record<string, string>;
 
   // Actions
   loadExtensions: () => Promise<void>;
@@ -168,6 +184,8 @@ interface ExtensionState {
   loadExtensionThemes: (themes: Array<ThemeContribution & { extensionName: string }>) => Promise<void>;
   fetchStoreItems: () => Promise<void>;
   installFromStore: (item: StoreItem) => Promise<void>;
+  updateExtensionFromStore: (item: StoreItem) => Promise<void>;
+  getStoreUpdates: () => string[];
   // Computed-like helpers
   getFiltered: () => InstalledExtension[];
 }
@@ -193,7 +211,9 @@ export const useExtensionStore = create<ExtensionState>()(
     storeLoading: false,
     storeError: null,
     installingFromStore: null,
+    updatingFromStore: null,
     storeFetchedAt: null,
+    installedStoreShas: loadStoreShas(),
 
     loadExtensions: async () => {
       const previousExtensions = get().extensions;
@@ -485,12 +505,52 @@ export const useExtensionStore = create<ExtensionState>()(
             (a.displayName || a.name).toLowerCase().localeCompare((b.displayName || b.name).toLowerCase())
           );
           s.installingFromStore = null;
+          // Record the installed sha so we can detect future updates
+          s.installedStoreShas[ext.name] = item.sha;
+          saveStoreShas(s.installedStoreShas);
         });
         get().rebuildContributions();
         void reloadExtension(ext);
       } catch (err) {
         set((s) => { s.installingFromStore = null; s.error = String(err); });
       }
+    },
+
+    updateExtensionFromStore: async (item: StoreItem) => {
+      set((s) => { s.updatingFromStore = item.name; s.error = null; });
+      try {
+        const ext = await invoke<InstalledExtension>('extension_install_from_store', {
+          downloadUrl: item.downloadUrl,
+        });
+        set((s) => {
+          s.extensions = s.extensions.filter((e) => e.name !== ext.name);
+          s.extensions.push(ext);
+          s.extensions.sort((a, b) =>
+            (a.displayName || a.name).toLowerCase().localeCompare((b.displayName || b.name).toLowerCase())
+          );
+          s.updatingFromStore = null;
+          // Update recorded sha
+          s.installedStoreShas[ext.name] = item.sha;
+          saveStoreShas(s.installedStoreShas);
+        });
+        get().rebuildContributions();
+        void reloadExtension(ext);
+      } catch (err) {
+        set((s) => { s.updatingFromStore = null; s.error = String(err); });
+      }
+    },
+
+    getStoreUpdates: () => {
+      const { storeItems, installedStoreShas, extensions } = get();
+      const installedNames = new Set(extensions.map((e) => e.name));
+      return storeItems
+        .filter((item) => {
+          if (!installedNames.has(item.name)) return false;
+          const recordedSha = installedStoreShas[item.name];
+          // Only flag as outdated if we have a recorded sha AND it differs
+          return recordedSha !== undefined && recordedSha !== item.sha;
+        })
+        .map((item) => item.name);
     },
 
     getFiltered: () => {
