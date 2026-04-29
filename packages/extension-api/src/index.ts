@@ -180,6 +180,39 @@ export interface IconThemeContribution {
   path: string;
 }
 
+/**
+ * A single icon definition inside an icon theme JSON file.
+ * `svgPath` is resolved relative to the theme JSON file's directory.
+ */
+export interface IconImageDefinition {
+  svgPath: string;
+}
+
+/**
+ * Shape of the icon theme JSON file referenced by `IconThemeContribution.path`.
+ *
+ * Keys in `fileExtensions`, `fileNames`, `folderNames`, and `folderNamesExpanded`
+ * are matched case-insensitively. Extension keys should omit the leading dot.
+ */
+export interface IconThemeDefinition {
+  /** Map of icon id → image definition. All icon ids used below must appear here. */
+  iconDefinitions: Record<string, IconImageDefinition>;
+  /** Default icon id used for files with no specific match. */
+  file?: string;
+  /** Default icon id used for closed folders with no specific match. */
+  folder?: string;
+  /** Default icon id used for open folders with no specific match. */
+  folderExpanded?: string;
+  /** Map of file extension (no leading dot) → icon id. */
+  fileExtensions?: Record<string, string>;
+  /** Map of exact file name → icon id. */
+  fileNames?: Record<string, string>;
+  /** Map of folder name → icon id for closed state. */
+  folderNames?: Record<string, string>;
+  /** Map of folder name → icon id for open state. */
+  folderNamesExpanded?: Record<string, string>;
+}
+
 // ── Settings Tab Contribution ─────────────────────────────────────────────────
 
 /**
@@ -324,6 +357,7 @@ export interface HyscodeAPI {
   settings: SettingsAPI;
   git: GitAPI;
   themes: ThemesAPI;
+  iconThemes: IconThemesAPI;
   languages: LanguagesAPI;
   notifications: NotificationsAPI;
   extensions: ExtensionsManagerAPI;
@@ -567,6 +601,26 @@ export interface GitFileStatus {
 export interface ThemesAPI {
   registerTheme(theme: ThemeDefinition): Disposable;
   getActiveThemeId(): string;
+}
+
+// ── Icon Themes API ──────────────────────────────────────────────────────────
+
+export interface IconThemesAPI {
+  /**
+   * Register a data-URL SVG icon for one or more file extensions.
+   * `extensions` should be without a leading dot (e.g. `['ts', 'tsx']`).
+   * Lower-priority than a full active icon theme pack; used as fallback.
+   */
+  registerFileExtensionIcon(extensions: string[], svgDataUrl: string): Disposable;
+  /**
+   * Register a data-URL SVG icon for one or more exact file names.
+   * Lower-priority than a full active icon theme pack; used as fallback.
+   */
+  registerFileNameIcon(fileNames: string[], svgDataUrl: string): Disposable;
+  /** Returns the id of the currently active icon theme (`'default'` for built-ins). */
+  getActiveIconThemeId(): string;
+  /** Subscribe to icon theme changes. */
+  onDidChangeIconTheme(handler: (themeId: string) => void): Disposable;
 }
 
 // ── Languages API ────────────────────────────────────────────────────────────

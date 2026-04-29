@@ -29,6 +29,11 @@ import type {
   SettingsTabContent,
 } from '@hyscode/extension-api';
 import { registerExtensionTheme } from './monaco-themes';
+import {
+  registerLanguageIcon,
+  getActiveIconThemeId,
+  subscribeIconThemeChange,
+} from './icon-theme-registry';
 import { useProjectStore } from '../stores/project-store';
 import { useSettingsStore } from '../stores/settings-store';
 import { useEditorStore } from '../stores/editor-store';
@@ -231,6 +236,24 @@ const _api: HyscodeAPI = {
     },
     getActiveThemeId(): string {
       return useSettingsStore.getState().themeId;
+    },
+  },
+
+  iconThemes: {
+    registerFileExtensionIcon(extensions: string[], svgDataUrl: string): Disposable {
+      registerLanguageIcon(extensions, [], svgDataUrl);
+      return { dispose() {} };
+    },
+    registerFileNameIcon(fileNames: string[], svgDataUrl: string): Disposable {
+      registerLanguageIcon([], fileNames, svgDataUrl);
+      return { dispose() {} };
+    },
+    getActiveIconThemeId(): string {
+      return getActiveIconThemeId();
+    },
+    onDidChangeIconTheme(handler: (themeId: string) => void): Disposable {
+      const unsub = subscribeIconThemeChange(handler);
+      return { dispose: unsub };
     },
   },
 

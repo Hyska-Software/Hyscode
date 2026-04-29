@@ -2,6 +2,7 @@
 // SVG icons colored to match VS Code's material-icon-theme.
 
 import React from 'react';
+import { resolveFileIconUrl, resolveFolderIconUrl } from '../../../lib/icon-theme-registry';
 
 interface IconProps {
   className?: string;
@@ -1250,13 +1251,30 @@ const SPECIAL_FOLDERS: Record<string, React.FC<IconProps>> = {
 //  PUBLIC API
 // ═══════════════════════════════════════════════════════════════════════════════
 
+/**
+ * Cache of data-URL → stable React FC component.
+ * Stable references prevent unnecessary React unmount/remount cycles.
+ */
+const _urlIconCache = new Map<string, React.FC<IconProps>>();
+
+function createUrlIcon(dataUrl: string): React.FC<IconProps> {
+  if (!_urlIconCache.has(dataUrl)) {
+    const UrlIcon: React.FC<IconProps> = ({ className = 'h-4 w-4' }) => (
+      <img src={dataUrl} className={className} style={{ objectFit: 'contain' }} alt="" />
+    );
+    _urlIconCache.set(dataUrl, UrlIcon);
+  }
+  return _urlIconCache.get(dataUrl)!;
+}
+
 export function getFileIcon(name: string): React.FC<IconProps> {
+  // 1. Active icon theme or language icon override
+  const url = resolveFileIconUrl(name);
+  if (url) return createUrlIcon(url);
+
+  // 2. Built-in hardcoded icons
   const lower = name.toLowerCase();
-
-  // Check special file names first
   if (SPECIAL_FILES[lower]) return SPECIAL_FILES[lower];
-
-  // Check extension
   const ext = lower.split('.').pop() ?? '';
   if (EXT_ICONS[ext]) return EXT_ICONS[ext];
 
@@ -1264,6 +1282,11 @@ export function getFileIcon(name: string): React.FC<IconProps> {
 }
 
 export function getFolderIcon(name: string, isOpen: boolean): React.FC<IconProps> {
+  // 1. Active icon theme override
+  const url = resolveFolderIconUrl(name, isOpen);
+  if (url) return createUrlIcon(url);
+
+  // 2. Built-in hardcoded icons
   const lower = name.toLowerCase();
   if (SPECIAL_FOLDERS[lower]) return SPECIAL_FOLDERS[lower];
   return isOpen ? FolderOpenIcon : FolderIcon;

@@ -17,6 +17,7 @@ import {
 import { useFileStore, useEditorStore, useGitStore } from '../../../stores';
 import { useLayoutStore } from '../../../stores/layout-store';
 import { useDiagnosticsStore } from '../../../stores/diagnostics-store';
+import { useExtensionStore } from '../../../stores/extension-store';
 import type { FileDiagnostics } from '../../../stores/diagnostics-store';
 import { tauriFs } from '../../../lib/tauri-fs';
 import { getViewerType, writeClipboard } from '../../../lib/utils';
@@ -541,6 +542,8 @@ export function FileTree() {
   const tree = useFileStore((s) => s.tree);
   const rootPath = useFileStore((s) => s.rootPath);
   const expandDirectory = useFileStore((s) => s.expandDirectory);
+  // Re-render when extension icon themes change
+  useExtensionStore((s) => s.extensionIconThemesVersion);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [renamingPath, setRenamingPath] = useState<string | null>(null);
   const [creatingIn, setCreatingIn] = useState<{ parentPath: string; isDir: boolean } | null>(null);

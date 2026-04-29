@@ -2,6 +2,7 @@ import { Check } from 'lucide-react';
 import { useSettingsStore } from '../../../stores';
 import { useExtensionStore } from '../../../stores/extension-store';
 import { getCustomThemeMetas } from '../../../lib/monaco-themes';
+import { getRegisteredIconThemes, setActiveIconThemeId } from '../../../lib/icon-theme-registry';
 import type { ThemeId } from '../../../stores/settings-store';
 
 interface ThemeOption {
@@ -185,9 +186,18 @@ function ThemeCard({
 export function ThemeTab() {
   const themeId = useSettingsStore((s) => s.themeId);
   const setThemeId = useSettingsStore((s) => s.setThemeId);
+  const iconThemeId = useSettingsStore((s) => s.iconThemeId);
+  const setIconThemeId = useSettingsStore((s) => s.setIconThemeId);
   // Re-render when extension themes finish loading
   useExtensionStore((s) => s.extensionThemesVersion);
+  useExtensionStore((s) => s.extensionIconThemesVersion);
   const customMetas = getCustomThemeMetas();
+  const extensionIconThemes = getRegisteredIconThemes();
+
+  function handleSelectIconTheme(id: string) {
+    setIconThemeId(id);
+    setActiveIconThemeId(id);
+  }
 
   return (
     <div className="flex flex-col gap-4">
@@ -232,6 +242,69 @@ export function ThemeTab() {
           </div>
         </>
       )}
+
+      {/* ── Icon Themes ──────────────────────────────────────────────────── */}
+      <div className="mt-2 border-t border-border pt-3">
+        <p className="text-[11px] font-medium text-foreground mb-1">Icon Theme</p>
+        <p className="text-[10px] text-muted-foreground mb-3">
+          Changes file and folder icons throughout the IDE.
+        </p>
+      </div>
+
+      <div className="flex flex-col gap-1">
+        {/* Built-in default option */}
+        <IconThemeRow
+          id="default"
+          label="Default"
+          description="Built-in material-style icons"
+          isActive={iconThemeId === 'default'}
+          onSelect={() => handleSelectIconTheme('default')}
+        />
+        {extensionIconThemes.map((t) => (
+          <IconThemeRow
+            key={t.id}
+            id={t.id}
+            label={t.label}
+            description={`from ${t.extensionName}`}
+            isActive={iconThemeId === t.id}
+            onSelect={() => handleSelectIconTheme(t.id)}
+          />
+        ))}
+      </div>
     </div>
+  );
+}
+
+function IconThemeRow({
+  label,
+  description,
+  isActive,
+  onSelect,
+}: {
+  id: string;
+  label: string;
+  description: string;
+  isActive: boolean;
+  onSelect: () => void;
+}) {
+  return (
+    <button
+      onClick={onSelect}
+      className={`flex items-center gap-3 rounded-md px-3 py-2 text-left transition-colors ${
+        isActive
+          ? 'bg-accent/15 ring-1 ring-accent'
+          : 'hover:bg-muted/40'
+      }`}
+    >
+      <div className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-full border ${
+        isActive ? 'border-accent bg-accent' : 'border-muted-foreground/40'
+      }`}>
+        {isActive && <Check className="h-2.5 w-2.5 text-accent-foreground" />}
+      </div>
+      <div className="flex flex-col">
+        <span className="text-[11px] font-medium text-foreground">{label}</span>
+        <span className="text-[10px] text-muted-foreground">{description}</span>
+      </div>
+    </button>
   );
 }

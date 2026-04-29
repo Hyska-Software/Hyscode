@@ -19,6 +19,14 @@ import type {
 } from '@hyscode/extension-api';
 import { registerExtensionTheme, unregisterExtensionTheme } from '../lib/monaco-themes';
 import {
+  registerIconTheme,
+  unregisterIconTheme,
+  setActiveIconThemeId,
+  registerLanguageIcon,
+  clearLanguageIcons,
+} from '../lib/icon-theme-registry';
+import { useSettingsStore } from './settings-store';
+import {
   activateAllExtensions,
   activateExtension,
   deactivateExtension,
@@ -152,6 +160,7 @@ interface ExtensionState {
   selectedExtension: string | null;
   contributions: MergedContributions;
   extensionThemesVersion: number;
+  extensionIconThemesVersion: number;
   // Git install/update
   gitUpdates: Record<string, GitUpdateInfo>;
   gitSources: Record<string, ExtensionGitSource>;
@@ -182,6 +191,10 @@ interface ExtensionState {
   selectExtension: (name: string | null) => void;
   rebuildContributions: () => void;
   loadExtensionThemes: (themes: Array<ThemeContribution & { extensionName: string }>) => Promise<void>;
+  loadExtensionIconThemes: (
+    iconThemes: Array<IconThemeContribution & { extensionName: string }>,
+    languages: Array<LanguageContribution & { extensionName: string }>,
+  ) => Promise<void>;
   fetchStoreItems: () => Promise<void>;
   installFromStore: (item: StoreItem) => Promise<void>;
   updateExtensionFromStore: (item: StoreItem) => Promise<void>;
@@ -203,6 +216,7 @@ export const useExtensionStore = create<ExtensionState>()(
     selectedExtension: null,
     contributions: emptyContributions(),
     extensionThemesVersion: 0,
+    extensionIconThemesVersion: 0,
     gitUpdates: {},
     gitSources: {},
     checkingUpdates: false,
@@ -679,12 +693,21 @@ export const useExtensionStore = create<ExtensionState>()(
         }
       }
 
+      // Unregister icon themes that are no longer active
+      for (const old of prev.iconThemes) {
+        if (!next.iconThemes.find((it) => it.id === old.id)) {
+          unregisterIconTheme(old.id);
+        }
+      }
+
       set((s) => {
         s.contributions = next;
       });
 
       // Async: read theme JSON files and register them with Monaco + theme picker
       void get().loadExtensionThemes(next.themes);
+      // Async: read icon theme JSON + SVG files and register with icon registry
+      void get().loadExtensionIconThemes(next.iconThemes, next.languages);
     },
 
     loadExtensionThemes: async (themes: Array<ThemeContribution & { extensionName: string }>) => {
@@ -706,6 +729,94 @@ export const useExtensionStore = create<ExtensionState>()(
       }
       // Bump version so theme-tab re-renders and picks up getCustomThemeMetas()
       set((s) => { s.extensionThemesVersion++; });
+    },
+
+    loadExtensionIconThemes: async (
+      iconThemes: Array<IconThemeContribution & { extensionName: string }>,
+      languages: Array<LanguageContribution & { extensionName: string }>,
+    ) => {
+      // Generation token: if rebuildContributions is called again while this
+      // async load is in flight, the new call will have a newer token and the
+      // old results will be silently discarded.
+      const generation = Date.now();
+      (get() as unknown as { _iconThemeGeneration?: number })._iconThemeGeneration = generation;
+
+      const isStale = () =>
+        (get() as unknown as { _iconThemeGeneration?: number })._iconThemeGeneration !== generation;
+
+      // ── Full icon theme packs ──────────────────────────────────────────────
+      for (const contrib of iconThemes) {
+        if (!contrib.path || isStale()) continue;
+        try {
+          const content = await invoke<string>('extension_read_asset', {
+            name: contrib.extensionName,
+            assetPath: contrib.path,
+          });
+          if (isStale()) continue;
+
+          const def = JSON.parse(content) as import('@hyscode/extension-api').IconThemeDefinition;
+
+          // Determine the directory of the theme JSON relative to extension root
+          const themeDir = contrib.path.includes('/')
+            ? contrib.path.substring(0, contrib.path.lastIndexOf('/') + 1)
+            : contrib.path.includes('\\')
+            ? contrib.path.substring(0, contrib.path.lastIndexOf('\\') + 1)
+            : '';
+
+          const svgLoader = async (svgPath: string): Promise<string | null> => {
+            const fullPath = themeDir + svgPath;
+            try {
+              const raw = await invoke<string>('extension_read_asset', {
+                name: contrib.extensionName,
+                assetPath: fullPath,
+              });
+              const b64 = btoa(unescape(encodeURIComponent(raw)));
+              return `data:image/svg+xml;base64,${b64}`;
+            } catch {
+              return null;
+            }
+          };
+
+          await registerIconTheme(contrib.id, contrib.label, contrib.extensionName, def, svgLoader);
+        } catch (e) {
+          console.warn(`[ExtensionStore] Failed to load icon theme "${contrib.id}":`, e);
+        }
+      }
+
+      if (isStale()) return;
+
+      // ── Language icon contributions ────────────────────────────────────────
+      // Collect all keys contributed by extension languages to clear stale entries first
+      const allLangKeys: Array<{ ext?: string; name?: string }> = [];
+      for (const lang of languages) {
+        for (const ext of lang.extensions ?? []) allLangKeys.push({ ext });
+        for (const name of lang.filenames ?? []) allLangKeys.push({ name });
+      }
+      clearLanguageIcons(allLangKeys);
+
+      for (const lang of languages) {
+        if (!lang.icon || isStale()) continue;
+        try {
+          const raw = await invoke<string>('extension_read_asset', {
+            name: lang.extensionName,
+            assetPath: lang.icon,
+          });
+          if (isStale()) continue;
+          const b64 = btoa(unescape(encodeURIComponent(raw)));
+          const dataUrl = `data:image/svg+xml;base64,${b64}`;
+          registerLanguageIcon(lang.extensions ?? [], lang.filenames ?? [], dataUrl);
+        } catch (e) {
+          console.warn(`[ExtensionStore] Failed to load language icon for "${lang.id}":`, e);
+        }
+      }
+
+      if (isStale()) return;
+
+      // Sync active icon theme from settings (handles app restart persistence)
+      const savedIconThemeId = useSettingsStore.getState().iconThemeId;
+      setActiveIconThemeId(savedIconThemeId);
+
+      set((s) => { s.extensionIconThemesVersion++; });
     },
   })),
 );

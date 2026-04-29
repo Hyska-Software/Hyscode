@@ -71,6 +71,7 @@ export interface CustomApprovalRules {
 interface SettingsState {
   // ─ Theme ─
   themeId: ThemeId;
+  iconThemeId: string;
 
   // ─ Editor ─
   fontSize: number;
@@ -184,6 +185,7 @@ interface SettingsState {
   // ─ Actions ─
   set: <K extends keyof SettingsState>(key: K, value: SettingsState[K]) => void;
   setThemeId: (id: ThemeId) => void;
+  setIconThemeId: (id: string) => void;
   setActiveProvider: (providerId: string, modelId: string) => void;
   openSettings: () => void;
   closeSettings: () => void;
@@ -207,6 +209,7 @@ export const useSettingsStore = create<SettingsState>()(
     immer((set) => ({
       // Theme
       themeId: 'hyscode-dark',
+      iconThemeId: 'default',
 
       // Editor
       fontSize: 14,
@@ -323,6 +326,11 @@ export const useSettingsStore = create<SettingsState>()(
       setThemeId: (id) =>
         set((state) => {
           state.themeId = id;
+        }),
+
+      setIconThemeId: (id) =>
+        set((state) => {
+          state.iconThemeId = id;
         }),
 
       setActiveProvider: (providerId, modelId) =>

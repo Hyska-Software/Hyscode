@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useFileStore } from '@/stores/file-store';
+import { useExtensionStore } from '@/stores/extension-store';
 import { tauriFs, type FileEntry } from '@/lib/tauri-fs';
 import { getFileIcon, getFolderIcon } from '../sidebar/views/file-icons';
 
@@ -206,6 +207,8 @@ export function ContextMentionPicker({
   onSelect,
 }: ContextMentionPickerProps) {
   const rootPath = useFileStore((s) => s.rootPath);
+  // Re-render when extension icon themes change
+  useExtensionStore((s) => s.extensionIconThemesVersion);
   const [view, setView] = useState<PickerView>('categories');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedIdx, setSelectedIdx] = useState(0);

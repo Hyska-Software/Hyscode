@@ -3,6 +3,7 @@ import { useState, useCallback, useRef } from 'react';
 import { useEditorStore } from '../../stores';
 import { useAgentStore } from '../../stores/agent-store';
 import { useTerminalStore } from '../../stores/terminal-store';
+import { useExtensionStore } from '../../stores/extension-store';
 import { useShallow } from 'zustand/shallow';
 import { TabContextMenu } from './tab-context-menu';
 import { getFileIcon } from '../sidebar/views/file-icons';
@@ -22,6 +23,8 @@ export function EditorTabs() {
   const tabs = useEditorStore((s) => s.tabs);
   const activeTabId = useEditorStore((s) => s.activeTabId);
   const setActiveTab = useEditorStore((s) => s.setActiveTab);
+  // Re-render when extension icon themes change
+  useExtensionStore((s) => s.extensionIconThemesVersion);
   const closeTab = useEditorStore((s) => s.closeTab);
   const reorderTabs = useEditorStore((s) => s.reorderTabs);
 
