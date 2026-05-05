@@ -68,7 +68,7 @@ function getEditorSnapshot(): EditorSnapshot {
   return {
     tabs: tabs
       .filter((t) => !t.filePath.startsWith('untitled:'))
-      .map((t) => ({ ...t, isDirty: false })),
+      .map((t) => ({ ...t, isDirty: false, isPreview: false })),
     activeTabId,
   };
 }
@@ -133,14 +133,10 @@ export function clearProjectState(rootPath: string): void {
  * Restore editor tabs from a snapshot.
  */
 function restoreEditorState(snapshot: EditorSnapshot): void {
-  const store = useEditorStore.getState();
-  store.closeAllTabs();
-  for (const tab of snapshot.tabs) {
-    store.openTab(tab);
-  }
-  if (snapshot.activeTabId) {
-    store.setActiveTab(snapshot.activeTabId);
-  }
+  useEditorStore.setState({
+    tabs: snapshot.tabs.map((t) => ({ ...t, isPreview: false })),
+    activeTabId: snapshot.activeTabId,
+  });
 }
 
 /**

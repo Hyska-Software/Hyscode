@@ -57,13 +57,14 @@ export const useEditorStore = create<EditorState>()(
 
         // Replace preview tab if exists
         const previewIdx = state.tabs.findIndex((t) => t.isPreview);
+        const isFileTab = (tab.type ?? 'file') === 'file';
         const newTab: Tab = {
           ...tab,
           type: tab.type ?? 'file',
           viewerType: tab.viewerType ?? 'code',
           isDirty: false,
           isPinned: false,
-          isPreview: false,
+          isPreview: isFileTab,
         };
 
         if (previewIdx >= 0) {
@@ -173,7 +174,10 @@ export const useEditorStore = create<EditorState>()(
     markDirty: (id, dirty) =>
       set((state) => {
         const tab = state.tabs.find((t) => t.id === id);
-        if (tab) tab.isDirty = dirty;
+        if (tab) {
+          tab.isDirty = dirty;
+          if (dirty) tab.isPreview = false;
+        }
       }),
 
     reorderTabs: (fromIndex, toIndex) =>
