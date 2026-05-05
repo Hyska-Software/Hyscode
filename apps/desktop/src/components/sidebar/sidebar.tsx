@@ -28,16 +28,25 @@ export function Sidebar() {
   const setActiveView = useLayoutStore((s) => s.setSidebarActiveView);
   const extensionViews = useExtensionStore((s) => s.contributions.views);
   const visibleSidebarTabs = useSettingsStore((s) => s.visibleSidebarTabs);
+  const visibleExtensionViews = useSettingsStore((s) => s.visibleExtensionViews);
 
-  // If active builtin view gets hidden, fall back to first visible one
+  // If active view gets hidden, fall back to first visible one
   useEffect(() => {
-    if (isBuiltinView(activeView) && !visibleSidebarTabs[activeView]) {
-      const fallback = (Object.keys(visibleSidebarTabs) as BuiltinSidebarView[]).find(
-        (id) => visibleSidebarTabs[id],
-      );
-      if (fallback) setActiveView(fallback);
+    if (isBuiltinView(activeView)) {
+      if (!visibleSidebarTabs[activeView]) {
+        const fallback = (Object.keys(visibleSidebarTabs) as BuiltinSidebarView[]).find(
+          (id) => visibleSidebarTabs[id],
+        );
+        if (fallback) setActiveView(fallback);
+      }
+    } else {
+      // Extension view
+      if (visibleExtensionViews[activeView] === false) {
+        const fallback = extensionViews.find((v) => visibleExtensionViews[v.id] !== false);
+        if (fallback) setActiveView(fallback.id);
+      }
     }
-  }, [activeView, visibleSidebarTabs, setActiveView]);
+  }, [activeView, visibleSidebarTabs, visibleExtensionViews, extensionViews, setActiveView]);
 
   const getViewLabel = (view: SidebarView): string => {
     if (isBuiltinView(view)) return builtinViewLabels[view];

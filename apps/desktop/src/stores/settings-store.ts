@@ -181,6 +181,8 @@ interface SettingsState {
   agentCenterPanelMode: 'chat' | 'terminal';
   /** Which builtin sidebar tabs are visible in the ActivityBar */
   visibleSidebarTabs: Record<SidebarViewId, boolean>;
+  /** Which extension-contributed sidebar views are visible */
+  visibleExtensionViews: Record<string, boolean>;
 
   // ─ Settings modal ─
   settingsOpen: boolean;
@@ -326,6 +328,7 @@ export const useSettingsStore = create<SettingsState>()(
         devices: true,
         docker: true,
       },
+      visibleExtensionViews: {},
 
       // Settings modal
       settingsOpen: false,

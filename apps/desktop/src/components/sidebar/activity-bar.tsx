@@ -43,6 +43,7 @@ function ActivityBadge({ count }: { count: number }) {
 export function ActivityBar({ active, onSelect }: ActivityBarProps) {
   const openSettings = useSettingsStore((s) => s.openSettings);
   const visibleSidebarTabs = useSettingsStore((s) => s.visibleSidebarTabs);
+  const visibleExtensionViews = useSettingsStore((s) => s.visibleExtensionViews);
   const extensionViews = useExtensionStore((s) => s.contributions.views);
   const viewBadges = useViewRegistryStore((s) => s.badges);
 
@@ -69,11 +70,13 @@ export function ActivityBar({ active, onSelect }: ActivityBarProps) {
   };
 
   // Build dynamic items from extension-contributed views
-  const dynamicItems: { id: string; icon: LucideIcon; label: string }[] = extensionViews.map((v) => ({
-    id: v.id,
-    icon: (v.icon && ICON_MAP[v.icon]) || LayoutList,
-    label: v.name,
-  }));
+  const dynamicItems: { id: string; icon: LucideIcon; label: string }[] = extensionViews
+    .filter((v) => visibleExtensionViews[v.id] !== false)
+    .map((v) => ({
+      id: v.id,
+      icon: (v.icon && ICON_MAP[v.icon]) || LayoutList,
+      label: v.name,
+    }));
 
   return (
     <div className="flex w-11 flex-col items-center gap-1 bg-sidebar py-2">
