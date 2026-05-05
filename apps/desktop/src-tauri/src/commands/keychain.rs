@@ -1,12 +1,12 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use tauri::State;
 
 /// File-backed key store. Keys are persisted as a JSON file in the app's
 /// local data directory. For production, swap for tauri-plugin-stronghold.
-pub struct KeychainState(pub Mutex<HashMap<String, String>>);
+pub struct KeychainState(pub Arc<Mutex<HashMap<String, String>>>);
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct KeychainEntry {

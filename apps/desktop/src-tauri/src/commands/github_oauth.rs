@@ -1,4 +1,6 @@
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 use tauri::State;
 
 use super::keychain::KeychainState;
@@ -183,19 +185,16 @@ pub async fn github_oauth_poll(
     })
 }
 
-/// Step 3: Exchange the long-lived GitHub access token for a short-lived Copilot API token.
-/// Called before each AI request to ensure the token is fresh.
-#[tauri::command]
-pub async fn github_copilot_ensure_token(
-    keychain: State<'_, KeychainState>,
+/// Exchange the long-lived GitHub access token for a short-lived Copilot API token.
+/// Can be called directly with an Arc to the keychain (used by ai_stream_request retry).
+pub async fn ensure_copilot_token(
+    keychain: Arc<Mutex<HashMap<String, String>>>,
 ) -> Result<String, String> {
-    eprintln!("[CopilotAuth] github_copilot_ensure_token called");
-
     // Read the long-lived access token
     let access_token = {
-        let store = keychain.0.lock().map_err(|e| e.to_string())?;
+        let store = keychain.lock().map_err(|e| e.to_string())?;
         let has_token = store.contains_key("hyscode:github_copilot_access_token");
-        eprintln!("[CopilotAuth] github_copilot_ensure_token — keychain has access_token: {}", has_token);
+        eprintln!("[CopilotAuth] ensure_copilot_token — keychain has access_token: {}", has_token);
         store
             .get("hyscode:github_copilot_access_token")
             .cloned()
@@ -219,13 +218,13 @@ pub async fn github_copilot_ensure_token(
         .map_err(|e| format!("Failed to verify GitHub token: {}", e))?;
     let user_status = user_resp.status();
     let user_body = user_resp.text().await.unwrap_or_default();
-    eprintln!("[CopilotAuth] github_copilot_ensure_token — /user status: {}, body: {}", user_status, &user_body[..user_body.len().min(200)]);
+    eprintln!("[CopilotAuth] ensure_copilot_token — /user status: {}, body: {}", user_status, &user_body[..user_body.len().min(200)]);
     if !user_status.is_success() {
         return Err(format!("GitHub token is invalid ({}): {}", user_status.as_u16(), user_body));
     }
 
-    eprintln!("[CopilotAuth] github_copilot_ensure_token — calling copilot_internal/v2/token");
-    eprintln!("[CopilotAuth] github_copilot_ensure_token — token prefix: {}...", &access_token[..access_token.len().min(6)]);
+    eprintln!("[CopilotAuth] ensure_copilot_token — calling copilot_internal/v2/token");
+    eprintln!("[CopilotAuth] ensure_copilot_token — token prefix: {}...", &access_token[..access_token.len().min(6)]);
 
     let resp = client
         .get("https://api.github.com/copilot_internal/v2/token")
@@ -241,15 +240,15 @@ pub async fn github_copilot_ensure_token(
         .map_err(|e| format!("Failed to get Copilot token: {}", e))?;
 
     let status = resp.status();
-    eprintln!("[CopilotAuth] github_copilot_ensure_token HTTP status: {}", status);
+    eprintln!("[CopilotAuth] ensure_copilot_token HTTP status: {}", status);
 
     if !status.is_success() {
         let status_u16 = status.as_u16();
         let body = resp.text().await.unwrap_or_default();
-        eprintln!("[CopilotAuth] github_copilot_ensure_token error ({}): {}", status_u16, body);
+        eprintln!("[CopilotAuth] ensure_copilot_token error ({}): {}", status_u16, body);
         if status_u16 == 401 {
             // Access token is invalid/revoked — clear it
-            let mut store = keychain.0.lock().map_err(|e| e.to_string())?;
+            let mut store = keychain.lock().map_err(|e| e.to_string())?;
             store.remove("hyscode:github_copilot_access_token");
             store.remove("hyscode:github_copilot_token");
             super::keychain::persist_keychain_ref(&store);
@@ -260,24 +259,34 @@ pub async fn github_copilot_ensure_token(
 
     let body_bytes = resp.bytes().await.map_err(|e| format!("Failed to read Copilot token response body: {}", e))?;
     let body_str = String::from_utf8_lossy(&body_bytes);
-    eprintln!("[CopilotAuth] github_copilot_ensure_token raw response: {}", body_str);
+    eprintln!("[CopilotAuth] ensure_copilot_token raw response: {}", body_str);
 
     let data: CopilotTokenResponse = serde_json::from_slice(&body_bytes)
         .map_err(|e| format!("Failed to parse Copilot token: {} — body: {}", e, body_str))?;
 
     // Store the short-lived Copilot API token
     {
-        let mut store = keychain.0.lock().map_err(|e| e.to_string())?;
+        let mut store = keychain.lock().map_err(|e| e.to_string())?;
         store.insert(
             "hyscode:github_copilot_token".to_string(),
             data.token.clone(),
         );
         super::keychain::persist_keychain_ref(&store);
-        eprintln!("[CopilotAuth] github_copilot_ensure_token — Copilot token stored, expires_at: {}", data.expires_at);
+        eprintln!("[CopilotAuth] ensure_copilot_token — Copilot token stored, expires_at: {}", data.expires_at);
     }
 
-    eprintln!("[CopilotAuth] github_copilot_ensure_token SUCCESS");
+    eprintln!("[CopilotAuth] ensure_copilot_token SUCCESS");
     Ok(data.token)
+}
+
+/// Step 3: Exchange the long-lived GitHub access token for a short-lived Copilot API token.
+/// Called before each AI request to ensure the token is fresh.
+#[tauri::command]
+pub async fn github_copilot_ensure_token(
+    keychain: State<'_, KeychainState>,
+) -> Result<String, String> {
+    eprintln!("[CopilotAuth] github_copilot_ensure_token called");
+    ensure_copilot_token(keychain.0.clone()).await
 }
 
 /// Disconnect GitHub Copilot — remove all stored tokens.

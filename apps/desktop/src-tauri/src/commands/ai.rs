@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use tauri::{Emitter, State, Window};
 
 use super::keychain::KeychainState;
+use super::github_oauth::ensure_copilot_token;
 
 #[derive(Debug, Deserialize)]
 pub struct AiStreamRequest {
@@ -63,14 +64,31 @@ pub async fn ai_stream_request(
         None
     } else {
         let key_name = provider_key_name(&request.provider);
-        let store = keychain.0.lock().map_err(|e| e.to_string())?;
-        let key = store.get(&key_name).cloned();
-        // For github-copilot, also try the token key directly
+        let key = {
+            let store = keychain.0.lock().map_err(|e| e.to_string())?;
+            let key = store.get(&key_name).cloned();
+            // For github-copilot, also try the token key directly
+            if key.is_none() && request.provider == "github-copilot" {
+                store.get("hyscode:github_copilot_token").cloned()
+            } else {
+                key
+            }
+        }; // lock released here
+
+        // For Copilot, if the short-lived token is missing but we have an access token,
+        // regenerate it on-the-fly instead of failing immediately.
         let key = if key.is_none() && request.provider == "github-copilot" {
-            store.get("hyscode:github_copilot_token").cloned()
+            match ensure_copilot_token(keychain.0.clone()).await {
+                Ok(token) => Some(token),
+                Err(e) => {
+                    eprintln!("[ai_stream_request] Copilot token regeneration failed: {}", e);
+                    None
+                }
+            }
         } else {
             key
         };
+
         if key.is_none() {
             let _ = window.emit(
                 "ai:chunk",
@@ -93,10 +111,13 @@ pub async fn ai_stream_request(
     // Spawn async task to handle streaming
     let window_clone = window.clone();
     let req_id = request_id.clone();
+    let keychain_arc = keychain.0.clone();
 
     tauri::async_runtime::spawn(async move {
         let client = reqwest::Client::new();
         let timeout = std::time::Duration::from_millis(request.timeout_ms.unwrap_or(120_000));
+
+        let mut current_api_key = api_key;
 
         let mut req_builder = client
             .post(&request.url)
@@ -108,15 +129,15 @@ pub async fn ai_stream_request(
         }
 
         // Inject auth header from keychain
-        if let Some(ref key) = api_key {
+        if let Some(ref key) = current_api_key {
             let (header_name, header_value) = get_auth_header(&request.provider, key);
             req_builder = req_builder.header(header_name.as_str(), header_value.as_str());
         }
 
-        req_builder = req_builder.body(request.body);
+        req_builder = req_builder.body(request.body.clone());
 
         // Make the request
-        let response = match req_builder.send().await {
+        let mut response = match req_builder.send().await {
             Ok(resp) => resp,
             Err(e) => {
                 let _ = window_clone.emit(
@@ -133,7 +154,35 @@ pub async fn ai_stream_request(
             }
         };
 
-        let status = response.status().as_u16();
+        let mut status = response.status().as_u16();
+
+        // If Copilot returns 401, the short-lived token may have expired.
+        // Automatically refresh it and retry once.
+        if status == 401 && request.provider == "github-copilot" {
+            match ensure_copilot_token(keychain_arc).await {
+                Ok(new_token) => {
+                    current_api_key = Some(new_token);
+                    let mut retry_builder = client
+                        .post(&request.url)
+                        .timeout(timeout);
+                    for (key, value) in &request.headers {
+                        retry_builder = retry_builder.header(key.as_str(), value.as_str());
+                    }
+                    if let Some(ref key) = current_api_key {
+                        let (header_name, header_value) = get_auth_header(&request.provider, key);
+                        retry_builder = retry_builder.header(header_name.as_str(), header_value.as_str());
+                    }
+                    retry_builder = retry_builder.body(request.body.clone());
+                    if let Ok(retry_resp) = retry_builder.send().await {
+                        response = retry_resp;
+                        status = response.status().as_u16();
+                    }
+                }
+                Err(e) => {
+                    eprintln!("[ai_stream_request] Copilot token refresh failed: {}", e);
+                }
+            }
+        }
 
         if status >= 400 {
             let error_body = response.text().await.unwrap_or_default();

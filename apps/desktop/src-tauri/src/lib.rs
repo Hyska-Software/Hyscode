@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use tauri::Manager;
 
 mod commands;
@@ -23,7 +23,7 @@ pub fn run() {
         .manage(LspState(Mutex::new(HashMap::new())))
         .manage(FsWatcherState(Mutex::new(HashMap::new())))
         .manage(DockerWatchState(Mutex::new(HashMap::new())))
-        .manage(KeychainState(Mutex::new(commands::keychain::load_keychain())))
+        .manage(KeychainState(Arc::new(Mutex::new(commands::keychain::load_keychain()))))
         .manage({
             let app_dir = dirs::data_dir()
                 .unwrap_or_else(|| std::path::PathBuf::from("."))
