@@ -266,6 +266,47 @@ pub fn db_create_message(
     Ok(())
 }
 
+// ─── Turn Record commands ────────────────────────────────────────────────────
+
+#[tauri::command]
+pub fn db_create_turn_record(
+    state: State<'_, DbState>,
+    id: String,
+    conversation_id: String,
+    mode: String,
+    iterations: i64,
+    tool_calls: Option<String>,
+    token_input: i64,
+    token_output: i64,
+    stop_reason: String,
+    verification_performed: bool,
+    verification_forced: bool,
+    files_modified: Option<String>,
+    duration_ms: i64,
+) -> Result<(), String> {
+    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    conn.execute(
+        "INSERT INTO turn_records (id, conversation_id, mode, iterations, tool_calls, token_input, token_output, stop_reason, verification_performed, verification_forced, files_modified, duration_ms)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+        params![
+            id,
+            conversation_id,
+            mode,
+            iterations,
+            tool_calls,
+            token_input,
+            token_output,
+            stop_reason,
+            verification_performed as i64,
+            verification_forced as i64,
+            files_modified,
+            duration_ms,
+        ],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 // ─── Trace commands ─────────────────────────────────────────────────────────
 
 #[derive(Serialize)]

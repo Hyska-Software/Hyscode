@@ -1,7 +1,9 @@
 import { Suspense, lazy, useCallback } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import remarkMath from 'remark-math';
 import rehypeHighlight from 'rehype-highlight';
+import rehypeKatex from 'rehype-katex';
 import { Code, Eye, Loader2 } from 'lucide-react';
 import { useSettingsStore } from '../../../stores';
 import { defineAllMonacoThemes, getMonacoThemeName } from '../../../lib/monaco-themes';
@@ -91,7 +93,10 @@ export function MarkdownViewer({
       {mode === 'preview' ? (
         <div className="flex-1 overflow-auto p-6">
           <article className="markdown-preview select-text cursor-text">
-            <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlight]}>
+            <ReactMarkdown
+              remarkPlugins={[remarkGfm, remarkMath]}
+              rehypePlugins={[[rehypeKatex], [rehypeHighlight, { ignoreMissing: true }]] as any}
+            >
               {content}
             </ReactMarkdown>
           </article>

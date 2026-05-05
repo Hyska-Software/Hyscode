@@ -12,6 +12,7 @@ import { App } from './app';
 import './app.css';
 // @ts-ignore xterm CSS has no type declarations
 import '@xterm/xterm/css/xterm.css';
+import 'katex/dist/katex.min.css';
 
 enableMapSet();
 

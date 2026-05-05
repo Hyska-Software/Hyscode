@@ -141,6 +141,8 @@ pub fn run() {
             commands::db::db_delete_conversation,
             commands::db::db_list_messages,
             commands::db::db_create_message,
+            // Turn record commands
+            commands::db::db_create_turn_record,
             // Trace commands
             commands::db::db_create_trace,
             commands::db::db_list_traces,

@@ -1602,8 +1602,8 @@ ${hints.map(h => `- ${h}`).join('\n')}
         mode: record.mode,
         iterations: record.iterations,
         toolCalls: JSON.stringify(record.toolCalls),
-        tokenInput: record.tokenUsage.input,
-        tokenOutput: record.tokenUsage.output,
+        tokenInput: record.tokenUsage?.input ?? 0,
+        tokenOutput: record.tokenUsage?.output ?? 0,
         stopReason: record.stopReason,
         verificationPerformed: record.verificationPerformed,
         verificationForced: record.verificationForced,
@@ -1640,9 +1640,9 @@ ${hints.map(h => `- ${h}`).join('\n')}
           console.warn('[HarnessBridge] Failed to persist trace');
         }
       }
-    } catch {
+    } catch (e) {
       // Turn record persistence is best-effort
-      console.warn('[HarnessBridge] Failed to persist turn record');
+      console.warn('[HarnessBridge] Failed to persist turn record', e);
     }
   }
 

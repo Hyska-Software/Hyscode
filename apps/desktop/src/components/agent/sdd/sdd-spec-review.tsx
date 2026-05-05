@@ -1,8 +1,7 @@
 import { FileText, Check, X } from 'lucide-react';
 import { useAgentStore } from '@/stores/agent-store';
 import { Button } from '@/components/ui/button';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
+import { MarkdownContent } from '../markdown-renderer';
 
 interface SddSpecReviewProps {
   onApprove: () => void;
@@ -26,11 +25,7 @@ export function SddSpecReview({ onApprove, onReject }: SddSpecReviewProps) {
 
       {/* Spec content */}
       <div className="max-h-60 overflow-y-auto rounded-md bg-surface-raised p-3">
-        <div className="prose-sm prose-invert max-w-none text-[11px]">
-          <ReactMarkdown remarkPlugins={[remarkGfm]}>
-            {sddSpec}
-          </ReactMarkdown>
-        </div>
+        <MarkdownContent content={sddSpec} className="text-[11px]" />
       </div>
 
       {/* Actions */}
