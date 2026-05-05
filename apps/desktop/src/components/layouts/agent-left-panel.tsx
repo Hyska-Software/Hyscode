@@ -6,7 +6,6 @@ import { FileExplorerView } from '../sidebar/views/file-explorer-view';
 import { ExtensionsView } from '../sidebar/views/extensions-view';
 import { useSettingsStore } from '../../stores/settings-store';
 
-
 function CollapsibleSection({
   title,
   icon: Icon,

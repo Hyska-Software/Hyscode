@@ -95,7 +95,7 @@ export function GitFileItem({
   return (
     <>
       <div
-        className="group flex items-center gap-1.5 px-2 py-[3px] text-[11px] hover:bg-surface-raised transition-colors cursor-pointer"
+        className="group relative flex items-center gap-1.5 px-2 py-[3px] text-[12px] hover:bg-surface-raised transition-colors cursor-pointer"
         onClick={onOpenDiff ?? onOpenFile}
         onContextMenu={handleContextMenu}
         title={`${STATUS_LABELS[file.status] ?? file.status}: ${file.path}`}
@@ -111,8 +111,8 @@ export function GitFileItem({
           {file.status === '?' ? 'U' : file.status}
         </span>
 
-        {/* Inline action buttons */}
-        <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+        {/* Hover action buttons — float over content, no layout reserve */}
+        <div className="pointer-events-none absolute right-1 top-1/2 hidden -translate-y-1/2 items-center gap-0.5 rounded-md bg-surface-raised/95 px-1 py-0.5 shadow-sm group-hover:pointer-events-auto group-hover:flex">
           {mode === 'staged' && onUnstage && (
             <ActionButton
               icon={Minus}
