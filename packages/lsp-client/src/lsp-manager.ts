@@ -33,6 +33,10 @@ function normalizeServerKey(languageId: string): string {
   return SERVER_KEY_NORMALIZATION[languageId] ?? languageId;
 }
 
+/** Grace period (ms) before stopping a server when all its documents close.
+ *  Prevents unnecessary server restarts during tab switches. */
+const STOP_SERVER_DEBOUNCE_MS = 500;
+
 export class LspManager {
   private servers = new Map<string, ActiveServer>();
   private configs = new Map<string, LspContribution>();
@@ -41,6 +45,7 @@ export class LspManager {
   private monaco: MonacoEditor | null = null;
   private rootUri: string | null = null;
   private statusListeners = new Set<StatusChangeHandler>();
+  private stopServerTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
   constructor(invoke: TauriInvoke, listen: TauriListen) {
     this.invoke = invoke;
@@ -75,10 +80,25 @@ export class LspManager {
 
   async onLanguageOpened(languageId: string, filePath?: string): Promise<void> {
     const serverKey = normalizeServerKey(languageId);
+
+    // Cancel any pending deferred stop so the server stays alive during tab switches
+    const pendingStop = this.stopServerTimers.get(serverKey);
+    if (pendingStop) {
+      clearTimeout(pendingStop);
+      this.stopServerTimers.delete(serverKey);
+    }
+
     const existing = this.servers.get(serverKey);
     if (existing) {
-      existing.openDocCount++;
-      return;
+      // If the server is in a dead state, tear it down and restart
+      const deadState = existing.connection.status === 'error' || existing.connection.status === 'stopped';
+      if (!deadState) {
+        existing.openDocCount++;
+        return;
+      }
+      // Server is dead — clean up before restarting
+      existing.adapter.dispose();
+      this.servers.delete(serverKey);
     }
 
     const config = this.configs.get(languageId);
@@ -151,15 +171,37 @@ export class LspManager {
     const server = this.servers.get(serverKey);
     if (!server) return;
 
-    server.openDocCount--;
+    server.openDocCount = Math.max(0, server.openDocCount - 1);
     if (server.openDocCount <= 0) {
-      await this.stopServer(serverKey);
+      // Defer the actual stop so rapid tab switches don't kill the server
+      const existing = this.stopServerTimers.get(serverKey);
+      if (existing) clearTimeout(existing);
+      this.stopServerTimers.set(
+        serverKey,
+        setTimeout(async () => {
+          this.stopServerTimers.delete(serverKey);
+          const srv = this.servers.get(serverKey);
+          if (srv && srv.openDocCount <= 0) {
+            await this.stopServer(serverKey);
+          }
+        }, STOP_SERVER_DEBOUNCE_MS),
+      );
     }
   }
 
   async stopServer(serverKey: string): Promise<void> {
     const server = this.servers.get(serverKey);
     if (!server) return;
+
+    // Clear any pending deferred stop for this key
+    const timer = this.stopServerTimers.get(serverKey);
+    if (timer) {
+      clearTimeout(timer);
+      this.stopServerTimers.delete(serverKey);
+    }
+
+    // Remove from map first so concurrent onLanguageOpened starts a fresh server
+    this.servers.delete(serverKey);
 
     server.adapter.dispose();
     await server.connection.shutdown();
@@ -169,11 +211,15 @@ export class LspManager {
     } catch {
       // Process may have already died
     }
-
-    this.servers.delete(serverKey);
   }
 
   async stopAll(): Promise<void> {
+    // Cancel all deferred stops before explicitly stopping
+    for (const timer of this.stopServerTimers.values()) {
+      clearTimeout(timer);
+    }
+    this.stopServerTimers.clear();
+
     const keys = Array.from(this.servers.keys());
     for (const key of keys) {
       await this.stopServer(key);

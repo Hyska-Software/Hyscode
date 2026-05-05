@@ -172,6 +172,9 @@ class LspBridgeImpl {
 
     const uri = this.filePathToUri(filePath);
 
+    // Guard against duplicate close notifications (two effects can fire for the same doc)
+    if (!this.openDocuments.has(uri)) return;
+
     // Send textDocument/didClose
     const connection = this.manager.getConnection(languageId);
     if (connection && connection.status === 'ready') {
