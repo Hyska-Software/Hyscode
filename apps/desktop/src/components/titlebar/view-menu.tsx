@@ -8,13 +8,20 @@ import {
   DropdownMenuShortcut,
 } from '../ui/dropdown-menu';
 import { useLayoutStore } from '../../stores/layout-store';
+import { useSettingsStore } from '../../stores';
 
 export function ViewMenu() {
+  const workspaceMode = useLayoutStore((s) => s.workspaceMode);
   const terminalVisible = useLayoutStore((s) => s.terminalVisible);
   const terminalLocation = useLayoutStore((s) => s.terminalLocation);
   const toggleTerminal = useLayoutStore((s) => s.toggleTerminal);
   const moveTerminalToSidebar = useLayoutStore((s) => s.moveTerminalToSidebar);
   const moveTerminalToBottom = useLayoutStore((s) => s.moveTerminalToBottom);
+
+  const showAgentChatPanel = useSettingsStore((s) => s.showAgentChatPanel);
+  const setShowAgentChatPanel = useSettingsStore((s) => s.set);
+
+  const isAgentMode = workspaceMode === 'agent';
 
   return (
     <DropdownMenu>
@@ -22,6 +29,18 @@ export function ViewMenu() {
         View
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" sideOffset={4} className="w-56">
+        {/* Chat Controls */}
+        <DropdownMenuCheckboxItem
+          checked={showAgentChatPanel}
+          onCheckedChange={(checked) => setShowAgentChatPanel('showAgentChatPanel', checked)}
+          disabled={isAgentMode}
+        >
+          Agent Chat
+        </DropdownMenuCheckboxItem>
+
+        <DropdownMenuSeparator />
+
+        {/* Terminal Controls */}
         <DropdownMenuCheckboxItem
           checked={terminalVisible}
           onCheckedChange={toggleTerminal}

@@ -17,12 +17,21 @@ export function TitleBar() {
   const setMode = useLayoutStore((s) => s.setWorkspaceMode);
   const showAgentTab = useSettingsStore((s) => s.showAgentTab);
   const showReviewTab = useSettingsStore((s) => s.showReviewTab);
+  const showAgentChatPanel = useSettingsStore((s) => s.showAgentChatPanel);
+  const setSettings = useSettingsStore((s) => s.set);
 
   // If the current mode's tab is hidden, fall back to editor
   useEffect(() => {
     if (mode === 'agent' && !showAgentTab) setMode('editor');
     if (mode === 'review' && !showReviewTab) setMode('editor');
   }, [showAgentTab, showReviewTab, mode, setMode]);
+
+  // Agent mode requires chat to be visible
+  useEffect(() => {
+    if (mode === 'agent' && !showAgentChatPanel) {
+      setSettings('showAgentChatPanel', true);
+    }
+  }, [mode, showAgentChatPanel, setSettings]);
 
   const visibleModes = (['editor', 'agent', 'review'] as const).filter((m) => {
     if (m === 'agent') return showAgentTab;
