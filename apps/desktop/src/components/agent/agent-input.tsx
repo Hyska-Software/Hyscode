@@ -355,7 +355,7 @@ export function AgentInput() {
   }, [addImagesFromFiles]);
 
   return (
-    <div className="shrink-0 bg-surface-raised px-2.5 pt-1.5 pb-2.5 flex flex-col gap-1.5">
+    <div className="shrink-0 px-2.5 pt-1.5 pb-2.5 flex flex-col gap-1.5">
       {/* Hidden file input for image picker */}
       <input
         ref={fileInputRef}
@@ -366,7 +366,7 @@ export function AgentInput() {
         onChange={handleFileInputChange}
       />
 
-      {/* Vision warning */}
+      {/* Vision warning (outside the frame) */}
       {showVisionWarning && (
         <div className="flex items-center gap-1.5 rounded-md bg-amber-500/10 px-2.5 py-1.5 text-[10px] text-amber-400">
           <AlertTriangle className="h-3 w-3 shrink-0" />
@@ -374,88 +374,97 @@ export function AgentInput() {
         </div>
       )}
 
-      {/* Image preview strip */}
-      {attachedImages.length > 0 && (
-        <div className="flex flex-wrap gap-1.5 px-1">
-          {attachedImages.map((img) => (
-            <div
-              key={img.id}
-              className="group/img relative h-12 w-12 shrink-0 rounded-md border border-border/40 bg-muted overflow-hidden"
-              title={img.name}
-            >
-              <img
-                src={img.previewUrl}
-                alt={img.name}
-                className="h-full w-full object-cover"
-              />
-              <button
-                onClick={() => useAgentStore.getState().removeAttachedImage(img.id)}
-                className="absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full bg-surface-raised border border-border/50 text-muted-foreground opacity-0 group-hover/img:opacity-100 transition-opacity hover:text-foreground hover:bg-red-500/20"
-              >
-                <X className="h-2.5 w-2.5" />
-              </button>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* Textarea area */}
+      {/* ── Unified input frame ── */}
       <div
         ref={inputWrapperRef}
         className={cn(
-          'relative px-1 py-1 rounded-md transition-colors',
-          isDragOver && 'ring-1 ring-accent/50 bg-accent/5',
+          'relative flex flex-col rounded-xl bg-surface-raised',
+          'ring-1 ring-inset ring-foreground/[0.07] shadow-sm shadow-black/[0.1]',
+          'transition-all focus-within:ring-accent/[0.22]',
+          isDragOver && 'ring-accent/[0.45]',
         )}
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
       >
+        {/* Drag-to-drop overlay */}
         {isDragOver && (
-          <div className="absolute inset-0 z-20 flex items-center justify-center rounded-md bg-accent/10 pointer-events-none">
+          <div className="absolute inset-0 z-20 flex items-center justify-center rounded-xl bg-accent/10 pointer-events-none">
             <div className="flex items-center gap-1.5 text-[11px] text-accent font-medium">
               <ImageIcon className="h-4 w-4" />
               Drop images here
             </div>
           </div>
         )}
-        <ContextMentionPicker
-          open={mentionPickerOpen}
-          onClose={() => setMentionPickerOpen(false)}
-          onSelect={handleMentionSelect}
-        />
-        <Textarea
-          ref={textareaRef}
-          value={input}
-          onChange={(e) => {
-            const val = e.target.value;
-            setInput(val);
-            // Detect '@' typed at the end or after a space
-            if (val.endsWith('@') && (val.length === 1 || val[val.length - 2] === ' ' || val[val.length - 2] === '\n')) {
-              setMentionPickerOpen(true);
-            }
-          }}
-          onPaste={handlePaste}
-          placeholder={currentCap.placeholder}
-          className="max-h-32 min-h-[36px] w-full border-0 bg-transparent text-xs leading-relaxed focus-visible:ring-0 resize-none overflow-y-auto"
-          onKeyDown={(e) => {
-            if (mentionPickerOpen && (e.key === 'Escape' || e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
-              // Let the picker handle these keys
-              return;
-            }
-            if (e.key === 'Enter' && !e.shiftKey) {
-              if (mentionPickerOpen) {
-                // Don't send when picker is open
+
+        {/* Image preview strip */}
+        {attachedImages.length > 0 && (
+          <div className="flex flex-wrap gap-1.5 px-3 pt-2.5">
+            {attachedImages.map((img) => (
+              <div
+                key={img.id}
+                className="group/img relative h-12 w-12 shrink-0 rounded-md border border-border/40 bg-muted overflow-hidden"
+                title={img.name}
+              >
+                <img
+                  src={img.previewUrl}
+                  alt={img.name}
+                  className="h-full w-full object-cover"
+                />
+                <button
+                  onClick={() => useAgentStore.getState().removeAttachedImage(img.id)}
+                  className="absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full bg-surface-raised border border-border/50 text-muted-foreground opacity-0 group-hover/img:opacity-100 transition-opacity hover:text-foreground hover:bg-red-500/20"
+                >
+                  <X className="h-2.5 w-2.5" />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Textarea */}
+        <div className="relative px-1 py-0.5">
+          <ContextMentionPicker
+            open={mentionPickerOpen}
+            onClose={() => setMentionPickerOpen(false)}
+            onSelect={handleMentionSelect}
+          />
+          <Textarea
+            ref={textareaRef}
+            value={input}
+            onChange={(e) => {
+              const val = e.target.value;
+              setInput(val);
+              // Detect '@' typed at the end or after a space
+              if (val.endsWith('@') && (val.length === 1 || val[val.length - 2] === ' ' || val[val.length - 2] === '\n')) {
+                setMentionPickerOpen(true);
+              }
+            }}
+            onPaste={handlePaste}
+            placeholder={currentCap.placeholder}
+            className="max-h-32 min-h-[40px] w-full border-0 bg-transparent px-2.5 text-xs leading-relaxed focus-visible:ring-0 resize-none overflow-y-auto"
+            onKeyDown={(e) => {
+              if (mentionPickerOpen && (e.key === 'Escape' || e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
+                // Let the picker handle these keys
                 return;
               }
-              e.preventDefault();
-              handleSend();
-            }
-          }}
-        />
-      </div>
+              if (e.key === 'Enter' && !e.shiftKey) {
+                if (mentionPickerOpen) {
+                  // Don't send when picker is open
+                  return;
+                }
+                e.preventDefault();
+                handleSend();
+              }
+            }}
+          />
+        </div>
 
-      {/* Bottom toolbar: agent pills + model left, actions right */}
-      <div className="flex items-center justify-between gap-2">
+        {/* Separator between textarea and toolbar */}
+        <div className="h-px bg-foreground/[0.06]" />
+
+        {/* Bottom toolbar: agent pills + model left, actions right */}
+        <div className="flex items-center justify-between gap-2 px-2.5 py-1.5">
         {/* Agent mode + model + approval selectors */}
         <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1">
           {/* Agent mode dropdown */}
@@ -742,6 +751,7 @@ export function AgentInput() {
             </Tooltip>
           )}
         </div>
+      </div>
       </div>
     </div>
   );

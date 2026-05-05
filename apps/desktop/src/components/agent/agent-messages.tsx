@@ -172,28 +172,41 @@ const MarkdownContent = memo(function MarkdownContent({ content }: { content: st
 
 // ─── Thinking Block (collapsible dropdown) ────────────────────────────────────
 
-const ThinkingBlock = memo(function ThinkingBlock({ content, isStreaming }: { content: string; isStreaming?: boolean }) {
-  const [open, setOpen] = useState(false);
+const ThinkingBlock = memo(function ThinkingBlock({
+  content,
+  isStreaming,
+  defaultOpen = false,
+}: {
+  content: string;
+  isStreaming?: boolean;
+  defaultOpen?: boolean;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
   return (
     <div className="agent-fade-in my-0.5">
       <button
         onClick={() => setOpen(!open)}
-        className="flex w-full items-center gap-1.5 rounded-md px-1.5 py-0.5 text-left text-[10px] text-muted-foreground/50 transition-colors hover:bg-white/[0.02] hover:text-muted-foreground/80"
+        className="flex w-full items-center gap-1.5 rounded-md border border-foreground/[0.06] bg-muted/[0.15] px-2 py-1 text-left text-[10px] text-muted-foreground/70 transition-all hover:bg-muted/[0.35] hover:text-muted-foreground"
       >
-        {open ? <ChevronDown className="h-2.5 w-2.5" /> : <ChevronRight className="h-2.5 w-2.5" />}
-        <Brain className="h-2.5 w-2.5" />
-        <span>Thinking</span>
+        {open ? <ChevronDown className="h-2.5 w-2.5 shrink-0" /> : <ChevronRight className="h-2.5 w-2.5 shrink-0" />}
+        <Brain className="h-2.5 w-2.5 shrink-0 text-accent/60" />
+        <span className="font-medium">Thinking</span>
         {isStreaming && (
           <span className="ml-0.5 flex items-center gap-[3px]">
-            <span className="agent-dot-bounce h-1 w-1 rounded-full bg-muted-foreground/35" />
-            <span className="agent-dot-bounce h-1 w-1 rounded-full bg-muted-foreground/35" style={{ animationDelay: '0.16s' }} />
-            <span className="agent-dot-bounce h-1 w-1 rounded-full bg-muted-foreground/35" style={{ animationDelay: '0.32s' }} />
+            <span className="agent-dot-bounce h-1 w-1 rounded-full bg-accent/50" />
+            <span className="agent-dot-bounce h-1 w-1 rounded-full bg-accent/50" style={{ animationDelay: '0.16s' }} />
+            <span className="agent-dot-bounce h-1 w-1 rounded-full bg-accent/50" style={{ animationDelay: '0.32s' }} />
+          </span>
+        )}
+        {!isStreaming && content && (
+          <span className="ml-auto text-[9px] text-muted-foreground/40 font-normal">
+            {content.split(/\s+/).filter(Boolean).length} words
           </span>
         )}
       </button>
       {open && (
-        <div className="agent-fade-in mt-1 max-h-[220px] overflow-y-auto rounded-md border border-border/15 bg-surface-raised/40 px-3 py-2">
-          <p className="text-[11px] leading-[1.72] text-foreground/65 whitespace-pre-wrap">{content}</p>
+        <div className="agent-fade-in mt-1 max-h-[260px] overflow-y-auto rounded-lg bg-muted/[0.2] ring-1 ring-inset ring-foreground/[0.06] px-3 py-2.5">
+          <p className="text-[11px] leading-[1.72] text-foreground/60 whitespace-pre-wrap">{content}</p>
         </div>
       )}
     </div>
@@ -204,16 +217,10 @@ const ThinkingBlock = memo(function ThinkingBlock({ content, isStreaming }: { co
 
 function StreamingIndicator() {
   return (
-    <div className="agent-fade-in flex items-center gap-2.5 py-1.5">
-      <div className="flex h-5 w-5 items-center justify-center rounded-md bg-accent/10">
-        <Sparkles className="h-3 w-3 text-accent animate-pulse" />
-      </div>
-      <div className="flex items-center gap-[3px]">
-        <span className="agent-dot-bounce h-[5px] w-[5px] rounded-full bg-accent/70" />
-        <span className="agent-dot-bounce h-[5px] w-[5px] rounded-full bg-accent/70" style={{ animationDelay: '0.16s' }} />
-        <span className="agent-dot-bounce h-[5px] w-[5px] rounded-full bg-accent/70" style={{ animationDelay: '0.32s' }} />
-      </div>
-      <span className="text-[11px] text-muted-foreground/70">Generating response...</span>
+    <div className="agent-fade-in flex items-center gap-[4px] py-1.5">
+      <span className="agent-dot-bounce h-[5px] w-[5px] rounded-full bg-accent/60" />
+      <span className="agent-dot-bounce h-[5px] w-[5px] rounded-full bg-accent/60" style={{ animationDelay: '0.16s' }} />
+      <span className="agent-dot-bounce h-[5px] w-[5px] rounded-full bg-accent/60" style={{ animationDelay: '0.32s' }} />
     </div>
   );
 }
@@ -222,7 +229,7 @@ function StreamingIndicator() {
 
 const AgentOutputBlock = memo(function AgentOutputBlock({ content }: { content: string }) {
   return (
-    <div className="agent-fade-in rounded-lg border border-border/10 bg-surface-raised/20 px-3 py-2">
+    <div className="agent-fade-in rounded-lg bg-muted/[0.1] ring-1 ring-inset ring-foreground/[0.05] px-3 py-2.5">
       <MarkdownContent content={content} />
     </div>
   );
@@ -262,12 +269,23 @@ const MessageItem = memo(function MessageItem({
 }: MessageItemProps) {
   const hasToolCalls = (msg.toolCalls?.length ?? 0) > 0;
 
+  // Skip empty assistant messages that have no content, thinking, tool calls, or error
+  const isEmptyAssistant =
+    msg.role === 'assistant' &&
+    !(msg.thinking || msg.content?.trim() || hasToolCalls || isActivelyStreaming || msg.isError);
+  if (isEmptyAssistant) return null;
+
+  // Skip empty user messages that have no text and no image blocks
+  const hasUserContent = msg.content?.trim() || msg.blocks?.some((b) => b.type === 'image');
+  const isEmptyUser = msg.role === 'user' && !hasUserContent;
+  if (isEmptyUser) return null;
+
   return (
     <div className="group/msg">
-      {/* User message */}
+      {/* User message — distinct bubble */}
       {msg.role === 'user' && (
-        <div className="mb-0.5 mt-0.5">
-          <div className="pl-0">
+        <div className="mb-1 mt-0.5">
+          <div className="rounded-xl bg-muted/[0.4] ring-1 ring-inset ring-foreground/[0.05] px-3.5 py-2.5">
             {/* Render attached images from blocks */}
             {msg.blocks && msg.blocks.some((b) => b.type === 'image') && (
               <div className="flex flex-wrap gap-2 mb-2">
@@ -288,42 +306,60 @@ const MessageItem = memo(function MessageItem({
         </div>
       )}
 
-      {/* Assistant message */}
-      {msg.role === 'assistant' && (
-        <div className={cn('mb-0.5', isConsecutiveAssistant ? '' : 'mt-1')}>
-          {!isConsecutiveAssistant && isActivelyStreaming && (
-            <div className="flex items-center gap-2 mb-0.5">
-              <span className="h-1.5 w-1.5 rounded-full bg-accent agent-pulse-ring" />
-            </div>
-          )}
-          <div className="pl-0 flex flex-col gap-0.5">
-            {/* Thinking block (collapsible dropdown) */}
-            {msg.thinking && (
-              <ThinkingBlock
-                content={msg.thinking}
-                isStreaming={isActivelyStreaming && !msg.content}
-              />
+      {/* Assistant message — flex layout with persistent icon column */}
+      {msg.role === 'assistant' && (msg.thinking || msg.content?.trim() || hasToolCalls || isActivelyStreaming || msg.isError) && (
+        <div className={cn('mb-1', isConsecutiveAssistant ? '' : 'mt-2')}>
+          <div className="flex gap-2">
+            {/* Icon column — shows avatar for first in group, spacer for consecutive */}
+            {!isConsecutiveAssistant ? (
+              <div className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-md bg-accent/15">
+                <Sparkles className="h-2.5 w-2.5 text-accent" />
+              </div>
+            ) : (
+              <div className="w-4 shrink-0" />
             )}
 
-            {hasToolCalls ? (
-              /* Mid-loop message: show tool calls compactly, then agent output */
-              <>
-                <ToolCallGroup toolCalls={msg.toolCalls!} />
-                {msg.content && <AgentOutputBlock content={msg.content} />}
-              </>
-            ) : msg.isError ? (
-              <ErrorMessage message={msg.content} />
-            ) : msg.content ? (
-              /* Final response: full markdown in an IDE-like card */
-              <AgentOutputBlock content={msg.content} />
-            ) : isActivelyStreaming ? (
-              <StreamingIndicator />
-            ) : null}
+            {/* Content column */}
+            <div className="flex-1 min-w-0 flex flex-col gap-0.5">
+              {/* Role label (first in group only) */}
+              {!isConsecutiveAssistant && (
+                <div className="flex items-center gap-1.5 mb-1">
+                  <span className="text-[10px] font-medium text-muted-foreground/60">Agent</span>
+                  {isActivelyStreaming && (
+                    <span className="h-1.5 w-1.5 rounded-full bg-accent/70 animate-pulse" />
+                  )}
+                </div>
+              )}
+
+              {/* Thinking block (collapsible dropdown) */}
+              {msg.thinking && (
+                <ThinkingBlock
+                  content={msg.thinking}
+                  isStreaming={isActivelyStreaming && !msg.content?.trim()}
+                  defaultOpen={isActivelyStreaming || !msg.content?.trim()}
+                />
+              )}
+
+              {hasToolCalls ? (
+                /* Mid-loop message: show tool calls compactly, then agent output */
+                <>
+                  <ToolCallGroup toolCalls={msg.toolCalls!} />
+                  {msg.content?.trim() && <AgentOutputBlock content={msg.content} />}
+                </>
+              ) : msg.isError ? (
+                <ErrorMessage message={msg.content} />
+              ) : msg.content?.trim() ? (
+                /* Final response: full markdown */
+                <AgentOutputBlock content={msg.content} />
+              ) : isActivelyStreaming ? (
+                <StreamingIndicator />
+              ) : null}
+            </div>
           </div>
+          {showSeparator && <div className="my-3 h-px bg-gradient-to-r from-transparent via-foreground/[0.08] to-transparent" />}
         </div>
       )}
 
-      {showSeparator && <div className="my-2 h-px bg-gradient-to-r from-transparent via-border/25 to-transparent" />}
     </div>
   );
 });
@@ -404,7 +440,7 @@ export function AgentMessages() {
   return (
     <div className="flex-1 overflow-hidden">
       <ScrollArea className="h-full">
-        <div className="flex flex-col gap-0 px-4 py-2 max-w-[720px] mx-auto w-full">
+        <div className="flex flex-col gap-0.5 px-4 py-3 max-w-[720px] mx-auto w-full">
           {messages.map((msg, idx) => {
             const prevMsg = idx > 0 ? messages[idx - 1] : null;
             const nextMsg = idx < messages.length - 1 ? messages[idx + 1] : null;

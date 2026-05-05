@@ -137,7 +137,7 @@ function InlineDiff({ oldText, newText, lang }: { oldText: string; newText: stri
     <div className="overflow-hidden rounded-b-lg">
       <button
         onClick={() => setExpanded(!expanded)}
-        className="flex w-full items-center gap-1 px-3 py-1 text-[10px] text-muted-foreground/50 hover:bg-white/[0.02] transition-colors"
+        className="flex w-full items-center gap-1 px-3 py-1 text-[10px] text-muted-foreground/50 hover:bg-foreground/[0.02] transition-colors"
       >
         {expanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
         <span>Diff ({lines.filter(l => l.type !== 'ctx').length} changes)</span>
@@ -252,7 +252,7 @@ function FileEditCard({ toolCall }: { toolCall: ToolCallDisplay }) {
       {isEdit && oldContent && isDone ? (
         <InlineDiff oldText={oldContent} newText={rawContent} lang={lang} />
       ) : rawContent ? (
-        <div className="bg-[#0d1117]/80">
+        <div className="bg-muted">
           <pre className="max-h-[280px] overflow-auto px-4 py-3 text-[11.5px] leading-[1.7] select-text cursor-text">
             <code
               className={cn('hljs', lang && `language-${lang}`)}
@@ -318,7 +318,7 @@ function FileReferenceRow({ toolCall }: { toolCall: ToolCallDisplay }) {
         {hasOutput && isDone && (
           <button
             onClick={() => setShowOutput(!showOutput)}
-            className="shrink-0 rounded px-1.5 py-0.5 text-[9px] text-muted-foreground/40 hover:bg-white/[0.03] hover:text-muted-foreground/70 transition-colors"
+            className="shrink-0 rounded px-1.5 py-0.5 text-[9px] text-muted-foreground/40 hover:bg-foreground/[0.03] hover:text-muted-foreground/70 transition-colors"
           >
             {showOutput ? 'hide' : 'preview'}
           </button>
@@ -326,7 +326,7 @@ function FileReferenceRow({ toolCall }: { toolCall: ToolCallDisplay }) {
       </div>
 
       {showOutput && outputPreview && (
-        <div className="border-t border-border/10 bg-[#0d1117]/60">
+        <div className="border-t border-border/10 bg-muted">
           <pre className="max-h-[200px] overflow-auto px-4 py-2 text-[11px] leading-[1.6] font-mono text-foreground/60 select-text cursor-text">
             {outputPreview}
           </pre>
@@ -334,7 +334,7 @@ function FileReferenceRow({ toolCall }: { toolCall: ToolCallDisplay }) {
       )}
       {isError && toolCall.error && (
         <div className="border-t border-red-500/10 bg-red-950/10 px-3 py-1.5">
-          <span className="text-[10px] text-red-300/70">{toolCall.error}</span>
+          <span className="text-[10px] text-[var(--color-error)]/85">{toolCall.error}</span>
         </div>
       )}
     </div>
@@ -371,7 +371,7 @@ function TerminalCard({ toolCall }: { toolCall: ToolCallDisplay }) {
         {isDone && (
           <button
             onClick={() => setShowOutput(!showOutput)}
-            className="shrink-0 rounded px-1.5 py-0.5 text-[9px] text-muted-foreground/40 hover:bg-white/[0.03] hover:text-muted-foreground/70 transition-colors"
+            className="shrink-0 rounded px-1.5 py-0.5 text-[9px] text-muted-foreground/40 hover:bg-foreground/[0.03] hover:text-muted-foreground/70 transition-colors"
           >
             {showOutput ? 'hide' : 'output'}
           </button>
@@ -392,15 +392,15 @@ function TerminalCard({ toolCall }: { toolCall: ToolCallDisplay }) {
 
       {/* Output */}
       {showOutput && toolCall.output && (
-        <div className="bg-[#0d1117]/80 border-t border-border/15">
-          <pre className="max-h-[200px] overflow-auto px-4 py-3 text-[11px] leading-[1.65] font-mono text-green-300/70 select-text cursor-text">
+        <div className="bg-muted border-t border-border/15">
+          <pre className="max-h-[200px] overflow-auto px-4 py-3 text-[11px] leading-[1.65] font-mono text-[var(--color-success)]/85 select-text cursor-text">
             {toolCall.output}
           </pre>
         </div>
       )}
       {isError && toolCall.error && (
         <div className="border-t border-red-500/10 bg-red-950/10 px-4 py-2">
-          <pre className="text-[11px] font-mono text-red-300/70 whitespace-pre-wrap">{toolCall.error}</pre>
+          <pre className="text-[11px] font-mono text-[var(--color-error)]/85 whitespace-pre-wrap">{toolCall.error}</pre>
         </div>
       )}
     </div>
@@ -441,7 +441,7 @@ function RunCodeCard({ toolCall }: { toolCall: ToolCallDisplay }) {
         {isDone && (
           <button
             onClick={() => setShowOutput(!showOutput)}
-            className="shrink-0 rounded px-1.5 py-0.5 text-[9px] text-muted-foreground/40 hover:bg-white/[0.03] hover:text-muted-foreground/70 transition-colors"
+            className="shrink-0 rounded px-1.5 py-0.5 text-[9px] text-muted-foreground/40 hover:bg-foreground/[0.03] hover:text-muted-foreground/70 transition-colors"
           >
             {showOutput ? 'hide' : 'output'}
           </button>
@@ -449,14 +449,14 @@ function RunCodeCard({ toolCall }: { toolCall: ToolCallDisplay }) {
       </div>
 
       {/* Code preview */}
-      <div className="border-t border-border/10 bg-[#0d1117]/50 px-3 py-2">
+      <div className="border-t border-border/10 bg-muted px-3 py-2">
         <pre className="text-[10px] leading-[1.6] font-mono text-foreground/40 select-text cursor-text">
           <code dangerouslySetInnerHTML={{ __html: highlighted }} />
         </pre>
       </div>
 
       {showOutput && toolCall.output && (
-        <div className="bg-[#0d1117]/80 border-t border-border/15">
+        <div className="bg-muted border-t border-border/15">
           <pre className="max-h-[200px] overflow-auto px-4 py-3 text-[11px] leading-[1.65] font-mono text-foreground/70 select-text cursor-text">
             {toolCall.output}
           </pre>
@@ -464,7 +464,7 @@ function RunCodeCard({ toolCall }: { toolCall: ToolCallDisplay }) {
       )}
       {isError && toolCall.error && (
         <div className="border-t border-red-500/10 bg-red-950/10 px-4 py-2">
-          <pre className="text-[11px] font-mono text-red-300/70 whitespace-pre-wrap">{toolCall.error}</pre>
+          <pre className="text-[11px] font-mono text-[var(--color-error)]/85 whitespace-pre-wrap">{toolCall.error}</pre>
         </div>
       )}
     </div>
@@ -505,7 +505,7 @@ function BrowserCard({ toolCall }: { toolCall: ToolCallDisplay }) {
         {isDone && (
           <button
             onClick={() => setShowOutput(!showOutput)}
-            className="shrink-0 rounded px-1.5 py-0.5 text-[9px] text-muted-foreground/40 hover:bg-white/[0.03] hover:text-muted-foreground/70 transition-colors"
+            className="shrink-0 rounded px-1.5 py-0.5 text-[9px] text-muted-foreground/40 hover:bg-foreground/[0.03] hover:text-muted-foreground/70 transition-colors"
           >
             {showOutput ? 'hide' : 'results'}
           </button>
@@ -513,7 +513,7 @@ function BrowserCard({ toolCall }: { toolCall: ToolCallDisplay }) {
       </div>
 
       {showOutput && toolCall.output && (
-        <div className="bg-[#0d1117]/80 border-t border-border/15">
+        <div className="bg-muted border-t border-border/15">
           <pre className="max-h-[300px] overflow-auto px-4 py-3 text-[11px] leading-[1.65] font-mono text-foreground/70 select-text cursor-text">
             {toolCall.output}
           </pre>
@@ -521,7 +521,7 @@ function BrowserCard({ toolCall }: { toolCall: ToolCallDisplay }) {
       )}
       {isError && toolCall.error && (
         <div className="border-t border-red-500/10 bg-red-950/10 px-4 py-2">
-          <pre className="text-[11px] font-mono text-red-300/70 whitespace-pre-wrap">{toolCall.error}</pre>
+          <pre className="text-[11px] font-mono text-[var(--color-error)]/85 whitespace-pre-wrap">{toolCall.error}</pre>
         </div>
       )}
     </div>
@@ -622,7 +622,7 @@ function GenericToolRow({ toolCall }: { toolCall: ToolCallDisplay }) {
         {hasOutput && isDone && (
           <button
             onClick={() => setShowOutput(!showOutput)}
-            className="ml-auto shrink-0 rounded px-1.5 py-0.5 text-[9px] text-muted-foreground/40 hover:bg-white/[0.03] hover:text-muted-foreground/70 transition-colors"
+            className="ml-auto shrink-0 rounded px-1.5 py-0.5 text-[9px] text-muted-foreground/40 hover:bg-foreground/[0.03] hover:text-muted-foreground/70 transition-colors"
           >
             {showOutput ? 'hide' : 'output'}
           </button>
@@ -630,7 +630,7 @@ function GenericToolRow({ toolCall }: { toolCall: ToolCallDisplay }) {
       </div>
 
       {showOutput && hasOutput && (
-        <div className="border-t border-border/10 bg-[#0d1117]/60">
+        <div className="border-t border-border/10 bg-muted">
           <pre className="max-h-[180px] overflow-auto px-4 py-2 text-[11px] leading-[1.6] font-mono text-foreground/60 select-text cursor-text">
             {toolCall.output}
           </pre>
@@ -638,7 +638,7 @@ function GenericToolRow({ toolCall }: { toolCall: ToolCallDisplay }) {
       )}
       {isError && toolCall.error && (
         <div className="border-t border-red-500/10 bg-red-950/10 px-3 py-1.5">
-          <span className="text-[10px] text-red-300/70">{toolCall.error}</span>
+          <span className="text-[10px] text-[var(--color-error)]/85">{toolCall.error}</span>
         </div>
       )}
     </div>
@@ -745,7 +745,7 @@ function CompactToolCallRow({ toolCall }: { toolCall: ToolCallDisplay }) {
     <div className="agent-fade-in">
       <button
         onClick={() => setExpanded(!expanded)}
-        className="flex w-full items-center gap-2 px-1 py-[2px] text-left hover:bg-white/[0.02] transition-colors"
+        className="flex w-full items-center gap-2 px-1 py-[2px] text-left hover:bg-foreground/[0.02] transition-colors"
       >
         {/* Status indicator */}
         {isRunning ? (
