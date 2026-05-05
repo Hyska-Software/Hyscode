@@ -201,16 +201,38 @@ jobs:
               }
             }
 
-      # ── 5. Create draft release ──────────────────────────────────────────────
+      # ── 5. Generate changelog from commits ───────────────────────────────────
+      - name: Generate changelog
+        id: changelog
+        run: |
+          LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+          if [ -n "$LAST_TAG" ]; then
+            echo "Last tag: $LAST_TAG"
+            CHANGELOG=$(git log "$LAST_TAG"..HEAD --pretty=format:'- %s (%h) — %an, %ad' --date=short)
+          else
+            echo "No previous tag found"
+            CHANGELOG=$(git log --pretty=format:'- %s (%h) — %an, %ad' --date=short -20)
+          fi
+          if [ -z "$CHANGELOG" ]; then
+            CHANGELOG="_No new commits since last release._"
+          fi
+          # Write to file to preserve newlines safely
+          echo "$CHANGELOG" > /tmp/changelog.txt
+          echo "Generated changelog:"
+          cat /tmp/changelog.txt
+
+      # ── 6. Create draft release ──────────────────────────────────────────────
       - name: Create draft release
         id: create-release
         uses: actions/github-script@v7
         with:
           github-token: ${{ secrets.GH_PAT || secrets.GITHUB_TOKEN }}
           script: |
+            const fs = require('fs')
             const version    = "${{ steps.get-version.outputs.version }}"
             const tag        = "${{ steps.get-version.outputs.tag }}"
             const prerelease = "${{ steps.get-version.outputs.prerelease }}" === "true"
+            const changelog  = fs.readFileSync('/tmp/changelog.txt', 'utf8')
             const body = [
               `## HysCode ${tag}`,
               ``,
@@ -228,7 +250,7 @@ jobs:
                 : `> ✅ **Stable** — delivered automatically to users on the _Stable_ update channel.`,
               ``,
               `### Changelog`,
-              `See commit history for full list of changes.`,
+              changelog,
             ].join('\n')
 
             let releaseData

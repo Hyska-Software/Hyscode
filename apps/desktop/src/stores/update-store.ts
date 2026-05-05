@@ -6,6 +6,14 @@ import { useSettingsStore } from './settings-store';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
+export interface CommitInfo {
+  sha: string;
+  message: string;
+  author: string;
+  date: string;
+  url: string;
+}
+
 export interface ReleaseInfo {
   version: string;
   body: string;
@@ -14,6 +22,7 @@ export interface ReleaseInfo {
   assetName: string;
   assetSize: number;
   currentVersion: string;
+  commits: CommitInfo[];
 }
 
 export interface DownloadProgress {

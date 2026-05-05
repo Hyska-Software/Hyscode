@@ -8,6 +8,8 @@ import {
   ArrowRight,
   RotateCcw,
   CheckCircle,
+  GitCommit,
+  ExternalLink,
 } from 'lucide-react';
 import { useUpdateStore } from '../../stores/update-store';
 
@@ -94,6 +96,40 @@ export function UpdateDialog() {
             </h4>
             <div className="prose-sm text-[11px] leading-relaxed text-foreground/80 whitespace-pre-wrap">
               {releaseInfo.body}
+            </div>
+          </div>
+        )}
+
+        {/* Commit history */}
+        {releaseInfo.commits && releaseInfo.commits.length > 0 && (
+          <div className="flex-1 overflow-y-auto border-b border-border px-4 py-3 max-h-[200px]">
+            <h4 className="mb-2 text-[10px] font-medium uppercase tracking-widest text-muted-foreground flex items-center gap-1.5">
+              <GitCommit className="h-3 w-3" />
+              Commits ({releaseInfo.commits.length})
+            </h4>
+            <div className="flex flex-col gap-1.5">
+              {releaseInfo.commits.map((commit) => (
+                <a
+                  key={commit.sha}
+                  href={commit.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="group flex items-start gap-2 rounded-md px-2 py-1.5 hover:bg-muted transition-colors"
+                >
+                  <span className="mt-0.5 font-mono text-[10px] text-accent shrink-0">
+                    {commit.sha}
+                  </span>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-[11px] text-foreground leading-snug truncate group-hover:text-accent transition-colors">
+                      {commit.message}
+                    </p>
+                    <p className="text-[10px] text-muted-foreground mt-0.5">
+                      {commit.author} · {commit.date}
+                    </p>
+                  </div>
+                  <ExternalLink className="h-3 w-3 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity shrink-0 mt-0.5" />
+                </a>
+              ))}
             </div>
           </div>
         )}

@@ -20,7 +20,41 @@ struct GitHubRelease {
     assets: Vec<GitHubAsset>,
 }
 
+#[derive(Debug, Deserialize)]
+struct GitHubCompareAuthor {
+    name: String,
+    date: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct GitHubCompareCommitDetail {
+    message: String,
+    author: GitHubCompareAuthor,
+}
+
+#[derive(Debug, Deserialize)]
+struct GitHubCompareCommit {
+    sha: String,
+    commit: GitHubCompareCommitDetail,
+    html_url: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct GitHubCompareResponse {
+    commits: Vec<GitHubCompareCommit>,
+}
+
 // ── Public types returned to frontend ────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CommitInfo {
+    pub sha: String,
+    pub message: String,
+    pub author: String,
+    pub date: String,
+    pub url: String,
+}
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -32,6 +66,7 @@ pub struct ReleaseInfo {
     pub asset_name: String,
     pub asset_size: u64,
     pub current_version: String,
+    pub commits: Vec<CommitInfo>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -93,6 +128,50 @@ fn is_safe_installer_path(path: &std::path::Path) -> bool {
         .and_then(|e| e.to_str())
         .unwrap_or("");
     matches!(ext, "exe" | "msi" | "dmg" | "AppImage" | "deb")
+}
+
+/// Fetch commit history between two tags using GitHub Compare API.
+async fn fetch_commits_between(
+    client: &reqwest::Client,
+    base_tag: &str,
+    head_tag: &str,
+) -> Result<Vec<CommitInfo>, String> {
+    let url = format!(
+        "https://api.github.com/repos/hyskasoftware/Hyscode/compare/{}...{}",
+        base_tag,
+        head_tag
+    );
+    let response = client
+        .get(&url)
+        .header("User-Agent", USER_AGENT)
+        .header("Accept", "application/vnd.github+json")
+        .send()
+        .await
+        .map_err(|e| format!("Failed to fetch compare: {}", e))?;
+
+    if !response.status().is_success() {
+        // 404 usually means no common ancestor or tags not found — return empty list
+        return Ok(Vec::new());
+    }
+
+    let compare: GitHubCompareResponse = response
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse compare JSON: {}", e))?;
+
+    let commits = compare
+        .commits
+        .into_iter()
+        .map(|c| CommitInfo {
+            sha: c.sha.chars().take(7).collect(),
+            message: c.commit.message.lines().next().unwrap_or(&c.commit.message).to_string(),
+            author: c.commit.author.name,
+            date: c.commit.author.date.split('T').next().unwrap_or(&c.commit.author.date).to_string(),
+            url: c.html_url,
+        })
+        .collect();
+
+    Ok(commits)
 }
 
 // ── Commands ─────────────────────────────────────────────────────────────────
@@ -189,6 +268,10 @@ pub async fn updater_check(app: AppHandle, channel: Option<String>) -> Result<Op
         "No compatible installer found in this release".to_string()
     })?;
 
+    // Fetch commit history between current version and the new release
+    let base_tag = format!("v{}", current_version);
+    let commits = fetch_commits_between(&client, &base_tag, &release.tag_name).await.unwrap_or_default();
+
     Ok(Some(ReleaseInfo {
         version: release.tag_name.clone(),
         body: release.body.unwrap_or_default(),
@@ -197,6 +280,7 @@ pub async fn updater_check(app: AppHandle, channel: Option<String>) -> Result<Op
         asset_name: asset.name.clone(),
         asset_size: asset.size,
         current_version: current_version.to_string(),
+        commits,
     }))
 }
 
