@@ -1,6 +1,5 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import {
-  X,
   Loader2,
   User,
   Clock,
@@ -11,13 +10,11 @@ import {
   ChevronRight,
   GitCommit,
   Copy,
-  ExternalLink,
 } from 'lucide-react';
 import { useGitStore } from '../../stores';
-import { useEditorStore } from '../../stores/editor-store';
 import type { CommitDetail, CommitFileChange } from '../../stores/git-store';
 
-// ── Diff line parser ─────────────────────────────────────────────────────────
+// ── Diff line parser (shared logic) ─────────────────────────────────────────
 
 interface DiffLine {
   type: 'add' | 'del' | 'ctx' | 'hunk';
@@ -33,7 +30,6 @@ function parseDiff(raw: string): DiffLine[] {
 
   for (const line of raw.split('\n')) {
     if (line.startsWith('@@')) {
-      // Parse hunk header: @@ -oldStart,oldLines +newStart,newLines @@
       const match = line.match(/@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
       if (match) {
         oldNum = parseInt(match[1], 10);
@@ -83,17 +79,15 @@ function formatFullDate(timestamp: number): string {
   return new Date(timestamp * 1000).toLocaleString();
 }
 
-// ── Component ────────────────────────────────────────────────────────────────
+// ── CommitTab ─────────────────────────────────────────────────────────────────
 
-interface CommitDetailModalProps {
+interface CommitTabProps {
   hash: string;
-  onClose: () => void;
 }
 
-export function CommitDetailModal({ hash, onClose }: CommitDetailModalProps) {
+export function CommitTab({ hash }: CommitTabProps) {
   const getCommitDetail = useGitStore((s) => s.getCommitDetail);
   const getCommitFileDiff = useGitStore((s) => s.getCommitFileDiff);
-  const openCommitTab = useEditorStore((s) => s.openCommitTab);
 
   const [detail, setDetail] = useState<CommitDetail | null>(null);
   const [loading, setLoading] = useState(true);
@@ -101,36 +95,19 @@ export function CommitDetailModal({ hash, onClose }: CommitDetailModalProps) {
   const [expandedFile, setExpandedFile] = useState<string | null>(null);
   const [fileDiffs, setFileDiffs] = useState<Record<string, string>>({});
   const [loadingDiff, setLoadingDiff] = useState<string | null>(null);
-  const overlayRef = useRef<HTMLDivElement>(null);
 
-  // Fetch commit detail on open
   useEffect(() => {
     setLoading(true);
     setError(null);
+    setDetail(null);
+    setFileDiffs({});
+    setExpandedFile(null);
     getCommitDetail(hash)
       .then((d) => setDetail(d))
       .catch((err) => setError(err.message ?? String(err)))
       .finally(() => setLoading(false));
   }, [hash, getCommitDetail]);
 
-  // Close on Escape
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    document.addEventListener('keydown', handler);
-    return () => document.removeEventListener('keydown', handler);
-  }, [onClose]);
-
-  // Close on overlay click
-  const handleOverlayClick = useCallback(
-    (e: React.MouseEvent) => {
-      if (e.target === overlayRef.current) onClose();
-    },
-    [onClose],
-  );
-
-  // Toggle file diff
   const toggleFile = useCallback(
     async (filePath: string) => {
       if (expandedFile === filePath) {
@@ -139,7 +116,7 @@ export function CommitDetailModal({ hash, onClose }: CommitDetailModalProps) {
       }
       setExpandedFile(filePath);
 
-      if (fileDiffs[filePath]) return; // Already loaded
+      if (fileDiffs[filePath]) return;
 
       setLoadingDiff(filePath);
       try {
@@ -158,120 +135,86 @@ export function CommitDetailModal({ hash, onClose }: CommitDetailModalProps) {
     if (detail) navigator.clipboard.writeText(detail.hash);
   }, [detail]);
 
-  const handleOpenTab = useCallback(() => {
-    if (!detail) return;
-    openCommitTab(detail.hash, detail.short_hash, detail.message);
-    onClose();
-  }, [detail, openCommitTab, onClose]);
+  if (loading) {
+    return (
+      <div className="flex h-full items-center justify-center">
+        <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="flex h-full items-center justify-center text-[11px] text-red-400">
+        {error}
+      </div>
+    );
+  }
+
+  if (!detail) return null;
 
   return (
-    <div
-      ref={overlayRef}
-      onClick={handleOverlayClick}
-      className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm"
-    >
-      <div className="flex max-h-[80vh] w-[640px] max-w-[90vw] flex-col rounded-xl border border-border bg-background shadow-2xl">
-        {/* Header */}
-        <div className="flex items-center justify-between border-b border-border px-4 py-3">
-          <div className="flex items-center gap-2">
-            <GitCommit className="h-4 w-4 text-accent" />
-            <span className="text-[13px] font-semibold text-foreground">Commit Detail</span>
-          </div>
-          <div className="flex items-center gap-1">
-            {detail && (
+    <div className="flex h-full flex-col overflow-hidden bg-background">
+      {/* Header */}
+      <div className="flex items-start justify-between border-b border-border px-6 py-4 shrink-0">
+        <div className="flex items-start gap-3 min-w-0">
+          <GitCommit className="h-5 w-5 text-accent mt-0.5 shrink-0" />
+          <div className="min-w-0">
+            <p className="text-[13px] font-semibold text-foreground leading-snug whitespace-pre-wrap mb-2">
+              {detail.message}
+            </p>
+            <div className="flex flex-wrap items-center gap-3 text-[10px] text-muted-foreground">
               <button
-                onClick={handleOpenTab}
-                className="flex items-center gap-1 rounded-md px-2 py-1 text-[11px] text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-                title="Open as editor tab"
+                onClick={copyHash}
+                className="flex items-center gap-1 rounded bg-accent/10 px-1.5 py-0.5 font-mono text-[11px] text-accent hover:bg-accent/20 transition-colors"
+                title="Copy full hash"
               >
-                <ExternalLink className="h-3.5 w-3.5" />
-                Open in Editor
+                {detail.short_hash}
+                <Copy className="h-2.5 w-2.5" />
               </button>
-            )}
-            <button
-              onClick={onClose}
-              className="flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-            >
-              <X className="h-4 w-4" />
-            </button>
+              <span className="flex items-center gap-1">
+                <User className="h-3 w-3" />
+                {detail.author} &lt;{detail.email}&gt;
+              </span>
+              <span className="flex items-center gap-1">
+                <Clock className="h-3 w-3" />
+                {formatFullDate(detail.timestamp)} ({formatRelativeTime(detail.timestamp)})
+              </span>
+            </div>
           </div>
         </div>
 
-        {/* Body */}
-        <div className="flex-1 overflow-auto">
-          {loading && (
-            <div className="flex items-center justify-center py-12">
-              <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-            </div>
+        {/* Stats */}
+        <div className="flex items-center gap-3 text-[10px] shrink-0 ml-4 mt-0.5">
+          <span className="flex items-center gap-1 text-muted-foreground">
+            <FileText className="h-3 w-3" />
+            {detail.files.length} file{detail.files.length !== 1 ? 's' : ''}
+          </span>
+          {detail.total_insertions > 0 && (
+            <span className="flex items-center gap-0.5 text-green-400">
+              <Plus className="h-3 w-3" />{detail.total_insertions}
+            </span>
           )}
-
-          {error && (
-            <div className="px-4 py-8 text-center text-[11px] text-red-400">{error}</div>
-          )}
-
-          {detail && !loading && (
-            <div>
-              {/* Commit metadata */}
-              <div className="border-b border-border px-4 py-3">
-                <div className="flex items-center gap-2 mb-1.5">
-                  <button
-                    onClick={copyHash}
-                    className="flex items-center gap-1 rounded bg-accent/10 px-1.5 py-0.5 font-mono text-[11px] text-accent hover:bg-accent/20 transition-colors"
-                    title="Copy full hash"
-                  >
-                    {detail.short_hash}
-                    <Copy className="h-2.5 w-2.5" />
-                  </button>
-                </div>
-                <p className="text-[12px] text-foreground leading-snug whitespace-pre-wrap">
-                  {detail.message}
-                </p>
-                <div className="mt-2 flex flex-wrap items-center gap-3 text-[10px] text-muted-foreground">
-                  <span className="flex items-center gap-1">
-                    <User className="h-3 w-3" />
-                    {detail.author} &lt;{detail.email}&gt;
-                  </span>
-                  <span className="flex items-center gap-1">
-                    <Clock className="h-3 w-3" />
-                    {formatFullDate(detail.timestamp)} ({formatRelativeTime(detail.timestamp)})
-                  </span>
-                </div>
-
-                {/* Stats summary */}
-                <div className="mt-2 flex items-center gap-3 text-[10px]">
-                  <span className="flex items-center gap-1 text-muted-foreground">
-                    <FileText className="h-3 w-3" />
-                    {detail.files.length} file{detail.files.length !== 1 ? 's' : ''} changed
-                  </span>
-                  {detail.total_insertions > 0 && (
-                    <span className="flex items-center gap-0.5 text-green-400">
-                      <Plus className="h-3 w-3" />{detail.total_insertions}
-                    </span>
-                  )}
-                  {detail.total_deletions > 0 && (
-                    <span className="flex items-center gap-0.5 text-red-400">
-                      <Minus className="h-3 w-3" />{detail.total_deletions}
-                    </span>
-                  )}
-                </div>
-              </div>
-
-              {/* File list */}
-              <div>
-                {detail.files.map((file) => (
-                  <FileChangeRow
-                    key={file.path}
-                    file={file}
-                    isExpanded={expandedFile === file.path}
-                    isLoadingDiff={loadingDiff === file.path}
-                    diffContent={fileDiffs[file.path] ?? null}
-                    onToggle={() => toggleFile(file.path)}
-                  />
-                ))}
-              </div>
-            </div>
+          {detail.total_deletions > 0 && (
+            <span className="flex items-center gap-0.5 text-red-400">
+              <Minus className="h-3 w-3" />{detail.total_deletions}
+            </span>
           )}
         </div>
+      </div>
+
+      {/* File list */}
+      <div className="flex-1 overflow-auto">
+        {detail.files.map((file) => (
+          <FileChangeRow
+            key={file.path}
+            file={file}
+            isExpanded={expandedFile === file.path}
+            isLoadingDiff={loadingDiff === file.path}
+            diffContent={fileDiffs[file.path] ?? null}
+            onToggle={() => toggleFile(file.path)}
+          />
+        ))}
       </div>
     </div>
   );
@@ -304,7 +247,7 @@ function FileChangeRow({
     <div className="border-b border-border/30">
       <button
         onClick={onToggle}
-        className="flex w-full items-center gap-1.5 px-4 py-1.5 text-left hover:bg-surface-raised transition-colors"
+        className="flex w-full items-center gap-1.5 px-6 py-1.5 text-left hover:bg-surface-raised transition-colors"
       >
         <Chevron className="h-3 w-3 shrink-0 text-muted-foreground" />
         <span className={`shrink-0 font-mono text-[10px] font-medium ${statusColor}`}>
@@ -315,12 +258,8 @@ function FileChangeRow({
           <span className="truncate text-[10px] text-muted-foreground/60">{dirPath}</span>
         )}
         <span className="ml-auto flex items-center gap-1.5 shrink-0 text-[10px]">
-          {file.insertions > 0 && (
-            <span className="text-green-400">+{file.insertions}</span>
-          )}
-          {file.deletions > 0 && (
-            <span className="text-red-400">-{file.deletions}</span>
-          )}
+          {file.insertions > 0 && <span className="text-green-400">+{file.insertions}</span>}
+          {file.deletions > 0 && <span className="text-red-400">-{file.deletions}</span>}
         </span>
       </button>
 
@@ -349,7 +288,7 @@ function DiffView({ content }: { content: string }) {
 
   if (lines.length === 0) {
     return (
-      <div className="px-4 py-3 text-[10px] text-muted-foreground">No diff available</div>
+      <div className="px-6 py-3 text-[10px] text-muted-foreground">No diff available</div>
     );
   }
 

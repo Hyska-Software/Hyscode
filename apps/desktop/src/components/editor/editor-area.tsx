@@ -4,6 +4,7 @@ import { EditorTabs } from './editor-tabs';
 import { EditorWelcome } from './editor-welcome';
 import { DiffViewer } from './diff-viewer';
 import { AgentDiffViewer } from './agent-diff-viewer';
+import { CommitTab } from './commit-tab';
 import { PendingChangesBar } from './pending-changes-bar';
 import { InlineReviewBar } from './inline-review-bar';
 import { EditorContextMenu } from './editor-context-menu';
@@ -301,7 +302,9 @@ export function EditorArea() {
 
   // Viewer types that are handled as text (Monaco / markdown)
   const isTextViewer =
-    !activeTab || activeTab.viewerType === 'code' || activeTab.viewerType === 'markdown';
+    !activeTab ||
+    (activeTab.type !== 'commit' &&
+      (activeTab.viewerType === 'code' || activeTab.viewerType === 'markdown'));
 
   // Load file content when active tab changes (only for text-based viewers)
   useEffect(() => {
@@ -450,6 +453,8 @@ export function EditorArea() {
         <div className="absolute inset-0 flex flex-col" style={{ display: activeTab?.type === 'terminal' ? 'none' : 'flex' }}>
           {!activeTab ? (
             <EditorWelcome />
+          ) : activeTab.type === 'commit' && activeTab.commitProps ? (
+            <CommitTab hash={activeTab.commitProps.hash} />
           ) : activeTab.type === 'diff' && activeTab.diffProps ? (
             <DiffViewer
               filePath={activeTab.diffProps.filePath}

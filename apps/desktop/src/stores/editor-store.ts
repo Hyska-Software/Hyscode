@@ -10,12 +10,18 @@ export interface Tab {
   isDirty: boolean;
   isPinned: boolean;
   isPreview: boolean;
-  type: 'file' | 'diff' | 'terminal';
+  type: 'file' | 'diff' | 'terminal' | 'commit';
   viewerType: ViewerType;
   markdownMode?: 'preview' | 'code';
   diffProps?: {
     filePath: string;
     staged: boolean;
+  };
+  /** Commit details when type === 'commit' */
+  commitProps?: {
+    hash: string;
+    shortHash: string;
+    message: string;
   };
   /** Terminal session id when type === 'terminal' */
   terminalSessionId?: string;
@@ -29,6 +35,7 @@ interface EditorState {
   openTab: (tab: Omit<Tab, 'isDirty' | 'isPinned' | 'isPreview' | 'type' | 'diffProps' | 'viewerType' | 'markdownMode'> & { type?: Tab['type']; diffProps?: Tab['diffProps']; viewerType?: ViewerType; markdownMode?: Tab['markdownMode'] }) => void;
   openUntitled: () => void;
   openTerminalTab: (sessionId: string, name: string) => void;
+  openCommitTab: (hash: string, shortHash: string, message: string) => void;
   closeTab: (id: string) => void;
   closeOtherTabs: (id: string) => void;
   closeTabsToTheRight: (id: string) => void;
@@ -114,6 +121,32 @@ export const useEditorStore = create<EditorState>()(
           type: 'terminal',
           viewerType: 'code',
           terminalSessionId: sessionId,
+        };
+        state.tabs.push(newTab);
+        state.activeTabId = id;
+      }),
+
+    openCommitTab: (hash: string, shortHash: string, message: string) =>
+      set((state) => {
+        const id = `commit:${hash}`;
+        const existing = state.tabs.find((t) => t.id === id);
+        if (existing) {
+          state.activeTabId = existing.id;
+          return;
+        }
+        const firstLine = message.split('\n')[0] ?? message;
+        const label = firstLine.length > 40 ? `${firstLine.slice(0, 40)}…` : firstLine;
+        const newTab: Tab = {
+          id,
+          filePath: id,
+          fileName: `Commit ${shortHash}`,
+          language: 'plaintext',
+          isDirty: false,
+          isPinned: false,
+          isPreview: false,
+          type: 'commit',
+          viewerType: 'code',
+          commitProps: { hash, shortHash, message: label },
         };
         state.tabs.push(newTab);
         state.activeTabId = id;
