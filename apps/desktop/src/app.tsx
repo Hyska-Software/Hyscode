@@ -271,10 +271,36 @@ export function App() {
     }, { category: 'View', key: 'ctrl+`' });
 
     builtin('workbench.action.toggleSidebar', 'Toggle Sidebar', () => {
-      // The sidebar toggle would need to be implemented in the layout store
-      // For now, just a placeholder
-      console.debug('[Builtin] Toggle sidebar');
+      useLayoutStore.getState().toggleSidebar();
     }, { category: 'View', key: 'ctrl+b' });
+
+    builtin('workbench.action.focusExplorer', 'Focus Explorer', () => {
+      useLayoutStore.getState().focusSidebarView('files');
+    }, { category: 'View', key: 'ctrl+shift+e' });
+
+    builtin('workbench.action.focusSearch', 'Focus Search', () => {
+      useLayoutStore.getState().focusSidebarView('search');
+    }, { category: 'View', key: 'ctrl+shift+f' });
+
+    builtin('workbench.action.focusSourceControl', 'Focus Source Control', () => {
+      useLayoutStore.getState().focusSidebarView('git');
+    }, { category: 'View', key: 'ctrl+shift+g' });
+
+    builtin('workbench.action.focusExtensions', 'Focus Extensions', () => {
+      useLayoutStore.getState().focusSidebarView('extensions');
+    }, { category: 'View' });
+
+    builtin('workbench.action.focusSkills', 'Focus Skills', () => {
+      useLayoutStore.getState().focusSidebarView('skills');
+    }, { category: 'View' });
+
+    builtin('workbench.action.focusDevices', 'Focus Devices', () => {
+      useLayoutStore.getState().focusSidebarView('devices');
+    }, { category: 'View' });
+
+    builtin('workbench.action.focusDocker', 'Focus Docker', () => {
+      useLayoutStore.getState().focusSidebarView('docker');
+    }, { category: 'View' });
 
     builtin('workbench.action.switchToEditorMode', 'Switch to Editor Mode', () => {
       useLayoutStore.getState().setWorkspaceMode('editor');

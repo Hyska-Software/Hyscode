@@ -10,6 +10,7 @@ import { useSettingsStore } from '../../stores';
 export function EditorLayout() {
   const terminalLocation = useLayoutStore((s) => s.terminalLocation);
   const terminalVisible = useLayoutStore((s) => s.terminalVisible);
+  const sidebarVisible = useLayoutStore((s) => s.sidebarVisible);
   const moveTerminalToSidebar = useLayoutStore((s) => s.moveTerminalToSidebar);
   const moveTerminalToBottom = useLayoutStore((s) => s.moveTerminalToBottom);
   const showAgentChat = useSettingsStore((s) => s.showAgentChatPanel);
@@ -22,16 +23,19 @@ export function EditorLayout() {
   return (
     <PanelGroup direction="horizontal">
       {/* Sidebar */}
-      <Panel defaultSize={16} minSize={12} maxSize={24}>
-        <div className="h-full rounded-lg bg-surface overflow-hidden">
-          <Sidebar />
-        </div>
-      </Panel>
-
-      <PanelResizeHandle className="w-1.5" />
+      {sidebarVisible && (
+        <>
+          <Panel defaultSize={16} minSize={12} maxSize={24}>
+            <div className="h-full rounded-lg bg-surface overflow-hidden">
+              <Sidebar />
+            </div>
+          </Panel>
+          <PanelResizeHandle className="w-1.5" />
+        </>
+      )}
 
       {/* Editor + (optionally) Terminal stacked */}
-      <Panel defaultSize={showRightPanel ? 50 : 84} minSize={30}>
+      <Panel defaultSize={showRightPanel ? 50 : sidebarVisible ? 84 : 100} minSize={30}>
         {showBottomTerminal ? (
           <PanelGroup direction="vertical">
             <Panel defaultSize={65} minSize={25}>

@@ -6,12 +6,33 @@ import {
   DropdownMenuSeparator,
   DropdownMenuCheckboxItem,
   DropdownMenuShortcut,
+  DropdownMenuSub,
+  DropdownMenuSubTrigger,
+  DropdownMenuSubContent,
 } from '../ui/dropdown-menu';
-import { useLayoutStore } from '../../stores/layout-store';
+import { useLayoutStore, type SidebarViewId } from '../../stores/layout-store';
 import { useSettingsStore } from '../../stores';
+import { useCommandStore } from '../../stores/command-store';
+
+const VIEW_LABELS: Record<SidebarViewId, string> = {
+  files: 'Explorer',
+  search: 'Search',
+  git: 'Source Control',
+  skills: 'Skills',
+  extensions: 'Extensions',
+  agent: 'Agent',
+  devices: 'Devices',
+  docker: 'Docker',
+};
 
 export function ViewMenu() {
   const workspaceMode = useLayoutStore((s) => s.workspaceMode);
+  const setWorkspaceMode = useLayoutStore((s) => s.setWorkspaceMode);
+  const sidebarVisible = useLayoutStore((s) => s.sidebarVisible);
+  const toggleSidebar = useLayoutStore((s) => s.toggleSidebar);
+  const focusSidebarView = useLayoutStore((s) => s.focusSidebarView);
+  const sidebarActiveView = useLayoutStore((s) => s.sidebarActiveView);
+
   const terminalVisible = useLayoutStore((s) => s.terminalVisible);
   const terminalLocation = useLayoutStore((s) => s.terminalLocation);
   const toggleTerminal = useLayoutStore((s) => s.toggleTerminal);
@@ -19,7 +40,13 @@ export function ViewMenu() {
   const moveTerminalToBottom = useLayoutStore((s) => s.moveTerminalToBottom);
 
   const showAgentChatPanel = useSettingsStore((s) => s.showAgentChatPanel);
-  const setShowAgentChatPanel = useSettingsStore((s) => s.set);
+  const setSettings = useSettingsStore((s) => s.set);
+  const minimap = useSettingsStore((s) => s.minimap);
+  const wordWrap = useSettingsStore((s) => s.wordWrap);
+  const lineNumbers = useSettingsStore((s) => s.lineNumbers);
+  const visibleSidebarTabs = useSettingsStore((s) => s.visibleSidebarTabs);
+
+  const executeCommand = useCommandStore((s) => s.executeCommand);
 
   const isAgentMode = workspaceMode === 'agent';
 
@@ -29,18 +56,109 @@ export function ViewMenu() {
         View
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" sideOffset={4} className="w-56">
-        {/* Chat Controls */}
+        {/* ── Workspace Mode ── */}
+        <DropdownMenuItem
+          onClick={() => setWorkspaceMode('editor')}
+          className={workspaceMode === 'editor' ? 'bg-accent text-accent-foreground' : ''}
+        >
+          Editor Mode
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          onClick={() => setWorkspaceMode('agent')}
+          className={workspaceMode === 'agent' ? 'bg-accent text-accent-foreground' : ''}
+        >
+          Agent Mode
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          onClick={() => setWorkspaceMode('review')}
+          className={workspaceMode === 'review' ? 'bg-accent text-accent-foreground' : ''}
+        >
+          Review Mode
+        </DropdownMenuItem>
+
+        <DropdownMenuSeparator />
+
+        {/* ── Appearance ── */}
+        <DropdownMenuCheckboxItem
+          checked={sidebarVisible}
+          onCheckedChange={toggleSidebar}
+        >
+          Sidebar
+          <DropdownMenuShortcut>Ctrl+B</DropdownMenuShortcut>
+        </DropdownMenuCheckboxItem>
+
         <DropdownMenuCheckboxItem
           checked={showAgentChatPanel}
-          onCheckedChange={(checked) => setShowAgentChatPanel('showAgentChatPanel', checked)}
+          onCheckedChange={(checked) => setSettings('showAgentChatPanel', checked)}
           disabled={isAgentMode}
         >
           Agent Chat
         </DropdownMenuCheckboxItem>
 
+        <DropdownMenuCheckboxItem
+          checked={minimap}
+          onCheckedChange={(checked) => setSettings('minimap', checked)}
+        >
+          Minimap
+        </DropdownMenuCheckboxItem>
+
+        <DropdownMenuCheckboxItem
+          checked={wordWrap === 'on'}
+          onCheckedChange={(checked) => setSettings('wordWrap', checked ? 'on' : 'off')}
+        >
+          Word Wrap
+          <DropdownMenuShortcut>Alt+Z</DropdownMenuShortcut>
+        </DropdownMenuCheckboxItem>
+
+        <DropdownMenuCheckboxItem
+          checked={lineNumbers !== 'off'}
+          onCheckedChange={(checked) => setSettings('lineNumbers', checked ? 'on' : 'off')}
+        >
+          Line Numbers
+        </DropdownMenuCheckboxItem>
+
         <DropdownMenuSeparator />
 
-        {/* Terminal Controls */}
+        {/* ── Sidebar Tabs ── */}
+        <DropdownMenuSub>
+          <DropdownMenuSubTrigger>Sidebar Tabs</DropdownMenuSubTrigger>
+          <DropdownMenuSubContent className="w-48">
+            {(Object.keys(VIEW_LABELS) as SidebarViewId[]).map((id) => (
+              <DropdownMenuCheckboxItem
+                key={id}
+                checked={visibleSidebarTabs[id]}
+                onCheckedChange={(checked) =>
+                  setSettings('visibleSidebarTabs', { ...visibleSidebarTabs, [id]: checked })
+                }
+                disabled={id === 'files'}
+              >
+                {VIEW_LABELS[id]}
+              </DropdownMenuCheckboxItem>
+            ))}
+          </DropdownMenuSubContent>
+        </DropdownMenuSub>
+
+        {/* ── Sidebar Views (jump to) ── */}
+        <DropdownMenuSub>
+          <DropdownMenuSubTrigger>Sidebar Views</DropdownMenuSubTrigger>
+          <DropdownMenuSubContent className="w-48">
+            {(Object.keys(VIEW_LABELS) as SidebarViewId[])
+              .filter((id) => visibleSidebarTabs[id])
+              .map((id) => (
+                <DropdownMenuItem
+                  key={id}
+                  onClick={() => focusSidebarView(id)}
+                  className={sidebarActiveView === id ? 'bg-accent text-accent-foreground' : ''}
+                >
+                  {VIEW_LABELS[id]}
+                </DropdownMenuItem>
+              ))}
+          </DropdownMenuSubContent>
+        </DropdownMenuSub>
+
+        <DropdownMenuSeparator />
+
+        {/* ── Terminal ── */}
         <DropdownMenuCheckboxItem
           checked={terminalVisible}
           onCheckedChange={toggleTerminal}
@@ -49,7 +167,12 @@ export function ViewMenu() {
           <DropdownMenuShortcut>Ctrl+`</DropdownMenuShortcut>
         </DropdownMenuCheckboxItem>
 
-        <DropdownMenuSeparator />
+        <DropdownMenuItem
+          onClick={() => executeCommand('workbench.action.terminal.new')}
+        >
+          New Terminal
+          <DropdownMenuShortcut>Ctrl+Shift+`</DropdownMenuShortcut>
+        </DropdownMenuItem>
 
         <DropdownMenuItem
           onClick={moveTerminalToBottom}

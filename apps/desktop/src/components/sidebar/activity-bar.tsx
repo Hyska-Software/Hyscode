@@ -42,6 +42,7 @@ function ActivityBadge({ count }: { count: number }) {
 
 export function ActivityBar({ active, onSelect }: ActivityBarProps) {
   const openSettings = useSettingsStore((s) => s.openSettings);
+  const visibleSidebarTabs = useSettingsStore((s) => s.visibleSidebarTabs);
   const extensionViews = useExtensionStore((s) => s.contributions.views);
   const viewBadges = useViewRegistryStore((s) => s.badges);
 
@@ -76,7 +77,7 @@ export function ActivityBar({ active, onSelect }: ActivityBarProps) {
 
   return (
     <div className="flex w-11 flex-col items-center gap-1 bg-sidebar py-2">
-      {builtinItems.map((item) => {
+      {builtinItems.filter((item) => visibleSidebarTabs[item.id]).map((item) => {
         const Icon = item.icon;
         const isActive = active === item.id;
         const badge = badges[item.id];

@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { immer } from 'zustand/middleware/immer';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import type { AgentType, ToolCategory } from '@hyscode/agent-harness';
+import type { SidebarViewId } from './layout-store';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -178,6 +179,8 @@ interface SettingsState {
   showReviewTab: boolean;
   showAgentChatPanel: boolean;
   agentCenterPanelMode: 'chat' | 'terminal';
+  /** Which builtin sidebar tabs are visible in the ActivityBar */
+  visibleSidebarTabs: Record<SidebarViewId, boolean>;
 
   // ─ Settings modal ─
   settingsOpen: boolean;
@@ -313,6 +316,16 @@ export const useSettingsStore = create<SettingsState>()(
       showReviewTab: true,
       showAgentChatPanel: true,
       agentCenterPanelMode: 'chat' as const,
+      visibleSidebarTabs: {
+        files: true,
+        search: true,
+        git: true,
+        skills: true,
+        extensions: true,
+        agent: true,
+        devices: true,
+        docker: true,
+      },
 
       // Settings modal
       settingsOpen: false,

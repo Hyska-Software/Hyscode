@@ -1,7 +1,9 @@
-import { useState } from 'react';
+import { useEffect } from 'react';
 import { ActivityBar } from './activity-bar';
 import { SidebarContent } from './sidebar-content';
 import { useExtensionStore } from '../../stores/extension-store';
+import { useLayoutStore } from '../../stores/layout-store';
+import { useSettingsStore } from '../../stores';
 
 const builtinViewLabels: Record<BuiltinSidebarView, string> = {
   files: 'Explorer',
@@ -22,8 +24,20 @@ export function isBuiltinView(view: string): view is BuiltinSidebarView {
 }
 
 export function Sidebar() {
-  const [activeView, setActiveView] = useState<SidebarView>('files');
+  const activeView = useLayoutStore((s) => s.sidebarActiveView);
+  const setActiveView = useLayoutStore((s) => s.setSidebarActiveView);
   const extensionViews = useExtensionStore((s) => s.contributions.views);
+  const visibleSidebarTabs = useSettingsStore((s) => s.visibleSidebarTabs);
+
+  // If active builtin view gets hidden, fall back to first visible one
+  useEffect(() => {
+    if (isBuiltinView(activeView) && !visibleSidebarTabs[activeView]) {
+      const fallback = (Object.keys(visibleSidebarTabs) as BuiltinSidebarView[]).find(
+        (id) => visibleSidebarTabs[id],
+      );
+      if (fallback) setActiveView(fallback);
+    }
+  }, [activeView, visibleSidebarTabs, setActiveView]);
 
   const getViewLabel = (view: SidebarView): string => {
     if (isBuiltinView(view)) return builtinViewLabels[view];
