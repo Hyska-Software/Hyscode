@@ -645,6 +645,156 @@ function GenericToolRow({ toolCall }: { toolCall: ToolCallDisplay }) {
   );
 }
 
+// ─── Compact Diff Helpers ────────────────────────────────────────────────────
+
+function computeLineDiffCounts(toolCall: ToolCallDisplay): { added: number; removed: number } {
+  const name = toolCall.name;
+  if (['write_file', 'create_file'].includes(name)) {
+    const content = ((toolCall.input.new_content ?? toolCall.input.content ?? '') as string);
+    return { added: content.split('\n').length, removed: 0 };
+  }
+  if (['edit_file', 'replace_lines', 'insert_lines'].includes(name)) {
+    const oldStr = (toolCall.input.old_string as string) ?? '';
+    const newStr = (toolCall.input.new_string as string) ?? '';
+    const oldLines = oldStr.split('\n').length;
+    const newLines = newStr.split('\n').length;
+    return {
+      added: Math.max(0, newLines - oldLines),
+      removed: Math.max(0, oldLines - newLines),
+    };
+  }
+  return { added: 0, removed: 0 };
+}
+
+function getFileNameFromToolCall(toolCall: ToolCallDisplay): string {
+  const p = (toolCall.input.path as string) ?? '';
+  return p.split(/[\\/]/).pop() ?? p;
+}
+
+function getFullPathFromToolCall(toolCall: ToolCallDisplay): string {
+  return (toolCall.input.path as string) ?? '';
+}
+
+// ─── Compact Tool Call Row ───────────────────────────────────────────────────
+
+const TOOL_ICON_MAP: Record<string, LucideIcon> = {
+  read_file: FileText,
+  search_code: Search,
+  find_files: FolderOpen,
+  get_file_info: FileText,
+  read_multiple_files: FileText,
+  list_directory: FolderOpen,
+  write_file: FileText,
+  create_file: Plus,
+  edit_file: Pencil,
+  replace_lines: Pencil,
+  insert_lines: Plus,
+  web_search: Globe,
+  web_fetch: Globe,
+  run_code: Code2,
+  run_terminal_command: Terminal,
+  git_status: GitBranch,
+  git_diff: GitBranch,
+  git_commit: GitBranch,
+  git_add: GitBranch,
+  git_log: GitBranch,
+  git_checkout: GitBranch,
+  git_push: GitBranch,
+  git_pull: GitBranch,
+  git_fetch: GitBranch,
+  git_stash: GitBranch,
+  git_merge: GitBranch,
+  git_reset: GitBranch,
+  git_blame: GitBranch,
+  git_show: GitBranch,
+  activate_skill: Sparkles,
+  list_skills: Zap,
+  mcp_call: Globe,
+  mcp_query: Network,
+  database_query: Database,
+  delete_file: Trash2,
+  rename_file: FileText,
+  copy_file: FileText,
+  detect_project_type: Zap,
+  get_diagnostics: Code2,
+  gather_context: FileText,
+  drop_context: FileText,
+  list_context: FileText,
+  manage_tasks: CheckCircle2,
+  request_mode_switch: Zap,
+  ask_user: Sparkles,
+  create_skill: Sparkles,
+};
+
+function CompactToolCallRow({ toolCall }: { toolCall: ToolCallDisplay }) {
+  const [expanded, setExpanded] = useState(false);
+  const isRunning = toolCall.status === 'running';
+  const isDone = toolCall.status === 'success';
+  const isError = toolCall.status === 'error';
+
+  const ToolIcon = TOOL_ICON_MAP[toolCall.name] ?? Wrench;
+  const fileName = getFileNameFromToolCall(toolCall);
+  const fullPath = getFullPathFromToolCall(toolCall);
+  const { added, removed } = computeLineDiffCounts(toolCall);
+  const isFileEdit = ['write_file', 'create_file', 'edit_file', 'replace_lines', 'insert_lines'].includes(toolCall.name);
+  const isFileRead = ['read_file', 'search_code', 'find_files', 'get_file_info', 'read_multiple_files', 'list_directory'].includes(toolCall.name);
+  const isTerminal = /terminal|command/.test(toolCall.name);
+  const isWeb = ['web_search', 'web_fetch'].includes(toolCall.name);
+
+  return (
+    <div className="agent-fade-in">
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="flex w-full items-center gap-2 px-1 py-[2px] text-left hover:bg-white/[0.02] transition-colors"
+      >
+        {/* Status indicator */}
+        {isRunning ? (
+          <Loader2 className="h-3 w-3 shrink-0 animate-spin text-muted-foreground/40" />
+        ) : isDone ? (
+          <Check className="h-3 w-3 shrink-0 text-green-400" />
+        ) : isError ? (
+          <X className="h-3 w-3 shrink-0 text-red-400" />
+        ) : (
+          <Clock className="h-3 w-3 shrink-0 text-yellow-400/40" />
+        )}
+
+        {/* Tool icon */}
+        <ToolIcon className="h-3 w-3 shrink-0 text-muted-foreground/40" />
+
+        {/* Label */}
+        {isFileEdit || isFileRead ? (
+          <span className="truncate font-mono text-[11px] text-muted-foreground/70">{fileName || fullPath}</span>
+        ) : isTerminal ? (
+          <span className="truncate font-mono text-[11px] text-muted-foreground/70">{(toolCall.input.command as string) ?? ''}</span>
+        ) : isWeb ? (
+          <span className="truncate font-mono text-[11px] text-muted-foreground/70">{(toolCall.input.query as string) ?? (toolCall.input.url as string) ?? ''}</span>
+        ) : (
+          <span className="truncate text-[11px] text-foreground/60">{getGenericLabel(toolCall.name)}</span>
+        )}
+
+        {/* Diff counts */}
+        {(added > 0 || removed > 0) && (
+          <span className="shrink-0 ml-auto flex items-center gap-1 text-[10px] tabular-nums">
+            {added > 0 && <span className="text-green-400">+{added}</span>}
+            {removed > 0 && <span className="text-red-400">-{removed}</span>}
+          </span>
+        )}
+
+        {isFileEdit && !added && !removed && isDone && (
+          <span className="shrink-0 ml-auto text-[9px] text-green-400/60">applied</span>
+        )}
+      </button>
+
+      {/* Expanded content */}
+      {expanded && (
+        <div className="agent-fade-in ml-5">
+          <ToolCallCard toolCall={toolCall} />
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── ToolCallCard dispatcher ──────────────────────────────────────────────────
 
 interface ToolCallCardProps {
@@ -679,39 +829,13 @@ interface ToolCallGroupProps {
 }
 
 export const ToolCallGroup = memo(function ToolCallGroup({ toolCalls }: ToolCallGroupProps) {
-  const [expanded, setExpanded] = useState(true);
   if (toolCalls.length === 0) return null;
 
-  const running = toolCalls.filter(tc => tc.status === 'running').length;
-  const done = toolCalls.filter(tc => tc.status === 'success').length;
-  const error = toolCalls.filter(tc => tc.status === 'error').length;
-
   return (
-    <div className="agent-fade-in my-1 rounded-lg border border-border/10 bg-surface-raised/[0.04]">
-      {/* Group header */}
-      <button
-        onClick={() => setExpanded(!expanded)}
-        className="flex w-full items-center gap-2 px-3 py-1.5 text-left hover:bg-white/[0.02] transition-colors"
-      >
-        {expanded ? <ChevronDown className="h-3 w-3 text-muted-foreground/40" /> : <ChevronRight className="h-3 w-3 text-muted-foreground/40" />}
-        <Wrench className="h-3 w-3 text-muted-foreground/40" />
-        <span className="text-[11px] text-muted-foreground/60">
-          {toolCalls.length} tool call{toolCalls.length > 1 ? 's' : ''}
-        </span>
-        <span className="flex items-center gap-1 text-[10px]">
-          {running > 0 && <span className="text-amber-400/60">{running} running</span>}
-          {done > 0 && <span className="text-green-400/60">{done} done</span>}
-          {error > 0 && <span className="text-red-400/60">{error} failed</span>}
-        </span>
-      </button>
-
-      {expanded && (
-        <div className="px-2 pb-1.5">
-          {toolCalls.map((tc) => (
-            <ToolCallCard key={tc.id} toolCall={tc} />
-          ))}
-        </div>
-      )}
+    <div className="agent-fade-in my-0.5 flex flex-col">
+      {toolCalls.map((tc) => (
+        <CompactToolCallRow key={tc.id} toolCall={tc} />
+      ))}
     </div>
   );
 });

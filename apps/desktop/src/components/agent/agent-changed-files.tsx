@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react';
-import { ChevronDown, ChevronRight, Check, Undo2, FileCode2 } from 'lucide-react';
+import { ChevronDown, ChevronRight, Check, Undo2, FileCode2, FileText } from 'lucide-react';
 import { useAgentStore } from '@/stores/agent-store';
 import { useEditorStore } from '@/stores/editor-store';
 import { HarnessBridge } from '@/lib/harness-bridge';
@@ -58,25 +58,25 @@ export function AgentChangedFiles() {
   };
 
   return (
-    <div className="shrink-0 border-t border-border bg-surface-raised">
+    <div className="agent-fade-in shrink-0 border-t border-border/10 bg-surface-raised/[0.04]">
       {/* Header row */}
       <button
         onClick={() => setExpanded(!expanded)}
-        className="flex w-full items-center gap-1.5 px-3 py-1.5 text-left hover:bg-muted/40 transition-colors"
+        className="flex w-full items-center gap-1.5 px-3 py-1 text-left hover:bg-white/[0.02] transition-colors"
       >
         {expanded ? (
-          <ChevronDown className="h-3 w-3 text-muted-foreground" />
+          <ChevronDown className="h-3 w-3 text-muted-foreground/50" />
         ) : (
-          <ChevronRight className="h-3 w-3 text-muted-foreground" />
+          <ChevronRight className="h-3 w-3 text-muted-foreground/50" />
         )}
-        <span className="text-[11px] font-medium text-foreground">
+        <FileText className="h-3 w-3 text-muted-foreground/40" />
+        <span className="text-[11px] text-muted-foreground/60">
           {sessions.length} {sessions.length === 1 ? 'file' : 'files'} changed
         </span>
-        <span className="ml-1 text-[10px] text-muted-foreground">
+        <span className="ml-1 flex items-center gap-1 text-[10px] tabular-nums">
           {totalStats.added > 0 && (
             <span className="text-green-400">+{totalStats.added}</span>
           )}
-          {totalStats.added > 0 && totalStats.removed > 0 && ' '}
           {totalStats.removed > 0 && (
             <span className="text-red-400">-{totalStats.removed}</span>
           )}
@@ -105,7 +105,7 @@ export function AgentChangedFiles() {
 
       {/* File list */}
       {expanded && (
-        <div className="flex flex-col pb-1">
+        <div className="flex flex-col gap-1 px-2 pb-2">
           {sessions.map((session) => {
             const fileName = session.filePath.split(/[\\/]/).pop() ?? session.filePath;
             const dir = session.filePath.split(/[\\/]/).slice(-2, -1)[0] ?? '';
@@ -116,22 +116,19 @@ export function AgentChangedFiles() {
                 key={session.id}
                 onClick={() => handleOpenFile(session.filePath)}
                 className={cn(
-                  'flex items-center gap-2 px-3 py-1 text-left hover:bg-muted/50 transition-colors group',
+                  'flex items-center gap-2 rounded-md border border-border/10 bg-surface-raised/[0.04] px-3 py-[4px] text-left hover:bg-white/[0.02] transition-colors group',
                 )}
               >
-                <FileCode2 className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                <div className="flex min-w-0 flex-1 items-baseline gap-1.5">
-                  <span className="truncate text-[11px] text-foreground">{fileName}</span>
-                  {dir && (
-                    <span className="truncate text-[10px] text-muted-foreground">{dir}</span>
-                  )}
-                </div>
-                <span className="shrink-0 text-[10px] tabular-nums">
+                <FileCode2 className="h-3 w-3 shrink-0 text-muted-foreground/40" />
+                <span className="truncate font-mono text-[11px] text-muted-foreground/70">{fileName}</span>
+                {dir && (
+                  <span className="truncate text-[10px] text-muted-foreground/40">{dir}</span>
+                )}
+                <span className="shrink-0 ml-auto flex items-center gap-1 text-[10px] tabular-nums">
                   {added > 0 && <span className="text-green-400">+{added}</span>}
-                  {added > 0 && removed > 0 && ' '}
                   {removed > 0 && <span className="text-red-400">-{removed}</span>}
                   {added === 0 && removed === 0 && (
-                    <span className="text-muted-foreground">~</span>
+                    <span className="text-muted-foreground/30">~</span>
                   )}
                 </span>
               </button>

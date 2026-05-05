@@ -1,4 +1,4 @@
-import { Sparkles, ChevronDown, ChevronRight, Copy, Check, Brain, AlertCircle, Zap, FileText, Circle } from 'lucide-react';
+import { Sparkles, ChevronDown, ChevronRight, Copy, Check, Brain, AlertCircle, Zap, FileText } from 'lucide-react';
 import { useRef, useEffect, useState, useCallback, memo } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -147,7 +147,16 @@ const MARKDOWN_COMPONENTS = {
 const REMARK_PLUGINS = [remarkGfm];
 const REHYPE_PLUGINS = [rehypeHighlight];
 
+function cleanMarkdownContent(content: string): string {
+  // Strip image reference placeholders like [Image 1], [Image 1]: description
+  return content
+    .replace(/\s*\[Image\s+\d+\][^\n]*/gi, '')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
 const MarkdownContent = memo(function MarkdownContent({ content }: { content: string }) {
+  const cleaned = cleanMarkdownContent(content);
   return (
     <div className="agent-markdown select-text cursor-text text-[12.5px] leading-[1.7] text-foreground/90">
       <ReactMarkdown
@@ -155,21 +164,25 @@ const MarkdownContent = memo(function MarkdownContent({ content }: { content: st
         rehypePlugins={REHYPE_PLUGINS}
         components={MARKDOWN_COMPONENTS}
       >
-        {content}
+        {cleaned}
       </ReactMarkdown>
     </div>
   );
 });
 
-// ─── Thinking Block (flat inline, no card) ────────────────────────────────────
+// ─── Thinking Block (collapsible dropdown) ────────────────────────────────────
 
 const ThinkingBlock = memo(function ThinkingBlock({ content, isStreaming }: { content: string; isStreaming?: boolean }) {
+  const [open, setOpen] = useState(false);
   return (
-    <div className="agent-fade-in my-2">
-      {/* Label row */}
-      <div className="flex items-center gap-1.5 mb-1">
-        <Circle className="h-2.5 w-2.5 shrink-0 text-muted-foreground/35" />
-        <span className="text-[11px] font-medium text-muted-foreground/45">Thinking</span>
+    <div className="agent-fade-in my-0.5">
+      <button
+        onClick={() => setOpen(!open)}
+        className="flex w-full items-center gap-1.5 rounded-md px-1.5 py-0.5 text-left text-[10px] text-muted-foreground/50 transition-colors hover:bg-white/[0.02] hover:text-muted-foreground/80"
+      >
+        {open ? <ChevronDown className="h-2.5 w-2.5" /> : <ChevronRight className="h-2.5 w-2.5" />}
+        <Brain className="h-2.5 w-2.5" />
+        <span>Thinking</span>
         {isStreaming && (
           <span className="ml-0.5 flex items-center gap-[3px]">
             <span className="agent-dot-bounce h-1 w-1 rounded-full bg-muted-foreground/35" />
@@ -177,11 +190,12 @@ const ThinkingBlock = memo(function ThinkingBlock({ content, isStreaming }: { co
             <span className="agent-dot-bounce h-1 w-1 rounded-full bg-muted-foreground/35" style={{ animationDelay: '0.32s' }} />
           </span>
         )}
-      </div>
-      {/* Content — inline prose, indented to align with label text */}
-      <div className="pl-[18px] max-h-[220px] overflow-y-auto">
-        <p className="text-[12px] leading-[1.72] text-foreground/65 whitespace-pre-wrap">{content}</p>
-      </div>
+      </button>
+      {open && (
+        <div className="agent-fade-in mt-1 max-h-[220px] overflow-y-auto rounded-md border border-border/15 bg-surface-raised/40 px-3 py-2">
+          <p className="text-[11px] leading-[1.72] text-foreground/65 whitespace-pre-wrap">{content}</p>
+        </div>
+      )}
     </div>
   );
 });
@@ -190,7 +204,7 @@ const ThinkingBlock = memo(function ThinkingBlock({ content, isStreaming }: { co
 
 function StreamingIndicator() {
   return (
-    <div className="agent-fade-in flex items-center gap-2.5 py-2">
+    <div className="agent-fade-in flex items-center gap-2.5 py-1.5">
       <div className="flex h-5 w-5 items-center justify-center rounded-md bg-accent/10">
         <Sparkles className="h-3 w-3 text-accent animate-pulse" />
       </div>
@@ -204,27 +218,12 @@ function StreamingIndicator() {
   );
 }
 
-// ─── Collapsible reasoning text (shown only when message also has tool calls) ──
+// ─── Agent Output Block (markdown, shown after tool calls) ────────────────────
 
-const ReasoningText = memo(function ReasoningText({ content }: { content: string }) {
-  const [open, setOpen] = useState(false);
+const AgentOutputBlock = memo(function AgentOutputBlock({ content }: { content: string }) {
   return (
-    <div className="mb-1.5">
-      <button
-        onClick={() => setOpen(!open)}
-        className="flex items-center gap-1.5 rounded-md px-1.5 py-1 text-[10px] text-muted-foreground/50 transition-colors hover:bg-white/[0.02] hover:text-muted-foreground/80"
-      >
-        {open ? <ChevronDown className="h-2.5 w-2.5" /> : <ChevronRight className="h-2.5 w-2.5" />}
-        <Brain className="h-2.5 w-2.5" />
-        <span>Reasoning</span>
-      </button>
-      {open && (
-        <div className="agent-fade-in mt-1 max-h-[180px] overflow-y-auto rounded-md border border-border/15 bg-surface-raised/40 px-3 py-2">
-          <div className="text-[11px] leading-[1.65] text-muted-foreground/60">
-            {content}
-          </div>
-        </div>
-      )}
+    <div className="agent-fade-in rounded-lg border border-border/10 bg-surface-raised/20 px-3 py-2">
+      <MarkdownContent content={content} />
     </div>
   );
 });
@@ -233,7 +232,7 @@ const ReasoningText = memo(function ReasoningText({ content }: { content: string
 
 const ErrorMessage = memo(function ErrorMessage({ message }: { message: string }) {
   return (
-    <div className="agent-fade-in flex items-start gap-2.5 rounded-lg border border-red-500/20 bg-red-500/[0.06] px-3.5 py-3">
+    <div className="agent-fade-in flex items-start gap-2.5 rounded-lg border border-red-500/20 bg-red-500/[0.06] px-3 py-2">
       <div className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-red-500/10">
         <AlertCircle className="h-3 w-3 text-red-400" />
       </div>
@@ -267,7 +266,7 @@ const MessageItem = memo(function MessageItem({
     <div className="group/msg">
       {/* User message */}
       {msg.role === 'user' && (
-        <div className="mb-1 mt-1">
+        <div className="mb-0.5 mt-0.5">
           <div className="pl-0">
             {/* Render attached images from blocks */}
             {msg.blocks && msg.blocks.some((b) => b.type === 'image') && (
@@ -291,14 +290,14 @@ const MessageItem = memo(function MessageItem({
 
       {/* Assistant message */}
       {msg.role === 'assistant' && (
-        <div className={cn('mb-1', isConsecutiveAssistant ? '' : 'mt-2')}>
+        <div className={cn('mb-0.5', isConsecutiveAssistant ? '' : 'mt-1')}>
           {!isConsecutiveAssistant && isActivelyStreaming && (
-            <div className="flex items-center gap-2 mb-1">
+            <div className="flex items-center gap-2 mb-0.5">
               <span className="h-1.5 w-1.5 rounded-full bg-accent agent-pulse-ring" />
             </div>
           )}
-          <div className="pl-0">
-            {/* Thinking block (collapsible) */}
+          <div className="pl-0 flex flex-col gap-0.5">
+            {/* Thinking block (collapsible dropdown) */}
             {msg.thinking && (
               <ThinkingBlock
                 content={msg.thinking}
@@ -307,18 +306,16 @@ const MessageItem = memo(function MessageItem({
             )}
 
             {hasToolCalls ? (
-              /* Mid-loop message: show tool calls prominently, hide text behind toggle */
+              /* Mid-loop message: show tool calls compactly, then agent output */
               <>
-                {msg.content && <ReasoningText content={msg.content} />}
                 <ToolCallGroup toolCalls={msg.toolCalls!} />
+                {msg.content && <AgentOutputBlock content={msg.content} />}
               </>
             ) : msg.isError ? (
               <ErrorMessage message={msg.content} />
             ) : msg.content ? (
               /* Final response: full markdown in an IDE-like card */
-              <div className="agent-fade-in rounded-lg border border-border/10 bg-surface-raised/20 px-3.5 py-3">
-                <MarkdownContent content={msg.content} />
-              </div>
+              <AgentOutputBlock content={msg.content} />
             ) : isActivelyStreaming ? (
               <StreamingIndicator />
             ) : null}
@@ -326,7 +323,7 @@ const MessageItem = memo(function MessageItem({
         </div>
       )}
 
-      {showSeparator && <div className="my-3 h-px bg-gradient-to-r from-transparent via-border/25 to-transparent" />}
+      {showSeparator && <div className="my-2 h-px bg-gradient-to-r from-transparent via-border/25 to-transparent" />}
     </div>
   );
 });
@@ -407,7 +404,7 @@ export function AgentMessages() {
   return (
     <div className="flex-1 overflow-hidden">
       <ScrollArea className="h-full">
-        <div className="flex flex-col gap-0 px-4 py-3 max-w-[720px] mx-auto w-full">
+        <div className="flex flex-col gap-0 px-4 py-2 max-w-[720px] mx-auto w-full">
           {messages.map((msg, idx) => {
             const prevMsg = idx > 0 ? messages[idx - 1] : null;
             const nextMsg = idx < messages.length - 1 ? messages[idx + 1] : null;
