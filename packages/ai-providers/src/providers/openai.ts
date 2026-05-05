@@ -287,6 +287,15 @@ export class OpenAIProvider implements AIProvider {
     if (params.topP !== undefined) body.top_p = params.topP;
     if (params.stopSequences?.length) body.stop = params.stopSequences;
     if (params.tools?.length) body.tools = toOpenAITools(params.tools);
+    if (params.thinking?.enabled) {
+      const isKimi = params.model.startsWith('kimi-') || params.model.startsWith('mimo-');
+      if (isKimi) {
+        // Kimi/MiMo uses thinking: { type: 'enabled' | 'disabled' }
+        body.thinking = { type: params.thinking.level === 'disabled' ? 'disabled' : 'enabled' };
+      } else if (params.thinking.level && params.thinking.level !== 'disabled') {
+        body.reasoning_effort = params.thinking.level;
+      }
+    }
 
     const requestBody = JSON.stringify(body);
     const bodyMessages = body.messages as Array<{ role?: string; tool_calls?: unknown[]; reasoning_content?: string }> | undefined;

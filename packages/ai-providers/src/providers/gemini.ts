@@ -302,6 +302,10 @@ export class GeminiProvider implements AIProvider {
     if (params.stopSequences?.length) generationConfig.stopSequences = params.stopSequences;
     if (Object.keys(generationConfig).length) body.generationConfig = generationConfig;
 
+    if (params.thinking?.enabled) {
+      body.thinkingConfig = { includeThoughts: true };
+    }
+
     const url = `${this.baseUrl}/models/${params.model}:streamGenerateContent?alt=sse`;
 
     const response = await this.fetchImpl(url, {

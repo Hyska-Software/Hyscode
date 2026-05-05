@@ -22,6 +22,13 @@ import {
 import type { ProviderInfo, ModelInfo } from '@/lib/provider-catalog';
 import type { ToolCategory } from '@hyscode/agent-harness';
 
+function getActiveModelInfo(providerId: string | null, modelId: string | null): ModelInfo | null {
+  if (!providerId || !modelId) return null;
+  const provider = PROVIDERS.find((p) => p.id === providerId);
+  if (!provider) return null;
+  return provider.models.find((m) => m.id === modelId) ?? null;
+}
+
 export function AiTab() {
   const store = useSettingsStore();
   const [showingMcpForm, setShowingMcpForm] = useState(false);
@@ -333,6 +340,62 @@ export function AiTab() {
           />
         </Row>
       </Section>
+
+      {/* ─── Thinking / Reasoning ─────────────────────────────────── */}
+      {(() => {
+        const activeModel = getActiveModelInfo(store.activeProviderId, store.activeModelId);
+        if (!activeModel?.supportsThinking) return null;
+        const thinkingKey = `${store.activeProviderId}::${store.activeModelId}`;
+        const thinkingConfig = store.thinkingSettings[thinkingKey] ?? { enabled: false };
+        const levels = activeModel.thinkingLevels ?? ['low', 'medium', 'high'];
+        return (
+          <Section title="Thinking & Reasoning">
+            <Row
+              label="Enable thinking"
+              description="Allow the model to use extended reasoning before responding"
+            >
+              <Toggle
+                checked={thinkingConfig.enabled}
+                onChange={(v) => store.setThinkingConfig(store.activeProviderId!, store.activeModelId!, { enabled: v })}
+              />
+            </Row>
+            {thinkingConfig.enabled && (
+              <>
+                <Row label="Thinking level" description="Control how deeply the model reasons">
+                  <SelectInput
+                    value={thinkingConfig.level ?? levels[0]}
+                    onChange={(v) => store.setThinkingConfig(store.activeProviderId!, store.activeModelId!, { level: v as import('@/stores/settings-store').ModelThinkingConfig['level'] })}
+                    options={levels.map((lvl) => ({ value: lvl, label: lvl.charAt(0).toUpperCase() + lvl.slice(1) }))}
+                  />
+                </Row>
+                {activeModel.thinkingType === 'anthropic' && (
+                  <Row label="Budget tokens" description="Max tokens for reasoning (leave empty for default)">
+                    <NumberInput
+                      value={thinkingConfig.budgetTokens ?? 0}
+                      onChange={(v) => store.setThinkingConfig(store.activeProviderId!, store.activeModelId!, { budgetTokens: v > 0 ? v : undefined })}
+                      min={0}
+                      max={32000}
+                      step={1024}
+                    />
+                  </Row>
+                )}
+                {activeModel.thinkingType === 'anthropic' && (
+                  <Row label="Display mode" description="How thinking content is shown">
+                    <SelectInput
+                      value={thinkingConfig.display ?? 'summarized'}
+                      onChange={(v) => store.setThinkingConfig(store.activeProviderId!, store.activeModelId!, { display: v as 'summarized' | 'omitted' })}
+                      options={[
+                        { value: 'summarized', label: 'Summarized' },
+                        { value: 'omitted', label: 'Omitted' },
+                      ]}
+                    />
+                  </Row>
+                )}
+              </>
+            )}
+          </Section>
+        );
+      })()}
 
       {/* ─── Inline Completion ─────────────────────────────────────── */}
       <Section title="Inline Completion">

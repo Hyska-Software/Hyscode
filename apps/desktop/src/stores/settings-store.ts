@@ -38,6 +38,13 @@ export interface CustomModel {
   name: string;
 }
 
+export interface ModelThinkingConfig {
+  enabled: boolean;
+  level?: 'low' | 'medium' | 'high' | 'enabled' | 'disabled' | 'none' | 'minimal' | 'xhigh';
+  budgetTokens?: number;
+  display?: 'summarized' | 'omitted';
+}
+
 export interface McpServerConfig {
   id: string;
   name: string;
@@ -154,6 +161,10 @@ interface SettingsState {
   /** User-added custom models (primarily for OpenRouter) */
   customModels: CustomModel[];
 
+  // ─ Thinking / Reasoning ─
+  /** Per-model thinking configuration: key = "providerId::modelId" */
+  thinkingSettings: Record<string, ModelThinkingConfig>;
+
   // ─ MCP Servers ─
   mcpServers: McpServerConfig[];
 
@@ -205,6 +216,10 @@ interface SettingsState {
   setCustomCategoryRule: (category: ToolCategory, autoApprove: boolean | undefined) => void;
   /** Set a per-tool override for custom approval mode */
   setCustomToolRule: (toolName: string, autoApprove: boolean | undefined) => void;
+  /** Get thinking config for a specific provider+model */
+  getThinkingConfig: (providerId: string, modelId: string) => ModelThinkingConfig;
+  /** Set thinking config for a specific provider+model */
+  setThinkingConfig: (providerId: string, modelId: string, config: Partial<ModelThinkingConfig>) => void;
 }
 
 // ── Store ────────────────────────────────────────────────────────────────────
@@ -292,6 +307,9 @@ export const useSettingsStore = create<SettingsState>()(
       // Per-provider enabled models (default: empty = all enabled)
       enabledModels: {},
       customModels: [],
+
+      // Thinking / Reasoning
+      thinkingSettings: {},
 
       // MCP Servers
       mcpServers: [],
@@ -446,6 +464,19 @@ export const useSettingsStore = create<SettingsState>()(
           } else {
             state.customApprovalRules.toolRules[toolName] = autoApprove;
           }
+        }),
+
+      getThinkingConfig: (providerId: string, modelId: string): ModelThinkingConfig => {
+        const key = `${providerId}::${modelId}`;
+        const stored = useSettingsStore.getState().thinkingSettings[key];
+        return stored ?? { enabled: false };
+      },
+
+      setThinkingConfig: (providerId: string, modelId: string, config: Partial<ModelThinkingConfig>) =>
+        set((state) => {
+          const key = `${providerId}::${modelId}`;
+          const current = state.thinkingSettings[key] ?? { enabled: false };
+          state.thinkingSettings[key] = { ...current, ...config };
         }),
     })),
     {

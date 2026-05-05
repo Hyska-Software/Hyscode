@@ -24,9 +24,11 @@ import { HarnessBridge } from '@/lib/harness-bridge';
 import type { AgentMode, AttachedImage } from '@/stores/agent-store';
 import type { ApprovalMode } from '@/stores/settings-store';
 import {
+  PROVIDERS,
   getEnabledModelsForProvider,
   getAllEnabledModelsGrouped,
 } from '@/lib/provider-catalog';
+import type { ModelInfo } from '@/lib/provider-catalog';
 import { getProviderRegistry } from '@hyscode/ai-providers';
 import type { AIModel } from '@hyscode/ai-providers';
 
@@ -41,6 +43,15 @@ function useActiveModel(): AIModel | null {
   if (!providerId || !modelId) return null;
   const provider = getProviderRegistry().get(providerId);
   return provider?.models.find((m) => m.id === modelId) ?? null;
+}
+
+function useActiveModelInfo(): ModelInfo | null {
+  const providerId = useSettingsStore((s) => s.activeProviderId);
+  const modelId = useSettingsStore((s) => s.activeModelId);
+  if (!providerId || !modelId) return null;
+  const provider = PROVIDERS.find((p) => p.id === providerId);
+  if (!provider) return null;
+  return provider.models.find((m) => m.id === modelId) ?? null;
 }
 
 function processImageFile(file: File): Promise<AttachedImage | null> {
@@ -216,7 +227,13 @@ export function AgentInput() {
   const approvalMode = useSettingsStore((s) => s.approvalMode);
 
   const activeModel = useActiveModel();
+  const activeModelInfo = useActiveModelInfo();
   const showVisionWarning = attachedImages.length > 0 && activeModel != null && !activeModel.supportsVision;
+
+  const thinkingKey = `${activeProviderId ?? ''}::${activeModelId ?? ''}`;
+  const thinkingSettings = useSettingsStore((s) => s.thinkingSettings);
+  const setThinkingConfig = useSettingsStore((s) => s.setThinkingConfig);
+  const currentThinking = thinkingSettings[thinkingKey] ?? { enabled: false };
 
   const currentCap = AGENT_CAPABILITIES[mode];
 
@@ -611,6 +628,71 @@ export function AgentInput() {
               )}
             </DropdownMenuContent>
           </DropdownMenu>
+
+          {/* Thinking control */}
+          {activeModelInfo?.supportsThinking && (
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                className={cn(
+                  'flex cursor-pointer items-center gap-0.5 rounded-pill px-2 py-[3px] text-[10px] transition-colors focus:outline-none',
+                  currentThinking.enabled
+                    ? 'bg-amber-500/15 text-amber-400 hover:bg-amber-500/25'
+                    : 'bg-muted text-muted-foreground hover:text-foreground',
+                )}
+              >
+                <Brain className="h-2.5 w-2.5 shrink-0" />
+                <span className="ml-0.5">
+                  {currentThinking.enabled
+                    ? `Thinking: ${currentThinking.level ?? 'default'}`
+                    : 'Thinking off'}
+                </span>
+                <ChevronDown className="h-2.5 w-2.5 shrink-0 opacity-60" />
+              </DropdownMenuTrigger>
+              <DropdownMenuContent side="top" className="min-w-[180px]">
+                <div className="px-2 pb-1 pt-1.5 text-[9px] uppercase tracking-wider text-muted-foreground">
+                  Thinking Mode
+                </div>
+                <DropdownMenuSeparator />
+                {/* Toggle on/off */}
+                <DropdownMenuItem
+                  onClick={() => {
+                    if (!activeProviderId || !activeModelId) return;
+                    setThinkingConfig(activeProviderId, activeModelId, { enabled: !currentThinking.enabled });
+                  }}
+                  className={cn(!currentThinking.enabled && 'bg-accent/10')}
+                >
+                  <div className="flex w-full items-center justify-between">
+                    <span className="text-[11px]">{currentThinking.enabled ? 'Disable thinking' : 'Enable thinking'}</span>
+                    {!currentThinking.enabled && <Check className="h-3 w-3 shrink-0 text-accent" />}
+                  </div>
+                </DropdownMenuItem>
+                {/* Level selector (only when enabled) */}
+                {currentThinking.enabled && (
+                  <>
+                    <DropdownMenuSeparator />
+                    <div className="px-2 pb-1 pt-1 text-[9px] uppercase tracking-wider text-muted-foreground">
+                      Level
+                    </div>
+                    {(activeModelInfo.thinkingLevels ?? ['low', 'medium', 'high']).map((lvl) => (
+                      <DropdownMenuItem
+                        key={lvl}
+                        onClick={() => {
+                          if (!activeProviderId || !activeModelId) return;
+                          setThinkingConfig(activeProviderId, activeModelId, { enabled: true, level: lvl as import('@/stores/settings-store').ModelThinkingConfig['level'] });
+                        }}
+                        className={cn(currentThinking.level === lvl && 'bg-accent/10')}
+                      >
+                        <div className="flex w-full items-center justify-between">
+                          <span className="text-[11px] capitalize">{lvl}</span>
+                          {currentThinking.level === lvl && <Check className="h-3 w-3 shrink-0 text-accent" />}
+                        </div>
+                      </DropdownMenuItem>
+                    ))}
+                  </>
+                )}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
 
           {/* Approval mode selector */}
           {(() => {

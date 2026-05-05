@@ -1,7 +1,7 @@
 // ─── Agent Harness Types ────────────────────────────────────────────────────
 // Core types for the agent harness orchestration engine.
 
-import type { Message, StreamChunk, ToolDefinition } from '@hyscode/ai-providers';
+import type { Message, StreamChunk, ToolDefinition, ThinkingConfig } from '@hyscode/ai-providers';
 
 // ─── Tool System ────────────────────────────────────────────────────────────
 
@@ -283,6 +283,8 @@ export interface HarnessConfig {
   turnTimeoutMs: number;
   /** Approval configuration */
   approval: ApprovalConfig;
+  /** Thinking/reasoning configuration */
+  thinking?: ThinkingConfig;
 }
 
 export const DEFAULT_HARNESS_CONFIG: HarnessConfig = {

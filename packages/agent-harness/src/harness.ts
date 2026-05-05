@@ -181,7 +181,7 @@ export class Harness {
     this.abortController?.abort();
   }
 
-  setConfig(patch: Partial<Pick<HarnessConfig, 'providerId' | 'modelId' | 'maxIterations' | 'approval'>>): void {
+  setConfig(patch: Partial<Pick<HarnessConfig, 'providerId' | 'modelId' | 'maxIterations' | 'approval' | 'thinking'>>): void {
     if (patch.providerId !== undefined) this.config.providerId = patch.providerId;
     if (patch.modelId !== undefined) {
       this.config.modelId = patch.modelId;
@@ -194,6 +194,9 @@ export class Harness {
     if (patch.approval !== undefined) {
       this.config.approval = patch.approval;
       this.toolRouter.setApprovalConfig(patch.approval);
+    }
+    if (patch.thinking !== undefined) {
+      this.config.thinking = patch.thinking;
     }
   }
 
@@ -454,6 +457,7 @@ export class Harness {
         tools: snapshot.tools,
         maxTokens: policy.maxOutputTokens,
         signal: abortController.signal,
+        thinking: this.config.thinking,
       };
 
       let assistantText = '';

@@ -74,6 +74,19 @@ export type StopReason = 'end_turn' | 'tool_use' | 'max_tokens' | 'stop_sequence
 
 // ─── Chat Parameters ────────────────────────────────────────────────────────
 
+export interface ThinkingConfig {
+  /** Whether thinking is enabled */
+  enabled: boolean;
+  /** Effort/level for providers that support it (OpenAI: low/medium/high, Anthropic adaptive: low/medium/high, Kimi: enabled/disabled) */
+  level?: 'low' | 'medium' | 'high' | 'enabled' | 'disabled' | 'none' | 'minimal' | 'xhigh';
+  /** Budget tokens for providers that support it (Anthropic manual mode) */
+  budgetTokens?: number;
+  /** Provider-native thinking type override */
+  type?: 'enabled' | 'adaptive' | 'disabled';
+  /** Display mode for Anthropic thinking blocks */
+  display?: 'summarized' | 'omitted';
+}
+
 export interface ChatParams {
   model: string;
   messages: Message[];
@@ -84,6 +97,8 @@ export interface ChatParams {
   topP?: number;
   stopSequences?: string[];
   signal?: AbortSignal;
+  /** Thinking/reasoning configuration */
+  thinking?: ThinkingConfig;
 }
 
 // ─── Transport ──────────────────────────────────────────────────────────────

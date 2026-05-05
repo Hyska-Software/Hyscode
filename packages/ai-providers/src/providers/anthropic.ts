@@ -288,6 +288,22 @@ export class AnthropicProvider implements AIProvider {
     if (params.stopSequences?.length) {
       body.stop_sequences = params.stopSequences;
     }
+    if (params.thinking?.enabled) {
+      const thinkingConfig: Record<string, unknown> = {};
+      // Claude Opus 4.7+ uses adaptive thinking; earlier models use enabled
+      const isOpus47 = params.model.includes('opus-4-7');
+      thinkingConfig.type = isOpus47 ? 'adaptive' : (params.thinking.type ?? 'adaptive');
+      if (params.thinking.level) {
+        thinkingConfig.effort = params.thinking.level;
+      }
+      if (params.thinking.budgetTokens && !isOpus47) {
+        thinkingConfig.budget_tokens = params.thinking.budgetTokens;
+      }
+      if (params.thinking.display) {
+        thinkingConfig.display = params.thinking.display;
+      }
+      body.thinking = thinkingConfig;
+    }
 
     const response = await this.fetchImpl(`${this.baseUrl}/v1/messages`, {
       method: 'POST',

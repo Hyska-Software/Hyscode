@@ -198,6 +198,7 @@ export class HarnessBridge {
             ),
           }),
         },
+        thinking: this.buildThinkingConfig(settings.activeProviderId, settings.activeModelId),
       },
       onEvent: (event) => this.handleEvent(event),
       onApprovalRequest: (pending) => this.handleApprovalRequest(pending),
@@ -300,7 +301,13 @@ export class HarnessBridge {
       : { mode: modePolicy.approvalMode };
 
     // Sync settings → harness config
-    this.harness.setConfig({ providerId, modelId, maxIterations: settings.maxIterations, approval: approvalConfig });
+    this.harness.setConfig({
+      providerId,
+      modelId,
+      maxIterations: settings.maxIterations,
+      approval: approvalConfig,
+      thinking: this.buildThinkingConfig(providerId, modelId),
+    });
     // mode IS the agent type — single source of truth
     this.harness.setAgentType(store.mode as AgentType);
 
@@ -1277,6 +1284,23 @@ export class HarnessBridge {
   }
 
   // ─── Helpers ────────────────────────────────────────────────────────
+
+  /**
+   * Build thinking config for the active provider+model from settings.
+   */
+  private buildThinkingConfig(providerId: string | null, modelId: string | null): import('@hyscode/ai-providers').ThinkingConfig | undefined {
+    if (!providerId || !modelId) return undefined;
+    const settings = useSettingsStore.getState();
+    const key = `${providerId}::${modelId}`;
+    const cfg = settings.thinkingSettings[key];
+    if (!cfg || !cfg.enabled) return undefined;
+    return {
+      enabled: true,
+      level: cfg.level as 'low' | 'medium' | 'high' | undefined,
+      budgetTokens: cfg.budgetTokens,
+      display: cfg.display,
+    };
+  }
 
   /**
    * Finalize the current iteration's structured blocks.

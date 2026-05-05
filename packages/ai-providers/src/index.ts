@@ -19,6 +19,7 @@ export type {
   StreamRequest,
   StreamEvent,
   FetchImpl,
+  ThinkingConfig,
 } from './types';
 export { ProviderError } from './types';
 
