@@ -189,7 +189,7 @@ const GEMINI_MODELS: AIModel[] = [
     id: 'gemini-3.1-pro-preview',
     name: 'Gemini 3.1 Pro Preview',
     provider: 'gemini',
-    contextWindow: 300_000, // actual: 1,048,576, capped at 300k
+    contextWindow: 1_048_576,
     maxOutputTokens: 65_536,
     supportsTools: true,
     supportsStreaming: true,
@@ -201,7 +201,7 @@ const GEMINI_MODELS: AIModel[] = [
     id: 'gemini-3-flash-preview',
     name: 'Gemini 3 Flash Preview',
     provider: 'gemini',
-    contextWindow: 300_000, // actual: 1,048,576, capped at 300k
+    contextWindow: 1_048_576,
     maxOutputTokens: 65_536,
     supportsTools: true,
     supportsStreaming: true,
@@ -213,7 +213,7 @@ const GEMINI_MODELS: AIModel[] = [
     id: 'gemini-3.1-flash-lite-preview',
     name: 'Gemini 3.1 Flash-Lite Preview',
     provider: 'gemini',
-    contextWindow: 300_000, // actual: 1,048,576, capped at 300k
+    contextWindow: 1_048_576,
     maxOutputTokens: 65_536,
     supportsTools: true,
     supportsStreaming: true,
@@ -226,7 +226,7 @@ const GEMINI_MODELS: AIModel[] = [
     id: 'gemini-2.5-pro',
     name: 'Gemini 2.5 Pro',
     provider: 'gemini',
-    contextWindow: 300_000, // actual: 1,048,576, capped at 300k
+    contextWindow: 1_048_576,
     maxOutputTokens: 65_536,
     supportsTools: true,
     supportsStreaming: true,
@@ -238,8 +238,8 @@ const GEMINI_MODELS: AIModel[] = [
     id: 'gemini-2.5-flash',
     name: 'Gemini 2.5 Flash',
     provider: 'gemini',
-    contextWindow: 300_000, // actual: 1,048,576, capped at 300k
-    maxOutputTokens: 65_536,
+    contextWindow: 1_048_576,
+    maxOutputTokens: 65_535, // OpenRouter reports 65,535 for Vertex provider
     supportsTools: true,
     supportsStreaming: true,
     supportsVision: true,
@@ -250,8 +250,8 @@ const GEMINI_MODELS: AIModel[] = [
     id: 'gemini-2.5-flash-lite',
     name: 'Gemini 2.5 Flash-Lite',
     provider: 'gemini',
-    contextWindow: 300_000, // actual: 1,048,576, capped at 300k
-    maxOutputTokens: 65_536,
+    contextWindow: 1_048_576,
+    maxOutputTokens: 65_535, // OpenRouter reports 65,535 for Vertex provider
     supportsTools: true,
     supportsStreaming: true,
     supportsVision: true,

@@ -194,7 +194,7 @@ const ANTHROPIC_MODELS: AIModel[] = [
     id: 'claude-opus-4-7',
     name: 'Claude Opus 4.7',
     provider: 'anthropic',
-    contextWindow: 300_000, // actual: 1M, capped at 300k
+    contextWindow: 1_000_000,
     maxOutputTokens: 128_000,
     supportsTools: true,
     supportsStreaming: true,
@@ -206,7 +206,7 @@ const ANTHROPIC_MODELS: AIModel[] = [
     id: 'claude-opus-4-6',
     name: 'Claude Opus 4.6',
     provider: 'anthropic',
-    contextWindow: 300_000, // actual: 1M, capped at 300k
+    contextWindow: 1_000_000,
     maxOutputTokens: 128_000,
     supportsTools: true,
     supportsStreaming: true,
@@ -218,7 +218,7 @@ const ANTHROPIC_MODELS: AIModel[] = [
     id: 'claude-sonnet-4-6',
     name: 'Claude Sonnet 4.6',
     provider: 'anthropic',
-    contextWindow: 300_000, // actual: 1M, capped at 300k
+    contextWindow: 1_000_000,
     maxOutputTokens: 64_000,
     supportsTools: true,
     supportsStreaming: true,

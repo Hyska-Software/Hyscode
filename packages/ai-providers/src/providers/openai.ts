@@ -208,7 +208,7 @@ const OPENAI_MODELS: AIModel[] = [
     id: 'gpt-5.4',
     name: 'GPT-5.4',
     provider: 'openai',
-    contextWindow: 300_000, // actual: 1M, capped at 300k
+    contextWindow: 1_000_000,
     maxOutputTokens: 128_000,
     supportsTools: true,
     supportsStreaming: true,
@@ -220,7 +220,7 @@ const OPENAI_MODELS: AIModel[] = [
     id: 'gpt-5.4-mini',
     name: 'GPT-5.4 Mini',
     provider: 'openai',
-    contextWindow: 300_000, // actual: 400k, capped at 300k
+    contextWindow: 400_000,
     maxOutputTokens: 128_000,
     supportsTools: true,
     supportsStreaming: true,
@@ -232,7 +232,7 @@ const OPENAI_MODELS: AIModel[] = [
     id: 'gpt-5.4-nano',
     name: 'GPT-5.4 Nano',
     provider: 'openai',
-    contextWindow: 300_000, // actual: 400k, capped at 300k
+    contextWindow: 400_000,
     maxOutputTokens: 128_000,
     supportsTools: true,
     supportsStreaming: true,
