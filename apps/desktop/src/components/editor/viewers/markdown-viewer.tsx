@@ -6,6 +6,7 @@ import rehypeHighlight from 'rehype-highlight';
 import rehypeKatex from 'rehype-katex';
 import { Code, Eye, Loader2 } from 'lucide-react';
 import { useSettingsStore } from '../../../stores';
+import { MARKDOWN_COMPONENTS } from '../../agent/markdown-renderer';
 import { defineAllMonacoThemes, getMonacoThemeName } from '../../../lib/monaco-themes';
 import { registerAllLanguages, disableNativeTypeScriptValidation } from '@hyscode/lsp-client';
 import { LspBridge } from '../../../lib/lsp-bridge';
@@ -96,6 +97,7 @@ export function MarkdownViewer({
             <ReactMarkdown
               remarkPlugins={[remarkGfm, remarkMath]}
               rehypePlugins={[[rehypeKatex], [rehypeHighlight, { ignoreMissing: true }]] as any}
+              components={MARKDOWN_COMPONENTS as any}
             >
               {content}
             </ReactMarkdown>
