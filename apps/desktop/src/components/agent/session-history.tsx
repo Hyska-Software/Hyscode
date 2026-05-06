@@ -199,10 +199,24 @@ async function restoreSession(conversationId: string): Promise<void> {
     }));
 
     const store = useAgentStore.getState();
-    store.clearConversation();
+
+    // If current tab has messages, open the session in a new tab
+    if (store.messages.length > 0) {
+      store.openNewTab();
+    } else {
+      store.clearConversation();
+    }
+
     store.setConversationId(conversationId);
     for (const msg of messages) {
       store.addMessage(msg);
+    }
+
+    // Update the active tab title to first user message snippet
+    const firstUserMsg = messages.find((m) => m.role === 'user');
+    if (firstUserMsg) {
+      const snippet = firstUserMsg.content.slice(0, 40);
+      store.updateTabTitle(store.activeTabId, snippet);
     }
 
     // Sync the Harness's internal conversationId so subsequent messages
@@ -235,14 +249,18 @@ async function deleteSession(conversationId: string, _projectId?: string): Promi
 
 function startNewSession(): void {
   const store = useAgentStore.getState();
-  store.clearConversation();
-  // Assign a fresh conversation ID so the next message is persisted as a new session
-  const newId = crypto.randomUUID();
-  store.setConversationId(newId);
-  try {
-    HarnessBridge.get().restoreSession(newId);
-  } catch {
-    // Bridge not yet ready — store ID is enough; bridge will pick it up on next sendMessage
+  // If current tab already empty, just reset its conversationId
+  if (store.messages.length === 0) {
+    const newId = crypto.randomUUID();
+    store.setConversationId(newId);
+    try {
+      HarnessBridge.get().restoreSession(newId);
+    } catch {
+      // Bridge not yet ready
+    }
+  } else {
+    // Open a new tab so the user can start fresh without losing current context
+    store.openNewTab();
   }
   store.setHistoryOpen(false);
 }

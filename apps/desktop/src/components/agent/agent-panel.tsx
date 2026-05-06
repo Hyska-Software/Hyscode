@@ -1,4 +1,4 @@
-import { Trash2, History, Bot, BookText, Terminal, MessageSquare, Zap } from 'lucide-react';
+import { Trash2, History, Bot, BookText, Terminal, MessageSquare, Zap, Plus, X } from 'lucide-react';
 import { useState, useRef, useEffect } from 'react';
 import { AgentMessages } from './agent-messages';
 import { AgentInput } from './agent-input';
@@ -227,6 +227,12 @@ export function AgentPanel({ hideChangedFiles }: { hideChangedFiles?: boolean } 
   const rulesOpen = useLayoutStore((s) => s.rulesPanelOpen);
   const setRulesOpen = useLayoutStore((s) => s.setRulesPanelOpen);
   const agentCenterPanelMode = useSettingsStore((s) => s.agentCenterPanelMode);
+  const openTabs = useAgentStore((s) => s.openTabs);
+  const activeTabId = useAgentStore((s) => s.activeTabId);
+  const isStreaming = useAgentStore((s) => s.isStreaming);
+  const switchTab = useAgentStore((s) => s.switchTab);
+  const closeTab = useAgentStore((s) => s.closeTab);
+  const openNewTab = useAgentStore((s) => s.openNewTab);
 
   const handleSpecApprove = async () => {
     try {
@@ -246,6 +252,45 @@ export function AgentPanel({ hideChangedFiles }: { hideChangedFiles?: boolean } 
 
   return (
     <div className="flex h-full flex-col">
+      {/* Tab bar — shown when more than one tab is open */}
+      {openTabs.length > 1 && (
+        <div className="flex h-7 shrink-0 items-center gap-0 overflow-x-auto border-b border-border bg-surface px-1 scrollbar-none">
+          {openTabs.map((tab) => (
+            <div
+              key={tab.id}
+              className={cn(
+                'group flex h-full max-w-[140px] min-w-0 shrink-0 cursor-pointer items-center gap-1 border-r border-border/40 px-2 text-[10px] transition-colors',
+                tab.id === activeTabId
+                  ? 'bg-surface-raised text-foreground'
+                  : 'text-muted-foreground hover:bg-surface-raised/60 hover:text-foreground',
+                isStreaming && tab.id !== activeTabId && 'cursor-not-allowed opacity-50',
+              )}
+              onClick={() => switchTab(tab.id)}
+            >
+              <span className="min-w-0 truncate">{tab.title}</span>
+              {openTabs.length > 1 && (
+                <button
+                  className="ml-0.5 shrink-0 rounded p-0.5 opacity-0 transition-opacity hover:bg-muted group-hover:opacity-100"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    closeTab(tab.id);
+                  }}
+                >
+                  <X className="h-2.5 w-2.5" />
+                </button>
+              )}
+            </div>
+          ))}
+          <button
+            className="ml-0.5 shrink-0 rounded p-1 text-muted-foreground transition-colors hover:bg-surface-raised hover:text-foreground"
+            title="New conversation"
+            onClick={() => openNewTab()}
+          >
+            <Plus className="h-3 w-3" />
+          </button>
+        </div>
+      )}
+
       {/* Header */}
       <div className="flex h-8 shrink-0 items-center justify-between bg-surface-raised px-3">
         <div className="flex items-center gap-2">
@@ -292,6 +337,21 @@ export function AgentPanel({ hideChangedFiles }: { hideChangedFiles?: boolean } 
           </Tooltip>
           <CreditUsageIndicator />
           <ContextPieButton usage={tokenUsage} messageCount={messageCount} />
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  variant="ghost"
+                  size="icon-xs"
+                  onClick={() => openNewTab()}
+                  className="text-muted-foreground hover:text-foreground"
+                />
+              }
+            >
+              <Plus className="h-3 w-3" />
+            </TooltipTrigger>
+            <TooltipContent side="bottom">New conversation</TooltipContent>
+          </Tooltip>
           <Tooltip>
             <TooltipTrigger
               render={

@@ -79,6 +79,8 @@
     "clipboard-manager:allow-read-text",
     "clipboard-manager:allow-read-image",
     "clipboard-manager:allow-write-text",
-    "clipboard-manager:allow-write-image"
+    "clipboard-manager:allow-write-image",
+    "notification:default",
+    "notification:allow-notify"
   ]
 }

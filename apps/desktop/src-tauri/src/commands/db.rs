@@ -21,6 +21,8 @@ pub fn open_database(app_dir: &std::path::Path) -> Connection {
         .expect("failed to run migration 003");
     conn.execute_batch(include_str!("../../migrations/004_traces_and_policies.sql"))
         .expect("failed to run migration 004");
+    conn.execute_batch(include_str!("../../migrations/005_open_tabs.sql"))
+        .expect("failed to run migration 005");
     conn
 }
 
@@ -512,5 +514,87 @@ pub fn db_update_mode_policy(
     let sql = format!("UPDATE mode_policies SET {} WHERE mode = ?", sets.join(", "));
     let params: Vec<&dyn rusqlite::types::ToSql> = values.iter().map(|b| b.as_ref()).collect();
     conn.execute(&sql, params.as_slice()).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+// ─── Open Tabs commands ──────────────────────────────────────────────────────
+
+#[derive(Serialize)]
+pub struct OpenTabRow {
+    pub id: String,
+    pub project_id: String,
+    pub conversation_id: Option<String>,
+    pub title: String,
+    pub mode: String,
+    pub tab_index: i64,
+    pub last_focused_at: String,
+}
+
+#[tauri::command]
+pub fn db_get_open_tabs(
+    state: State<'_, DbState>,
+    project_id: String,
+) -> Result<Vec<OpenTabRow>, String> {
+    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, project_id, conversation_id, title, mode, tab_index, last_focused_at
+             FROM open_tabs
+             WHERE project_id = ?1
+             ORDER BY tab_index ASC, last_focused_at DESC",
+        )
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map(params![project_id], |row| {
+            Ok(OpenTabRow {
+                id: row.get(0)?,
+                project_id: row.get(1)?,
+                conversation_id: row.get(2)?,
+                title: row.get(3)?,
+                mode: row.get(4)?,
+                tab_index: row.get(5)?,
+                last_focused_at: row.get(6)?,
+            })
+        })
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+    Ok(rows)
+}
+
+#[tauri::command]
+pub fn db_upsert_open_tab(
+    state: State<'_, DbState>,
+    id: String,
+    project_id: String,
+    conversation_id: Option<String>,
+    title: String,
+    mode: String,
+    tab_index: i64,
+) -> Result<(), String> {
+    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    conn.execute(
+        "INSERT INTO open_tabs (id, project_id, conversation_id, title, mode, tab_index, last_focused_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, datetime('now'))
+         ON CONFLICT(id) DO UPDATE SET
+             conversation_id = excluded.conversation_id,
+             title = excluded.title,
+             mode = excluded.mode,
+             tab_index = excluded.tab_index,
+             last_focused_at = datetime('now')",
+        params![id, project_id, conversation_id, title, mode, tab_index],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn db_remove_open_tab(
+    state: State<'_, DbState>,
+    id: String,
+) -> Result<(), String> {
+    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    conn.execute("DELETE FROM open_tabs WHERE id = ?1", params![id])
+        .map_err(|e| e.to_string())?;
     Ok(())
 }

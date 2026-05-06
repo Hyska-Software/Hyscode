@@ -19,6 +19,7 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_http::init())
         .plugin(tauri_plugin_clipboard_manager::init())
+        .plugin(tauri_plugin_notification::init())
         .manage(commands::pty::PtyState(Mutex::new(HashMap::new())))
         .manage(LspState(Mutex::new(HashMap::new())))
         .manage(FsWatcherState(Mutex::new(HashMap::new())))
@@ -149,6 +150,12 @@ pub fn run() {
             // Mode policy commands
             commands::db::db_list_mode_policies,
             commands::db::db_update_mode_policy,
+            // Open tabs commands
+            commands::db::db_get_open_tabs,
+            commands::db::db_upsert_open_tab,
+            commands::db::db_remove_open_tab,
+            // Notification commands
+            commands::notifications::notify_agent_done,
             // Device management commands
             commands::devices::check_sdk_paths,
             commands::devices::list_devices,

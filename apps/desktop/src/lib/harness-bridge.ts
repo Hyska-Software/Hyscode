@@ -28,8 +28,9 @@ import { useRulesStore } from '@/stores/rules-store';
 import { useFileStore } from '@/stores/file-store';
 import { useEditorStore } from '@/stores/editor-store';
 import { useTerminalStore } from '@/stores/terminal-store';
-import type { ToolCallDisplay, PendingApproval, AgentEditSession } from '@/stores/agent-store';
+import type { ToolCallDisplay, PendingApproval, AgentEditSession, SubAgentState, AgentMode } from '@/stores/agent-store';
 import { computeDiffHunks } from './compute-diff';
+import { SubAgentRunner } from './sub-agent-runner';
 
 // ─── Error Parser ────────────────────────────────────────────────────────────
 // Converts raw technical error messages into friendly user-facing text.
@@ -102,21 +103,25 @@ let _instance: HarnessBridge | null = null;
 
 export class HarnessBridge {
   private harness: Harness;
+  private _projectId: string = '';
   private approvalResolvers = new Map<string, (approved: boolean) => void>();
   private modeSwitchResolvers = new Map<string, (approved: boolean) => void>();
   private userQuestionResolvers = new Map<string, (answers: import('@hyscode/agent-harness').AgentQuestionAnswer[]) => void>();
+  /** Active sub-agent runners keyed by their id (toolCallId of spawn_subagent). */
+  private _subAgentRunners = new Map<string, SubAgentRunner>();
   /** Accumulated tool results for the current iteration (flushed between turns). */
   private pendingToolResults: Array<{ toolCallId: string; output: string; isError: boolean }> = [];
   /** Tool call IDs seen in the current iteration (for building assistant blocks). */
   private currentIterationToolCalls: Array<{ id: string; name: string; input: Record<string, unknown> }> = [];
 
   // ─── Agent Terminal Integration ───────────────────────────────────
-  /** Pool of terminal store session ids owned by the agent */
-  private _agentTerminalSessionIds: string[] = [];
+  /** Pool of terminal store session ids owned by the agent, keyed by conversationId */
+  private _agentTerminalSessionIds: Map<string, string[]> = new Map();
   /** Last terminal command executed by the agent (persists across turns within a conversation) */
   private _lastTerminalCommand: { command: string; output: string; exitCode: number | null } | null = null;
 
   private constructor(workspacePath: string, projectId: string, homePath: string) {
+    this._projectId = projectId;
     const settings = useSettingsStore.getState();
 
     // Create SkillLoader with Tauri-backed file system callbacks
@@ -230,8 +235,13 @@ export class HarnessBridge {
       const session = ts.sessions.find((s) => s.ptyId === deadPtyId && s.isAgentSession);
       if (session) {
         ts.markPtyDead(session.id);
-        // Remove from our active pool so the next command spawns a fresh one
-        this._agentTerminalSessionIds = this._agentTerminalSessionIds.filter((id) => id !== session.id);
+        // Remove from all tab pools so the next command spawns a fresh one
+        for (const [convId, ids] of this._agentTerminalSessionIds.entries()) {
+          const filtered = ids.filter((id) => id !== session.id);
+          if (filtered.length !== ids.length) {
+            this._agentTerminalSessionIds.set(convId, filtered);
+          }
+        }
       }
     }).catch(() => {});
   }
@@ -274,6 +284,12 @@ export class HarnessBridge {
 
     // Load rules and sync with store so they're active from the first turn
     await _instance.loadAndSyncRules();
+
+    // Register the spawn_subagent built-in tool
+    _instance.registerSpawnSubagentTool();
+
+    // Subscribe to tab switches: keep harness in sync with the active tab
+    _instance.subscribeToTabSwitches();
 
     return _instance;
   }
@@ -357,11 +373,17 @@ export class HarnessBridge {
     this.syncActiveRules(activeRules.map((r) => r.id));
     dbg(`Rules ativas: ${activeRules.length}`);
 
+    // Always sync conversationId to harness — tab may have switched since last run
     if (!store.conversationId) {
       const id = crypto.randomUUID();
       useAgentStore.getState().setConversationId(id);
       this.harness.setConversationId(id);
+    } else {
+      this.harness.setConversationId(store.conversationId);
     }
+
+    // Clear any context carried over from a previous tab before injecting fresh sources
+    this.clearTabContext();
 
     // Inject context files into the harness context manager
     const contextFiles = store.contextFiles;
@@ -431,6 +453,16 @@ export class HarnessBridge {
       timestamp: Date.now(),
     });
 
+    // Auto-title the tab from first user message if still untitled
+    {
+      const s = useAgentStore.getState();
+      const activeTab = s.openTabs.find((t) => t.id === s.activeTabId);
+      if (activeTab && activeTab.title === 'New Chat') {
+        const autoTitle = userMessage.slice(0, 40).trimEnd() + (userMessage.length > 40 ? '…' : '');
+        s.updateTabTitle(s.activeTabId, autoTitle);
+      }
+    }
+
     // Start streaming
     useAgentStore.getState().setStreaming(true);
 
@@ -493,10 +525,25 @@ export class HarnessBridge {
       useAgentStore.getState().updateLastAssistantError(friendlyMsg);
     } finally {
       useAgentStore.getState().setStreaming(false);
+      // OS notification when the app is in the background
+      if (document.hidden) {
+        try {
+          const { openTabs, activeTabId } = useAgentStore.getState();
+          const tabTitle = openTabs.find((t) => t.id === activeTabId)?.title ?? 'Agent';
+          await tauriInvokeRaw('notify_agent_done', { title: tabTitle, body: 'Agent finished working' });
+        } catch {
+          // Notification is best-effort — non-fatal
+        }
+      }
     }
   }
 
   cancel(): void {
+    // Cancel all active sub-agent runners first
+    for (const runner of this._subAgentRunners.values()) {
+      runner.cancel();
+    }
+    this._subAgentRunners.clear();
     this.harness.cancel();
     useAgentStore.getState().setStreaming(false);
   }
@@ -568,6 +615,8 @@ Investigate the error, fix the underlying issue in the affected files, and verif
       const id = crypto.randomUUID();
       store.setConversationId(id);
       this.harness.setConversationId(id);
+    } else {
+      this.harness.setConversationId(store.conversationId);
     }
 
     store.setStreaming(true);
@@ -647,6 +696,8 @@ Investigate the error, fix the underlying issue in the affected files, and verif
       const id = crypto.randomUUID();
       store.setConversationId(id);
       this.harness.setConversationId(id);
+    } else {
+      this.harness.setConversationId(store.conversationId);
     }
 
     store.setStreaming(true);
@@ -857,7 +908,44 @@ Investigate the error, fix the underlying issue in the affected files, and verif
     useAgentStore.getState().setConversationId(conversationId);
     // Clear session trust when switching sessions
     this.clearSessionTrust();
+    // Clear context sources so previous session's context doesn't bleed into the new one
+    this.clearTabContext();
     this.debug(`Session restored: ${conversationId}`);
+  }
+
+  /** Clear harness context sources (call when switching tabs or restoring sessions). */
+  clearTabContext(): void {
+    try {
+      const ctx = this.harness.getContextManager() as { clearAll?: () => void };
+      ctx.clearAll?.();
+    } catch {
+      // Context manager might not support clearAll — safe to ignore
+    }
+  }
+
+  /**
+   * Subscribe to tab switches in the Zustand store.
+   * When the user switches tabs, immediately sync the harness to the new tab's state.
+   */
+  private subscribeToTabSwitches(): void {
+    let prevTabId = useAgentStore.getState().activeTabId;
+    useAgentStore.subscribe((state) => {
+      if (state.activeTabId !== prevTabId) {
+        prevTabId = state.activeTabId;
+        this.syncToActiveTab(state);
+      }
+    });
+  }
+
+  /** Sync the harness to whatever tab is currently active (called on tab switch). */
+  private syncToActiveTab(state: ReturnType<typeof useAgentStore.getState>): void {
+    // Reset context so nothing bleeds from the previous tab
+    this.clearTabContext();
+    // Point the harness at the new tab's conversation
+    if (state.conversationId) {
+      this.harness.setConversationId(state.conversationId);
+    }
+    this.debug(`Harness synced to tab: ${state.activeTabId} (conv: ${state.conversationId ?? 'none'})`);
   }
 
   async loadSkills(): Promise<Skill[]> {
@@ -933,6 +1021,102 @@ Investigate the error, fix the underlying issue in the affected files, and verif
     } catch (err) {
       this.debug(`Rules init failed: ${err instanceof Error ? err.message : String(err)}`);
     }
+  }
+
+  /** Register the spawn_subagent built-in tool so non-chat agents can delegate subtasks. */
+  private registerSpawnSubagentTool(): void {
+    const bridge = this;
+
+    const handler: ToolHandler = {
+      definition: {
+        name: 'spawn_subagent',
+        description: 'Delegate a focused subtask to a specialized sub-agent that runs autonomously and returns its result. Use this to parallelize work or apply a specialist agent (e.g. review, debug) to a specific subtask. Not available in chat mode.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            task: {
+              type: 'string',
+              description: 'Clear, self-contained description of the subtask. Include all context needed for the sub-agent to work independently.',
+            },
+            mode: {
+              type: 'string',
+              enum: ['build', 'review', 'debug', 'plan'],
+              description: 'The agent mode to use. build=implement code, review=analyze code quality, debug=investigate bugs, plan=create implementation plan.',
+            },
+          },
+          required: ['task'],
+        },
+      } satisfies ToolDefinition,
+      category: 'meta' as ToolCategory,
+      requiresApproval: false,
+      execute: async (input: Record<string, unknown>, ctx: ToolExecutionContext): Promise<ToolResult> => {
+        const settings = useSettingsStore.getState();
+
+        if (!settings.subAgentEnabled) {
+          return { success: false, output: '', error: 'Sub-agents are disabled in Settings → Sub-agents.' };
+        }
+
+        const { task, mode: inputMode } = input as { task: string; mode?: AgentMode };
+        // Fall back to the configured default mode when the LLM omits it
+        const mode: AgentMode = inputMode ?? settings.subAgentDefaultMode;
+
+        // Prevent spawning a sub-agent in the same mode as the parent
+        const parentMode = useAgentStore.getState().mode;
+        if (mode === parentMode) {
+          const alternatives: Record<string, string> = { build: 'review', review: 'build', debug: 'build', plan: 'review' };
+          const suggested = alternatives[mode] ?? 'review';
+          return {
+            success: false,
+            output: '',
+            error: `Cannot spawn a '${mode}' sub-agent from a '${parentMode}' parent — same-mode recursion is wasteful. Use '${suggested}' mode instead, or handle this task yourself.`,
+          };
+        }
+        const subAgentId = ctx.toolCallId;
+        const store = useAgentStore.getState();
+
+        const subAgent: SubAgentState = {
+          id: subAgentId,
+          task,
+          mode,
+          status: 'running',
+          output: '',
+          toolCalls: [],
+          startedAt: Date.now(),
+        };
+        store.addSubAgent(subAgent);
+
+        const runner = new SubAgentRunner({
+          id: subAgentId,
+          task,
+          mode,
+          workspacePath: bridge.harness.getWorkspacePath(),
+          projectId: bridge._projectId,
+          invoke: tauriInvokeRaw,
+          listen: async (event: string, handler: (payload: unknown) => void) => {
+            const unlisten = await tauriListen(event, (e) => handler(e.payload));
+            return unlisten;
+          },
+          onApproval: (pending) => bridge.handleApprovalRequest(pending),
+          onUpdate: (patch) => store.updateSubAgent(subAgentId, patch),
+          activeSkills: bridge.harness.getActiveSkills(),
+          activeRules: bridge.harness.getActiveRules(),
+        });
+
+        bridge._subAgentRunners.set(subAgentId, runner);
+
+        try {
+          const output = await runner.run(task);
+          return { success: true, output };
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          return { success: false, output: '', error: msg };
+        } finally {
+          bridge._subAgentRunners.delete(subAgentId);
+        }
+      },
+    };
+
+    this.harness.registerExternalTool(handler);
   }
 
   /** Register all tools from connected MCP servers as native tool handlers */
@@ -1827,9 +2011,16 @@ ${hints.map(h => `- ${h}`).join('\n')}
     try {
       const termStore = useTerminalStore.getState();
       const workspacePath = this.harness.getWorkspacePath() as string;
+      const convId = useAgentStore.getState().conversationId ?? '_global';
+
+      // Get (or create) the terminal pool for the current tab's conversation
+      const pool = this._agentTerminalSessionIds.get(convId) ?? [];
+      if (!this._agentTerminalSessionIds.has(convId)) {
+        this._agentTerminalSessionIds.set(convId, pool);
+      }
 
       // Reuse a healthy session if we already have one in the pool
-      let sessionId = this._agentTerminalSessionIds.find((id) => {
+      let sessionId = pool.find((id) => {
         const s = termStore.sessions.find((sess) => sess.id === id);
         return s && !s.isDead && s.ptyId;
       });
@@ -1839,8 +2030,8 @@ ${hints.map(h => `- ${h}`).join('\n')}
         const healthy = termStore.findHealthyAgentSession();
         if (healthy) {
           sessionId = healthy.id;
-          if (!this._agentTerminalSessionIds.includes(sessionId)) {
-            this._agentTerminalSessionIds.push(sessionId);
+          if (!pool.includes(sessionId)) {
+            pool.push(sessionId);
           }
         }
       }
@@ -1848,7 +2039,7 @@ ${hints.map(h => `- ${h}`).join('\n')}
       // Nothing healthy — create a fresh agent session
       if (!sessionId) {
         sessionId = termStore.ensureAgentSession({ reuseHealthy: false });
-        this._agentTerminalSessionIds.push(sessionId);
+        pool.push(sessionId);
       }
 
       // Get the session to read its PTY id
@@ -1873,9 +2064,11 @@ ${hints.map(h => `- ${h}`).join('\n')}
       this.harness.setOnTerminalCommand((command: string, output: string, exitCode: number | null) => {
         this._lastTerminalCommand = { command, output, exitCode };
 
-        // Update history on every healthy agent session we know about
+        // Update history on every healthy agent session in the current tab's pool
         const ts = useTerminalStore.getState();
-        for (const sid of this._agentTerminalSessionIds) {
+        const activeConv = useAgentStore.getState().conversationId ?? '_global';
+        const activePool = this._agentTerminalSessionIds.get(activeConv) ?? [];
+        for (const sid of activePool) {
           const s = ts.sessions.find((sess) => sess.id === sid);
           if (s && !s.isDead) {
             ts.setLastCommand(sid, command, output.slice(0, 2000), exitCode);
@@ -1915,7 +2108,12 @@ ${hints.map(h => `- ${h}`).join('\n')}
         const deadSession = termStore.sessions.find((s) => s.ptyId === currentPtyId);
         if (deadSession) {
           termStore.markPtyDead(deadSession.id);
-          this._agentTerminalSessionIds = this._agentTerminalSessionIds.filter((id) => id !== deadSession.id);
+          for (const [convId, ids] of this._agentTerminalSessionIds.entries()) {
+            const filtered = ids.filter((id) => id !== deadSession.id);
+            if (filtered.length !== ids.length) {
+              this._agentTerminalSessionIds.set(convId, filtered);
+            }
+          }
         }
       }
 

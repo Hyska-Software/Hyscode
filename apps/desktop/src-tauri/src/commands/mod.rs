@@ -11,6 +11,7 @@ pub mod github_oauth;
 pub mod github_pr;
 pub mod keychain;
 pub mod lsp;
+pub mod notifications;
 pub mod pty;
 pub mod updater;
 pub mod utils;

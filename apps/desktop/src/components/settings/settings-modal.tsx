@@ -13,6 +13,7 @@ import {
   Info,
   Blocks,
   BookText,
+  Bot,
   type LucideIcon,
 } from 'lucide-react';
 import { useSettingsStore } from '../../stores';
@@ -31,10 +32,11 @@ import { AboutTab } from './tabs/about-tab';
 import { ExtensionSettingsTab } from './tabs/extension-settings-tab';
 import { ExtensionCustomTab } from './tabs/extension-custom-tab';
 import { RulesTab } from './tabs/rules-tab';
+import { SubAgentsTab } from './tabs/sub-agents-tab';
 
 // ── Built-in tabs ────────────────────────────────────────────────────────────
 
-type BuiltinTabId = 'editor' | 'theme' | 'terminal' | 'git' | 'general' | 'ai' | 'languages' | 'mobile' | 'docker' | 'about' | 'extensions' | 'rules';
+type BuiltinTabId = 'editor' | 'theme' | 'terminal' | 'git' | 'general' | 'ai' | 'languages' | 'mobile' | 'docker' | 'about' | 'extensions' | 'rules' | 'sub-agents';
 
 const BUILTIN_TAB_ITEMS: { id: BuiltinTabId; icon: LucideIcon; label: string }[] = [
   { id: 'editor', icon: Code2, label: 'Editor' },
@@ -44,6 +46,7 @@ const BUILTIN_TAB_ITEMS: { id: BuiltinTabId; icon: LucideIcon; label: string }[]
   { id: 'git', icon: GitBranch, label: 'Git' },
   { id: 'ai', icon: BrainCircuit, label: 'AI & Providers' },
   { id: 'rules', icon: BookText, label: 'Rules' },
+  { id: 'sub-agents', icon: Bot, label: 'Sub-agents' },
   { id: 'mobile', icon: Smartphone, label: 'Mobile' },
   { id: 'docker', icon: Container, label: 'Docker' },
   { id: 'extensions', icon: Blocks, label: 'Extensions' },
@@ -59,6 +62,7 @@ const BUILTIN_TAB_CONTENT: Record<BuiltinTabId, ReactNode> = {
   git: <GitTab />,
   ai: <AiTab />,
   rules: <RulesTab />,
+  'sub-agents': <SubAgentsTab />,
   mobile: <MobileTab />,
   docker: <DockerTab />,
   extensions: <ExtensionSettingsTab />,

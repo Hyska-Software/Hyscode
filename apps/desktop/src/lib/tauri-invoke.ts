@@ -128,6 +128,14 @@ interface TauriCommands {
   updater_check: { args: { channel?: string }; ret: { version: string; body: string; publishedAt: string; assetUrl: string; assetName: string; assetSize: number; currentVersion: string } | null };
   updater_download: { args: { assetUrl: string; assetName: string }; ret: string };
   updater_install: { args: { installerPath: string }; ret: void };
+
+  // Open tabs
+  db_get_open_tabs: { args: { projectId: string }; ret: Array<{ id: string; conversation_id: string | null; title: string; mode: string; tab_index: number }> };
+  db_upsert_open_tab: { args: { id: string; projectId: string; conversationId: string | null; title: string; mode: string; tabIndex: number }; ret: void };
+  db_remove_open_tab: { args: { id: string }; ret: void };
+
+  // Notifications
+  notify_agent_done: { args: { title: string; body: string }; ret: void };
 }
 
 // ─── Typed invoke ───────────────────────────────────────────────────────────

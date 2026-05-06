@@ -7,7 +7,7 @@ import { CommandPalette, openCommandPalette } from './components/editor/command-
 import { TooltipProvider } from './components/ui/tooltip';
 import { DialogProvider } from './components/ui/dialogs';
 import { EditorLayout, AgentLayout, ReviewLayout } from './components/layouts';
-import { useProjectStore, useFileStore, useSettingsStore, useEditorStore } from './stores';
+import { useProjectStore, useFileStore, useSettingsStore, useEditorStore, useAgentStore } from './stores';
 import { useLayoutStore } from './stores/layout-store';
 import { useSkillsStore } from './stores/skills-store';
 import { useRulesStore } from './stores/rules-store';
@@ -29,6 +29,83 @@ import { UpdateDialog } from './components/updater/update-dialog';
 import { saveProjectState, switchProject, closeCurrentProject } from './lib/project-persistence';
 
 import { isLightTheme } from './lib/monaco-themes';
+import { tauriInvoke } from './lib/tauri-invoke';
+import type { AgentMode, ChatMessage } from './stores/agent-store';
+
+// ─── Open tabs persistence ───────────────────────────────────────────────────
+
+async function restoreOpenTabs(projectId: string): Promise<void> {
+  try {
+    const rows = await tauriInvoke('db_get_open_tabs', { projectId });
+    if (rows.length === 0) return;
+
+    // Load messages for each tab
+    const tabsWithMessages = await Promise.all(
+      rows.map(async (row) => {
+        let messages: ChatMessage[] = [];
+        if (row.conversation_id) {
+          try {
+            const msgRows = await tauriInvoke('db_list_messages', { conversationId: row.conversation_id });
+            messages = msgRows.map((m) => ({
+              id: m.id,
+              role: m.role as 'user' | 'assistant',
+              content: m.content,
+              toolCalls: m.tool_calls ? JSON.parse(m.tool_calls) : undefined,
+              timestamp: new Date(m.created_at).getTime(),
+            }));
+          } catch {
+            // Messages may have been deleted
+          }
+        }
+        return {
+          id: row.id,
+          title: row.title,
+          conversationId: row.conversation_id,
+          mode: (row.mode as AgentMode) ?? 'chat',
+          messages,
+        };
+      }),
+    );
+
+    useAgentStore.getState().loadSavedTabs(tabsWithMessages);
+
+    // Sync active conversationId into harness
+    const store = useAgentStore.getState();
+    if (store.conversationId) {
+      try {
+        HarnessBridge.get().restoreSession(store.conversationId);
+      } catch {
+        // Bridge may not be fully ready
+      }
+    }
+  } catch {
+    // open_tabs not available — first launch
+  }
+}
+
+/** Persist current open tabs state to DB (fire-and-forget). */
+function persistOpenTabs(projectId: string): void {
+  const { openTabs, activeTabId, tabStates, conversationId, mode } = useAgentStore.getState();
+  // Build the flat active tab data
+  const activeTab = openTabs.find((t) => t.id === activeTabId);
+  if (!activeTab) return;
+
+  openTabs.forEach((tab, idx) => {
+    const isActive = tab.id === activeTabId;
+    const convId = isActive ? conversationId : (tabStates[tab.id]?.conversationId ?? null);
+    const tabMode = isActive ? mode : (tabStates[tab.id]?.mode ?? 'chat');
+    tauriInvoke('db_upsert_open_tab', {
+      id: tab.id,
+      projectId,
+      conversationId: convId,
+      title: tab.title,
+      mode: tabMode,
+      tabIndex: idx,
+    }).catch(() => {
+      // Best-effort persistence
+    });
+  });
+}
 
 // ── Theme effect — applies CSS class on <html> whenever themeId changes ──────
 
@@ -82,6 +159,7 @@ function IDE() {
       const currentPath = useProjectStore.getState().rootPath;
       if (currentPath) {
         saveProjectState(currentPath);
+        persistOpenTabs(currentPath);
       }
     };
     window.addEventListener('beforeunload', handleBeforeUnload);
@@ -101,6 +179,9 @@ function IDE() {
         // Populate the skills store with discovered skills
         useSkillsStore.getState().setDiscoveredSkills(skills);
         await bridge.registerMcpTools();
+
+        // Restore persisted open tabs from previous session
+        await restoreOpenTabs(projectRootPath);
       } catch (err) {
         console.warn('[App] Failed to initialize harness:', err);
       }

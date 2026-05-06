@@ -3,6 +3,7 @@ import { useRef, useEffect, useState, memo } from 'react';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { useAgentStore } from '@/stores/agent-store';
 import { ToolCallGroup } from './tool-call-card';
+import { SubAgentCard } from './sub-agent-card';
 import { ApprovalDialog } from './approval-dialog';
 import { ModeSwitchDialog } from './mode-switch-dialog';
 import { cn } from '@/lib/utils';
@@ -182,6 +183,13 @@ const MessageItem = memo(function MessageItem({
               {hasToolCalls ? (
                 /* Mid-loop message: show tool calls compactly, then agent output */
                 <>
+                  {/* Render sub-agent cards for spawn_subagent calls */}
+                  {msg.toolCalls!
+                    .filter((tc) => tc.name === 'spawn_subagent')
+                    .map((tc) => (
+                      <SubAgentCard key={tc.id} toolCallId={tc.id} input={tc.input} />
+                    ))}
+                  {/* Render all other tool calls via the standard group */}
                   <ToolCallGroup toolCalls={msg.toolCalls!} />
                   {msg.content?.trim() && <AgentOutputBlock content={msg.content} />}
                 </>

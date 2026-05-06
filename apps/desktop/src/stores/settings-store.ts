@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { immer } from 'zustand/middleware/immer';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import type { AgentType, ToolCategory } from '@hyscode/agent-harness';
+import type { AgentMode } from './agent-store';
 import type { SidebarViewId } from './layout-store';
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -189,6 +190,16 @@ interface SettingsState {
   /** Per-server custom binary path overrides: serverId → absolute path to binary */
   lspCustomBinaryPaths: Record<string, string>;
 
+  // ─ Sub-agents ─
+  /** Master switch — when false the spawn_subagent tool is disabled. */
+  subAgentEnabled: boolean;
+  /** Fallback mode used when the LLM does not specify one. */
+  subAgentDefaultMode: Exclude<AgentMode, 'chat'>;
+  /** Maximum tool-call iterations allowed per sub-agent run. */
+  subAgentMaxIterations: number;
+  /** When true, sub-agent tool calls are auto-approved (yolo mode inside sub-agent). */
+  subAgentAutoApprove: boolean;
+
   // ─ Layout tabs ─
   showAgentTab: boolean;
   showReviewTab: boolean;
@@ -344,6 +355,12 @@ export const useSettingsStore = create<SettingsState>()(
 
       // Language Servers
       lspCustomBinaryPaths: {},
+
+      // Sub-agents
+      subAgentEnabled: true,
+      subAgentDefaultMode: 'build' as Exclude<AgentMode, 'chat'>,
+      subAgentMaxIterations: 20,
+      subAgentAutoApprove: false,
 
       // Layout tabs
       showAgentTab: true,

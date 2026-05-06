@@ -7,6 +7,83 @@ import type { MessageContent } from '@hyscode/ai-providers';
 
 /** AgentMode mirrors AgentType — single source of truth for active agent. */
 export type AgentMode = 'chat' | 'build' | 'review' | 'debug' | 'plan';
+
+/** State for an active or completed sub-agent task. */
+export interface SubAgentState {
+  id: string;
+  task: string;
+  mode: AgentMode;
+  status: 'running' | 'done' | 'error';
+  output: string;
+  toolCalls: ToolCallDisplay[];
+  startedAt: number;
+  completedAt?: number;
+}
+
+/** All per-conversation state fields (mirrored to flat AgentState fields for active tab). */
+export interface PerTabState {
+  mode: AgentMode;
+  conversationId: string | null;
+  messages: ChatMessage[];
+  isStreaming: boolean;
+  streamingText: string;
+  contextFiles: string[];
+  attachedImages: AttachedImage[];
+  gatheredContext: Array<{ path: string; relevance: number; tokenEstimate: number }>;
+  pendingToolCalls: ToolCallDisplay[];
+  pendingApprovals: PendingApproval[];
+  pendingFileChanges: PendingFileChange[];
+  agentEditSessions: AgentEditSession[];
+  sddPhase: import('@hyscode/agent-harness').SddStatus | null;
+  sddSpec: string | null;
+  sddTasks: import('@hyscode/agent-harness').SddTask[];
+  sddProgress: number;
+  sddFailedTask: import('@hyscode/agent-harness').SddTask | null;
+  tokenUsage: TokenUsage | null;
+  apiRequestCount: number;
+  lastApiRequestAt: number | null;
+  agentTasks: Array<{ id: number; title: string; status: string }>;
+  pendingModeSwitch: import('@hyscode/agent-harness').ModeSwitchRequest | null;
+  delegationChain: Array<{ fromMode: AgentMode; toMode: AgentMode; reason: string }>;
+  pendingUserQuestion: PendingUserQuestion | null;
+  /** Active and completed sub-agent tasks spawned during this conversation. */
+  subAgents: SubAgentState[];
+}
+
+export interface TabMeta {
+  id: string;
+  title: string;
+}
+
+export function defaultPerTabState(mode: AgentMode = 'chat'): PerTabState {
+  return {
+    mode,
+    conversationId: null,
+    messages: [],
+    isStreaming: false,
+    streamingText: '',
+    contextFiles: [],
+    attachedImages: [],
+    gatheredContext: [],
+    pendingToolCalls: [],
+    pendingApprovals: [],
+    pendingFileChanges: [],
+    agentEditSessions: [],
+    sddPhase: null,
+    sddSpec: null,
+    sddTasks: [],
+    sddProgress: 0,
+    sddFailedTask: null,
+    tokenUsage: null,
+    apiRequestCount: 0,
+    lastApiRequestAt: null,
+    agentTasks: [],
+    pendingModeSwitch: null,
+    delegationChain: [],
+    pendingUserQuestion: null,
+    subAgents: [],
+  };
+}
 export type MessageRole = 'user' | 'assistant';
 
 export interface ToolCallDisplay {
@@ -168,6 +245,24 @@ interface AgentState {
   // User questions (ask_user tool)
   pendingUserQuestion: PendingUserQuestion | null;
 
+  // ─── Multi-tab management ─────────────────────────────────────────────
+  /** Ordered list of open tabs (visible in the switcher). */
+  openTabs: TabMeta[];
+  /** Currently visible tab id. */
+  activeTabId: string;
+  /** Cached state for background tabs (keyed by tab id). */
+  tabStates: Record<string, PerTabState>;
+  /** Open a new empty tab; returns the new tab id. */
+  openNewTab: (mode?: AgentMode) => string;
+  /** Switch active tab (blocked while isStreaming). */
+  switchTab: (id: string) => void;
+  /** Close tab by id. Activates the nearest remaining tab. */
+  closeTab: (id: string) => void;
+  /** Update a tab's display title. */
+  updateTabTitle: (id: string, title: string) => void;
+  /** Load previously saved tabs into the store (called on app init). */
+  loadSavedTabs: (tabs: Array<{ id: string; title: string; conversationId: string | null; mode: AgentMode; messages: ChatMessage[] }>) => void;
+
   // Session history
   sessions: SessionSummary[];
   sessionsLoading: boolean;
@@ -246,6 +341,11 @@ interface AgentState {
   // User questions (ask_user tool)
   setPendingUserQuestion: (question: PendingUserQuestion | null) => void;
 
+  // Sub-agents
+  subAgents: SubAgentState[];
+  addSubAgent: (agent: SubAgentState) => void;
+  updateSubAgent: (id: string, patch: Partial<SubAgentState>) => void;
+
   // Session history
   setSessions: (sessions: SessionSummary[]) => void;
   setSessionsLoading: (loading: boolean) => void;
@@ -282,9 +382,15 @@ export const useAgentStore = create<AgentState>()(
     pendingModeSwitch: null,
     delegationChain: [],
     pendingUserQuestion: null,
+    subAgents: [],
     sessions: [],
     sessionsLoading: false,
     historyOpen: false,
+
+    // ─── Multi-tab initialization (one default tab) ──────────────────
+    openTabs: [{ id: '__default__', title: 'New Chat' }],
+    activeTabId: '__default__',
+    tabStates: {},
 
     // Debug
     debugLines: [],
@@ -652,6 +758,19 @@ export const useAgentStore = create<AgentState>()(
         state.pendingUserQuestion = question;
       }),
 
+    // ─── Sub-Agent Actions ────────────────────────────────────────────
+
+    addSubAgent: (agent) =>
+      set((state) => {
+        state.subAgents.push(agent);
+      }),
+
+    updateSubAgent: (id, patch) =>
+      set((state) => {
+        const idx = state.subAgents.findIndex((a) => a.id === id);
+        if (idx !== -1) Object.assign(state.subAgents[idx], patch);
+      }),
+
     // ─── Session History ─────────────────────────────────────────────
 
     setSessions: (sessions) =>
@@ -672,6 +791,85 @@ export const useAgentStore = create<AgentState>()(
     deleteSession: (id) =>
       set((state) => {
         state.sessions = state.sessions.filter((s) => s.id !== id);
+      }),
+
+    // ─── Multi-tab Actions ────────────────────────────────────────────
+
+    openNewTab: (mode = 'chat') => {
+      const tabId = crypto.randomUUID();
+      set((state) => {
+        // Snapshot current active tab to cache
+        if (state.activeTabId) {
+          state.tabStates[state.activeTabId] = _extractTab(state);
+        }
+        state.openTabs.push({ id: tabId, title: 'New Chat' });
+        state.activeTabId = tabId;
+        // Reset flat fields to fresh defaults
+        _applyTab(state, defaultPerTabState(mode));
+      });
+      return tabId;
+    },
+
+    switchTab: (id) =>
+      set((state) => {
+        if (state.activeTabId === id) return;
+        // Block switch during streaming
+        if (state.isStreaming) return;
+        // Save current flat state to cache
+        state.tabStates[state.activeTabId] = _extractTab(state);
+        // Load target tab's cached state (or default)
+        const cached = state.tabStates[id];
+        _applyTab(state, cached ?? defaultPerTabState('chat'));
+        state.activeTabId = id;
+        // Clean up the new active tab from the cache (it's now in flat fields)
+        delete state.tabStates[id];
+      }),
+
+    closeTab: (id) =>
+      set((state) => {
+        // Can't close last tab
+        if (state.openTabs.length <= 1) return;
+        const idx = state.openTabs.findIndex((t) => t.id === id);
+        if (idx === -1) return;
+        state.openTabs.splice(idx, 1);
+        delete state.tabStates[id];
+        // If closing the active tab, switch to neighbour
+        if (state.activeTabId === id) {
+          const nextTab = state.openTabs[Math.max(0, idx - 1)];
+          const cached = state.tabStates[nextTab.id];
+          _applyTab(state, cached ?? defaultPerTabState('chat'));
+          state.activeTabId = nextTab.id;
+          delete state.tabStates[nextTab.id];
+        }
+      }),
+
+    updateTabTitle: (id, title) =>
+      set((state) => {
+        const tab = state.openTabs.find((t) => t.id === id);
+        if (tab) tab.title = title;
+      }),
+
+    loadSavedTabs: (tabs) =>
+      set((state) => {
+        if (tabs.length === 0) return;
+        // Replace the default single tab with saved tabs
+        state.openTabs = tabs.map((t) => ({ id: t.id, title: t.title }));
+        // First tab becomes active
+        const first = tabs[0];
+        state.activeTabId = first.id;
+        _applyTab(state, {
+          ...defaultPerTabState(first.mode),
+          conversationId: first.conversationId,
+          messages: first.messages,
+        });
+        // Cache remaining tabs
+        for (const t of tabs.slice(1)) {
+          state.tabStates[t.id] = {
+            ...defaultPerTabState(t.mode),
+            conversationId: t.conversationId,
+            messages: t.messages,
+          };
+        }
       }),
 
     // ─── Debug ───────────────────────────────────────────────────────
@@ -696,3 +894,67 @@ export const useAgentStore = create<AgentState>()(
       }),
   })),
 );
+
+// ─── Tab helpers (used inside immer set() callbacks) ────────────────────────
+
+/** Snapshot the flat per-conversation fields into a PerTabState object. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function _extractTab(s: any): PerTabState {
+  return {
+    mode: s.mode,
+    conversationId: s.conversationId,
+    messages: s.messages,
+    isStreaming: s.isStreaming,
+    streamingText: s.streamingText,
+    contextFiles: s.contextFiles,
+    attachedImages: s.attachedImages,
+    gatheredContext: s.gatheredContext,
+    pendingToolCalls: s.pendingToolCalls,
+    pendingApprovals: s.pendingApprovals,
+    pendingFileChanges: s.pendingFileChanges,
+    agentEditSessions: s.agentEditSessions,
+    sddPhase: s.sddPhase,
+    sddSpec: s.sddSpec,
+    sddTasks: s.sddTasks,
+    sddProgress: s.sddProgress,
+    sddFailedTask: s.sddFailedTask,
+    tokenUsage: s.tokenUsage,
+    apiRequestCount: s.apiRequestCount,
+    lastApiRequestAt: s.lastApiRequestAt,
+    agentTasks: s.agentTasks,
+    pendingModeSwitch: s.pendingModeSwitch,
+    delegationChain: s.delegationChain,
+    pendingUserQuestion: s.pendingUserQuestion,
+    subAgents: s.subAgents ?? [],
+  };
+}
+
+/** Apply a PerTabState snapshot to the flat fields of an immer draft. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function _applyTab(s: any, ps: PerTabState): void {
+  s.mode = ps.mode;
+  s.conversationId = ps.conversationId;
+  s.messages = ps.messages;
+  s.isStreaming = ps.isStreaming;
+  s.streamingText = ps.streamingText;
+  s.contextFiles = ps.contextFiles;
+  s.attachedImages = ps.attachedImages;
+  s.gatheredContext = ps.gatheredContext;
+  s.pendingToolCalls = ps.pendingToolCalls;
+  s.pendingApprovals = ps.pendingApprovals;
+  s.pendingFileChanges = ps.pendingFileChanges;
+  s.agentEditSessions = ps.agentEditSessions;
+  s.sddPhase = ps.sddPhase;
+  s.sddSpec = ps.sddSpec;
+  s.sddTasks = ps.sddTasks;
+  s.sddProgress = ps.sddProgress;
+  s.sddFailedTask = ps.sddFailedTask;
+  s.tokenUsage = ps.tokenUsage;
+  s.apiRequestCount = ps.apiRequestCount;
+  s.lastApiRequestAt = ps.lastApiRequestAt;
+  s.agentTasks = ps.agentTasks;
+  s.pendingModeSwitch = ps.pendingModeSwitch;
+  s.delegationChain = ps.delegationChain;
+  s.pendingUserQuestion = ps.pendingUserQuestion;
+  s.subAgents = ps.subAgents ?? [];
+}

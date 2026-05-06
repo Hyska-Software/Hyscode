@@ -726,7 +726,7 @@ const TOOL_ICON_MAP: Record<string, LucideIcon> = {
   create_skill: Sparkles,
 };
 
-function CompactToolCallRow({ toolCall }: { toolCall: ToolCallDisplay }) {
+export function CompactToolCallRow({ toolCall }: { toolCall: ToolCallDisplay }) {
   const [expanded, setExpanded] = useState(false);
   const isRunning = toolCall.status === 'running';
   const isDone = toolCall.status === 'success';
@@ -829,11 +829,13 @@ interface ToolCallGroupProps {
 }
 
 export const ToolCallGroup = memo(function ToolCallGroup({ toolCalls }: ToolCallGroupProps) {
-  if (toolCalls.length === 0) return null;
+  // spawn_subagent calls are rendered as SubAgentCard in agent-messages.tsx
+  const filtered = toolCalls.filter((tc) => tc.name !== 'spawn_subagent');
+  if (filtered.length === 0) return null;
 
   return (
     <div className="agent-fade-in my-0.5 flex flex-col">
-      {toolCalls.map((tc) => (
+      {filtered.map((tc) => (
         <CompactToolCallRow key={tc.id} toolCall={tc} />
       ))}
     </div>
