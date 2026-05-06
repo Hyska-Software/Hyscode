@@ -199,11 +199,178 @@ pub async fn lsp_list_active(app: tauri::AppHandle) -> Result<Vec<String>, Strin
     Ok(processes.keys().cloned().collect())
 }
 
-/// Check if a command exists on the system PATH or in common package manager global bin directories.
-/// Returns true if the command is found, false otherwise.
+/// Returns true if `command` looks like an explicit path (absolute or contains
+/// path separators) rather than a bare binary name.
+fn is_explicit_path(command: &str) -> bool {
+    std::path::Path::new(command).is_absolute()
+        || command.contains('/')
+        || command.contains('\\')
+}
+
+/// Push candidate paths for a directory into `v`.
+/// On Windows this adds `.exe`, `.cmd`, `.bat`, and plain variants (in that order).
+/// On Unix this adds only the plain name.
+fn push_dir_candidates(v: &mut Vec<std::path::PathBuf>, dir: std::path::PathBuf, command: &str) {
+    #[cfg(target_os = "windows")]
+    {
+        v.push(dir.join(format!("{}.exe", command)));
+        v.push(dir.join(format!("{}.cmd", command)));
+        v.push(dir.join(format!("{}.bat", command)));
+        v.push(dir.join(command));
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        v.push(dir.join(command));
+    }
+}
+
+/// Build an ordered list of fallback candidate paths for a bare command name,
+/// covering all common package-manager global bin directories on the current OS.
+/// Callers should check `is_file()` (not just `exists()`) on each entry.
+fn lsp_candidate_paths(command: &str) -> Vec<std::path::PathBuf> {
+    use std::path::PathBuf;
+    let mut v: Vec<PathBuf> = Vec::new();
+
+    #[cfg(target_os = "windows")]
+    {
+        // npm global (%APPDATA%\npm)
+        if let Ok(appdata) = std::env::var("APPDATA") {
+            let base = PathBuf::from(&appdata);
+            push_dir_candidates(&mut v, base.join("npm"), command);
+            // Yarn global (alternate location)
+            push_dir_candidates(&mut v, base.join("Yarn").join("bin"), command);
+            // pip --user: %APPDATA%\Python\Python*\Scripts (newest version first)
+            let python_base = base.join("Python");
+            if let Ok(entries) = std::fs::read_dir(&python_base) {
+                let mut python_dirs: Vec<PathBuf> = entries
+                    .filter_map(|e| e.ok())
+                    .filter(|e| e.path().is_dir())
+                    .map(|e| e.path())
+                    .collect();
+                python_dirs.sort_by(|a, b| b.file_name().cmp(&a.file_name()));
+                for dir in python_dirs {
+                    push_dir_candidates(&mut v, dir.join("Scripts"), command);
+                }
+            }
+        }
+        // pnpm / Yarn / nvim-mason (%LOCALAPPDATA%)
+        if let Ok(local) = std::env::var("LOCALAPPDATA") {
+            let base = PathBuf::from(&local);
+            push_dir_candidates(&mut v, base.join("pnpm"), command);
+            push_dir_candidates(&mut v, base.join("Yarn").join("bin"), command);
+            push_dir_candidates(&mut v, base.join("nvim-data").join("mason").join("bin"), command);
+        }
+        // USERPROFILE-based managers
+        if let Ok(profile) = std::env::var("USERPROFILE") {
+            let p = PathBuf::from(&profile);
+            push_dir_candidates(&mut v, p.join(".cargo").join("bin"), command);
+            push_dir_candidates(&mut v, p.join("go").join("bin"), command);
+            push_dir_candidates(&mut v, p.join(".dotnet").join("tools"), command);
+            push_dir_candidates(&mut v, p.join("scoop").join("shims"), command);
+            push_dir_candidates(&mut v, p.join(".volta").join("bin"), command);
+            push_dir_candidates(&mut v, p.join(".local").join("bin"), command);
+        }
+        // Chocolatey system-wide
+        push_dir_candidates(&mut v, PathBuf::from(r"C:\ProgramData\chocolatey\bin"), command);
+        // GOPATH (may be a semicolon-separated list)
+        if let Ok(gopath) = std::env::var("GOPATH") {
+            for p in std::env::split_paths(&gopath) {
+                push_dir_candidates(&mut v, p.join("bin"), command);
+            }
+        }
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        let home = std::env::var("HOME").unwrap_or_default();
+        let h = std::path::PathBuf::from(&home);
+
+        // Cargo (rust-analyzer, etc.)
+        push_dir_candidates(&mut v, h.join(".cargo").join("bin"), command);
+        // Go (gopls, etc.)
+        push_dir_candidates(&mut v, h.join("go").join("bin"), command);
+        if let Ok(gopath) = std::env::var("GOPATH") {
+            for p in std::env::split_paths(&gopath) {
+                v.push(p.join("bin").join(command));
+            }
+        }
+        // pip --user / pipx
+        push_dir_candidates(&mut v, h.join(".local").join("bin"), command);
+        // dotnet tools (csharp-ls)
+        push_dir_candidates(&mut v, h.join(".dotnet").join("tools"), command);
+        // Yarn classic
+        push_dir_candidates(&mut v, h.join(".yarn").join("bin"), command);
+        push_dir_candidates(
+            &mut v,
+            h.join(".config").join("yarn").join("global").join("node_modules").join(".bin"),
+            command,
+        );
+        // npm global (default prefix)
+        push_dir_candidates(&mut v, h.join(".npm-global").join("bin"), command);
+        // pnpm global
+        push_dir_candidates(&mut v, h.join(".local").join("share").join("pnpm"), command);
+        // Volta
+        push_dir_candidates(&mut v, h.join(".volta").join("bin"), command);
+        // asdf shims
+        push_dir_candidates(&mut v, h.join(".asdf").join("shims"), command);
+        // rbenv shims (ruby-lsp)
+        push_dir_candidates(&mut v, h.join(".rbenv").join("shims"), command);
+        // nvim Mason LSP manager
+        push_dir_candidates(
+            &mut v,
+            h.join(".local").join("share").join("nvim").join("mason").join("bin"),
+            command,
+        );
+        // SDKMAN (jdtls / Java tooling)
+        push_dir_candidates(
+            &mut v,
+            h.join(".sdkman").join("candidates").join("jdtls").join("current").join("bin"),
+            command,
+        );
+        // System paths (Homebrew Apple Silicon first, then standard Unix)
+        v.push(std::path::PathBuf::from("/opt/homebrew/bin").join(command));
+        v.push(std::path::PathBuf::from("/usr/local/bin").join(command));
+        v.push(std::path::PathBuf::from("/usr/bin").join(command));
+        v.push(std::path::PathBuf::from("/snap/bin").join(command));
+        // nvm: prefer NVM_BIN env var, otherwise scan versions sorted descending
+        if let Ok(nvm_bin) = std::env::var("NVM_BIN") {
+            v.push(std::path::PathBuf::from(nvm_bin).join(command));
+        } else {
+            let nvm_versions = h.join(".nvm").join("versions").join("node");
+            if let Ok(entries) = std::fs::read_dir(&nvm_versions) {
+                let mut versions: Vec<std::path::PathBuf> = entries
+                    .filter_map(|e| e.ok())
+                    .filter(|e| e.path().is_dir())
+                    .map(|e| e.path())
+                    .collect();
+                // Sort descending so the most recent Node version is checked first
+                versions.sort_by(|a, b| b.file_name().cmp(&a.file_name()));
+                for vdir in versions {
+                    v.push(vdir.join("bin").join(command));
+                }
+            }
+        }
+        // fnm
+        push_dir_candidates(
+            &mut v,
+            h.join(".fnm").join("aliases").join("default").join("bin"),
+            command,
+        );
+    }
+
+    v
+}
+
+/// Check if a command exists on the system PATH or in common package manager
+/// global bin directories. Returns true if the command is found.
 #[tauri::command]
 pub async fn lsp_probe_server(command: String) -> Result<bool, String> {
-    // 1. Try `where` / `which` against the current PATH
+    // Explicit path: just test whether the file exists
+    if is_explicit_path(&command) {
+        return Ok(std::path::Path::new(&command).is_file());
+    }
+
+    // 1. Try PATH via `where` (Windows) / `which` (Unix)
     #[cfg(target_os = "windows")]
     let path_found = cmd("where")
         .arg(&command)
@@ -226,51 +393,10 @@ pub async fn lsp_probe_server(command: String) -> Result<bool, String> {
         return Ok(true);
     }
 
-    // 2. Fallback: check common package-manager global bin directories directly.
-    //    On Windows, npm installs `.cmd` wrappers; on Unix plain executables.
-    #[cfg(target_os = "windows")]
-    {
-        let candidates: Vec<std::path::PathBuf> = {
-            let mut v = vec![];
-            // %APPDATA%\npm  (npm / pnpm global on Windows)
-            if let Ok(appdata) = std::env::var("APPDATA") {
-                let base = std::path::PathBuf::from(&appdata).join("npm");
-                v.push(base.join(format!("{}.cmd", command)));
-                v.push(base.join(&command));
-            }
-            // %LOCALAPPDATA%\pnpm
-            if let Ok(local) = std::env::var("LOCALAPPDATA") {
-                let base = std::path::PathBuf::from(&local).join("pnpm");
-                v.push(base.join(format!("{}.cmd", command)));
-                v.push(base.join(&command));
-            }
-            v
-        };
-        for p in &candidates {
-            if p.exists() {
-                return Ok(true);
-            }
-        }
-    }
-
-    #[cfg(not(target_os = "windows"))]
-    {
-        let home = std::env::var("HOME").unwrap_or_default();
-        let candidates: Vec<std::path::PathBuf> = vec![
-            // npm global (default prefix)
-            std::path::PathBuf::from(&home).join(".npm-global/bin").join(&command),
-            // pnpm global
-            std::path::PathBuf::from(&home).join(".local/share/pnpm").join(&command),
-            // yarn global
-            std::path::PathBuf::from(&home).join(".yarn/bin").join(&command),
-            // system npm via /usr/local/bin
-            std::path::PathBuf::from("/usr/local/bin").join(&command),
-            std::path::PathBuf::from("/usr/bin").join(&command),
-        ];
-        for p in &candidates {
-            if p.exists() {
-                return Ok(true);
-            }
+    // 2. Fallback: scan common package-manager / tool-manager bin directories
+    for p in lsp_candidate_paths(&command) {
+        if p.is_file() {
+            return Ok(true);
         }
     }
 
@@ -301,12 +427,15 @@ fn resolve_lsp_root(root_path: &str, file_path: Option<&str>, command: &str) -> 
     root_path.to_string()
 }
 
-/// Resolve an LSP command to its full path, checking common global bin directories
-/// if the command isn't found directly on PATH.
+/// Resolve an LSP command to its full executable path.
+/// Checks PATH first; falls back to common package-manager bin directories.
 fn resolve_lsp_command(command: &str) -> String {
-    // On Windows, `where` may return multiple lines (e.g. script without extension
-    // and the .cmd wrapper). We must pick an executable extension so that
-    // std::process::Command can actually spawn it.
+    // Explicit paths are used as-is (no extension appending, no PATH lookup)
+    if is_explicit_path(command) {
+        return command.to_string();
+    }
+
+    // On Windows `where` may return multiple lines; pick the best extension.
     #[cfg(target_os = "windows")]
     {
         if let Ok(output) = cmd("where")
@@ -317,19 +446,18 @@ fn resolve_lsp_command(command: &str) -> String {
         {
             if output.status.success() {
                 let stdout = String::from_utf8_lossy(&output.stdout);
-                let candidates: Vec<&str> = stdout
+                let lines: Vec<&str> = stdout
                     .lines()
                     .map(|l| l.trim())
                     .filter(|l| !l.is_empty())
                     .collect();
-                // Prefer .exe, then .cmd, then .bat, then first available.
-                let preferred = candidates
+                // Prefer .exe, then .cmd, then .bat (ordered passes), then first result
+                let preferred = lines
                     .iter()
-                    .find(|p| {
-                        let lower = p.to_ascii_lowercase();
-                        lower.ends_with(".exe") || lower.ends_with(".cmd") || lower.ends_with(".bat")
-                    })
-                    .or_else(|| candidates.first());
+                    .find(|p| p.to_ascii_lowercase().ends_with(".exe"))
+                    .or_else(|| lines.iter().find(|p| p.to_ascii_lowercase().ends_with(".cmd")))
+                    .or_else(|| lines.iter().find(|p| p.to_ascii_lowercase().ends_with(".bat")))
+                    .or_else(|| lines.first());
                 if let Some(path) = preferred {
                     return path.to_string();
                 }
@@ -357,50 +485,13 @@ fn resolve_lsp_command(command: &str) -> String {
         }
     }
 
-    // Fallback: check common package-manager global bin directories.
-    // On Windows, prefer .exe / .cmd / .bat because std::process::Command
-    // cannot execute extension-less shims.
-    #[cfg(target_os = "windows")]
-    {
-        let mut candidates: Vec<std::path::PathBuf> = vec![];
-        if let Ok(appdata) = std::env::var("APPDATA") {
-            let base = std::path::PathBuf::from(&appdata).join("npm");
-            candidates.push(base.join(format!("{}.cmd", command)));
-            candidates.push(base.join(format!("{}.bat", command)));
-            candidates.push(base.join(format!("{}.exe", command)));
-            candidates.push(base.join(command));
-        }
-        if let Ok(local) = std::env::var("LOCALAPPDATA") {
-            let base = std::path::PathBuf::from(&local).join("pnpm");
-            candidates.push(base.join(format!("{}.cmd", command)));
-            candidates.push(base.join(format!("{}.bat", command)));
-            candidates.push(base.join(format!("{}.exe", command)));
-            candidates.push(base.join(command));
-        }
-        for p in &candidates {
-            if p.exists() {
-                return p.to_string_lossy().to_string();
-            }
+    // Fallback: walk the same candidate list used by lsp_probe_server
+    for p in lsp_candidate_paths(command) {
+        if p.is_file() {
+            return p.to_string_lossy().to_string();
         }
     }
 
-    #[cfg(not(target_os = "windows"))]
-    {
-        let home = std::env::var("HOME").unwrap_or_default();
-        let candidates: Vec<std::path::PathBuf> = vec![
-            std::path::PathBuf::from(&home).join(".npm-global/bin").join(command),
-            std::path::PathBuf::from(&home).join(".local/share/pnpm").join(command),
-            std::path::PathBuf::from(&home).join(".yarn/bin").join(command),
-            std::path::PathBuf::from("/usr/local/bin").join(command),
-            std::path::PathBuf::from("/usr/bin").join(command),
-        ];
-        for p in &candidates {
-            if p.exists() {
-                return p.to_string_lossy().to_string();
-            }
-        }
-    }
-
-    // Return original command as-is if no resolution found
+    // Last resort: return command as-is and let the OS try
     command.to_string()
 }

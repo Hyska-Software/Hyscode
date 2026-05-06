@@ -1,9 +1,11 @@
 import React, { useState } from 'react';
-import { RefreshCw, Circle, AlertTriangle, CheckCircle2, XCircle, ChevronDown, ChevronRight, Copy, Check } from 'lucide-react';
+import { RefreshCw, Circle, AlertTriangle, CheckCircle2, XCircle, ChevronDown, ChevronRight, Copy, Check, FolderOpen, X } from 'lucide-react';
 import { useLspStore } from '../../../stores/lsp-store';
+import { useSettingsStore } from '../../../stores/settings-store';
 import { LspBridge } from '../../../lib/lsp-bridge';
 import { BUILTIN_SERVERS } from '@hyscode/lsp-client';
 import type { BuiltinServerConfig } from '@hyscode/lsp-client';
+import { pickFile } from '../../../lib/tauri-dialog';
 
 function StatusDot({ status }: { status: string }) {
   switch (status) {
@@ -53,14 +55,54 @@ function ServerRow({ server }: { server: BuiltinServerConfig }) {
   const disabledServers = useLspStore((s) => s.disabledServers);
   const toggleServer = useLspStore((s) => s.toggleServer);
 
-  const command = server.command.split(' ')[0];
-  const installed = probeResults[command];
+  const customBinaryPaths = useSettingsStore((s) => s.lspCustomBinaryPaths);
+  const setLspCustomBinaryPath = useSettingsStore((s) => s.setLspCustomBinaryPath);
+  const clearLspCustomBinaryPath = useSettingsStore((s) => s.clearLspCustomBinaryPath);
+
+  const savedCustomPath = customBinaryPaths[server.id] ?? '';
+  const [localPath, setLocalPath] = useState(savedCustomPath);
+
+  // Keep localPath in sync when settings change externally
+  React.useEffect(() => {
+    setLocalPath(customBinaryPaths[server.id] ?? '');
+  }, [customBinaryPaths, server.id]);
+
+  const defaultCommand = server.command.split(' ')[0];
+  // Use custom path for probe lookup when one is set
+  const effectiveCommand = savedCustomPath || defaultCommand;
+  const installed = probeResults[effectiveCommand];
   const isEnabled = !disabledServers.has(server.id);
 
   // Find active status for any of this server's languages
   const activeStatus = server.languageIds
     .map((id) => serverStatuses[id])
     .find((s) => s !== undefined);
+
+  async function handleSavePath(path: string) {
+    const trimmed = path.trim();
+    if (trimmed === savedCustomPath) return;
+    if (trimmed) {
+      setLspCustomBinaryPath(server.id, trimmed);
+    } else {
+      clearLspCustomBinaryPath(server.id);
+    }
+    await LspBridge.updateServerBinaryPath(server.id, trimmed);
+  }
+
+  async function handleBrowse() {
+    const file = await pickFile();
+    if (file) {
+      setLocalPath(file);
+      setLspCustomBinaryPath(server.id, file);
+      await LspBridge.updateServerBinaryPath(server.id, file);
+    }
+  }
+
+  function handleClearPath() {
+    setLocalPath('');
+    clearLspCustomBinaryPath(server.id);
+    LspBridge.updateServerBinaryPath(server.id, '');
+  }
 
   return (
     <div className="rounded-lg border border-border bg-background">
@@ -83,6 +125,11 @@ function ServerRow({ server }: { server: BuiltinServerConfig }) {
         </div>
 
         <div className="flex items-center gap-2 shrink-0">
+          {savedCustomPath && (
+            <span className="text-[10px] text-accent" title={savedCustomPath}>
+              custom path
+            </span>
+          )}
           {installed === undefined ? (
             <span className="text-[10px] text-muted-foreground">Checking…</span>
           ) : installed ? (
@@ -107,7 +154,7 @@ function ServerRow({ server }: { server: BuiltinServerConfig }) {
       </button>
 
       {expanded && (
-        <div className="border-t border-border px-4 py-3 space-y-2">
+        <div className="border-t border-border px-4 py-3 space-y-3">
           <div className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-[11px]">
             <span className="text-muted-foreground">Command:</span>
             <CopyCode
@@ -129,6 +176,41 @@ function ServerRow({ server }: { server: BuiltinServerConfig }) {
                 ))}
               </>
             )}
+          </div>
+
+          {/* Custom binary path override */}
+          <div className="space-y-1.5 pt-1 border-t border-border/50">
+            <span className="text-[11px] font-medium text-muted-foreground">Custom binary path</span>
+            <div className="flex items-center gap-1.5">
+              <input
+                type="text"
+                value={localPath}
+                onChange={(e) => setLocalPath(e.target.value)}
+                onBlur={() => handleSavePath(localPath)}
+                onKeyDown={(e) => { if (e.key === 'Enter') handleSavePath(localPath); }}
+                placeholder={`/usr/local/bin/${defaultCommand}`}
+                className="h-7 flex-1 rounded-md bg-muted px-2 text-[11px] font-mono text-foreground outline-none placeholder:text-muted-foreground/50 min-w-0"
+              />
+              <button
+                onClick={handleBrowse}
+                className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground transition-colors hover:bg-surface-raised hover:text-foreground"
+                title="Browse for binary"
+              >
+                <FolderOpen className="h-3 w-3" />
+              </button>
+              {savedCustomPath && (
+                <button
+                  onClick={handleClearPath}
+                  className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground transition-colors hover:bg-surface-raised hover:text-destructive"
+                  title="Clear custom path"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              )}
+            </div>
+            <p className="text-[10px] text-muted-foreground">
+              Override the auto-detected binary. Leave empty to use the system PATH.
+            </p>
           </div>
 
           <div className="flex gap-2 pt-1">

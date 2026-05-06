@@ -20,6 +20,7 @@ import type { LspContribution } from '@hyscode/extension-api';
 import { useLspStore } from '@/stores/lsp-store';
 import type { LspServerInfo } from '@/stores/lsp-store';
 import type { LspConnectionStatus } from '@hyscode/lsp-client';
+import { useSettingsStore } from '@/stores/settings-store';
 
 type MonacoInstance = typeof import('monaco-editor');
 type TauriInvoke = (cmd: string, args?: Record<string, unknown>) => Promise<unknown>;
@@ -71,10 +72,13 @@ class LspBridgeImpl {
     });
 
     // Register built-in server configs
+    const customPaths = useSettingsStore.getState().lspCustomBinaryPaths;
     for (const server of BUILTIN_SERVERS) {
       const store = useLspStore.getState();
       if (store.disabledServers.has(server.id)) continue;
-      this.manager.registerServerConfig(server);
+      const customPath = customPaths[server.id];
+      const config = customPath ? { ...server, command: customPath } : server;
+      this.manager.registerServerConfig(config);
     }
 
     // Register any extension configs that arrived before init
@@ -269,14 +273,50 @@ class LspBridgeImpl {
     await this.probeAllServers();
   }
 
+  /**
+   * Apply a custom binary path override for a built-in server.
+   * Re-registers the config and restarts any running server so the new binary takes effect.
+   */
+  async updateServerBinaryPath(serverId: string, binaryPath: string): Promise<void> {
+    if (!this.manager) return;
+
+    const server = BUILTIN_SERVERS.find((s) => s.id === serverId);
+    if (!server) return;
+
+    const config = binaryPath ? { ...server, command: binaryPath } : server;
+    this.manager.registerServerConfig(config);
+
+    // Probe the new binary immediately so the UI reflects its status
+    if (this.invoke) {
+      const commandToProbe = binaryPath || server.command;
+      const found = (await this.invoke('lsp_probe_server', { command: commandToProbe })) as boolean;
+      useLspStore.getState().setProbeResult(commandToProbe, found);
+    }
+
+    // Restart any currently-running server for this config's languages
+    for (const langId of server.languageIds) {
+      if (this.manager.getStatus(langId) !== undefined) {
+        await this.restartServer(langId);
+      }
+    }
+  }
+
   private async probeAllServers(): Promise<void> {
     if (!this.invoke) return;
 
     const commands = getUniqueServerCommands();
+
+    // Also probe any user-configured custom binary paths
+    const customPaths = useSettingsStore.getState().lspCustomBinaryPaths;
+    const allCommands = new Set(commands);
+    for (const path of Object.values(customPaths)) {
+      if (path) allCommands.add(path);
+    }
+
     const store = useLspStore.getState();
 
     const results = await Promise.allSettled(
-      commands.map(async (command) => {
+      Array.from(allCommands).map(async (command) => {
         const found = (await this.invoke!('lsp_probe_server', { command })) as boolean;
         store.setProbeResult(command, found);
         return { command, found };

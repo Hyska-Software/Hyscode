@@ -185,6 +185,10 @@ interface SettingsState {
   dockerAutoRefreshInterval: number;
   dockerComposeFile: string;
 
+  // ─ Language Servers ─
+  /** Per-server custom binary path overrides: serverId → absolute path to binary */
+  lspCustomBinaryPaths: Record<string, string>;
+
   // ─ Layout tabs ─
   showAgentTab: boolean;
   showReviewTab: boolean;
@@ -220,6 +224,10 @@ interface SettingsState {
   getThinkingConfig: (providerId: string, modelId: string) => ModelThinkingConfig;
   /** Set thinking config for a specific provider+model */
   setThinkingConfig: (providerId: string, modelId: string, config: Partial<ModelThinkingConfig>) => void;
+  /** Set a custom binary path override for a language server */
+  setLspCustomBinaryPath: (serverId: string, path: string) => void;
+  /** Remove the custom binary path override for a language server */
+  clearLspCustomBinaryPath: (serverId: string) => void;
 }
 
 // ── Store ────────────────────────────────────────────────────────────────────
@@ -330,6 +338,9 @@ export const useSettingsStore = create<SettingsState>()(
       dockerShowStopped: true,
       dockerAutoRefreshInterval: 5,
       dockerComposeFile: 'docker-compose.yml',
+
+      // Language Servers
+      lspCustomBinaryPaths: {},
 
       // Layout tabs
       showAgentTab: true,
@@ -477,6 +488,16 @@ export const useSettingsStore = create<SettingsState>()(
           const key = `${providerId}::${modelId}`;
           const current = state.thinkingSettings[key] ?? { enabled: false };
           state.thinkingSettings[key] = { ...current, ...config };
+        }),
+
+      setLspCustomBinaryPath: (serverId, path) =>
+        set((state) => {
+          state.lspCustomBinaryPaths[serverId] = path;
+        }),
+
+      clearLspCustomBinaryPath: (serverId) =>
+        set((state) => {
+          delete state.lspCustomBinaryPaths[serverId];
         }),
     })),
     {
