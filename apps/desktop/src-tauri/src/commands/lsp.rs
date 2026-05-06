@@ -1,10 +1,60 @@
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Child, Stdio};
-use std::sync::Mutex;
+use std::sync::{Mutex, OnceLock};
 use serde::Serialize;
 use tauri::{Emitter, Manager};
 use super::utils::cmd;
+
+/// Cache of user PATH directories read from the Windows registry.
+/// Tauri GUI apps only inherit the system PATH; this supplements it with
+/// entries the user added via shell profiles or the Control Panel.
+#[cfg(target_os = "windows")]
+static WINDOWS_USER_PATH_DIRS: OnceLock<Vec<std::path::PathBuf>> = OnceLock::new();
+
+/// Return (and lazily initialise) the list of directories from the current
+/// user's PATH as stored in `HKCU\Environment`.  Called at most once per
+/// process lifetime.
+#[cfg(target_os = "windows")]
+fn windows_user_path_dirs() -> &'static Vec<std::path::PathBuf> {
+    WINDOWS_USER_PATH_DIRS.get_or_init(|| {
+        use std::collections::HashSet;
+        use std::path::PathBuf;
+
+        let Ok(output) = cmd("powershell")
+            .args([
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                "[Environment]::GetEnvironmentVariable('Path','User')",
+            ])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .output()
+        else {
+            return Vec::new();
+        };
+
+        if !output.status.success() {
+            return Vec::new();
+        }
+
+        let text = String::from_utf8_lossy(&output.stdout);
+        let mut seen = HashSet::new();
+        let mut dirs = Vec::new();
+        for part in text.trim().split(';') {
+            let part = part.trim().trim_matches('"');
+            if part.is_empty() {
+                continue;
+            }
+            let key = part.to_lowercase();
+            if seen.insert(key) {
+                dirs.push(PathBuf::from(part));
+            }
+        }
+        dirs
+    })
+}
 
 #[derive(Serialize)]
 pub struct LspStartResult {
@@ -49,13 +99,37 @@ pub async fn lsp_start(
     #[cfg(not(target_os = "windows"))]
     let (program, extra_args): (&str, Vec<String>) = (&resolved, vec![]);
 
-    let mut child = cmd(program)
+    let mut child_cmd = cmd(program);
+    child_cmd
         .args(&extra_args)
         .args(&args)
         .current_dir(&resolved_root)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
+        .stderr(Stdio::piped());
+
+    // Merge user PATH from the Windows registry so that .bat/.cmd wrappers
+    // and shims can find their own dependencies even when Tauri was launched
+    // from the taskbar (which only gets the system PATH).
+    #[cfg(target_os = "windows")]
+    {
+        let current_path = std::env::var("PATH").unwrap_or_default();
+        let user_dirs: Vec<String> = windows_user_path_dirs()
+            .iter()
+            .map(|p| p.to_string_lossy().to_string())
+            .collect();
+        if !user_dirs.is_empty() {
+            let extra = user_dirs.join(";");
+            let merged = if current_path.is_empty() {
+                extra
+            } else {
+                format!("{};{}", extra, current_path)
+            };
+            child_cmd.env("PATH", merged);
+        }
+    }
+
+    let mut child = child_cmd
         .spawn()
         .map_err(|e| format!("Failed to spawn LSP process '{}': {}", command, e))?;
 
@@ -278,6 +352,21 @@ fn lsp_candidate_paths(command: &str) -> Vec<std::path::PathBuf> {
                 push_dir_candidates(&mut v, p.join("bin"), command);
             }
         }
+        // LLVM suite (clangd, clang-format, etc.)
+        push_dir_candidates(&mut v, PathBuf::from(r"C:\Program Files\LLVM\bin"), command);
+        push_dir_candidates(&mut v, PathBuf::from(r"C:\Program Files (x86)\LLVM\bin"), command);
+        // Flutter / Dart SDK – common install locations
+        if let Ok(profile) = std::env::var("USERPROFILE") {
+            let p = PathBuf::from(&profile);
+            push_dir_candidates(&mut v, p.join("flutter").join("bin"), command);
+            push_dir_candidates(&mut v, p.join("fvm").join("default").join("bin"), command);
+        }
+        if let Ok(local) = std::env::var("LOCALAPPDATA") {
+            let base = PathBuf::from(&local);
+            push_dir_candidates(&mut v, base.join("flutter").join("bin"), command);
+            // Windows App Execution Aliases (e.g. ruby-lsp, gem-installed tools)
+            push_dir_candidates(&mut v, base.join("Microsoft").join("WindowsApps"), command);
+        }
     }
 
     #[cfg(not(target_os = "windows"))]
@@ -400,6 +489,23 @@ pub async fn lsp_probe_server(command: String) -> Result<bool, String> {
         }
     }
 
+    // 3. Scan user PATH from the Windows registry.
+    //    GUI apps launched from the taskbar or a shortcut only inherit the
+    //    system PATH, missing entries the user added via Control Panel or a
+    //    shell profile.  The cached registry read is done at most once.
+    #[cfg(target_os = "windows")]
+    {
+        for dir in windows_user_path_dirs() {
+            let mut candidates = Vec::new();
+            push_dir_candidates(&mut candidates, dir.clone(), &command);
+            for p in candidates {
+                if p.is_file() {
+                    return Ok(true);
+                }
+            }
+        }
+    }
+
     Ok(false)
 }
 
@@ -489,6 +595,24 @@ fn resolve_lsp_command(command: &str) -> String {
     for p in lsp_candidate_paths(command) {
         if p.is_file() {
             return p.to_string_lossy().to_string();
+        }
+    }
+
+    // Also scan user PATH from the Windows registry (same logic as lsp_probe_server)
+    #[cfg(target_os = "windows")]
+    {
+        for dir in windows_user_path_dirs() {
+            let mut candidates = Vec::new();
+            push_dir_candidates(&mut candidates, dir.clone(), command);
+            // Prefer .exe, then .cmd, then .bat
+            let found = candidates.iter()
+                .find(|p| p.is_file() && p.extension().map_or(false, |e| e.eq_ignore_ascii_case("exe")))
+                .or_else(|| candidates.iter().find(|p| p.is_file() && p.extension().map_or(false, |e| e.eq_ignore_ascii_case("cmd"))))
+                .or_else(|| candidates.iter().find(|p| p.is_file() && p.extension().map_or(false, |e| e.eq_ignore_ascii_case("bat"))))
+                .or_else(|| candidates.iter().find(|p| p.is_file()));
+            if let Some(p) = found {
+                return p.to_string_lossy().to_string();
+            }
         }
     }
 

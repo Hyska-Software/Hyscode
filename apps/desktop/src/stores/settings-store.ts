@@ -201,6 +201,8 @@ interface SettingsState {
 
   // ─ Settings modal ─
   settingsOpen: boolean;
+  /** When set, the Settings modal will navigate to this tab on open */
+  settingsInitialTab: string | null;
 
   // ─ Actions ─
   set: <K extends keyof SettingsState>(key: K, value: SettingsState[K]) => void;
@@ -208,6 +210,7 @@ interface SettingsState {
   setIconThemeId: (id: string) => void;
   setActiveProvider: (providerId: string, modelId: string) => void;
   openSettings: () => void;
+  openSettingsOnTab: (tab: string) => void;
   closeSettings: () => void;
   addMcpServer: (server: McpServerConfig) => void;
   removeMcpServer: (id: string) => void;
@@ -361,6 +364,7 @@ export const useSettingsStore = create<SettingsState>()(
 
       // Settings modal
       settingsOpen: false,
+      settingsInitialTab: null,
 
       // Generic setter for any key
       set: (key, value) =>
@@ -387,6 +391,12 @@ export const useSettingsStore = create<SettingsState>()(
       openSettings: () =>
         set((state) => {
           state.settingsOpen = true;
+        }),
+
+      openSettingsOnTab: (tab) =>
+        set((state) => {
+          state.settingsOpen = true;
+          state.settingsInitialTab = tab;
         }),
 
       closeSettings: () =>
@@ -505,7 +515,7 @@ export const useSettingsStore = create<SettingsState>()(
       storage: createJSONStorage(() => localStorage),
       partialize: (state) => {
         // Exclude transient UI state and action functions from persistence
-        const { settingsOpen: _, ...rest } = state;
+        const { settingsOpen: _, settingsInitialTab: _tab, ...rest } = state;
         return rest;
       },
     },

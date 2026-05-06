@@ -95,9 +95,21 @@ function resolveExtIcon(icon?: string): LucideIcon {
 export function SettingsModal() {
   const open = useSettingsStore((s) => s.settingsOpen);
   const close = useSettingsStore((s) => s.closeSettings);
+  const settingsInitialTab = useSettingsStore((s) => s.settingsInitialTab);
   const extensionSettingsTabs = useExtensionStore((s) => s.contributions.settingsTabs);
 
   const [activeTab, setActiveTab] = useState<ActiveTab>({ type: 'builtin', id: 'editor' });
+
+  // Navigate to requested tab when modal opens
+  useEffect(() => {
+    if (open && settingsInitialTab) {
+      const builtin = BUILTIN_TAB_ITEMS.find((t) => t.id === settingsInitialTab);
+      if (builtin) {
+        setActiveTab({ type: 'builtin', id: builtin.id });
+      }
+      useSettingsStore.getState().set('settingsInitialTab', null);
+    }
+  }, [open, settingsInitialTab]);
 
   // Close on Escape
   useEffect(() => {

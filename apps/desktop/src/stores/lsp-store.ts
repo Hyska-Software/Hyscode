@@ -27,12 +27,16 @@ interface LspState {
   /** Whether initial probe scan has completed */
   probeComplete: boolean;
 
+  /** Language IDs for which the "LSP not installed" banner was dismissed this session */
+  dismissedLspNotifications: Set<string>;
+
   // Actions
   setServerStatus: (languageId: string, info: LspServerInfo) => void;
   removeServer: (languageId: string) => void;
   setProbeResult: (command: string, found: boolean) => void;
   setProbeComplete: (complete: boolean) => void;
   toggleServer: (serverId: string, enabled: boolean) => void;
+  dismissLspNotification: (languageId: string) => void;
   clearAll: () => void;
 }
 
@@ -42,6 +46,7 @@ export const useLspStore = create<LspState>()(
     probeResults: {},
     disabledServers: new Set(),
     probeComplete: false,
+    dismissedLspNotifications: new Set(),
 
     setServerStatus: (languageId, info) =>
       set((s) => {
@@ -70,6 +75,11 @@ export const useLspStore = create<LspState>()(
         } else {
           s.disabledServers.add(serverId);
         }
+      }),
+
+    dismissLspNotification: (languageId) =>
+      set((s) => {
+        s.dismissedLspNotifications.add(languageId);
       }),
 
     clearAll: () =>

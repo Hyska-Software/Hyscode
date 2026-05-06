@@ -29,6 +29,7 @@ import { useDiagnosticsSync } from '../../hooks/use-diagnostics-sync';
 import { useInlineCompletion } from '../../hooks/use-inline-completion';
 import { defineAllMonacoThemes, getMonacoThemeName } from '../../lib/monaco-themes';
 import { LspBridge, detectLanguage, detectLspLanguage } from '../../lib/lsp-bridge';
+import { LspMissingBanner } from './lsp-missing-banner';
 import { registerAllLanguages, disableNativeTypeScriptValidation } from '@hyscode/lsp-client';
 import type * as monacoEditor from 'monaco-editor';
 
@@ -448,6 +449,7 @@ export function EditorArea() {
   return (
     <div className="flex h-full flex-col">
       {hasOpenTabs && <EditorTabs />}
+      <LspMissingBanner />
       <div className="relative flex-1 overflow-hidden">
         {/* ── Layer 1: Normal editor content (hidden when a terminal tab is active) ── */}
         <div className="absolute inset-0 flex flex-col" style={{ display: activeTab?.type === 'terminal' ? 'none' : 'flex' }}>
