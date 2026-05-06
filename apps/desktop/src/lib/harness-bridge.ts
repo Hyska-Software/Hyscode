@@ -177,6 +177,21 @@ export class HarnessBridge {
         const unlisten = await tauriListen(event, (e) => handler(e.payload));
         return unlisten;
       },
+      savePlanFile: async (sessionId, spec, tasks) => {
+        const planDir = `${workspacePath}/.hyscode/plans`;
+        const planPath = `${planDir}/PLAN-${sessionId}.md`;
+        const taskList = tasks
+          .map((t, i) => `${i + 1}. **${t.title}**\n   - Files: ${t.files.join(', ') || 'N/A'}\n   - Description: ${t.description}`)
+          .join('\n\n');
+        const content = `# Implementation Plan\n\n## Specification\n\n${spec}\n\n## Tasks\n\n${taskList}\n`;
+        try {
+          await tauriInvokeRaw('create_directory', { path: planDir });
+        } catch {
+          // directory may already exist
+        }
+        await tauriInvokeRaw('write_file', { path: planPath, content });
+        this.debug(`SDD plan saved to ${planPath}`);
+      },
       config: {
         providerId: settings.activeProviderId ?? '',
         modelId: settings.activeModelId ?? '',
@@ -310,6 +325,9 @@ export class HarnessBridge {
     });
     // mode IS the agent type — single source of truth
     this.harness.setAgentType(store.mode as AgentType);
+
+    // Sync delegation chain so the agent is aware of mode switches
+    this.harness.setDelegationChain(store.delegationChain);
 
     const dbg = (msg: string) => {
       const line = `[${new Date().toLocaleTimeString()}] ${msg}`;
@@ -502,6 +520,36 @@ export class HarnessBridge {
   }
 
   /**
+   * Delegate a failed SDD task to the Debug agent.
+   * Switches mode to debug and sends the error context as a message.
+   */
+  async debugFailedSddTask(): Promise<void> {
+    const failedTask = this.harness.getSddFailedTask();
+    if (!failedTask) {
+      this.debug('No failed SDD task to debug');
+      return;
+    }
+
+    const store = useAgentStore.getState();
+    store.setMode('debug');
+    this.setAgentType('debug');
+
+    const prompt = `A task in an SDD implementation plan has failed. Please investigate and fix the root cause.
+
+## Failed Task
+- Title: ${failedTask.title}
+- Description: ${failedTask.description}
+- Affected Files: ${failedTask.files.join(', ') || 'Not specified'}
+
+## Error Output
+${failedTask.agentOutput || 'No output captured'}
+
+Investigate the error, fix the underlying issue in the affected files, and verify the fix works. Once fixed, the user will resume the SDD plan execution.`;
+
+    await this.sendMessage(prompt);
+  }
+
+  /**
    * Start a new SDD session explicitly.
    * Generates the spec and surfaces it to the store for user review.
    */
@@ -575,6 +623,43 @@ export class HarnessBridge {
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       this.debug(`SDD reject spec error: ${msg}`);
+    } finally {
+      store.setStreaming(false);
+    }
+  }
+
+  /**
+   * Promote the current build-mode conversation into a structured SDD session.
+   */
+  async promoteToSdd(): Promise<void> {
+    const store = useAgentStore.getState();
+    const lastUserMessage = [...store.messages].reverse().find((m) => m.role === 'user');
+    const description = lastUserMessage?.content || 'Continue implementation from current conversation';
+
+    this.harness.setConfig({
+      providerId: useSettingsStore.getState().activeProviderId ?? '',
+      modelId: useSettingsStore.getState().activeModelId ?? '',
+    });
+    this.harness.setAgentType('build');
+    this.harness.setMode('sdd');
+
+    if (!store.conversationId) {
+      const id = crypto.randomUUID();
+      store.setConversationId(id);
+      this.harness.setConversationId(id);
+    }
+
+    store.setStreaming(true);
+    store.setSddPhase('describing');
+
+    try {
+      const { sessionId, spec } = await this.harness.promoteToSdd(description);
+      store.setSddSpec(spec);
+      this.debug(`Conversation promoted to SDD session ${sessionId}`);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      this.debug(`Promote to SDD error: ${msg}`);
+      store.setSddPhase(null);
     } finally {
       store.setStreaming(false);
     }
@@ -1067,6 +1152,9 @@ export class HarnessBridge {
           status: event.task.status,
           agentOutput: event.task.agentOutput,
         } as Partial<SddTask>);
+        if (event.task.status === 'failed') {
+          store.setSddFailedTask(event.task);
+        }
         break;
       }
 

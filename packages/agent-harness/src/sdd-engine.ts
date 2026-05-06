@@ -176,13 +176,16 @@ export interface SddEngineConfig {
   db: SddDatabase;
   eventHandler?: HarnessEventHandler;
   /** Called to run an agent turn (returns the text response) */
-  runAgentTurn: (systemPromptAddon: string, userMessage: string) => Promise<string>;
+  runAgentTurn: (systemPromptAddon: string, userMessage: string, agentTypeOverride?: import('./types').AgentType) => Promise<string>;
+  /** Optional: called when the spec is approved to persist the plan to disk */
+  savePlanFile?: (sessionId: string, spec: string, tasks: import('./types').SddTask[]) => Promise<void>;
 }
 
 export class SddEngine {
   private planManager: PlanManager;
   private config: SddEngineConfig;
   private _paused = false;
+  private _failedTask: SddTask | null = null;
 
   constructor(config: SddEngineConfig) {
     this.config = config;
@@ -191,6 +194,10 @@ export class SddEngine {
 
   get paused(): boolean {
     return this._paused;
+  }
+
+  get failedTask(): SddTask | null {
+    return this._failedTask;
   }
 
   pause(): void {
@@ -309,6 +316,15 @@ Order tasks so dependencies come first.`;
       }
     }
 
+    // Persist plan to disk if callback provided
+    if (this.config.savePlanFile && session.spec) {
+      try {
+        await this.config.savePlanFile(sessionId, session.spec, tasks);
+      } catch {
+        // Non-critical: continue even if file write fails
+      }
+    }
+
     return tasks;
   }
 
@@ -321,6 +337,10 @@ Order tasks so dependencies come first.`;
   async execute(sessionId: string): Promise<void> {
     this.emitPhaseChange('executing');
     this._paused = false;
+    this._failedTask = null;
+
+    const session = await this.planManager.getSession(sessionId);
+    if (!session) throw new Error(`Session ${sessionId} not found`);
 
     while (!this._paused) {
       const task = await this.planManager.getNextTask(sessionId);
@@ -332,8 +352,32 @@ Order tasks so dependencies come first.`;
       this.config.eventHandler?.({ type: 'sdd_task_start', task });
       await this.planManager.updateTaskStatus(task.id, 'in_progress');
 
-      try {
-        const taskPrompt = `Execute the following task from the implementation plan:
+      // Build rich context: spec + completed tasks + current task
+      const completedTasks = session.tasks.filter((t) => t.status === 'completed' || t.status === 'skipped');
+      const completedSummary = completedTasks
+        .map((t) => `- [${t.status}] ${t.title}: ${t.agentOutput ? t.agentOutput.slice(0, 200) : 'No output yet'}`)
+        .join('\n');
+
+      const systemAddon = `You are executing a task from an implementation plan.
+
+## Feature Specification
+${session.spec ?? 'No spec available'}
+
+## Completed Tasks So Far
+${completedSummary || 'None yet — this is the first task.'}
+
+## Current Task
+- Title: ${task.title}
+- Description: ${task.description}
+- Affected Files: ${task.files.join(', ') || 'Not specified'}
+
+Guidelines:
+- Stay focused on this task only.
+- Read files before modifying them.
+- When done, provide a brief summary of what you did.
+- If you encounter an unexpected issue that blocks this task, explain the blocker clearly.`;
+
+      const taskPrompt = `Execute the following task:
 
 ## Task: ${task.title}
 ${task.description}
@@ -344,29 +388,38 @@ ${task.files.join('\n') || 'Not specified'}
 Complete this task by using the available tools. Read files before modifying them.
 When done, provide a brief summary of what you did.`;
 
-        const output = await this.config.runAgentTurn(
-          'You are executing a specific task from an implementation plan. Stay focused on this task only.',
-          taskPrompt,
-        );
+      try {
+        const output = await this.config.runAgentTurn(systemAddon, taskPrompt);
 
         await this.planManager.updateTaskStatus(task.id, 'completed', output);
 
         const updatedTask = { ...task, status: 'completed' as SddTaskStatus, agentOutput: output };
         this.config.eventHandler?.({ type: 'sdd_task_complete', task: updatedTask });
+
+        // Refresh session.tasks so completedSummary is accurate for next iteration
+        const refreshed = await this.planManager.getSession(sessionId);
+        if (refreshed) session.tasks = refreshed.tasks;
       } catch (err) {
-        await this.planManager.updateTaskStatus(
-          task.id,
-          'failed',
-          err instanceof Error ? err.message : String(err),
-        );
+        const errorMsg = err instanceof Error ? err.message : String(err);
+        await this.planManager.updateTaskStatus(task.id, 'failed', errorMsg);
+
+        // Emit task failure event with full context for potential debug delegation
+        const failedTask: SddTask = { ...task, status: 'failed', agentOutput: errorMsg };
+        this._failedTask = failedTask;
+        this.config.eventHandler?.({ type: 'sdd_task_complete', task: failedTask });
+
+        // Pause execution — user can choose to debug or skip
+        this._paused = true;
         break;
       }
     }
 
-    // Check completion
-    const isComplete = await this.planManager.isComplete(sessionId);
-    if (isComplete) {
-      await this.review(sessionId);
+    // Check completion (only review if not paused due to failure)
+    if (!this._paused) {
+      const isComplete = await this.planManager.isComplete(sessionId);
+      if (isComplete) {
+        await this.review(sessionId);
+      }
     }
   }
 
@@ -409,6 +462,7 @@ Provide a summary of the implementation and any issues found.`;
     const reviewOutput = await this.config.runAgentTurn(
       'You are reviewing a completed implementation. Be thorough but fair.',
       prompt,
+      'review',
     );
 
     await this.planManager.completeSession(sessionId);

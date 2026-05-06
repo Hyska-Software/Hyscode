@@ -52,6 +52,8 @@ export interface HarnessOptions {
   onUserQuestionRequest?: (questions: AgentQuestion[], title?: string) => Promise<AgentQuestionAnswer[]>;
   /** SDD database interface */
   sddDb?: SddDatabase;
+  /** Optional callback to save an approved SDD plan to disk */
+  savePlanFile?: (sessionId: string, spec: string, tasks: import('./types').SddTask[]) => Promise<void>;
   /** Skill loader config */
   skillLoader?: SkillLoader;
   /** Rule loader config */
@@ -86,6 +88,10 @@ export class Harness {
   private activeSkills: Skill[] = [];
   private activeRules: Rule[] = [];
 
+  // ─── Reentrancy Guard ─────────────────────────────────────────────
+  /** When true, `run()` skips SDD mode checks to allow recursive agent turns. */
+  private _inAgentTurn = false;
+
   // ─── Agent Terminal Integration ───────────────────────────────────
   private agentTerminalPtyId: string | undefined;
   private onTerminalCommand: ((command: string, output: string, exitCode: number | null) => void) | undefined;
@@ -95,6 +101,9 @@ export class Harness {
   private postToolHooks: PostToolHook[] = [];
   private loopDetection = new LoopDetectionMiddleware();
   private autoGather = new AutoGatherMiddleware();
+
+  // ─── Session Context ──────────────────────────────────────────────
+  private delegationChain: Array<{ fromMode: string; toMode: string; reason: string }> = [];
 
   // ─── Tracing & Policies ───────────────────────────────────────────
   private traceRecorder = new TraceRecorder();
@@ -154,7 +163,8 @@ export class Harness {
       this.sddEngine = new SddEngine({
         db: options.sddDb,
         eventHandler: this.eventHandler ?? undefined,
-        runAgentTurn: (addon, msg) => this.runSingleTurn(addon, msg),
+        runAgentTurn: (addon, msg, typeOverride) => this.runSingleTurn(addon, msg, typeOverride),
+        savePlanFile: options.savePlanFile,
       });
     }
   }
@@ -213,6 +223,26 @@ export class Harness {
   /** Update the terminal command callback (called by the bridge at init). */
   setOnTerminalCommand(cb: ((command: string, output: string, exitCode: number | null) => void) | undefined): void {
     this.onTerminalCommand = cb;
+  }
+
+  /** Set the delegation chain for the current session */
+  setDelegationChain(chain: Array<{ fromMode: string; toMode: string; reason: string }>): void {
+    this.delegationChain = chain;
+  }
+
+  /** Inject delegation chain as a context source so the agent is aware of mode switches */
+  private injectDelegationChain(): void {
+    if (this.delegationChain.length === 0) return;
+    const lines = this.delegationChain.map(
+      (d, i) => `${i + 1}. ${d.fromMode} → ${d.toMode}${d.reason ? ` (${d.reason})` : ''}`,
+    );
+    this.contextManager.addSource({
+      id: 'delegation-chain',
+      type: 'context_chip',
+      priority: 'medium',
+      content: `<delegation_history>\n${lines.join('\n')}\n</delegation_history>`,
+      tokenEstimate: Math.ceil(lines.join('\n').length / 4),
+    });
   }
 
   getSddEngine(): SddEngine | null {
@@ -357,7 +387,8 @@ export class Harness {
 
     // In SDD mode, start a new session and return the spec for user review.
     // Subsequent phases are driven by explicit approve/reject calls.
-    if (this._mode === 'sdd') {
+    // Skip this check when called recursively from runAgentTurn (SDD task execution).
+    if (this._mode === 'sdd' && !this._inAgentTurn) {
       const { spec } = await this.startSdd(userMessage);
       const turnRecord = this.buildTurnRecord('complete', 1, turnStart);
       turnRecord.trace = this.traceRecorder.finalizeTrace('complete', { input: 0, output: 0 }, []) ?? undefined;
@@ -417,6 +448,9 @@ export class Harness {
         });
         middlewareInjections = [];
       }
+
+      // Inject delegation chain so the agent knows how it arrived here
+      this.injectDelegationChain();
 
       // Build context snapshot (use policy-based limits)
       const tools = this.toolRouter.getToolDefinitionsFiltered(
@@ -842,6 +876,11 @@ export class Harness {
     return this.sddSessionId;
   }
 
+  /** Get the failed task from the current SDD session (if any) */
+  getSddFailedTask(): import('./types').SddTask | null {
+    return this.sddEngine?.failedTask ?? null;
+  }
+
   /**
    * Start a new SDD session: create the session and generate a spec.
    * Returns the spec text. The caller is responsible for presenting it
@@ -904,6 +943,21 @@ export class Harness {
   }
 
   /**
+   * Promote the current build-mode conversation into a structured SDD session.
+   * Uses the provided description to generate a spec, then returns it for approval.
+   * The conversation history is preserved in the harness context manager.
+   */
+  async promoteToSdd(description: string): Promise<{ sessionId: string; spec: string }> {
+    if (!this.sddEngine) {
+      throw new Error('SDD Engine not initialized (no database provided)');
+    }
+    const session = await this.sddEngine.startSession(this.projectId, description);
+    this.sddSessionId = session.id;
+    const spec = await this.sddEngine.generateSpec(session.id);
+    return { sessionId: session.id, spec };
+  }
+
+  /**
    * @deprecated Use startSdd() + approveSddSpec() + approveSddPlan() instead.
    * Kept for backward compatibility but now delegates to the stepped API.
    */
@@ -917,19 +971,41 @@ export class Harness {
   // ─── Internals ──────────────────────────────────────────────────────
 
   /** Run a single agent turn (used by SDD engine) */
-  private async runSingleTurn(systemPromptAddon: string, userMessage: string): Promise<string> {
-    const agentDef = getAgentDefinition(this.agentType);
-    const originalPrompt = agentDef.basePrompt;
+  private async runSingleTurn(
+    systemPromptAddon: string,
+    userMessage: string,
+    agentTypeOverride?: AgentType,
+  ): Promise<string> {
+    const originalType = this.agentType;
+    const originalPrompt = agentTypeOverride
+      ? getAgentDefinition(agentTypeOverride).basePrompt
+      : getAgentDefinition(this.agentType).basePrompt;
+    const originalMode = this._mode;
+
+    // Guard: prevent run() from re-entering SDD mode when called recursively
+    this._inAgentTurn = true;
+    // Force agent mode for the recursive call so the normal loop runs
+    this._mode = 'agent';
+
+    if (agentTypeOverride) {
+      this.agentType = agentTypeOverride;
+      this._effectivePolicy = null; // invalidate cached policy
+    }
 
     // Temporarily modify system prompt
     this.contextManager.setSystemPrompt(originalPrompt + '\n\n' + systemPromptAddon);
 
-    const result = await this.run(userMessage, this.contextManager.getHistory());
-
-    // Restore original prompt
-    this.contextManager.setSystemPrompt(originalPrompt);
-
-    return result.response;
+    try {
+      const result = await this.run(userMessage, this.contextManager.getHistory());
+      return result.response;
+    } finally {
+      // Restore state
+      this._inAgentTurn = false;
+      this._mode = originalMode;
+      this.agentType = originalType;
+      this._effectivePolicy = null;
+      this.contextManager.setSystemPrompt(originalPrompt);
+    }
   }
 
   private emit(event: HarnessEvent): void {

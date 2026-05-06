@@ -148,6 +148,7 @@ interface AgentState {
   sddSpec: string | null;
   sddTasks: SddTask[];
   sddProgress: number; // 0-100
+  sddFailedTask: SddTask | null;
 
   // Token usage
   tokenUsage: TokenUsage | null;
@@ -226,6 +227,7 @@ interface AgentState {
   setSddTasks: (tasks: SddTask[]) => void;
   updateSddTask: (id: string, patch: Partial<SddTask>) => void;
   setSddProgress: (progress: number) => void;
+  setSddFailedTask: (task: SddTask | null) => void;
 
   // Token usage
   setTokenUsage: (usage: TokenUsage | null) => void;
@@ -272,6 +274,7 @@ export const useAgentStore = create<AgentState>()(
     sddSpec: null,
     sddTasks: [],
     sddProgress: 0,
+    sddFailedTask: null,
     tokenUsage: null,
     apiRequestCount: 0,
     lastApiRequestAt: null,
@@ -439,6 +442,7 @@ export const useAgentStore = create<AgentState>()(
         state.sddSpec = null;
         state.sddTasks = [];
         state.sddProgress = 0;
+        state.sddFailedTask = null;
         state.tokenUsage = null;
         state.apiRequestCount = 0;
         state.lastApiRequestAt = null;
@@ -584,6 +588,11 @@ export const useAgentStore = create<AgentState>()(
     setSddProgress: (progress) =>
       set((state) => {
         state.sddProgress = progress;
+      }),
+
+    setSddFailedTask: (task) =>
+      set((state) => {
+        state.sddFailedTask = task;
       }),
 
     // ─── Token Usage ─────────────────────────────────────────────────
