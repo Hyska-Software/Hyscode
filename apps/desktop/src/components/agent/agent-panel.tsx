@@ -1,4 +1,4 @@
-import { Trash2, History, Bot, BookText, Terminal, MessageSquare } from 'lucide-react';
+import { Trash2, History, Bot, BookText, Terminal, MessageSquare, Zap } from 'lucide-react';
 import { useState, useRef, useEffect } from 'react';
 import { AgentMessages } from './agent-messages';
 import { AgentInput } from './agent-input';
@@ -183,6 +183,38 @@ function StatRow({ label, value, accent }: { label: string; value: string; accen
   );
 }
 
+// ─── Credit Usage Indicator ───────────────────────────────────────────────────
+// Shows the number of API requests made in the current turn.
+// Particularly useful for per-request-cost providers (e.g. GitHub Copilot).
+
+function CreditUsageIndicator() {
+  const apiRequestCount = useAgentStore((s) => s.apiRequestCount);
+  const isStreaming = useAgentStore((s) => s.isStreaming);
+
+  if (apiRequestCount === 0) return null;
+
+  return (
+    <div className="flex items-center">
+      <div
+        className={cn(
+          'flex items-center gap-1 rounded-full border px-1.5 py-0.5 text-[10px] tabular-nums transition-colors',
+          isStreaming
+            ? 'border-accent/20 bg-accent/[0.06] text-accent/80'
+            : 'border-border/30 bg-surface-raised/40 text-muted-foreground/60',
+        )}
+      >
+        <Zap className="h-3 w-3" />
+        <span>
+          {apiRequestCount} {apiRequestCount === 1 ? 'request' : 'requests'}
+        </span>
+        {isStreaming && (
+          <span className="h-1.5 w-1.5 rounded-full bg-accent/70 animate-pulse" />
+        )}
+      </div>
+    </div>
+  );
+}
+
 export function AgentPanel({ hideChangedFiles }: { hideChangedFiles?: boolean } = {}) {
   const sddPhase = useAgentStore((s) => s.sddPhase);
   const sddSpec = useAgentStore((s) => s.sddSpec);
@@ -258,6 +290,7 @@ export function AgentPanel({ hideChangedFiles }: { hideChangedFiles?: boolean } 
               {agentCenterPanelMode === 'terminal' ? 'Show Chat' : 'Show Terminal'}
             </TooltipContent>
           </Tooltip>
+          <CreditUsageIndicator />
           <ContextPieButton usage={tokenUsage} messageCount={messageCount} />
           <Tooltip>
             <TooltipTrigger

@@ -37,7 +37,7 @@ interface OpenAITool {
   function: { name: string; description: string; parameters: Record<string, unknown> };
 }
 
-function toOpenAIMessages(messages: Message[], systemPrompt?: string, alwaysReasoningContent = false): OpenAIMessage[] {
+export function toOpenAIMessages(messages: Message[], systemPrompt?: string, alwaysReasoningContent = false): OpenAIMessage[] {
   const result: OpenAIMessage[] = [];
 
   if (systemPrompt) {
@@ -116,7 +116,7 @@ function toOpenAIMessages(messages: Message[], systemPrompt?: string, alwaysReas
   return result;
 }
 
-function toOpenAITools(tools: ToolDefinition[]): OpenAITool[] {
+export function toOpenAITools(tools: ToolDefinition[]): OpenAITool[] {
   return tools.map((t) => ({
     type: 'function' as const,
     function: { name: t.name, description: t.description, parameters: t.inputSchema },
@@ -181,6 +181,12 @@ function parseOpenAIChunk(data: string): StreamChunk[] {
 
   if (delta?.reasoning_content) {
     return [{ type: 'thinking_delta', text: delta.reasoning_content }];
+  }
+
+  // Some proxies (e.g., Xiaomi/MiMo via OpenRouter) return reasoning in delta.reasoning
+  // instead of the OpenAI-standard delta.reasoning_content.
+  if (delta?.reasoning) {
+    return [{ type: 'thinking_delta', text: delta.reasoning }];
   }
 
   if (delta?.content) {
@@ -293,7 +299,9 @@ export class OpenAIProvider implements AIProvider {
         // Kimi/MiMo uses thinking: { type: 'enabled' | 'disabled' }
         body.thinking = { type: params.thinking.level === 'disabled' ? 'disabled' : 'enabled' };
       } else if (params.thinking.level && params.thinking.level !== 'disabled') {
-        body.reasoning_effort = params.thinking.level;
+        // Map generic 'enabled' to a default effort level for APIs that require specific values
+        const effort = params.thinking.level === 'enabled' ? 'medium' : params.thinking.level;
+        body.reasoning_effort = effort;
       }
     }
 

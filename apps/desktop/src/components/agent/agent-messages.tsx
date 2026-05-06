@@ -1,4 +1,4 @@
-import { Sparkles, ChevronDown, ChevronRight, Brain, AlertCircle, Zap } from 'lucide-react';
+import { Sparkles, ChevronDown, ChevronRight, Brain, AlertCircle } from 'lucide-react';
 import { useRef, useEffect, useState, memo } from 'react';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { useAgentStore } from '@/stores/agent-store';
@@ -203,38 +203,6 @@ const MessageItem = memo(function MessageItem({
   );
 });
 
-// ─── Credit Usage Indicator ───────────────────────────────────────────────────
-// Shows the number of API requests made in the current turn.
-// Particularly useful for per-request-cost providers (e.g. GitHub Copilot).
-
-function CreditUsageIndicator() {
-  const apiRequestCount = useAgentStore((s) => s.apiRequestCount);
-  const isStreaming = useAgentStore((s) => s.isStreaming);
-
-  if (apiRequestCount === 0) return null;
-
-  return (
-    <div className="agent-fade-in flex items-center justify-center py-2">
-      <div
-        className={cn(
-          'flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[10px] tabular-nums transition-colors',
-          isStreaming
-            ? 'border-accent/20 bg-accent/[0.06] text-accent/80'
-            : 'border-border/30 bg-surface-raised/40 text-muted-foreground/60',
-        )}
-      >
-        <Zap className="h-3 w-3" />
-        <span>
-          {apiRequestCount} {apiRequestCount === 1 ? 'request' : 'requests'}
-        </span>
-        {isStreaming && (
-          <span className="h-1.5 w-1.5 rounded-full bg-accent/70 animate-pulse" />
-        )}
-      </div>
-    </div>
-  );
-}
-
 // ─── Agent Messages ───────────────────────────────────────────────────────────
 
 export function AgentMessages() {
@@ -307,9 +275,6 @@ export function AgentMessages() {
 
           {/* Pending mode switch delegation */}
           <ModeSwitchDialog />
-
-          {/* API credit usage indicator */}
-          <CreditUsageIndicator />
 
           {/* Scroll anchor */}
           <div ref={bottomRef} />

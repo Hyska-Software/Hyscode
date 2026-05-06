@@ -345,6 +345,20 @@ const MODEL_PROFILES: ModelProfile[] = [
     supportsThinking: true,
   },
   {
+    pattern: 'deepseek-v4-pro|deepseek-v4-flash',
+    maxContext: 128_000,
+    recommendedMaxOutput: 8_192,
+    supportsToolCalling: true,
+    supportsThinking: true,
+  },
+  {
+    pattern: 'mimo-v2-pro|mimo-v2-omni|mimo-v2\\.5-pro|mimo-v2\\.5',
+    maxContext: 128_000,
+    recommendedMaxOutput: 8_192,
+    supportsToolCalling: true,
+    supportsThinking: true,
+  },
+  {
     pattern: 'deepseek-coder|deepseek-chat',
     maxContext: 64_000,
     recommendedMaxOutput: 8_000,

@@ -310,6 +310,7 @@ export class AnthropicProvider implements AIProvider {
       headers: {
         'Content-Type': 'application/json',
         'x-api-key': this.apiKey,
+        'Authorization': `Bearer ${this.apiKey}`,
         'anthropic-version': '2023-06-01',
         'anthropic-beta': 'prompt-caching-2024-07-31',
       },

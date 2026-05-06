@@ -137,6 +137,26 @@ const GO_MODELS: AIModel[] = [
     supportsStreaming: true,
     supportsVision: false,
   },
+  {
+    id: 'deepseek-v4-pro',
+    name: 'DeepSeek V4 Pro (Go)',
+    provider: 'opencode-go',
+    contextWindow: 128_000,
+    maxOutputTokens: 8_192,
+    supportsTools: true,
+    supportsStreaming: true,
+    supportsVision: false,
+  },
+  {
+    id: 'deepseek-v4-flash',
+    name: 'DeepSeek V4 Flash (Go)',
+    provider: 'opencode-go',
+    contextWindow: 128_000,
+    maxOutputTokens: 8_192,
+    supportsTools: true,
+    supportsStreaming: true,
+    supportsVision: false,
+  },
 ];
 
 // ─── Provider Implementation ────────────────────────────────────────────────
