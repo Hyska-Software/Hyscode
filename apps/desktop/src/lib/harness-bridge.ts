@@ -1315,9 +1315,12 @@ Investigate the error, fix the underlying issue in the affected files, and verif
         } else {
           this.debug(`Turno encerrado: ${event.reason}`);
         }
-        // Finalize any remaining iteration blocks before ending the turn
-        this.finalizeIterationBlocks();
+        // Flush streaming text FIRST so it commits to the last assistant message
+        // before finalizeIterationBlocks() inserts a user tool_result message.
+        // If flushed after, the last message would be 'user' and flushStreamingText
+        // would create a duplicate assistant message with the same content.
         useAgentStore.getState().flushStreamingText();
+        this.finalizeIterationBlocks();
         break;
       }
 
