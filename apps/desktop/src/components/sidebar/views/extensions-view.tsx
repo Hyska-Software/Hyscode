@@ -23,9 +23,52 @@ import {
   Store,
   Download,
   HardDrive,
+  BookOpen,
 } from 'lucide-react';
 import { useExtensionStore, type ExtensionFilter, type InstalledExtension, type StoreItem } from '../../../stores/extension-store';
+import { useEditorStore } from '../../../stores/editor-store';
+import { tauriFs } from '../../../lib/tauri-fs';
 import { TabBadge } from '../../ui/tab-badge';
+
+// ── README helpers ────────────────────────────────────────────────────────────
+
+const STORE_README_BASE = 'https://raw.githubusercontent.com/hyskasoftware/Hyscode-Extensions/main/';
+
+async function fetchStoreReadme(name: string): Promise<string> {
+  try {
+    const res = await fetch(`${STORE_README_BASE}${name}/README.md`);
+    if (!res.ok) return '';
+    return await res.text();
+  } catch {
+    return '';
+  }
+}
+
+async function readLocalReadme(extPath: string): Promise<string> {
+  const sep = extPath.includes('/') ? '/' : '\\';
+  const readmePath = `${extPath}${sep}README.md`;
+  try {
+    return await tauriFs.readFile(readmePath);
+  } catch {
+    return '';
+  }
+}
+
+function computeContributions(ext: InstalledExtension): { label: string; count: number }[] {
+  const c = ext.manifest?.contributes;
+  if (!c) return [];
+  const result: { label: string; count: number }[] = [];
+  if (c.themes?.length) result.push({ label: 'Themes', count: c.themes.length });
+  if (c.languages?.length) result.push({ label: 'Languages', count: c.languages.length });
+  if (c.languageServers?.length) result.push({ label: 'Language Servers', count: c.languageServers.length });
+  if (c.commands?.length) result.push({ label: 'Commands', count: c.commands.length });
+  if (c.keybindings?.length) result.push({ label: 'Keybindings', count: c.keybindings.length });
+  if (c.views?.length) result.push({ label: 'Views', count: c.views.length });
+  if (c.statusBarItems?.length) result.push({ label: 'Status Bar Items', count: c.statusBarItems.length });
+  if (c.snippets?.length) result.push({ label: 'Snippets', count: c.snippets.length });
+  if (c.configuration) result.push({ label: 'Settings', count: Object.keys(c.configuration.properties || {}).length });
+  return result;
+}
 
 // ── Filter Tabs ──────────────────────────────────────────────────────────────
 
@@ -51,8 +94,10 @@ function ExtensionDetail({
   const gitSources = useExtensionStore((s) => s.gitSources);
   const gitUpdates = useExtensionStore((s) => s.gitUpdates);
   const updateFromGit = useExtensionStore((s) => s.updateFromGit);
+  const openExtensionReadmeTab = useEditorStore((s) => s.openExtensionReadmeTab);
   const [confirmUninstall, setConfirmUninstall] = useState(false);
   const [updatingGit, setUpdatingGit] = useState(false);
+  const [loadingReadme, setLoadingReadme] = useState(false);
 
   const gitSource = gitSources[ext.name];
   const gitUpdate = gitUpdates[ext.name];
@@ -65,6 +110,30 @@ function ExtensionDetail({
       setUpdatingGit(false);
     }
   }, [ext.name, updateFromGit]);
+
+  const handleViewReadme = useCallback(async () => {
+    setLoadingReadme(true);
+    try {
+      const content = await readLocalReadme(ext.path);
+      openExtensionReadmeTab({
+        extensionName: ext.name,
+        displayName: ext.displayName || ext.name,
+        readmeContent: content,
+        iconUrl: ext.icon,
+        version: ext.version,
+        publisher: ext.publisher,
+        description: ext.description,
+        enabled: ext.enabled,
+        categories: ext.categories,
+        activationEvents: ext.activationEvents,
+        installedAt: ext.installedAt,
+        hasMain: ext.hasMain,
+        contributions: computeContributions(ext),
+      });
+    } finally {
+      setLoadingReadme(false);
+    }
+  }, [ext, openExtensionReadmeTab]);
 
   const contributes = ext.manifest?.contributes;
   const contributionSummary: { label: string; count: number }[] = [];
@@ -144,6 +213,18 @@ function ExtensionDetail({
                 <PowerOff className="h-3 w-3" />
                 Disabled
               </>
+            )}
+          </button>
+          <button
+            onClick={handleViewReadme}
+            disabled={loadingReadme}
+            className="flex items-center justify-center gap-1 rounded-md bg-muted px-3 py-1.5 text-[10px] text-muted-foreground hover:text-foreground hover:bg-muted/80 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            title="View README"
+          >
+            {loadingReadme ? (
+              <Loader2 className="h-3 w-3 animate-spin" />
+            ) : (
+              <BookOpen className="h-3 w-3" />
             )}
           </button>
           {!confirmUninstall ? (
@@ -323,15 +404,41 @@ function ExtensionRow({
   onSelect: () => void;
 }) {
   const toggleExtension = useExtensionStore((s) => s.toggleExtension);
+  const openExtensionReadmeTab = useEditorStore((s) => s.openExtensionReadmeTab);
   const gitUpdates = useExtensionStore((s) => s.gitUpdates);
   const hasGitUpdate = gitUpdates[ext.name]?.hasUpdate ?? false;
   const hasStoreUpdate = storeUpdateNames.has(ext.name);
   const hasUpdate = hasGitUpdate || hasStoreUpdate;
+  const [loadingReadme, setLoadingReadme] = useState(false);
+
+  const handleClick = useCallback(async () => {
+    setLoadingReadme(true);
+    try {
+      const content = await readLocalReadme(ext.path);
+      openExtensionReadmeTab({
+        extensionName: ext.name,
+        displayName: ext.displayName || ext.name,
+        readmeContent: content,
+        iconUrl: ext.icon,
+        version: ext.version,
+        publisher: ext.publisher,
+        description: ext.description,
+        enabled: ext.enabled,
+        categories: ext.categories,
+        activationEvents: ext.activationEvents,
+        installedAt: ext.installedAt,
+        hasMain: ext.hasMain,
+        contributions: computeContributions(ext),
+      });
+    } finally {
+      setLoadingReadme(false);
+    }
+  }, [ext, openExtensionReadmeTab]);
 
   return (
     <div
       className="flex items-center gap-2 px-2 py-1.5 hover:bg-muted/50 transition-colors cursor-pointer group"
-      onClick={onSelect}
+      onClick={handleClick}
     >
       <div className="relative shrink-0">
         {ext.icon ? (
@@ -342,7 +449,11 @@ function ExtensionRow({
           />
         ) : (
           <div className="flex h-7 w-7 items-center justify-center rounded-md bg-muted">
-            <Package className="h-3.5 w-3.5 text-muted-foreground" />
+            {loadingReadme ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
+            ) : (
+              <Package className="h-3.5 w-3.5 text-muted-foreground" />
+            )}
           </div>
         )}
         {hasUpdate && (
@@ -380,24 +491,36 @@ function ExtensionRow({
           )}
         </div>
       </div>
-      <button
-        onClick={(e) => {
-          e.stopPropagation();
-          toggleExtension(ext.name);
-        }}
-        className={`shrink-0 rounded-full p-1 transition-colors ${
-          ext.enabled
-            ? 'text-accent hover:bg-accent/10'
-            : 'text-muted-foreground/40 hover:bg-muted'
-        }`}
-        title={ext.enabled ? 'Disable' : 'Enable'}
-      >
-        {ext.enabled ? (
-          <Power className="h-3 w-3" />
-        ) : (
-          <PowerOff className="h-3 w-3" />
-        )}
-      </button>
+      <div className="flex items-center gap-0.5 shrink-0">
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            onSelect();
+          }}
+          className="rounded p-1 text-muted-foreground/40 opacity-0 group-hover:opacity-100 hover:text-foreground hover:bg-muted transition-all"
+          title="Extension details"
+        >
+          <Blocks className="h-3 w-3" />
+        </button>
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            toggleExtension(ext.name);
+          }}
+          className={`shrink-0 rounded-full p-1 transition-colors ${
+            ext.enabled
+              ? 'text-accent hover:bg-accent/10'
+              : 'text-muted-foreground/40 hover:bg-muted'
+          }`}
+          title={ext.enabled ? 'Disable' : 'Enable'}
+        >
+          {ext.enabled ? (
+            <Power className="h-3 w-3" />
+          ) : (
+            <PowerOff className="h-3 w-3" />
+          )}
+        </button>
+      </div>
     </div>
   );
 }
@@ -428,10 +551,34 @@ function StoreRow({
   onInstall: () => void;
   onUpdate: () => void;
 }) {
+  const openExtensionReadmeTab = useEditorStore((s) => s.openExtensionReadmeTab);
+  const [loadingReadme, setLoadingReadme] = useState(false);
+
+  const handleClick = useCallback(async () => {
+    setLoadingReadme(true);
+    try {
+      const content = await fetchStoreReadme(item.name);
+      openExtensionReadmeTab({
+        extensionName: item.name,
+        displayName: item.displayName,
+        readmeContent: content,
+      });
+    } finally {
+      setLoadingReadme(false);
+    }
+  }, [item, openExtensionReadmeTab]);
+
   return (
-    <div className="flex items-center gap-2 px-2 py-1.5 hover:bg-muted/50 transition-colors group">
+    <div
+      className="flex items-center gap-2 px-2 py-1.5 hover:bg-muted/50 transition-colors cursor-pointer group"
+      onClick={handleClick}
+    >
       <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-muted">
-        <Package className="h-3.5 w-3.5 text-muted-foreground" />
+        {loadingReadme ? (
+          <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
+        ) : (
+          <Package className="h-3.5 w-3.5 text-muted-foreground" />
+        )}
       </div>
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-1.5">
@@ -457,7 +604,7 @@ function StoreRow({
       </div>
       {hasUpdate ? (
         <button
-          onClick={onUpdate}
+          onClick={(e) => { e.stopPropagation(); onUpdate(); }}
           disabled={isUpdating}
           className={`shrink-0 flex items-center gap-1 rounded-md px-2 py-0.5 text-[9px] font-medium transition-colors ${
             isUpdating
@@ -474,7 +621,7 @@ function StoreRow({
         </button>
       ) : (
         <button
-          onClick={onInstall}
+          onClick={(e) => { e.stopPropagation(); onInstall(); }}
           disabled={isInstalled || isInstalling}
           className={`shrink-0 flex items-center gap-1 rounded-md px-2 py-0.5 text-[9px] font-medium transition-colors ${
             isInstalled

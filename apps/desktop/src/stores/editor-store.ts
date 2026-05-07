@@ -10,7 +10,7 @@ export interface Tab {
   isDirty: boolean;
   isPinned: boolean;
   isPreview: boolean;
-  type: 'file' | 'diff' | 'terminal' | 'commit' | 'history' | 'release-notes';
+  type: 'file' | 'diff' | 'terminal' | 'commit' | 'history' | 'release-notes' | 'extension-readme';
   viewerType: ViewerType;
   markdownMode?: 'preview' | 'code';
   diffProps?: {
@@ -37,6 +37,22 @@ export interface Tab {
     version: string;
     body: string;
   };
+  /** Extension README details when type === 'extension-readme' */
+  extensionReadmeProps?: {
+    extensionName: string;
+    displayName: string;
+    readmeContent: string;
+    iconUrl?: string | null;
+    version?: string;
+    publisher?: string;
+    description?: string;
+    enabled?: boolean;
+    categories?: string[];
+    activationEvents?: string[];
+    installedAt?: string;
+    hasMain?: boolean;
+    contributions?: { label: string; count: number }[];
+  };
 }
 
 let untitledCounter = 0;
@@ -50,6 +66,7 @@ interface EditorState {
   openCommitTab: (hash: string, shortHash: string, message: string) => void;
   openHistoryTab: (snapshotId: string, originalPath: string, timestamp: string, content: string) => void;
   openReleaseNotesTab: (version: string, body: string) => void;
+  openExtensionReadmeTab: (props: { extensionName: string; displayName: string; readmeContent: string; iconUrl?: string | null; version?: string; publisher?: string; description?: string; enabled?: boolean; categories?: string[]; activationEvents?: string[]; installedAt?: string; hasMain?: boolean; contributions?: { label: string; count: number }[] }) => void;
   closeTab: (id: string) => void;
   closeOtherTabs: (id: string) => void;
   closeTabsToTheRight: (id: string) => void;
@@ -211,6 +228,34 @@ export const useEditorStore = create<EditorState>()(
           viewerType: 'code',
           markdownMode: 'preview',
           releaseNotesProps: { version, body },
+        };
+        state.tabs.push(newTab);
+        state.activeTabId = id;
+      }),
+
+    openExtensionReadmeTab: (props) =>
+      set((state) => {
+        const id = `extension-readme:${props.extensionName}`;
+        const existing = state.tabs.find((t) => t.id === id);
+        if (existing) {
+          // Update content in case it was refreshed
+          if (existing.extensionReadmeProps) {
+            existing.extensionReadmeProps.readmeContent = props.readmeContent;
+          }
+          state.activeTabId = existing.id;
+          return;
+        }
+        const newTab: Tab = {
+          id,
+          filePath: id,
+          fileName: props.displayName,
+          language: 'markdown',
+          isDirty: false,
+          isPinned: false,
+          isPreview: false,
+          type: 'extension-readme',
+          viewerType: 'code',
+          extensionReadmeProps: props,
         };
         state.tabs.push(newTab);
         state.activeTabId = id;

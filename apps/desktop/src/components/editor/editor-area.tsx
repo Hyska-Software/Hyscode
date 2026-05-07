@@ -17,6 +17,7 @@ import {
   DocxViewer,
   PptxViewer,
 } from './viewers';
+import { ExtensionReadmeViewer } from './extension-readme-viewer';
 import { useEditorStore, useFileStore, useSettingsStore } from '../../stores';
 import { useAgentStore } from '../../stores/agent-store';
 import { useExtensionStore } from '../../stores/extension-store';
@@ -471,6 +472,8 @@ export function EditorArea() {
               language="markdown"
               filePath={activeTab.id}
             />
+          ) : activeTab.type === 'extension-readme' && activeTab.extensionReadmeProps ? (
+            <ExtensionReadmeViewer {...activeTab.extensionReadmeProps} />
           ) : activeTab.type === 'history' && activeTab.historyProps ? (
             loading ? (
               <EditorLoading />

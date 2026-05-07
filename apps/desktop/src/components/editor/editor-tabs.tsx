@@ -1,4 +1,4 @@
-import { X, Circle, GitCompare, GitCommit, Wand2, Loader2, Pin, Terminal, Plus, FilePlus, FolderOpen, Search, Code2 } from 'lucide-react';
+import { X, Circle, GitCompare, GitCommit, Wand2, Loader2, Pin, Terminal, Plus, FilePlus, FolderOpen, Search, Code2, Blocks } from 'lucide-react';
 import { useState, useCallback, useRef } from 'react';
 import { useEditorStore } from '../../stores';
 import { useAgentStore } from '../../stores/agent-store';
@@ -154,6 +154,7 @@ export function EditorTabs() {
         const isDiff = tab.type === 'diff';
         const isTerminal = tab.type === 'terminal';
         const isCommit = tab.type === 'commit';
+        const isExtReadme = tab.type === 'extension-readme';
         const editPhase = tab.filePath ? editPhaseMap[tab.filePath] : undefined;
         const isStreaming = editPhase === 'streaming';
         const isPendingReview = editPhase === 'pending_review';
@@ -187,6 +188,8 @@ export function EditorTabs() {
               <Terminal className="h-3 w-3 shrink-0 text-green-400" />
             ) : isCommit ? (
               <GitCommit className="h-3 w-3 shrink-0 text-accent" />
+            ) : isExtReadme ? (
+              <Blocks className="h-3 w-3 shrink-0 text-accent" />
             ) : isStreaming ? (
               <Loader2 className="h-3 w-3 shrink-0 text-purple-400 animate-spin" />
             ) : isPendingReview ? (
