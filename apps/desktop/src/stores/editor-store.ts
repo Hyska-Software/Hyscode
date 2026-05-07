@@ -10,7 +10,7 @@ export interface Tab {
   isDirty: boolean;
   isPinned: boolean;
   isPreview: boolean;
-  type: 'file' | 'diff' | 'terminal' | 'commit' | 'history';
+  type: 'file' | 'diff' | 'terminal' | 'commit' | 'history' | 'release-notes';
   viewerType: ViewerType;
   markdownMode?: 'preview' | 'code';
   diffProps?: {
@@ -32,6 +32,11 @@ export interface Tab {
     timestamp: string;
     content: string;
   };
+  /** Release notes details when type === 'release-notes' */
+  releaseNotesProps?: {
+    version: string;
+    body: string;
+  };
 }
 
 let untitledCounter = 0;
@@ -44,6 +49,7 @@ interface EditorState {
   openTerminalTab: (sessionId: string, name: string) => void;
   openCommitTab: (hash: string, shortHash: string, message: string) => void;
   openHistoryTab: (snapshotId: string, originalPath: string, timestamp: string, content: string) => void;
+  openReleaseNotesTab: (version: string, body: string) => void;
   closeTab: (id: string) => void;
   closeOtherTabs: (id: string) => void;
   closeTabsToTheRight: (id: string) => void;
@@ -180,6 +186,31 @@ export const useEditorStore = create<EditorState>()(
           type: 'history',
           viewerType: 'code',
           historyProps: { snapshotId, originalPath, timestamp, content },
+        };
+        state.tabs.push(newTab);
+        state.activeTabId = id;
+      }),
+
+    openReleaseNotesTab: (version: string, body: string) =>
+      set((state) => {
+        const id = `release-notes:${version}`;
+        const existing = state.tabs.find((t) => t.id === id);
+        if (existing) {
+          state.activeTabId = existing.id;
+          return;
+        }
+        const newTab: Tab = {
+          id,
+          filePath: id,
+          fileName: `Release ${version}`,
+          language: 'markdown',
+          isDirty: false,
+          isPinned: false,
+          isPreview: false,
+          type: 'release-notes',
+          viewerType: 'code',
+          markdownMode: 'preview',
+          releaseNotesProps: { version, body },
         };
         state.tabs.push(newTab);
         state.activeTabId = id;

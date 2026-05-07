@@ -2,6 +2,7 @@ use rusqlite::{params, Connection};
 use serde::Serialize;
 use std::sync::Mutex;
 use tauri::State;
+use git2;
 
 // ─── Managed state ──────────────────────────────────────────────────────────
 
@@ -626,6 +627,14 @@ pub fn file_history_save(
     file_path: String,
     content: String,
 ) -> Result<String, String> {
+    // Skip files ignored by git (respects .gitignore, global ignores, etc.)
+    let path = std::path::Path::new(&file_path);
+    if let Ok(repo) = git2::Repository::discover(path) {
+        if repo.is_path_ignored(path).unwrap_or(false) {
+            return Ok(String::new());
+        }
+    }
+
     let conn = state.0.lock().map_err(|e| e.to_string())?;
     let id = uuid::Uuid::new_v4().to_string();
     conn.execute(

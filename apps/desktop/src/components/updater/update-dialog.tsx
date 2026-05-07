@@ -10,8 +10,10 @@ import {
   CheckCircle,
   GitCommit,
   ExternalLink,
+  FileText,
 } from 'lucide-react';
 import { useUpdateStore } from '../../stores/update-store';
+import { useEditorStore } from '../../stores/editor-store';
 
 function formatBytes(bytes: number): string {
   if (bytes === 0) return '0 B';
@@ -31,6 +33,7 @@ export function UpdateDialog() {
   const startDownload = useUpdateStore((s) => s.startDownload);
   const installUpdate = useUpdateStore((s) => s.installUpdate);
   const checkForUpdates = useUpdateStore((s) => s.checkForUpdates);
+  const openReleaseNotesTab = useEditorStore((s) => s.openReleaseNotesTab);
   const overlayRef = useRef<HTMLDivElement>(null);
 
   // Close on Escape
@@ -91,9 +94,22 @@ export function UpdateDialog() {
         {/* Release notes */}
         {releaseInfo.body && (
           <div className="flex-1 overflow-y-auto border-b border-border px-4 py-3">
-            <h4 className="mb-2 text-[10px] font-medium uppercase tracking-widest text-muted-foreground">
-              Release Notes
-            </h4>
+            <div className="mb-2 flex items-center justify-between">
+              <h4 className="text-[10px] font-medium uppercase tracking-widest text-muted-foreground">
+                Release Notes
+              </h4>
+              <button
+                onClick={() => {
+                  openReleaseNotesTab(releaseInfo.version, releaseInfo.body);
+                  closeDialog();
+                }}
+                className="flex items-center gap-1 rounded-md px-2 py-1 text-[10px] font-medium text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                title="Open in editor"
+              >
+                <FileText className="h-3 w-3" />
+                Open in Editor
+              </button>
+            </div>
             <div className="prose-sm text-[11px] leading-relaxed text-foreground/80 whitespace-pre-wrap">
               {releaseInfo.body}
             </div>

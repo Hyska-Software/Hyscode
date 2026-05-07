@@ -463,6 +463,14 @@ export function EditorArea() {
             <EditorWelcome />
           ) : activeTab.type === 'commit' && activeTab.commitProps ? (
             <CommitTab hash={activeTab.commitProps.hash} />
+          ) : activeTab.type === 'release-notes' && activeTab.releaseNotesProps ? (
+            <MarkdownViewer
+              content={activeTab.releaseNotesProps.body}
+              mode={activeTab.markdownMode ?? 'preview'}
+              onModeChange={(mode) => setMarkdownMode(activeTab.id, mode)}
+              language="markdown"
+              filePath={activeTab.id}
+            />
           ) : activeTab.type === 'history' && activeTab.historyProps ? (
             loading ? (
               <EditorLoading />
