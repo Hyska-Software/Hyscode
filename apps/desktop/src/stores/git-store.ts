@@ -28,6 +28,17 @@ export interface GitCommitInfo {
   timestamp: number;
 }
 
+export interface GraphCommit {
+  hash: string;
+  short_hash: string;
+  message: string;
+  author: string;
+  email: string;
+  timestamp: number;
+  parents: string[];
+  refs: string[];
+}
+
 export interface GitBranchInfo {
   name: string;
   is_current: boolean;
@@ -99,6 +110,9 @@ interface GitState {
   // Log
   log: GitCommitInfo[];
 
+  // Graph
+  graphLog: GraphCommit[];
+
   // Stash
   stashes: GitStashEntry[];
 
@@ -119,6 +133,7 @@ interface GitState {
   deleteBranch: (name: string) => Promise<void>;
   fetchBranches: () => Promise<void>;
   fetchLog: (limit?: number) => Promise<void>;
+  fetchLogGraph: (limit?: number) => Promise<void>;
   fetchStashes: () => Promise<void>;
   stashChanges: (message?: string) => Promise<void>;
   popStash: (index: number) => Promise<void>;
@@ -169,6 +184,7 @@ export const useGitStore = create<GitState>()(
     branches: [],
     remotes: [],
     log: [],
+    graphLog: [],
     stashes: [],
     isLoading: false,
     commitMessage: '',
@@ -312,6 +328,17 @@ export const useGitStore = create<GitState>()(
         set((s) => { s.log = log as GitCommitInfo[]; });
       } catch {
         // No log if no commits
+      }
+    },
+
+    fetchLogGraph: async (limit = 200) => {
+      const rootPath = getRootPath();
+      if (!rootPath) return;
+      try {
+        const graph = await invoke<GraphCommit[]>('git_log_graph', { repoPath: rootPath, limit });
+        set((s) => { s.graphLog = graph as GraphCommit[]; });
+      } catch {
+        // ignore
       }
     },
 

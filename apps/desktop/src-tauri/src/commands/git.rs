@@ -1023,6 +1023,105 @@ pub fn git_commit_file_diff(
     Ok(output)
 }
 
+// ── Git Graph ────────────────────────────────────────────────────────────────
+
+#[derive(Serialize, Clone)]
+pub struct GraphCommit {
+    pub hash: String,
+    pub short_hash: String,
+    pub message: String,
+    pub author: String,
+    pub email: String,
+    pub timestamp: i64,
+    pub parents: Vec<String>,
+    pub refs: Vec<String>,
+}
+
+#[tauri::command]
+pub fn git_log_graph(repo_path: String, limit: u32) -> Result<Vec<GraphCommit>, String> {
+    let repo = open_repo(&repo_path)?;
+    let mut revwalk = repo.revwalk().map_err(|e| format!("Revwalk error: {}", e))?;
+    revwalk.push_head().map_err(|e| format!("Push head error: {}", e))?;
+    revwalk.set_sorting(Sort::TIME).map_err(|e| format!("Sort error: {}", e))?;
+
+    // Collect all refs (branches + tags) → commit mapping
+    let mut ref_map: std::collections::HashMap<String, Vec<String>> = std::collections::HashMap::new();
+
+    // Local branches
+    if let Ok(branches) = repo.branches(Some(BranchType::Local)) {
+        for branch in branches.flatten() {
+            let name = branch.0.name().ok().flatten().unwrap_or("").to_string();
+            if let Some(target) = branch.0.get().target() {
+                ref_map.entry(target.to_string()).or_default().push(name);
+            }
+        }
+    }
+
+    // Remote branches
+    if let Ok(branches) = repo.branches(Some(BranchType::Remote)) {
+        for branch in branches.flatten() {
+            let name = branch.0.name().ok().flatten().unwrap_or("").to_string();
+            if let Some(target) = branch.0.get().target() {
+                ref_map.entry(target.to_string()).or_default().push(name);
+            }
+        }
+    }
+
+    // Tags
+    if let Ok(tag_names) = repo.tag_names(None) {
+        for tag_name in tag_names.iter().flatten() {
+            if let Ok(tag_ref) = repo.find_reference(&format!("refs/tags/{}", tag_name)) {
+                if let Some(target) = tag_ref.target() {
+                    // Resolve annotated tag to actual commit
+                    let oid = if let Ok(obj) = repo.find_object(target, None) {
+                        obj.peel_to_commit().ok().map(|c| c.id())
+                    } else {
+                        None
+                    };
+                    if let Some(commit_oid) = oid {
+                        ref_map.entry(commit_oid.to_string()).or_default().push(format!("tag:{}", tag_name));
+                    } else {
+                        ref_map.entry(target.to_string()).or_default().push(format!("tag:{}", tag_name));
+                    }
+                }
+            }
+        }
+    }
+
+    let mut commits = Vec::new();
+    for (i, oid_result) in revwalk.enumerate() {
+        if i >= limit as usize {
+            break;
+        }
+        let oid = oid_result.map_err(|e| format!("OID error: {}", e))?;
+        let commit = repo
+            .find_commit(oid)
+            .map_err(|e| format!("Commit error: {}", e))?;
+
+        let hash = oid.to_string();
+        let short_hash = hash[..7.min(hash.len())].to_string();
+
+        let parents: Vec<String> = (0..commit.parent_count())
+            .filter_map(|i| commit.parent(i).ok().map(|p| p.id().to_string()))
+            .collect();
+
+        let refs = ref_map.remove(&hash).unwrap_or_default();
+
+        commits.push(GraphCommit {
+            hash,
+            short_hash,
+            message: commit.message().unwrap_or("").to_string(),
+            author: commit.author().name().unwrap_or("").to_string(),
+            email: commit.author().email().unwrap_or("").to_string(),
+            timestamp: commit.time().seconds(),
+            parents,
+            refs,
+        });
+    }
+
+    Ok(commits)
+}
+
 // ── Remote operations (via CLI for auth compatibility) ───────────────────────
 
 fn run_git_cli(repo_path: &str, args: &[&str]) -> Result<String, String> {

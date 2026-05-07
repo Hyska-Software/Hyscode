@@ -23,6 +23,7 @@ import {
   Sparkles,
   Settings2,
   GitPullRequest,
+  GitFork as GraphIcon,
 } from 'lucide-react';
 import { useGitStore, useEditorStore } from '../../../stores';
 import { useSettingsStore } from '../../../stores/settings-store';
@@ -30,13 +31,14 @@ import { getViewerType } from '../../../lib/utils';
 import { detectLanguage } from '../../../lib/lsp-bridge';
 import { GitFileItem } from '../../git/git-file-item';
 import { GitLogView } from '../../git/git-log-view';
+import { GitGraphView } from '../../git/git-graph-view';
 import { PullRequestDialog } from '../../git/pull-request-dialog';
 import { promptInput, promptConfirm } from '../../ui/dialogs';
 import type { GitFile } from '../../../stores/git-store';
 import { generateCommitMessage } from '../../../lib/commit-message-ai';
 import { PROVIDERS, getAllEnabledModelsGrouped } from '../../../lib/provider-catalog';
 
-type PanelMode = 'changes' | 'log';
+type PanelMode = 'changes' | 'log' | 'graph';
 
 export function GitView() {
   const isGitRepo = useGitStore((s) => s.isGitRepo);
@@ -369,6 +371,10 @@ export function GitView() {
     return <GitLogView onClose={() => setPanelMode('changes')} />;
   }
 
+  if (panelMode === 'graph') {
+    return <GitGraphView onClose={() => setPanelMode('changes')} />;
+  }
+
   const totalChanges = staged.length + changes.length + conflicts.length;
 
   return (
@@ -389,6 +395,14 @@ export function GitView() {
             title="View Commit History"
           >
             <History className="h-3 w-3" />
+          </button>
+          {/* Git Graph — directly accessible */}
+          <button
+            onClick={() => setPanelMode('graph')}
+            className="flex h-5 w-5 items-center justify-center rounded-sm text-muted-foreground hover:text-accent hover:bg-accent/10 transition-colors"
+            title="Git Graph Visualization"
+          >
+            <GraphIcon className="h-3 w-3" />
           </button>
           {/* Create Pull Request — directly accessible */}
           <button

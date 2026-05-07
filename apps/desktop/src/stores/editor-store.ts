@@ -10,7 +10,7 @@ export interface Tab {
   isDirty: boolean;
   isPinned: boolean;
   isPreview: boolean;
-  type: 'file' | 'diff' | 'terminal' | 'commit' | 'history' | 'release-notes' | 'extension-readme';
+  type: 'file' | 'diff' | 'terminal' | 'commit' | 'history' | 'release-notes' | 'extension-readme' | 'git-graph';
   viewerType: ViewerType;
   markdownMode?: 'preview' | 'code';
   diffProps?: {
@@ -37,6 +37,9 @@ export interface Tab {
     version: string;
     body: string;
   };
+  /** Git graph props */
+  gitGraphProps?: Record<string, never>;
+
   /** Extension README details when type === 'extension-readme' */
   extensionReadmeProps?: {
     extensionName: string;
@@ -65,6 +68,7 @@ interface EditorState {
   openTerminalTab: (sessionId: string, name: string) => void;
   openCommitTab: (hash: string, shortHash: string, message: string) => void;
   openHistoryTab: (snapshotId: string, originalPath: string, timestamp: string, content: string) => void;
+  openGitGraphTab: () => void;
   openReleaseNotesTab: (version: string, body: string) => void;
   openExtensionReadmeTab: (props: { extensionName: string; displayName: string; readmeContent: string; iconUrl?: string | null; version?: string; publisher?: string; description?: string; enabled?: boolean; categories?: string[]; activationEvents?: string[]; installedAt?: string; hasMain?: boolean; contributions?: { label: string; count: number }[] }) => void;
   closeTab: (id: string) => void;
@@ -203,6 +207,30 @@ export const useEditorStore = create<EditorState>()(
           type: 'history',
           viewerType: 'code',
           historyProps: { snapshotId, originalPath, timestamp, content },
+        };
+        state.tabs.push(newTab);
+        state.activeTabId = id;
+      }),
+
+    openGitGraphTab: () =>
+      set((state) => {
+        const id = 'git-graph';
+        const existing = state.tabs.find((t) => t.id === id);
+        if (existing) {
+          state.activeTabId = existing.id;
+          return;
+        }
+        const newTab: Tab = {
+          id,
+          filePath: id,
+          fileName: 'Git Graph',
+          language: 'plaintext',
+          isDirty: false,
+          isPinned: false,
+          isPreview: false,
+          type: 'git-graph',
+          viewerType: 'code',
+          gitGraphProps: {},
         };
         state.tabs.push(newTab);
         state.activeTabId = id;

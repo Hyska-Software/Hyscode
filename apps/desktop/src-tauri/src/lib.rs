@@ -82,6 +82,7 @@ pub fn run() {
             commands::git::git_reset,
             commands::git::git_blame,
             commands::git::git_tag_create,
+            commands::git::git_log_graph,
             // PTY commands
             commands::pty::pty_spawn,
             commands::pty::pty_write,

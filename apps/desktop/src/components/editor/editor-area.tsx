@@ -5,6 +5,7 @@ import { EditorWelcome } from './editor-welcome';
 import { DiffViewer } from './diff-viewer';
 import { AgentDiffViewer } from './agent-diff-viewer';
 import { CommitTab } from './commit-tab';
+import { GitGraphView } from '../git/git-graph-view';
 import { PendingChangesBar } from './pending-changes-bar';
 import { InlineReviewBar } from './inline-review-bar';
 import { EditorContextMenu } from './editor-context-menu';
@@ -464,6 +465,8 @@ export function EditorArea() {
             <EditorWelcome />
           ) : activeTab.type === 'commit' && activeTab.commitProps ? (
             <CommitTab hash={activeTab.commitProps.hash} />
+          ) : activeTab.type === 'git-graph' ? (
+            <GitGraphView />
           ) : activeTab.type === 'release-notes' && activeTab.releaseNotesProps ? (
             <MarkdownViewer
               content={activeTab.releaseNotesProps.body}
