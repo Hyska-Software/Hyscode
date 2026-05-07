@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
+import { useEffect, useState, useCallback, useMemo } from 'react';
 import {
   GitCommit,
   GitBranch,
@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import { useGitStore, useEditorStore } from '../../stores';
 import type { GraphCommit } from '../../stores/git-store';
+import { MermaidBlock } from '@/components/ui/mermaid-block';
 
 type ViewMode = 'tree' | 'compact' | 'mermaid' | 'grid';
 
@@ -116,31 +117,124 @@ function computeRows(commits: GraphCommit[]): { rows: RowData[]; maxLane: number
 
 /* ── Mermaid formatter ───────────────────────────────────────────────── */
 
+/**
+ * Generate a Mermaid gitGraph from real GraphCommit data.
+ *
+ * Strategy:
+ *  - Cap at MAX_COMMITS so the diagram stays legible.
+ *  - Trace the first-parent chain as the "main" timeline.
+ *  - For each merge commit on main, walk its second-parent chain and assign
+ *    those commits to a named branch (using refs if available).
+ *  - Emit oldest-first with correct branch/checkout/merge directives.
+ */
 function formatMermaid(commits: GraphCommit[]): string {
-  const lines: string[] = ['gitGraph TB:'];
-  const sorted = [...commits].reverse();
-  let branchCounter = 0;
-  const branchOf = new Map<string, string>();
+  const MAX_COMMITS = 50;
+  const slice = commits.slice(0, MAX_COMMITS);
+  if (!slice.length) return 'gitGraph\n    commit id: "empty" msg: "No commits"';
 
-  function getBranch(hash: string): string {
-    if (!branchOf.has(hash)) {
-      branchOf.set(hash, `b${branchCounter++}`);
+  const byHash = new Map<string, GraphCommit>();
+  for (const c of slice) byHash.set(c.hash, c);
+
+  // Sanitize commit message: strip non-ASCII, quotes, cap length
+  const safeMsg = (s: string) =>
+    s.split('\n')[0].replace(/"/g, "'").replace(/[^\x20-\x7E]/g, '').trim().slice(0, 40) || 'commit';
+
+  // Sanitize branch name: only alphanumeric + dash/underscore
+  const safeName = (s: string) =>
+    s.replace(/[^a-zA-Z0-9_-]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '') || 'branch';
+
+  // Pick a human-readable name from a commit's refs array.
+  // Prefer local branches over remote tracking branches; skip tags.
+  const extractRef = (refs: string[]): string | null => {
+    for (const r of refs) {
+      const n = r.replace(/^HEAD\s*->\s*/, '').trim();
+      if (n && !n.startsWith('tag:') && !n.startsWith('origin/')) return safeName(n);
     }
-    return branchOf.get(hash)!;
+    for (const r of refs) {
+      const m = r.match(/^origin\/(.+)/);
+      if (m && m[1] !== 'HEAD') return safeName(m[1]);
+    }
+    return null;
+  };
+
+  // Main branch name comes from the most-recent commit's refs
+  const mainBranch = extractRef(slice[0].refs) ?? 'main';
+
+  // ── 1. Trace first-parent chain → "main" timeline ──────────────────
+  const mainSet = new Set<string>();
+  {
+    let c: GraphCommit | undefined = slice[0];
+    while (c) {
+      mainSet.add(c.hash);
+      c = c.parents[0] ? byHash.get(c.parents[0]) : undefined;
+    }
   }
 
-  for (const c of sorted) {
+  // ── 2. Assign off-main commits to named branches ────────────────────
+  // Walk each merge commit's second-parent chain and give it a name.
+  const branchOf = new Map<string, string>(); // commit hash → branch name
+  const usedNames = new Set<string>([mainBranch]);
+  let autoIdx = 0;
+
+  for (const c of slice) {
+    if (!mainSet.has(c.hash) || c.parents.length < 2) continue;
+    const p2 = byHash.get(c.parents[1]);
+    if (!p2 || branchOf.has(p2.hash)) continue;
+
+    let name = extractRef(p2.refs) ?? `branch-${++autoIdx}`;
+    if (name === mainBranch) name = `branch-${++autoIdx}`;
+    // Deduplicate colliding names
+    const base = name; let n = 2;
+    while (usedNames.has(name)) name = `${base}-${n++}`;
+    usedNames.add(name);
+
+    // Tag every commit on this chain
+    let walk: GraphCommit | undefined = p2;
+    while (walk && !mainSet.has(walk.hash) && !branchOf.has(walk.hash)) {
+      branchOf.set(walk.hash, name);
+      walk = walk.parents[0] ? byHash.get(walk.parents[0]) : undefined;
+    }
+  }
+
+  const getBranch = (hash: string) => branchOf.get(hash) ?? mainBranch;
+
+  // ── 3. Emit Mermaid lines, oldest-first ────────────────────────────
+  const ordered = [...slice].reverse();
+  const lines: string[] = ['gitGraph'];
+  const declared = new Set<string>([mainBranch]);
+  let current = mainBranch;
+
+  // Switch to a branch, declaring it (via `branch`) if needed.
+  // `divergeFrom` is the branch to checkout before declaring a new one.
+  const switchBranch = (to: string, divergeFrom: string) => {
+    if (current === to) return;
+    if (!declared.has(to)) {
+      if (current !== divergeFrom) {
+        lines.push(`    checkout ${divergeFrom}`);
+        current = divergeFrom;
+      }
+      lines.push(`    branch ${to}`);
+      declared.add(to);
+    } else {
+      lines.push(`    checkout ${to}`);
+    }
+    current = to;
+  };
+
+  for (const c of ordered) {
     const b = getBranch(c.hash);
-    if (!lines.includes(`    branch ${b}`)) {
-      lines.splice(1, 0, `    branch ${b}`);
+    const parentBranch = c.parents[0] ? getBranch(c.parents[0]) : mainBranch;
+    switchBranch(b, parentBranch);
+
+    // Merge commits on main: emit as `merge <branch>` instead of `commit`
+    if (mainSet.has(c.hash) && c.parents.length > 1) {
+      const src = getBranch(c.parents[1]);
+      if (src !== mainBranch && declared.has(src)) {
+        lines.push(`    merge ${src} id: "${c.short_hash}" msg: "${safeMsg(c.message)}"`);
+        continue;
+      }
     }
-    lines.push(`    checkout ${b}`);
-    const msg = c.message.split('\n')[0].replace(/[^a-zA-Z0-9 _-]/g, '').slice(0, 30);
-    lines.push(`    commit id: "${c.short_hash}" message: "${msg || 'commit'}"`);
-    if (c.parents.length > 1) {
-      const pb = getBranch(c.parents[1]);
-      lines.push(`    merge ${pb}`);
-    }
+    lines.push(`    commit id: "${c.short_hash}" msg: "${safeMsg(c.message)}"`);
   }
 
   return lines.join('\n');
@@ -582,52 +676,19 @@ function GridView({
 
 /* ── Mermaid View ────────────────────────────────────────────────────── */
 
+const MERMAID_MAX = 50;
+
 function MermaidView({ commits }: { commits: GraphCommit[] }) {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const [error, setError] = useState<string | null>(null);
   const [rawMode, setRawMode] = useState(false);
-
   const mermaidCode = useMemo(() => formatMermaid(commits), [commits]);
-
-  useEffect(() => {
-    if (!containerRef.current || rawMode) return;
-    let cancelled = false;
-
-    const render = async () => {
-      try {
-        const mermaid = await import('mermaid').then((m) => m.default);
-        mermaid.initialize({
-          theme: 'base',
-          themeVariables: {
-            gitBranchLabel0: '#a855f7',
-            gitBranchLabel1: '#22c55e',
-            gitBranchLabel2: '#3b82f6',
-            gitBranchLabel3: '#f59e0b',
-            commitLabelBackground: '#181818',
-            commitLabelColor: '#e2e8f0',
-            tagLabelBackground: '#f59e0b',
-            tagLabelColor: '#181818',
-            mainBranchColor: '#a855f7',
-            lineColor: '#4a5568',
-          },
-        });
-        const { svg } = await mermaid.render('git-graph-mermaid', mermaidCode);
-        if (!cancelled && containerRef.current) {
-          containerRef.current.innerHTML = svg;
-        }
-      } catch (err: any) {
-        if (!cancelled) setError(err.message ?? 'Failed to render');
-      }
-    };
-    render();
-    return () => { cancelled = true; };
-  }, [mermaidCode, rawMode]);
+  const capped = commits.length > MERMAID_MAX;
 
   return (
     <div className="p-3">
       <div className="mb-2 flex items-center justify-between">
         <span className="text-[10px] text-muted-foreground">
-          Mermaid gitGraph ({commits.length} commits)
+          Mermaid gitGraph ({capped ? `${MERMAID_MAX} of ${commits.length}` : commits.length} commits
+          {capped && <span className="ml-1 text-yellow-400/70">· capped for legibility</span>})
         </span>
         <button
           onClick={() => setRawMode(!rawMode)}
@@ -637,21 +698,12 @@ function MermaidView({ commits }: { commits: GraphCommit[] }) {
         </button>
       </div>
 
-      {error && (
-        <div className="mb-2 rounded-sm bg-red-500/10 px-3 py-1.5 text-[10px] text-red-400">
-          {error}
-        </div>
-      )}
-
       {rawMode ? (
         <pre className="overflow-auto rounded-lg bg-muted/30 p-3 text-[10px] font-mono text-foreground/80 leading-relaxed">
           {mermaidCode}
         </pre>
       ) : (
-        <div
-          ref={containerRef}
-          className="flex justify-center overflow-auto rounded-lg bg-muted/10 p-3 min-h-[200px]"
-        />
+        <MermaidBlock code={mermaidCode} />
       )}
     </div>
   );
