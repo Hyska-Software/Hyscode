@@ -10,7 +10,7 @@ export interface Tab {
   isDirty: boolean;
   isPinned: boolean;
   isPreview: boolean;
-  type: 'file' | 'diff' | 'terminal' | 'commit';
+  type: 'file' | 'diff' | 'terminal' | 'commit' | 'history';
   viewerType: ViewerType;
   markdownMode?: 'preview' | 'code';
   diffProps?: {
@@ -25,6 +25,13 @@ export interface Tab {
   };
   /** Terminal session id when type === 'terminal' */
   terminalSessionId?: string;
+  /** Snapshot details when type === 'history' */
+  historyProps?: {
+    snapshotId: string;
+    originalPath: string;
+    timestamp: string;
+    content: string;
+  };
 }
 
 let untitledCounter = 0;
@@ -36,6 +43,7 @@ interface EditorState {
   openUntitled: () => void;
   openTerminalTab: (sessionId: string, name: string) => void;
   openCommitTab: (hash: string, shortHash: string, message: string) => void;
+  openHistoryTab: (snapshotId: string, originalPath: string, timestamp: string, content: string) => void;
   closeTab: (id: string) => void;
   closeOtherTabs: (id: string) => void;
   closeTabsToTheRight: (id: string) => void;
@@ -147,6 +155,31 @@ export const useEditorStore = create<EditorState>()(
           type: 'commit',
           viewerType: 'code',
           commitProps: { hash, shortHash, message: label },
+        };
+        state.tabs.push(newTab);
+        state.activeTabId = id;
+      }),
+
+    openHistoryTab: (snapshotId: string, originalPath: string, timestamp: string, content: string) =>
+      set((state) => {
+        const id = `history:${snapshotId}`;
+        const existing = state.tabs.find((t) => t.id === id);
+        if (existing) {
+          state.activeTabId = existing.id;
+          return;
+        }
+        const fileName = originalPath.split(/[\\/]/).pop() ?? originalPath;
+        const newTab: Tab = {
+          id,
+          filePath: id,
+          fileName: `${fileName} (snapshot)`,
+          language: 'plaintext',
+          isDirty: false,
+          isPinned: false,
+          isPreview: false,
+          type: 'history',
+          viewerType: 'code',
+          historyProps: { snapshotId, originalPath, timestamp, content },
         };
         state.tabs.push(newTab);
         state.activeTabId = id;

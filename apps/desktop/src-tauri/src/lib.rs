@@ -154,6 +154,11 @@ pub fn run() {
             commands::db::db_get_open_tabs,
             commands::db::db_upsert_open_tab,
             commands::db::db_remove_open_tab,
+            // File history commands
+            commands::db::file_history_save,
+            commands::db::file_history_list,
+            commands::db::file_history_get,
+            commands::db::file_history_clear,
             // Notification commands
             commands::notifications::notify_agent_done,
             // Device management commands

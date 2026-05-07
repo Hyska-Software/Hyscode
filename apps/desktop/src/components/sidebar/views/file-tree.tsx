@@ -13,6 +13,7 @@ import {
   Scissors,
   FolderSearch,
   Files,
+  History,
 } from 'lucide-react';
 import { useFileStore, useEditorStore, useGitStore } from '../../../stores';
 import { useLayoutStore } from '../../../stores/layout-store';
@@ -24,6 +25,7 @@ import { getViewerType, writeClipboard } from '../../../lib/utils';
 import { detectLanguage } from '../../../lib/lsp-bridge';
 import { getFileIcon, getFolderIcon, FolderIcon as DefaultFolderIcon } from './file-icons';
 import { promptInput, promptConfirm } from '../../ui/dialogs';
+import { FileHistoryModal } from '../../editor/file-history-modal';
 import type { FileNode } from '../../../stores/file-store';
 import type { GitFile } from '../../../stores/git-store';
 
@@ -552,6 +554,7 @@ export function FileTree() {
   const [focusedPath, setFocusedPath] = useState<string | null>(null);
   const [pendingOps, setPendingOps] = useState<Set<string>>(new Set());
   const [clipboard, setClipboard] = useState<{ paths: string[]; op: 'copy' | 'cut' } | null>(null);
+  const [historyModalPath, setHistoryModalPath] = useState<string | null>(null);
   const clipboardRef = useRef(clipboard);
   useEffect(() => { clipboardRef.current = clipboard; }, [clipboard]);
   const cutPaths = useMemo(() => {
@@ -987,6 +990,13 @@ export function FileTree() {
     }
   };
 
+  const handleViewHistory = () => {
+    if (!contextMenu?.node || contextMenu.node.isDir) return;
+    const node = contextMenu.node;
+    setContextMenu(null);
+    setHistoryModalPath(node.path);
+  };
+
   // ── Create / Rename submit ─────────────────────────────────────────────────
 
   const handleRenameSubmit = async (node: FileNode, newName: string) => {
@@ -1112,9 +1122,24 @@ export function FileTree() {
 
               <ContextMenuSeparator />
               <ContextMenuItem icon={FolderSearch} label="Reveal in File Manager" onClick={handleRevealInFileManager} />
+
+              {!contextMenu.node?.isDir && (
+                <>
+                  <ContextMenuSeparator />
+                  <ContextMenuItem icon={History} label="View History" onClick={handleViewHistory} />
+                </>
+              )}
             </>
           )}
         </div>
+      )}
+
+      {/* File History Modal */}
+      {historyModalPath && (
+        <FileHistoryModal
+          filePath={historyModalPath}
+          onClose={() => setHistoryModalPath(null)}
+        />
       )}
 
       {/* Pending ops overlay */}

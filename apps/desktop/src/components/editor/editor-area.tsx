@@ -158,6 +158,12 @@ export function EditorArea() {
       markDirty(activeTab.id, false);
       const lang = detectLspLanguage(activeTab.filePath) ?? activeTab.language ?? 'plaintext';
       LspBridge.onFileSaved(activeTab.filePath, lang, currentContent);
+      // Record history snapshot (skip large files >1 MB, fire-and-forget)
+      if (currentContent.length <= 1_048_576) {
+        import('@tauri-apps/api/core').then(({ invoke }) => {
+          invoke('file_history_save', { filePath: activeTab.filePath, content: currentContent }).catch(() => {});
+        });
+      }
     } catch (err) {
       console.error('Auto-save failed:', err);
     }
@@ -457,6 +463,38 @@ export function EditorArea() {
             <EditorWelcome />
           ) : activeTab.type === 'commit' && activeTab.commitProps ? (
             <CommitTab hash={activeTab.commitProps.hash} />
+          ) : activeTab.type === 'history' && activeTab.historyProps ? (
+            loading ? (
+              <EditorLoading />
+            ) : (
+              <Suspense fallback={<EditorLoading />}>
+                <MonacoEditor
+                  path={`history:${activeTab.historyProps.snapshotId}`}
+                  language={detectLanguage(activeTab.historyProps.originalPath)}
+                  value={activeTab.historyProps.content}
+                  theme={monacoTheme}
+                  onMount={(editor, monaco) => {
+                    monacoInstanceRef.current = monaco;
+                    editor.updateOptions({ contextmenu: false, readOnly: true });
+                  }}
+                  beforeMount={(monaco) => {
+                    defineAllMonacoThemes(monaco);
+                    registerAllLanguages(monaco);
+                  }}
+                  options={{
+                    readOnly: true,
+                    fontFamily: `'${editorFontFamily}', 'JetBrains Mono', 'Fira Code', monospace`,
+                    fontSize: editorFontSize,
+                    lineHeight: editorLineHeight,
+                    minimap: { enabled: editorMinimap, scale: 1 },
+                    wordWrap: editorWordWrap,
+                    lineNumbers: editorLineNumbers,
+                    scrollBeyondLastLine: editorScrollBeyondLastLine,
+                    padding: { top: 8 },
+                  }}
+                />
+              </Suspense>
+            )
           ) : activeTab.type === 'diff' && activeTab.diffProps ? (
             <DiffViewer
               filePath={activeTab.diffProps.filePath}

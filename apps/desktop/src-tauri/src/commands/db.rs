@@ -23,6 +23,8 @@ pub fn open_database(app_dir: &std::path::Path) -> Connection {
         .expect("failed to run migration 004");
     conn.execute_batch(include_str!("../../migrations/005_open_tabs.sql"))
         .expect("failed to run migration 005");
+    conn.execute_batch(include_str!("../../migrations/006_file_history.sql"))
+        .expect("failed to run migration 006");
     conn
 }
 
@@ -595,6 +597,118 @@ pub fn db_remove_open_tab(
 ) -> Result<(), String> {
     let conn = state.0.lock().map_err(|e| e.to_string())?;
     conn.execute("DELETE FROM open_tabs WHERE id = ?1", params![id])
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+// ─── File history commands ──────────────────────────────────────────────────
+
+const FILE_HISTORY_MAX: i64 = 50;
+
+#[derive(Serialize)]
+pub struct FileHistoryEntry {
+    pub id: String,
+    pub file_path: String,
+    pub created_at: String,
+}
+
+#[derive(Serialize)]
+pub struct FileHistorySnapshot {
+    pub id: String,
+    pub file_path: String,
+    pub content: String,
+    pub created_at: String,
+}
+
+#[tauri::command]
+pub fn file_history_save(
+    state: State<'_, DbState>,
+    file_path: String,
+    content: String,
+) -> Result<String, String> {
+    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let id = uuid::Uuid::new_v4().to_string();
+    conn.execute(
+        "INSERT INTO file_history (id, file_path, content) VALUES (?1, ?2, ?3)",
+        params![id, file_path, content],
+    )
+    .map_err(|e| e.to_string())?;
+
+    // Prune oldest entries beyond the max limit
+    conn.execute(
+        "DELETE FROM file_history
+         WHERE file_path = ?1
+           AND id NOT IN (
+               SELECT id FROM file_history
+               WHERE file_path = ?1
+               ORDER BY created_at DESC
+               LIMIT ?2
+           )",
+        params![file_path, FILE_HISTORY_MAX],
+    )
+    .map_err(|e| e.to_string())?;
+
+    Ok(id)
+}
+
+#[tauri::command]
+pub fn file_history_list(
+    state: State<'_, DbState>,
+    file_path: String,
+) -> Result<Vec<FileHistoryEntry>, String> {
+    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, file_path, created_at
+             FROM file_history
+             WHERE file_path = ?1
+             ORDER BY created_at DESC",
+        )
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map(params![file_path], |row| {
+            Ok(FileHistoryEntry {
+                id: row.get(0)?,
+                file_path: row.get(1)?,
+                created_at: row.get(2)?,
+            })
+        })
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+    Ok(rows)
+}
+
+#[tauri::command]
+pub fn file_history_get(
+    state: State<'_, DbState>,
+    id: String,
+) -> Result<FileHistorySnapshot, String> {
+    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let row = conn
+        .query_row(
+            "SELECT id, file_path, content, created_at FROM file_history WHERE id = ?1",
+            params![id],
+            |row| {
+                Ok(FileHistorySnapshot {
+                    id: row.get(0)?,
+                    file_path: row.get(1)?,
+                    content: row.get(2)?,
+                    created_at: row.get(3)?,
+                })
+            },
+        )
+        .map_err(|e| e.to_string())?;
+    Ok(row)
+}
+
+#[tauri::command]
+pub fn file_history_clear(
+    state: State<'_, DbState>,
+    file_path: String,
+) -> Result<(), String> {
+    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    conn.execute("DELETE FROM file_history WHERE file_path = ?1", params![file_path])
         .map_err(|e| e.to_string())?;
     Ok(())
 }
