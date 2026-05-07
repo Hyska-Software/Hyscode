@@ -187,6 +187,8 @@ pub fn run() {
             commands::updater::updater_check,
             commands::updater::updater_download,
             commands::updater::updater_install,
+            // Shell exec
+            commands::utils::shell_exec,
         ])
         .setup(|app| {
             let _window = app.get_webview_window("main").unwrap();

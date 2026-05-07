@@ -347,6 +347,20 @@ export interface ExtensionMemento {
   keys(): readonly string[];
 }
 
+// ── Terminal API ─────────────────────────────────────────────────────────────
+
+export interface TerminalAPI {
+  /** Send a command string to the active terminal, pressing Enter afterwards. */
+  sendToActive(command: string): Promise<void>;
+}
+
+// ── Process API ──────────────────────────────────────────────────────────────
+
+export interface ProcessAPI {
+  /** Run a program and capture stdout. Rejects with stderr on non-zero exit. */
+  exec(program: string, args: string[], cwd?: string): Promise<string>;
+}
+
 // ── HysCode API (injected into extensions) ──────────────────────────────────
 
 export interface HyscodeAPI {
@@ -363,6 +377,8 @@ export interface HyscodeAPI {
   extensions: ExtensionsManagerAPI;
   ui: UiAPI;
   views: ViewsAPI;
+  terminal: TerminalAPI;
+  process: ProcessAPI;
 }
 
 // ── Workspace API ────────────────────────────────────────────────────────────

@@ -1,26 +1,49 @@
 // C# & .NET Extension — main.js
 // Provides runtime commands for C# and .NET development
 
-const DOTNET_TEMPLATES = [
+const FALLBACK_TEMPLATES = [
   { label: 'Console App', value: 'console' },
+  { label: 'Class Library', value: 'classlib' },
   { label: 'Web API (ASP.NET)', value: 'webapi' },
+  { label: 'Minimal API', value: 'web' },
   { label: 'Web App (Razor Pages)', value: 'webapp' },
   { label: 'MVC', value: 'mvc' },
-  { label: 'Blazor Server', value: 'blazorserver' },
-  { label: 'Blazor WebAssembly', value: 'blazorwasm' },
-  { label: 'Class Library', value: 'classlib' },
+  { label: 'Blazor', value: 'blazor' },
   { label: 'Worker Service', value: 'worker' },
   { label: 'gRPC Service', value: 'grpc' },
+  { label: 'WPF App', value: 'wpf' },
+  { label: 'WinForms App', value: 'winforms' },
   { label: 'xUnit Test Project', value: 'xunit' },
   { label: 'NUnit Test Project', value: 'nunit' },
   { label: 'MSTest Project', value: 'mstest' },
-  { label: 'MAUI App', value: 'maui' },
-  { label: 'WPF App', value: 'wpf' },
-  { label: 'WinForms App', value: 'winforms' },
-  { label: 'Minimal API', value: 'web' },
+  { label: 'MAUI App (requires workload)', value: 'maui' },
 ];
 
-export function activate(context) {
+/** Parse `dotnet new list` plain-text output into [{label, value}] */
+function parseDotnetTemplates(output) {
+  const templates = [];
+  const lines = output.split('\n');
+  // Find the header separator line (all dashes)
+  const sepIdx = lines.findIndex((l) => /^-{5,}/.test(l.trim()));
+  if (sepIdx === -1) return null;
+
+  for (let i = sepIdx + 1; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (!line) continue;
+    // Columns are separated by 2+ spaces; first col = Template Name, second = Short Name
+    const parts = line.split(/\s{2,}/);
+    if (parts.length < 2) continue;
+    const label = parts[0].trim();
+    // Short name may contain comma-separated aliases like "console,con"
+    const shortName = parts[1].split(',')[0].trim();
+    if (label && shortName) {
+      templates.push({ label, value: shortName });
+    }
+  }
+  return templates.length > 0 ? templates : null;
+}
+
+export async function activate(context) {
   console.log('[csharp-dotnet] Extension activated');
 
   const api = context._api || globalThis.hyscode;
@@ -30,6 +53,16 @@ export function activate(context) {
   }
 
   if (!api.commands) return;
+
+  // ── Fetch available templates asynchronously ─────────────────────────────
+  let dotnetTemplates = FALLBACK_TEMPLATES;
+  try {
+    const output = await api.process?.exec('dotnet', ['new', 'list']);
+    const parsed = output ? parseDotnetTemplates(output) : null;
+    if (parsed && parsed.length > 0) dotnetTemplates = parsed;
+  } catch (_) {
+    // dotnet not found or error — use fallback list
+  }
 
   // ── Helper: run dotnet CLI command ──────────────────────────────────────────
   async function runDotnet(args) {
@@ -41,7 +74,7 @@ export function activate(context) {
   // ── New .NET Project ────────────────────────────────────────────────────────
   api.commands.register('dotnet.newProject', async () => {
     const template = await api.window?.showQuickPick?.(
-      DOTNET_TEMPLATES,
+      dotnetTemplates,
       { placeHolder: 'Select project template' }
     );
     if (!template) return;
@@ -52,8 +85,13 @@ export function activate(context) {
     });
     if (!name) return;
 
-    await runDotnet(`new ${template.value} -n ${name}`);
-    console.log(`[csharp-dotnet] Created project: ${name} (${template.value})`);
+    try {
+      api.notifications?.showInfo(`Running: dotnet new ${template.value} -n ${name}`);
+      await runDotnet(`new ${template.value} -n ${name}`);
+      api.notifications?.showInfo(`Created "${name}" (${template.label}). Check the terminal for output.`);
+    } catch (err) {
+      api.notifications?.showError(`Failed to create project: ${err?.message ?? err}`);
+    }
   });
 
   // ── New Solution ────────────────────────────────────────────────────────────
@@ -63,42 +101,43 @@ export function activate(context) {
       placeHolder: 'MySolution',
     });
     if (!name) return;
+    api.notifications?.showInfo(`Running: dotnet new sln -n ${name}`);
     await runDotnet(`new sln -n ${name}`);
   });
 
   // ── Build ───────────────────────────────────────────────────────────────────
   api.commands.register('dotnet.build', async () => {
-    console.log('[csharp-dotnet] Build');
+    api.notifications?.showInfo('Running: dotnet build');
     await runDotnet('build');
   });
 
   // ── Run ─────────────────────────────────────────────────────────────────────
   api.commands.register('dotnet.run', async () => {
-    console.log('[csharp-dotnet] Run');
+    api.notifications?.showInfo('Running: dotnet run');
     await runDotnet('run');
   });
 
   // ── Test ────────────────────────────────────────────────────────────────────
   api.commands.register('dotnet.test', async () => {
-    console.log('[csharp-dotnet] Test');
+    api.notifications?.showInfo('Running: dotnet test');
     await runDotnet('test');
   });
 
   // ── Watch (Hot Reload) ──────────────────────────────────────────────────────
   api.commands.register('dotnet.watch', async () => {
-    console.log('[csharp-dotnet] Watch');
+    api.notifications?.showInfo('Running: dotnet watch run');
     await runDotnet('watch run');
   });
 
   // ── Clean ───────────────────────────────────────────────────────────────────
   api.commands.register('dotnet.clean', async () => {
-    console.log('[csharp-dotnet] Clean');
+    api.notifications?.showInfo('Running: dotnet clean');
     await runDotnet('clean');
   });
 
   // ── Restore ─────────────────────────────────────────────────────────────────
   api.commands.register('dotnet.restore', async () => {
-    console.log('[csharp-dotnet] Restore');
+    api.notifications?.showInfo('Running: dotnet restore');
     await runDotnet('restore');
   });
 

@@ -8,33 +8,33 @@
   "categories": ["Other"],
   "keywords": ["sample", "demo", "template"],
   "main": "main.js",
-  "activationEvents": ["onStartup"],
+  "activationEvents": [
+    "onCommand:sample.helloWorld",
+    "onCommand:sample.listarArquivos"
+  ],
   "contributes": {
     "commands": [
       {
-        "id": "sample.helloWorld",
+        "command": "sample.helloWorld",
         "title": "Hello World",
         "category": "Sample"
       },
       {
-        "id": "sample.showTime",
-        "title": "Show Current Time",
+        "command": "sample.listarArquivos",
+        "title": "Listar Arquivos",
         "category": "Sample"
       }
     ],
+    "menus": {
+      "commandPalette": [
+        { "command": "sample.helloWorld" },
+        { "command": "sample.listarArquivos" }
+      ]
+    },
     "keybindings": [
       {
         "command": "sample.helloWorld",
         "key": "ctrl+shift+h"
-      }
-    ],
-    "statusBarItems": [
-      {
-        "id": "sample.clock",
-        "text": "Sample Ext",
-        "tooltip": "Sample Extension is active",
-        "alignment": "right",
-        "priority": 50
       }
     ],
     "configuration": {
@@ -44,19 +44,8 @@
           "type": "string",
           "default": "Hello from Sample Extension!",
           "description": "The greeting message to show"
-        },
-        "sample.showNotifications": {
-          "type": "boolean",
-          "default": true,
-          "description": "Show notification messages"
         }
       }
-    },
-    "menus": {
-      "commandPalette": [
-        { "command": "sample.helloWorld" },
-        { "command": "sample.showTime" }
-      ]
     }
   }
 }

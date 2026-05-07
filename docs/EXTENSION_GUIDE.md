@@ -13,15 +13,16 @@
 5. [Contribution Points — Referência Completa](#contribution-points--referência-completa)
 6. [Código da Extensão (main.js)](#código-da-extensão-mainjs)
 7. [API do HysCode](#api-do-hyscode)
-8. [Temas — Guia Detalhado](#temas--guia-detalhado)
-9. [Linguagens — Guia Detalhado](#linguagens--guia-detalhado)
-10. [Snippets — Guia Detalhado](#snippets--guia-detalhado)
-11. [Instalação](#instalação)
-12. [Empacotamento (.zip)](#empacotamento-zip)
-13. [Ciclo de Vida](#ciclo-de-vida)
-14. [Boas Práticas](#boas-práticas)
-15. [Exemplos Completos](#exemplos-completos)
-16. [Solução de Problemas](#solução-de-problemas)
+8. [Comandos na Paleta — Guia Completo](#comandos-na-paleta--guia-completo)
+9. [Temas — Guia Detalhado](#temas--guia-detalhado)
+10. [Linguagens — Guia Detalhado](#linguagens--guia-detalhado)
+11. [Snippets — Guia Detalhado](#snippets--guia-detalhado)
+12. [Instalação](#instalação)
+13. [Empacotamento (.zip)](#empacotamento-zip)
+14. [Ciclo de Vida](#ciclo-de-vida)
+15. [Boas Práticas](#boas-práticas)
+16. [Exemplos Completos](#exemplos-completos)
+17. [Solução de Problemas](#solução-de-problemas)
 
 ---
 
@@ -474,26 +475,41 @@ O arquivo de snippets segue o formato VS Code:
 
 ## Código da Extensão (main.js)
 
-Se a extensão tem `"main": "main.js"`, o arquivo deve exportar `activate()` e opcionalmente `deactivate()`:
+Se a extensão tem `"main": "main.js"`, o arquivo deve exportar `activate()` e opcionalmente `deactivate()`.
+
+> **⚠️ Importante:** Use `export async function activate(...)` sempre que precisar de `await` (terminal, process, UI inputs). Funções síncronas não suportam `await`.
 
 ```javascript
-// main.js — Usa ESM (export/import)
+// main.js — Usa ESM (export/import), sempre async se usar APIs assíncronas
 
-export function activate(context) {
+export async function activate(context) {
   // context.extensionName   → nome da extensão
   // context.extensionPath   → caminho no disco
   // context.subscriptions   → array de Disposables (limpos no deactivate)
   // context.globalState     → armazenamento persistente (key-value)
   // context.workspaceState  → armazenamento por workspace
+  // context._api            → objeto HyscodeAPI completo (use isso!)
+
+  // Obter a API — SEMPRE use context._api como fonte primária
+  const api = context._api || globalThis.hyscode;
+  if (!api) return;
 
   console.log(`${context.extensionName} ativada!`);
-
-  // O objeto HysCode API é recebido como segundo argumento (ou via context)
 }
 
 export function deactivate() {
   console.log('Extensão desativada');
 }
+```
+
+### Como obter a API
+
+```javascript
+// ✅ Correto — context._api é a fonte primária
+const api = context._api || globalThis.hyscode;
+
+// ❌ Errado — segundo argumento NÃO é mais a API (legado)
+export function activate(context, api) { ... }
 ```
 
 ---
@@ -524,41 +540,49 @@ context.subscriptions.push(sub);
 ### commands — Comandos
 
 ```javascript
-// Registrar comando
-const cmd = hyscode.commands.registerCommand('ext.hello', () => {
-  hyscode.window.showInformationMessage('Olá!');
+// Registrar handler de comando (use a mesma id do extension.json)
+const cmd = api.commands.register('ext.hello', () => {
+  api.notifications.showInfo('Olá!');
 });
 context.subscriptions.push(cmd);
 
-// Executar comando
-await hyscode.commands.executeCommand('ext.hello');
+// Alias equivalente
+const cmd2 = api.commands.registerCommand('ext.hello', () => { ... });
 
-// Listar comandos
-const todos = hyscode.commands.getCommands();
+// Executar outro comando programaticamente
+await api.commands.executeCommand('ext.hello');
 ```
+
+> **⚠️ Para aparecer na Paleta de Comandos, o comando precisa ser declarado em DOIS lugares:**
+> 1. `contributes.commands` no `extension.json` — define título e categoria
+> 2. `api.commands.register(id, handler)` no `main.js` — define o que executa
+>
+> Falta qualquer um dos dois = comando não aparece ou não executa.
+
+Veja o [Guia Completo de Comandos](#comandos-na-paleta--guia-completo) para exemplos detalhados.
 
 ### window — UI e Mensagens
 
 ```javascript
-// Mensagens
-await hyscode.window.showInformationMessage('Info');
-await hyscode.window.showWarningMessage('Aviso');
-await hyscode.window.showErrorMessage('Erro');
-
-// Mensagem com ações
-const escolha = await hyscode.window.showInformationMessage(
-  'Deseja continuar?', 'Sim', 'Não'
+// Quick Pick (seletor de opções)
+const item = await api.window.showQuickPick(
+  [
+    { label: 'Opção A', value: 'a', description: 'Descrição A' },
+    { label: 'Opção B', value: 'b' },
+  ],
+  { title: 'Escolha uma opção', placeHolder: 'Digite para filtrar...' }
 );
+if (!item) return; // usuário cancelou (Esc)
+console.log(item.value); // 'a' ou 'b'
 
-// Status bar
-const item = hyscode.window.createStatusBarItem({
-  id: 'ext.item',
-  text: 'Meu Item',
-  tooltip: 'Clique aqui',
-  command: 'ext.hello',
-  alignment: 'right',
-  priority: 100,
+// Input Box (campo de texto)
+const nome = await api.window.showInputBox({
+  title: 'Nome do projeto',
+  prompt: 'Informe o nome',
+  placeHolder: 'MeuProjeto',
+  value: '',
 });
+if (!nome) return; // usuário cancelou
 ```
 
 ### editor — Editor de Código
@@ -714,31 +738,129 @@ export function activate(context, api) {
 
 ### notifications — Notificações
 
-```javascript
-// Notificações simples
-hyscode.notifications.info('Operação concluída');
-hyscode.notifications.warning('Cuidado');
-hyscode.notifications.error('Falha na operação');
+Notificações aparecem como **toasts** no canto inferior direito do IDE.
 
-// Progresso
-const reporter = hyscode.notifications.progress('Processando...');
-reporter.report(50); // 50%
-reporter.done();
+```javascript
+// Toast de informação (azul)
+api.notifications.showInfo('Operação concluída');
+
+// Toast de aviso (amarelo)
+api.notifications.showWarning('Atenção: nenhum arquivo aberto');
+
+// Toast de erro (vermelho)
+api.notifications.showError('Falha: dotnet não encontrado');
+
+// Progresso assíncrono
+api.notifications.showProgress('Compilando...', async (reporter) => {
+  reporter.report({ message: 'Lendo arquivos...' });
+  await compilar();
+});
 ```
+
+> **⚠️ Métodos corretos:** `showInfo()`, `showWarning()`, `showError()`.
+> Os nomes `info()`, `warning()`, `error()` **não existem** na API atual.
+
+### terminal — Terminal Integrado
+
+Envia comandos para o terminal embutido do IDE. O painel do terminal abre automaticamente.
+
+```javascript
+// Enviar comando ao terminal ativo (abre terminal se necessário)
+await api.terminal.sendToActive('dotnet build');
+await api.terminal.sendToActive('npm install');
+await api.terminal.sendToActive('git status');
+```
+
+- Se já existe uma sessão de terminal aberta, o comando é enviado a ela.
+- Se não existe, uma nova sessão **"Extension Terminal"** é criada na pasta do projeto.
+- O painel do terminal é exibido automaticamente.
+- Há uma espera automática para o shell inicializar antes de enviar o comando.
+
+> **⚠️ `sendToActive` só envia o texto ao terminal — não captura saída.** Para capturar output de um programa, use `api.process.exec()`.
+
+---
+
+### process — Executar Programas
+
+Executa um programa em background (sem terminal visível) e captura a saída.
+
+```javascript
+// Executar programa e capturar stdout
+try {
+  const output = await api.process.exec('dotnet', ['new', 'list']);
+  console.log(output);
+} catch (err) {
+  // err contém stderr + mensagem de erro
+  api.notifications.showError(`Falha: ${err}`);
+}
+
+// Com diretório de trabalho específico
+const output = await api.process.exec(
+  'git', ['log', '--oneline', '-5'],
+  '/caminho/do/repo'
+);
+```
+
+**Diferença entre `terminal.sendToActive` e `process.exec`:**
+
+| | `terminal.sendToActive` | `process.exec` |
+|--|------------------------|----------------|
+| Visível ao usuário | ✅ Sim (no painel) | ❌ Não (background) |
+| Captura saída | ❌ Não | ✅ Sim (string) |
+| Uso ideal | Comandos de build/run | Consultas, listagens |
+
+---
+
+### editor — Editor de Código
+
+```javascript
+// Abrir arquivo
+await api.editor.openFile('/caminho/arquivo.ts');
+
+// Obter seleção
+const sel = api.editor.getSelection();
+
+// Inserir texto
+await api.editor.insertText('texto inserido');
+```
+
+---
+
+### themes — Temas
+
+```javascript
+// Registrar tema programaticamente
+const tema = api.themes.registerTheme({
+  id: 'meu-tema',
+  label: 'Meu Tema',
+  type: 'dark',
+  colors: { 'editor.background': '#1a1a2e' },
+  tokenColors: [
+    { scope: 'keyword', settings: { foreground: '#e94560' } }
+  ],
+});
+
+// Obter tema ativo
+const ativo = api.themes.getActiveThemeId();
+```
+
+---
 
 ### Tabela Resumo de APIs
 
 | API | Métodos Principais |
 |-----|-------------------|
 | `workspace` | `readFile()`, `writeFile()`, `listDir()`, `onDidOpenFile()`, `onDidSaveFile()` |
-| `commands` | `registerCommand()`, `executeCommand()`, `getCommands()` |
-| `window` | `showInformationMessage()`, `showWarningMessage()`, `showErrorMessage()`, `createStatusBarItem()` |
+| `commands` | `register()`, `registerCommand()`, `executeCommand()` |
+| `window` | `showQuickPick()`, `showInputBox()` |
 | `editor` | `openFile()`, `getSelection()`, `insertText()`, `addDecoration()` |
 | `settings` | `get()`, `set()`, `onDidChange()`, `updateTabContent()`, `onTabVisible()` |
 | `git` | `getBranch()`, `getStatus()`, `getDiff()` |
 | `themes` | `registerTheme()`, `getActiveThemeId()` |
 | `languages` | `registerLanguage()`, `registerLanguageServer()`, `setLanguageDiagnostics()` |
-| `notifications` | `info()`, `warning()`, `error()`, `progress()` |
+| `notifications` | `showInfo()`, `showWarning()`, `showError()`, `showProgress()` |
+| `terminal` | `sendToActive()` |
+| `process` | `exec()` |
 | `extensions` | `getAll()`, `getExtension()` |
 
 ---
@@ -1015,6 +1137,152 @@ Instalação → Carregamento → Ativação → Execução → Desativação �
 
 ---
 
+## Comandos na Paleta — Guia Completo
+
+Para um comando aparecer na Paleta de Comandos (`Ctrl+Shift+P`) **e** executar algo, são necessários **3 passos obrigatórios**.
+
+### Passo 1: Declarar em `extension.json`
+
+```json
+{
+  "contributes": {
+    "commands": [
+      {
+        "command": "minha-ext.fazerAlgo",
+        "title": "Fazer Algo",
+        "category": "Minha Extensão"
+      }
+    ],
+    "menus": {
+      "commandPalette": [
+        { "command": "minha-ext.fazerAlgo" }
+      ]
+    }
+  }
+}
+```
+
+- `command` — ID único. Use `publisher.ação` para evitar conflitos.
+- `title` — Texto exibido na paleta.
+- `category` — Prefixo exibido como `Categoria: Título`.
+- A entrada em `menus.commandPalette` é obrigatória para o comando aparecer na paleta.
+
+### Passo 2: Registrar handler em `main.js`
+
+```javascript
+async function activate(context) {
+  // Sempre use context._api para acessar a API
+  const api = context._api || globalThis.hyscode;
+
+  // O ID deve ser IDÊNTICO ao declarado no extension.json
+  const cmd = api.commands.register('minha-ext.fazerAlgo', async () => {
+    const nome = await api.window.showInputBox({
+      title: 'Nome',
+      prompt: 'Digite o nome',
+      placeHolder: 'ex: MeuProjeto',
+    });
+
+    if (!nome) return; // usuário cancelou
+
+    api.notifications.showInfo(`Criando ${nome}...`);
+
+    try {
+      await api.terminal.sendToActive(`echo Olá, ${nome}`);
+      api.notifications.showInfo(`Concluído: ${nome}`);
+    } catch (err) {
+      api.notifications.showError(`Erro: ${err}`);
+    }
+  });
+
+  context.subscriptions.push(cmd);
+}
+
+function deactivate() {}
+
+module.exports = { activate, deactivate };
+```
+
+### Passo 3: Declarar `activationEvents`
+
+```json
+{
+  "activationEvents": ["onCommand:minha-ext.fazerAlgo"]
+}
+```
+
+Sem `activationEvents`, o `activate` nunca é chamado e o handler nunca é registrado.
+
+### Checklist: Por que meu comando não funciona?
+
+| Problema | Causa | Solução |
+|---------|-------|---------|
+| Comando não aparece na paleta | Falta `contributes.commands` ou `contributes.menus.commandPalette` | Adicionar ambos no `extension.json` |
+| Comando aparece mas não faz nada | `api.commands.register()` não foi chamado no `main.js` | Registrar handler com ID idêntico |
+| Handler nunca executado | `activationEvents` ausente ou ID errado | Adicionar `onCommand:id` em `activationEvents` |
+| `api` é undefined | Usando `context` diretamente | Usar `context._api || globalThis.hyscode` |
+| Terminal abre mas vazio | Race condition (terminal abriu antes do PTY) | `sendToActive` já trata isso automaticamente |
+| Função async necessária | `await` sem `async` | Declarar `activate` como `async function` |
+
+### Exemplo Completo: Criar Arquivo
+
+**`extension.json`:**
+```json
+{
+  "name": "exemplo-criar-arquivo",
+  "version": "0.1.0",
+  "activationEvents": ["onCommand:exemplo.criarArquivo"],
+  "contributes": {
+    "commands": [
+      {
+        "command": "exemplo.criarArquivo",
+        "title": "Criar Arquivo de Texto",
+        "category": "Exemplo"
+      }
+    ],
+    "menus": {
+      "commandPalette": [
+        { "command": "exemplo.criarArquivo" }
+      ]
+    }
+  },
+  "main": "main.js"
+}
+```
+
+**`main.js`:**
+```javascript
+async function activate(context) {
+  const api = context._api || globalThis.hyscode;
+
+  const cmd = api.commands.register('exemplo.criarArquivo', async () => {
+    const nome = await api.window.showInputBox({
+      title: 'Novo Arquivo',
+      prompt: 'Nome do arquivo',
+      placeHolder: 'notas.txt',
+    });
+
+    if (!nome) return;
+
+    api.notifications.showInfo(`Criando ${nome}...`);
+
+    try {
+      const root = context.extensionPath || '.';
+      await api.workspace.writeFile(`${root}/${nome}`, '');
+      api.notifications.showInfo(`Arquivo criado: ${nome}`);
+    } catch (err) {
+      api.notifications.showError(`Falha ao criar arquivo: ${err}`);
+    }
+  });
+
+  context.subscriptions.push(cmd);
+}
+
+function deactivate() {}
+module.exports = { activate, deactivate };
+```
+
+---
+
 ## Boas Práticas
 
 1. **Nome único** — Use prefixo do publisher: `publisher-nome-extensao`
@@ -1040,11 +1308,17 @@ Veja as extensões de exemplo no repositório:
 
 ## Solução de Problemas
 
-| Problema | Solução |
-|----------|---------|
-| "No extension.json found" | Verifique que o manifesto está na raiz da pasta/zip |
-| "Invalid extension name" | Use apenas letras, números, hífens e underscores |
-| Extensão não aparece | Verifique `~/.hyscode/extensions/` e `extension-state.json` |
-| Tema não aplica | Verifique que `themes[].path` aponta para arquivo válido |
-| Snippets não funcionam | Verifique que `snippets[].language` corresponde ao ID da linguagem |
-| Comando não encontrado | Verifique que o comando está registrado em `contributes.commands` E no `main.js` |
+| Problema | Causa Provável | Solução |
+|----------|---------------|---------|
+| "No extension.json found" | Manifesto ausente ou em subpasta | Coloque `extension.json` na raiz da pasta/zip |
+| "Invalid extension name" | Nome com caracteres inválidos | Use apenas letras, números, hífens e underscores |
+| Extensão não aparece | Pasta não reconhecida | Verifique `~/.hyscode/extensions/` e `extension-state.json` |
+| Tema não aplica | Path incorreto | Verifique que `themes[].path` aponta para arquivo `.json` válido |
+| Snippets não funcionam | Language ID errado | Verifique que `snippets[].language` corresponde ao ID da linguagem |
+| Comando não aparece na paleta | Falta declaração ou menu | Adicione em `contributes.commands` E em `contributes.menus.commandPalette` |
+| Comando aparece mas não executa | Handler não registrado | Chame `api.commands.register(id, fn)` no `main.js` com ID idêntico |
+| Handler nunca chamado | `activationEvents` ausente | Adicione `"onCommand:seu.comando"` em `activationEvents` |
+| `api` ou `api.terminal` undefined | Padrão de acesso errado | Use `const api = context._api \|\| globalThis.hyscode` |
+| Terminal abre mas sem comando | PTY não inicializado | Use `api.terminal.sendToActive()` — trata race condition automaticamente |
+| Erro TypeScript em `activate` | `await` sem `async` | Declare `async function activate(context)` |
+| `dotnet new <template>` falha | Template/workload não instalado | Verifique com `dotnet new list <template>` e instale o workload necessário |

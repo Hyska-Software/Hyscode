@@ -42,6 +42,8 @@ import { useExtensionSettingsStore } from '../stores/extension-settings-store';
 import { useCommandStore } from '../stores/command-store';
 import { useKeybindingStore } from '../stores/keybinding-store';
 import { useViewRegistryStore } from '../stores/view-registry-store';
+import { useTerminalStore } from '../stores/terminal-store';
+import { useLayoutStore } from '../stores/layout-store';
 import type { InstalledExtension } from '../stores/extension-store';
 
 // ── Singleton sandbox ────────────────────────────────────────────────────────
@@ -268,9 +270,15 @@ const _api: HyscodeAPI = {
   },
 
   notifications: {
-    showInfo(message: string): void { console.info(`[Extension] ${message}`); },
-    showWarning(message: string): void { console.warn(`[Extension] ${message}`); },
-    showError(message: string): void { console.error(`[Extension] ${message}`); },
+    showInfo(message: string): void {
+      useExtensionUiStore.getState().showNotification('info', message);
+    },
+    showWarning(message: string): void {
+      useExtensionUiStore.getState().showNotification('warning', message);
+    },
+    showError(message: string): void {
+      useExtensionUiStore.getState().showNotification('error', message);
+    },
     showProgress(_title: string, task): void {
       task({ report() {} }).catch(console.error);
     },
@@ -311,6 +319,52 @@ const _api: HyscodeAPI = {
     },
     async showInputBox(options?: InputBoxOptions): Promise<string | undefined> {
       return useExtensionUiStore.getState().showInputBox(options);
+    },
+  },
+
+  terminal: {
+    async sendToActive(command: string): Promise<void> {
+      const termStore = useTerminalStore.getState();
+      const rootPath = useProjectStore.getState().rootPath;
+
+      // Try active session first, then any live non-agent session
+      let session =
+        termStore.sessions.find(
+          (s) => s.id === termStore.activeSessionId && !s.isDead && s.ptyId,
+        ) ??
+        termStore.sessions.find((s) => !s.isAgentSession && !s.isDead && s.ptyId);
+
+      let ptyId = session?.ptyId ?? null;
+      let isNewPty = false;
+
+      // No live session — spawn PTY FIRST, then show terminal so the component
+      // reuses our ptyId instead of creating a second shell (race-condition fix).
+      if (!ptyId) {
+        const sessionId = termStore.createSession('Extension Terminal', false, rootPath ?? undefined);
+        ptyId = await invoke<string>('pty_spawn', {
+          shell: null,
+          cwd: rootPath ?? null,
+          env: null,
+        });
+        termStore.setPtyId(sessionId, ptyId);
+        isNewPty = true;
+      }
+
+      // Show terminal panel AFTER ptyId is registered so the component sees it
+      useLayoutStore.getState().setTerminalVisible(true);
+
+      // Wait for shell to initialize before writing command
+      if (isNewPty) {
+        await new Promise<void>((resolve) => setTimeout(resolve, 1500));
+      }
+
+      await invoke('pty_write', { ptyId, data: command + '\r' });
+    },
+  },
+
+  process: {
+    async exec(program: string, args: string[], cwd?: string): Promise<string> {
+      return invoke<string>('shell_exec', { program, args, cwd: cwd ?? null });
     },
   },
 };

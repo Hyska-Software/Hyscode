@@ -20,6 +20,13 @@ import type {
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
+export interface ExtensionNotification {
+  id: string;
+  type: 'info' | 'warning' | 'error';
+  message: string;
+  title?: string;
+}
+
 interface RegisteredItem<T> {
   extensionName: string;
   item: T;
@@ -52,6 +59,9 @@ interface ExtensionUiState {
     prompt?: string;
     resolve?: (value: string | undefined) => void;
   };
+
+  /** Toast notifications from extensions */
+  notifications: ExtensionNotification[];
 
   // ── Mutation helpers (called from extension-loader) ──────────────────────
 
@@ -89,6 +99,12 @@ interface ExtensionUiState {
   /** Resolve input box (called from UI) */
   resolveInputBox: (value: string | undefined) => void;
 
+  /** Show a toast notification, returns its id */
+  showNotification: (type: ExtensionNotification['type'], message: string, title?: string) => string;
+
+  /** Dismiss a toast by id */
+  dismissNotification: (id: string) => void;
+
   /** Get formatters matching a language */
   getFormattersForLanguage: (languageId: string) => RegisteredItem<DocumentFormatter>[];
 }
@@ -105,6 +121,7 @@ export const useExtensionUiStore = create<ExtensionUiState>()(
     settingsTabContents: {},
     quickPick: { visible: false, items: [] },
     inputBox: { visible: false },
+    notifications: [],
 
     addContextMenuItem: (extensionName, item) => {
       set((s) => {
@@ -257,6 +274,20 @@ export const useExtensionUiStore = create<ExtensionUiState>()(
       resolve?.(value);
       set((s) => {
         s.inputBox = { visible: false, resolve: undefined };
+      });
+    },
+
+    showNotification: (type, message, title) => {
+      const id = Math.random().toString(36).slice(2);
+      set((s) => {
+        s.notifications.push({ id, type, message, title });
+      });
+      return id;
+    },
+
+    dismissNotification: (id) => {
+      set((s) => {
+        s.notifications = s.notifications.filter((n) => n.id !== id);
       });
     },
 
