@@ -81,6 +81,7 @@ interface SettingsState {
   // ─ Theme ─
   themeId: ThemeId;
   iconThemeId: string;
+  disableRoundedBorders: boolean;
 
   // ─ Editor ─
   fontSize: number;
@@ -252,6 +253,7 @@ export const useSettingsStore = create<SettingsState>()(
       // Theme
       themeId: 'hyscode-dark',
       iconThemeId: 'default',
+      disableRoundedBorders: false,
 
       // Editor
       fontSize: 14,

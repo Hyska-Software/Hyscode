@@ -127,6 +127,13 @@ function useThemeEffect() {
   }, [themeId]);
 }
 
+function useRoundedBordersEffect() {
+  const disable = useSettingsStore((s) => s.disableRoundedBorders);
+  useEffect(() => {
+    document.documentElement.classList.toggle('disable-rounded-borders', disable);
+  }, [disable]);
+}
+
 function IDE() {
   const projectRootPath = useProjectStore((s) => s.rootPath);
   const fileRootPath = useFileStore((s) => s.rootPath);
@@ -139,6 +146,7 @@ function IDE() {
   const workspaceMode = useLayoutStore((s) => s.workspaceMode);
 
   useThemeEffect();
+  useRoundedBordersEffect();
 
   // On mount: if fileStore is empty but projectStore has a path (from persistence),
   // reload the directory tree and restore per-project state

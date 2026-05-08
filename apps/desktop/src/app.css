@@ -123,6 +123,19 @@ body {
   --radius-4xl: calc(var(--radius) * 2.6);
 }
 
+.disable-rounded-borders {
+  --radius: 0 !important;
+  --radius-pill: 0 !important;
+}
+
+.disable-rounded-borders * {
+  border-radius: 0 !important;
+}
+
+.disable-rounded-borders ::-webkit-scrollbar-thumb {
+  border-radius: 0 !important;
+}
+
 /*
    ---break---
    */
