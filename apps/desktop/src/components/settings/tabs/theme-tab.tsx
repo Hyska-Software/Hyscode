@@ -322,6 +322,28 @@ export function ThemeTab() {
         Choose a color theme for the entire application. Changes apply immediately.
       </p>
 
+      {/* ── Rounded Borders Toggle ────────────────────────────────── */}
+      <div className="flex items-center justify-between gap-4 rounded-lg bg-surface-raised px-3 py-2.5">
+        <div className="flex flex-col">
+          <span className="text-[12px] text-foreground">Disable Rounded Borders</span>
+          <span className="text-[10px] text-muted-foreground">
+            Remove all rounded corners for a sharper, squared-off UI
+          </span>
+        </div>
+        <button
+          onClick={() => store.set('disableRoundedBorders', !store.disableRoundedBorders)}
+          className={`relative h-5 w-9 shrink-0 rounded-full transition-colors ${
+            store.disableRoundedBorders ? 'bg-accent' : 'bg-muted'
+          }`}
+        >
+          <span
+            className={`absolute top-0.5 left-0.5 h-4 w-4 rounded-full bg-foreground transition-transform ${
+              store.disableRoundedBorders ? 'translate-x-4' : 'translate-x-0'
+            }`}
+          />
+        </button>
+      </div>
+
       <div className="grid grid-cols-2 gap-3">
         {THEMES.map((theme) => (
           <ThemeCard
@@ -388,29 +410,6 @@ export function ThemeTab() {
         </div>
       </div>
 
-      {/* ── Rounded Borders Toggle ────────────────────────────────── */}
-      <div className="mt-4 border-t border-border pt-4">
-        <div className="flex items-center justify-between gap-4 rounded-lg bg-surface-raised px-3 py-2.5">
-          <div className="flex flex-col">
-            <span className="text-[12px] text-foreground">Disable Rounded Borders</span>
-            <span className="text-[10px] text-muted-foreground">
-              Remove all rounded corners for a sharper, squared-off UI
-            </span>
-          </div>
-          <button
-            onClick={() => store.set('disableRoundedBorders', !store.disableRoundedBorders)}
-            className={`relative h-5 w-9 shrink-0 rounded-full transition-colors ${
-              store.disableRoundedBorders ? 'bg-accent' : 'bg-muted'
-            }`}
-          >
-            <span
-              className={`absolute top-0.5 left-0.5 h-4 w-4 rounded-full bg-foreground transition-transform ${
-                store.disableRoundedBorders ? 'translate-x-4' : 'translate-x-0'
-              }`}
-            />
-          </button>
-        </div>
-      </div>
     </div>
   );
 }
