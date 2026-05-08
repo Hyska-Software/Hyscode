@@ -1,10 +1,12 @@
 import { useSettingsStore } from '../../../stores';
 import type { ApprovalMode, UpdateChannel } from '../../../stores/settings-store';
 import { useUpdateStore } from '../../../stores/update-store';
-import { Loader2, CheckCircle, ArrowUpCircle, RefreshCw } from 'lucide-react';
+import { useOnboardingStore } from '../../../stores/onboarding-store';
+import { Loader2, CheckCircle, ArrowUpCircle, RefreshCw, RotateCcw } from 'lucide-react';
 
 export function GeneralTab() {
   const store = useSettingsStore();
+  const resetOnboarding = useOnboardingStore((s) => s.resetOnboarding);
   const updateStatus = useUpdateStore((s) => s.status);
   const releaseInfo = useUpdateStore((s) => s.releaseInfo);
   const checkForUpdates = useUpdateStore((s) => s.checkForUpdates);
@@ -201,6 +203,24 @@ export function GeneralTab() {
             onChange={(v) => store.set('agentCenterPanelMode', v ? 'terminal' : 'chat')}
           />
         </Row>
+      </Section>
+
+      <Section title="Onboarding">
+        <div className="flex items-center justify-between rounded-lg bg-surface-raised px-3 py-2.5">
+          <div className="flex flex-col gap-0.5">
+            <span className="text-[12px] text-foreground">Restart Setup Wizard</span>
+            <span className="text-[10px] text-muted-foreground">
+              Re-run the onboarding wizard to reconfigure theme, AI provider and editor preferences
+            </span>
+          </div>
+          <button
+            onClick={resetOnboarding}
+            className="flex items-center gap-1.5 rounded-md bg-surface px-2.5 py-1 text-[11px] font-medium text-foreground hover:bg-muted transition-colors border border-border"
+          >
+            <RotateCcw className="h-3 w-3" />
+            Redo Onboarding
+          </button>
+        </div>
       </Section>
     </div>
   );

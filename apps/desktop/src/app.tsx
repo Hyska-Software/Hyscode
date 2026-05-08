@@ -2,6 +2,7 @@ import { TitleBar } from './components/titlebar';
 import { StatusBar } from './components/statusbar';
 import { WelcomePage } from './components/welcome';
 import { SettingsModal } from './components/settings';
+import { OnboardingWizard } from './components/onboarding';
 import { ExtensionOverlays } from './components/editor/extension-overlays';
 import { CommandPalette, openCommandPalette } from './components/editor/command-palette';
 import { TooltipProvider } from './components/ui/tooltip';
@@ -17,6 +18,7 @@ import { useKeybindingStore } from './stores/keybinding-store';
 import { useGitStore } from './stores/git-store';
 import { useTerminalStore } from './stores/terminal-store';
 import { useUpdateStore } from './stores/update-store';
+import { useOnboardingStore } from './stores/onboarding-store';
 import { useEffect, useRef, useCallback } from 'react';
 import { pickFolder, pickFile } from './lib/tauri-dialog';
 import { initProviders } from './lib/init-providers';
@@ -259,6 +261,7 @@ export function App() {
   const openUntitled = useEditorStore((s) => s.openUntitled);
   const openTab = useEditorStore((s) => s.openTab);
   const closeTab = useEditorStore((s) => s.closeTab);
+  const hasCompletedOnboarding = useOnboardingStore((s) => s.hasCompletedOnboarding);
 
   // Project lifecycle: open a new project with state save/restore
   const handleOpenProject = useCallback(async (path: string) => {
@@ -648,6 +651,7 @@ export function App() {
 
   return (
     <TooltipProvider>
+      {!hasCompletedOnboarding && <OnboardingWizard />}
       {!rootPath ? <WelcomePage /> : <IDE />}
       <DialogProvider />
     </TooltipProvider>

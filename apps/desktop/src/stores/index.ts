@@ -14,3 +14,4 @@ export { useDeviceStore } from './device-store';
 export { useDockerStore } from './docker-store';
 export { useCommandStore } from './command-store';
 export { useKeybindingStore } from './keybinding-store';
+export { useOnboardingStore } from './onboarding-store';
