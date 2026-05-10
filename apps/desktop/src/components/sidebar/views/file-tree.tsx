@@ -14,6 +14,7 @@ import {
   FolderSearch,
   Files,
   History,
+  Database,
 } from 'lucide-react';
 import { useFileStore, useEditorStore, useGitStore } from '../../../stores';
 import { useLayoutStore } from '../../../stores/layout-store';
@@ -997,6 +998,13 @@ export function FileTree() {
     setHistoryModalPath(node.path);
   };
 
+  const handleOpenAsSchemaViewer = () => {
+    if (!contextMenu?.node || contextMenu.node.isDir) return;
+    const node = contextMenu.node;
+    setContextMenu(null);
+    useEditorStore.getState().openDbSchemaTab(node.path);
+  };
+
   // ── Create / Rename submit ─────────────────────────────────────────────────
 
   const handleRenameSubmit = async (node: FileNode, newName: string) => {
@@ -1127,6 +1135,9 @@ export function FileTree() {
                 <>
                   <ContextMenuSeparator />
                   <ContextMenuItem icon={History} label="View History" onClick={handleViewHistory} />
+                  {['sql', 'prisma', 'db', 'sqlite', 'sqlite3'].includes(contextMenu.node?.name.split('.').pop()?.toLowerCase() ?? '') && (
+                    <ContextMenuItem icon={Database} label="Open in Schema Canvas" onClick={handleOpenAsSchemaViewer} />
+                  )}
                 </>
               )}
             </>

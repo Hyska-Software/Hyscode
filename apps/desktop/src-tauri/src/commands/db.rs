@@ -26,6 +26,8 @@ pub fn open_database(app_dir: &std::path::Path) -> Connection {
         .expect("failed to run migration 005");
     conn.execute_batch(include_str!("../../migrations/006_file_history.sql"))
         .expect("failed to run migration 006");
+    conn.execute_batch(include_str!("../../migrations/007_diagrams.sql"))
+        .expect("failed to run migration 007");
     conn
 }
 
@@ -721,3 +723,197 @@ pub fn file_history_clear(
         .map_err(|e| e.to_string())?;
     Ok(())
 }
+
+// ─── Diagram CRUD commands ──────────────────────────────────────────────────
+
+#[derive(Serialize)]
+pub struct DiagramRow {
+    pub id: String,
+    pub project_id: String,
+    pub name: String,
+    pub content: String,
+    pub source_file: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[tauri::command]
+pub fn db_list_diagrams(
+    state: State<'_, DbState>,
+    project_id: String,
+) -> Result<Vec<DiagramRow>, String> {
+    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, project_id, name, content, source_file, created_at, updated_at
+             FROM diagrams WHERE project_id = ?1 ORDER BY updated_at DESC",
+        )
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map(params![project_id], |row| {
+            Ok(DiagramRow {
+                id: row.get(0)?,
+                project_id: row.get(1)?,
+                name: row.get(2)?,
+                content: row.get(3)?,
+                source_file: row.get(4)?,
+                created_at: row.get(5)?,
+                updated_at: row.get(6)?,
+            })
+        })
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+    Ok(rows)
+}
+
+#[tauri::command]
+pub fn db_get_diagram(
+    state: State<'_, DbState>,
+    id: String,
+) -> Result<DiagramRow, String> {
+    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    conn.query_row(
+        "SELECT id, project_id, name, content, source_file, created_at, updated_at
+         FROM diagrams WHERE id = ?1",
+        params![id],
+        |row| Ok(DiagramRow {
+            id: row.get(0)?,
+            project_id: row.get(1)?,
+            name: row.get(2)?,
+            content: row.get(3)?,
+            source_file: row.get(4)?,
+            created_at: row.get(5)?,
+            updated_at: row.get(6)?,
+        }),
+    )
+    .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn db_save_diagram(
+    state: State<'_, DbState>,
+    id: String,
+    project_id: String,
+    name: String,
+    content: String,
+    source_file: Option<String>,
+) -> Result<(), String> {
+    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    conn.execute(
+        "INSERT INTO diagrams (id, project_id, name, content, source_file, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, datetime('now'), datetime('now'))
+         ON CONFLICT(id) DO UPDATE SET
+             name = excluded.name,
+             content = excluded.content,
+             source_file = excluded.source_file,
+             updated_at = datetime('now')",
+        params![id, project_id, name, content, source_file],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn db_delete_diagram(
+    state: State<'_, DbState>,
+    id: String,
+) -> Result<(), String> {
+    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    conn.execute("DELETE FROM diagrams WHERE id = ?1", params![id])
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+// ─── Schema extraction from SQLite ─────────────────────────────────────────
+
+#[derive(Serialize)]
+pub struct ExtractedColumn {
+    pub cid: i64,
+    pub name: String,
+    pub col_type: String,
+    pub not_null: bool,
+    pub default_value: Option<String>,
+    pub is_pk: bool,
+}
+
+#[derive(Serialize)]
+pub struct ExtractedForeignKey {
+    pub id: i64,
+    pub seq: i64,
+    pub to_table: String,
+    pub from_col: String,
+    pub to_col: String,
+}
+
+#[derive(Serialize)]
+pub struct ExtractedTable {
+    pub name: String,
+    pub columns: Vec<ExtractedColumn>,
+    pub foreign_keys: Vec<ExtractedForeignKey>,
+}
+
+#[tauri::command]
+pub fn db_extract_schema(db_path: String) -> Result<Vec<ExtractedTable>, String> {
+    let conn = Connection::open(&db_path).map_err(|e| e.to_string())?;
+
+    // Get list of user tables (exclude sqlite_ internals)
+    let mut stmt = conn
+        .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name")
+        .map_err(|e| e.to_string())?;
+    let table_names: Vec<String> = stmt
+        .query_map([], |row| row.get(0))
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+
+    let mut tables: Vec<ExtractedTable> = Vec::new();
+
+    for tbl in &table_names {
+        // PRAGMA table_info
+        let mut ci_stmt = conn
+            .prepare(&format!("PRAGMA table_info(\"{}\")", tbl))
+            .map_err(|e| e.to_string())?;
+        let columns: Vec<ExtractedColumn> = ci_stmt
+            .query_map([], |row| {
+                Ok(ExtractedColumn {
+                    cid: row.get(0)?,
+                    name: row.get(1)?,
+                    col_type: row.get(2)?,
+                    not_null: row.get::<_, i64>(3)? != 0,
+                    default_value: row.get(4)?,
+                    is_pk: row.get::<_, i64>(5)? != 0,
+                })
+            })
+            .map_err(|e| e.to_string())?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())?;
+
+        // PRAGMA foreign_key_list
+        let mut fk_stmt = conn
+            .prepare(&format!("PRAGMA foreign_key_list(\"{}\")", tbl))
+            .map_err(|e| e.to_string())?;
+        let foreign_keys: Vec<ExtractedForeignKey> = fk_stmt
+            .query_map([], |row| {
+                Ok(ExtractedForeignKey {
+                    id: row.get(0)?,
+                    seq: row.get(1)?,
+                    to_table: row.get(2)?,
+                    from_col: row.get(3)?,
+                    to_col: row.get(4)?,
+                })
+            })
+            .map_err(|e| e.to_string())?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())?;
+
+        tables.push(ExtractedTable {
+            name: tbl.clone(),
+            columns,
+            foreign_keys,
+        });
+    }
+
+    Ok(tables)
+}
+

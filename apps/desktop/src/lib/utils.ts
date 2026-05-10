@@ -22,11 +22,17 @@ export type ViewerType =
   | 'pdf'
   | 'spreadsheet'
   | 'docx'
-  | 'pptx';
+  | 'pptx'
+  | 'db-schema';
 
 const VIEWER_MAP: Record<string, ViewerType> = {
   md: 'markdown',
   mdx: 'markdown',
+  sql: 'code',
+  prisma: 'code',
+  db: 'code',
+  sqlite: 'code',
+  sqlite3: 'code',
   png: 'image',
   jpg: 'image',
   jpeg: 'image',

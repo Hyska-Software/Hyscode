@@ -160,6 +160,12 @@ pub fn run() {
             commands::db::file_history_list,
             commands::db::file_history_get,
             commands::db::file_history_clear,
+            // Diagram commands
+            commands::db::db_list_diagrams,
+            commands::db::db_get_diagram,
+            commands::db::db_save_diagram,
+            commands::db::db_delete_diagram,
+            commands::db::db_extract_schema,
             // Notification commands
             commands::notifications::notify_agent_done,
             // Device management commands

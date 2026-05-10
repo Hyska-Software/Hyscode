@@ -10,7 +10,7 @@ export interface Tab {
   isDirty: boolean;
   isPinned: boolean;
   isPreview: boolean;
-  type: 'file' | 'diff' | 'terminal' | 'commit' | 'history' | 'release-notes' | 'extension-readme' | 'git-graph';
+  type: 'file' | 'diff' | 'terminal' | 'commit' | 'history' | 'release-notes' | 'extension-readme' | 'git-graph' | 'db-schema';
   viewerType: ViewerType;
   markdownMode?: 'preview' | 'code';
   diffProps?: {
@@ -39,6 +39,14 @@ export interface Tab {
   };
   /** Git graph props */
   gitGraphProps?: Record<string, never>;
+
+  /** DB Schema diagram props */
+  dbSchemaProps?: {
+    /** Source file path (.sql, .prisma, .ts) — null for blank diagrams */
+    sourceFile: string | null;
+    /** Diagram ID when loaded from persisted diagram */
+    diagramId?: string;
+  };
 
   /** Extension README details when type === 'extension-readme' */
   extensionReadmeProps?: {
@@ -69,6 +77,7 @@ interface EditorState {
   openCommitTab: (hash: string, shortHash: string, message: string) => void;
   openHistoryTab: (snapshotId: string, originalPath: string, timestamp: string, content: string) => void;
   openGitGraphTab: () => void;
+  openDbSchemaTab: (sourceFile?: string | null, diagramId?: string) => void;
   openReleaseNotesTab: (version: string, body: string) => void;
   openExtensionReadmeTab: (props: { extensionName: string; displayName: string; readmeContent: string; iconUrl?: string | null; version?: string; publisher?: string; description?: string; enabled?: boolean; categories?: string[]; activationEvents?: string[]; installedAt?: string; hasMain?: boolean; contributions?: { label: string; count: number }[] }) => void;
   closeTab: (id: string) => void;
@@ -231,6 +240,33 @@ export const useEditorStore = create<EditorState>()(
           type: 'git-graph',
           viewerType: 'code',
           gitGraphProps: {},
+        };
+        state.tabs.push(newTab);
+        state.activeTabId = id;
+      }),
+
+    openDbSchemaTab: (sourceFile?: string | null, diagramId?: string) =>
+      set((state) => {
+        const id = sourceFile ? `db-schema:${sourceFile}` : (diagramId ? `db-schema:diagram:${diagramId}` : 'db-schema:new');
+        const existing = state.tabs.find((t) => t.id === id);
+        if (existing) {
+          state.activeTabId = existing.id;
+          return;
+        }
+        const fileName = sourceFile
+          ? `Schema — ${sourceFile.split(/[\\/]/).pop() ?? sourceFile}`
+          : 'New Schema Diagram';
+        const newTab: Tab = {
+          id,
+          filePath: id,
+          fileName,
+          language: 'plaintext',
+          isDirty: false,
+          isPinned: false,
+          isPreview: false,
+          type: 'db-schema',
+          viewerType: 'db-schema',
+          dbSchemaProps: { sourceFile: sourceFile ?? null, diagramId },
         };
         state.tabs.push(newTab);
         state.activeTabId = id;

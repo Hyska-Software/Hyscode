@@ -24,6 +24,8 @@ interface TauriCommands {
   rename_path: { args: { from: string; to: string }; ret: void };
   create_directory: { args: { path: string }; ret: void };
   search_files: { args: { root: string; query: string; maxResults?: number }; ret: Array<{ path: string; line_number: number; line_content: string }> };
+  fs_watch: { args: { path: string }; ret: void };
+  fs_unwatch: { args: { path: string }; ret: void };
 
   // Git
   git_is_repo: { args: { path: string }; ret: boolean };
@@ -133,6 +135,13 @@ interface TauriCommands {
   db_get_open_tabs: { args: { projectId: string }; ret: Array<{ id: string; conversation_id: string | null; title: string; mode: string; tab_index: number }> };
   db_upsert_open_tab: { args: { id: string; projectId: string; conversationId: string | null; title: string; mode: string; tabIndex: number }; ret: void };
   db_remove_open_tab: { args: { id: string }; ret: void };
+
+  // Diagrams
+  db_list_diagrams: { args: { projectId: string }; ret: Array<{ id: string; project_id: string; name: string; content: string; source_file: string | null; created_at: string; updated_at: string }> };
+  db_get_diagram: { args: { id: string }; ret: { id: string; project_id: string; name: string; content: string; source_file: string | null; created_at: string; updated_at: string } };
+  db_save_diagram: { args: { id: string; projectId: string; name: string; content: string; sourceFile: string | null }; ret: void };
+  db_delete_diagram: { args: { id: string }; ret: void };
+  db_extract_schema: { args: { dbPath: string }; ret: Array<{ name: string; columns: Array<{ cid: number; name: string; col_type: string; not_null: boolean; default_value: string | null; is_pk: boolean }>; foreign_keys: Array<{ id: number; seq: number; to_table: string; from_col: string; to_col: string }> }> };
 
   // Notifications
   notify_agent_done: { args: { title: string; body: string }; ret: void };

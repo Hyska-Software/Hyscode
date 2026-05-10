@@ -18,6 +18,7 @@ import {
   DocxViewer,
   PptxViewer,
 } from './viewers';
+import { DbSchemaViewer } from './viewers/db-schema';
 import { ExtensionReadmeViewer } from './extension-readme-viewer';
 import { useEditorStore, useFileStore, useSettingsStore } from '../../stores';
 import { useAgentStore } from '../../stores/agent-store';
@@ -467,6 +468,8 @@ export function EditorArea() {
             <CommitTab hash={activeTab.commitProps.hash} />
           ) : activeTab.type === 'git-graph' ? (
             <GitGraphView />
+          ) : activeTab.type === 'db-schema' ? (
+            <DbSchemaViewer sourceFile={activeTab.dbSchemaProps?.sourceFile ?? null} />
           ) : activeTab.type === 'release-notes' && activeTab.releaseNotesProps ? (
             <MarkdownViewer
               content={activeTab.releaseNotesProps.body}
@@ -555,6 +558,8 @@ export function EditorArea() {
             <DocxViewer filePath={activeTab.filePath} />
           ) : activeTab.viewerType === 'pptx' ? (
             <PptxViewer filePath={activeTab.filePath} />
+          ) : activeTab.viewerType === 'db-schema' ? (
+            <DbSchemaViewer sourceFile={activeTab.filePath} />
           ) : loading ? (
             <EditorLoading />
           ) : (
