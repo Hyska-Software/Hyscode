@@ -17,6 +17,7 @@ import {
   SpreadsheetViewer,
   DocxViewer,
   PptxViewer,
+  DatabaseViewer,
 } from './viewers';
 import { DbSchemaViewer } from './viewers/db-schema';
 import { ExtensionReadmeViewer } from './extension-readme-viewer';
@@ -560,6 +561,8 @@ export function EditorArea() {
             <PptxViewer filePath={activeTab.filePath} />
           ) : activeTab.viewerType === 'db-schema' ? (
             <DbSchemaViewer sourceFile={activeTab.filePath} />
+          ) : activeTab.viewerType === 'db' ? (
+            <DatabaseViewer filePath={activeTab.filePath} />
           ) : loading ? (
             <EditorLoading />
           ) : (
