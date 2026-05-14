@@ -14,9 +14,10 @@ const builtinViewLabels: Record<BuiltinSidebarView, string> = {
   agent: 'Agent',
   devices: 'Devices',
   docker: 'Docker',
+  memories: 'Memories',
 };
 
-export type BuiltinSidebarView = 'files' | 'search' | 'git' | 'skills' | 'extensions' | 'agent' | 'devices' | 'docker';
+export type BuiltinSidebarView = 'files' | 'search' | 'git' | 'skills' | 'extensions' | 'agent' | 'devices' | 'docker' | 'memories';
 export type SidebarView = BuiltinSidebarView | (string & {});
 
 export function isBuiltinView(view: string): view is BuiltinSidebarView {

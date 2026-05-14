@@ -23,6 +23,7 @@ const VIEW_LABELS: Record<SidebarViewId, string> = {
   agent: 'Agent',
   devices: 'Devices',
   docker: 'Docker',
+  memories: 'Memories',
 };
 
 export function ViewMenu() {

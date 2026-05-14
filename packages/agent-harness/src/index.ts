@@ -41,6 +41,13 @@ export type {
   AgentTask,
   TurnRecord,
   EnvironmentContext,
+  // Memory system
+  Memory,
+  MemoryType,
+  MemoryStatus,
+  MemoryCreatedBy,
+  MemoryQuery,
+  MemoryExtraction,
 } from './types';
 export { DEFAULT_HARNESS_CONFIG, SAFE_TOOLS, DESTRUCTIVE_TOOLS, CATEGORY_RISK } from './types';
 
@@ -65,6 +72,11 @@ export { getAgentDefinition, getAllAgentDefinitions, getAgentTypes } from './age
 
 // ─── Tools ──────────────────────────────────────────────────────────────────
 export { getAllBuiltinTools } from './tools';
+
+// ─── Memory System ──────────────────────────────────────────────────────────
+export { MemoryManager } from './memory-manager';
+export { MemoryExtractor } from './memory-extractor';
+export { MemoryContextProvider } from './memory-context-provider';
 
 // ─── SDD Engine ─────────────────────────────────────────────────────────────
 export { SddEngine, PlanManager } from './sdd-engine';

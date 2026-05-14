@@ -28,6 +28,8 @@ pub fn open_database(app_dir: &std::path::Path) -> Connection {
         .expect("failed to run migration 006");
     conn.execute_batch(include_str!("../../migrations/007_diagrams.sql"))
         .expect("failed to run migration 007");
+    conn.execute_batch(include_str!("../../migrations/008_memories.sql"))
+        .expect("failed to run migration 008");
     conn
 }
 
@@ -823,6 +825,409 @@ pub fn db_delete_diagram(
     conn.execute("DELETE FROM diagrams WHERE id = ?1", params![id])
         .map_err(|e| e.to_string())?;
     Ok(())
+}
+
+// ─── Memory commands ────────────────────────────────────────────────────────
+
+#[derive(Serialize)]
+pub struct MemoryRow {
+    pub id: String,
+    pub project_id: Option<String>,
+    pub memory_type: String,
+    pub title: String,
+    pub content: String,
+    pub summary: String,
+    pub tags: String,
+    pub source_conversation_id: Option<String>,
+    pub relevance_score: f64,
+    pub access_count: i64,
+    pub last_accessed_at: Option<String>,
+    pub created_by: String,
+    pub status: String,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[tauri::command]
+pub fn db_create_memory(
+    state: State<'_, DbState>,
+    id: String,
+    project_id: Option<String>,
+    memory_type: String,
+    title: String,
+    content: String,
+    summary: String,
+    tags: String,
+    source_conversation_id: Option<String>,
+    source_message_ids: Option<String>,
+    relevance_score: Option<f64>,
+    created_by: Option<String>,
+) -> Result<MemoryRow, String> {
+    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let score = relevance_score.unwrap_or(0.7);
+    let by = created_by.unwrap_or_else(|| "agent".to_string());
+
+    // Ensure project row exists (FK requirement) — derive name from last path segment
+    if let Some(ref pid) = project_id {
+        let proj_name = pid
+            .trim_end_matches(['/', '\\'])
+            .rsplit(['/', '\\'])
+            .next()
+            .unwrap_or(pid.as_str())
+            .to_string();
+        conn.execute(
+            "INSERT OR IGNORE INTO projects (id, name, path) VALUES (?1, ?2, ?3)",
+            params![pid, proj_name, pid],
+        ).map_err(|e| e.to_string())?;
+    }
+
+    conn.execute(
+        "INSERT INTO memories (id, project_id, type, title, content, summary, tags,
+                               source_conversation_id, source_message_ids, relevance_score, created_by)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+        params![
+            id, project_id, memory_type, title, content, summary, tags,
+            source_conversation_id, source_message_ids, score, by,
+        ],
+    ).map_err(|e| e.to_string())?;
+    let row = conn.query_row(
+        "SELECT id, project_id, type, title, content, summary, tags,
+                source_conversation_id, relevance_score, access_count, last_accessed_at,
+                created_by, status, created_at, updated_at
+         FROM memories WHERE id = ?1",
+        params![id],
+        |row| Ok(MemoryRow {
+            id: row.get(0)?,
+            project_id: row.get(1)?,
+            memory_type: row.get(2)?,
+            title: row.get(3)?,
+            content: row.get(4)?,
+            summary: row.get(5)?,
+            tags: row.get(6)?,
+            source_conversation_id: row.get(7)?,
+            relevance_score: row.get(8)?,
+            access_count: row.get(9)?,
+            last_accessed_at: row.get(10)?,
+            created_by: row.get(11)?,
+            status: row.get(12)?,
+            created_at: row.get(13)?,
+            updated_at: row.get(14)?,
+        }),
+    ).map_err(|e| e.to_string())?;
+    Ok(row)
+}
+
+#[tauri::command]
+pub fn db_list_memories(
+    state: State<'_, DbState>,
+    project_id: Option<String>,
+    memory_type: Option<String>,
+    status: Option<String>,
+    limit: Option<i64>,
+    offset: Option<i64>,
+) -> Result<Vec<MemoryRow>, String> {
+    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let lim = limit.unwrap_or(50);
+    let off = offset.unwrap_or(0);
+    let st = status.as_deref().unwrap_or("active");
+
+    // Build dynamic WHERE conditions
+    let mut conditions = vec!["m.status = ?1".to_string()];
+    let mut param_idx = 2i32;
+
+    if project_id.is_some() {
+        conditions.push(format!("m.project_id = ?{}", param_idx));
+        param_idx += 1;
+    }
+    if memory_type.is_some() {
+        conditions.push(format!("m.type = ?{}", param_idx));
+        param_idx += 1;
+    }
+
+    let where_clause = conditions.join(" AND ");
+    let lim_idx = param_idx;
+    let off_idx = param_idx + 1;
+    let sql = format!(
+        "SELECT m.id, m.project_id, m.type, m.title, m.content, m.summary, m.tags,
+                m.source_conversation_id, m.relevance_score, m.access_count, m.last_accessed_at,
+                m.created_by, m.status, m.created_at, m.updated_at
+         FROM memories m
+         WHERE {}
+         ORDER BY m.relevance_score DESC, m.updated_at DESC
+         LIMIT ?{} OFFSET ?{}",
+        where_clause, lim_idx, off_idx
+    );
+
+    // Build params dynamically
+    let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
+    let mut param_values: Vec<Box<dyn rusqlite::types::ToSql>> = vec![Box::new(st.to_string())];
+    if let Some(ref p) = project_id { param_values.push(Box::new(p.clone())); }
+    if let Some(ref t) = memory_type { param_values.push(Box::new(t.clone())); }
+    param_values.push(Box::new(lim));
+    param_values.push(Box::new(off));
+
+    let params_ref: Vec<&dyn rusqlite::types::ToSql> = param_values.iter().map(|b| b.as_ref()).collect();
+    let rows = stmt.query_map(params_ref.as_slice(), |row| {
+        Ok(MemoryRow {
+            id: row.get(0)?,
+            project_id: row.get(1)?,
+            memory_type: row.get(2)?,
+            title: row.get(3)?,
+            content: row.get(4)?,
+            summary: row.get(5)?,
+            tags: row.get(6)?,
+            source_conversation_id: row.get(7)?,
+            relevance_score: row.get(8)?,
+            access_count: row.get(9)?,
+            last_accessed_at: row.get(10)?,
+            created_by: row.get(11)?,
+            status: row.get(12)?,
+            created_at: row.get(13)?,
+            updated_at: row.get(14)?,
+        })
+    }).map_err(|e| e.to_string())?
+      .collect::<Result<Vec<_>, _>>()
+      .map_err(|e| e.to_string())?;
+    Ok(rows)
+}
+
+#[tauri::command]
+pub fn db_search_memories(
+    state: State<'_, DbState>,
+    project_id: Option<String>,
+    query: String,
+    memory_types: Option<String>,
+    min_relevance: Option<f64>,
+    limit: Option<i64>,
+) -> Result<Vec<MemoryRow>, String> {
+    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let lim = limit.unwrap_or(20);
+    let min_rel = min_relevance.unwrap_or(0.0);
+
+    // Use FTS5 for text search, join back to memories for full data + filters
+    let mut conditions = vec!["m.status = 'active'".to_string()];
+    if project_id.is_some() {
+        conditions.push("m.project_id = ?3".to_string());
+    }
+    if min_rel > 0.0 {
+        conditions.push(format!("m.relevance_score >= {}", min_rel));
+    }
+    // Filter by types if provided
+    if let Some(ref types) = memory_types {
+        let type_list: Vec<String> = serde_json::from_str(types).unwrap_or_default();
+        if !type_list.is_empty() {
+            let placeholders: Vec<String> = type_list.iter().enumerate()
+                .map(|(i, _)| format!("?{}", i + 10)) // Use high-numbered params
+                .collect();
+            conditions.push(format!("m.type IN ({})", placeholders.join(",")));
+        }
+    }
+
+    let where_clause = conditions.join(" AND ");
+    let sql = format!(
+        "SELECT m.id, m.project_id, m.type, m.title, m.content, m.summary, m.tags,
+                m.source_conversation_id, m.relevance_score, m.access_count, m.last_accessed_at,
+                m.created_by, m.status, m.created_at, m.updated_at,
+                rank
+         FROM memories_fts
+         JOIN memories m ON memories_fts.id = m.id
+         WHERE memories_fts MATCH ?1
+           AND {}
+         ORDER BY rank, m.relevance_score DESC
+         LIMIT ?2",
+        where_clause
+    );
+
+    let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
+    let mut param_values: Vec<Box<dyn rusqlite::types::ToSql>> = vec![
+        Box::new(query.clone()),
+        Box::new(lim),
+    ];
+    if let Some(ref p) = project_id { param_values.push(Box::new(p.clone())); }
+
+    // Add type params if needed
+    if let Some(ref types) = memory_types {
+        let type_list: Vec<String> = serde_json::from_str(types).unwrap_or_default();
+        for t in type_list {
+            param_values.push(Box::new(t));
+        }
+    }
+
+    let params_ref: Vec<&dyn rusqlite::types::ToSql> = param_values.iter().map(|b| b.as_ref()).collect();
+    let rows = stmt.query_map(params_ref.as_slice(), |row| {
+        Ok(MemoryRow {
+            id: row.get(0)?,
+            project_id: row.get(1)?,
+            memory_type: row.get(2)?,
+            title: row.get(3)?,
+            content: row.get(4)?,
+            summary: row.get(5)?,
+            tags: row.get(6)?,
+            source_conversation_id: row.get(7)?,
+            relevance_score: row.get(8)?,
+            access_count: row.get(9)?,
+            last_accessed_at: row.get(10)?,
+            created_by: row.get(11)?,
+            status: row.get(12)?,
+            created_at: row.get(13)?,
+            updated_at: row.get(14)?,
+        })
+    }).map_err(|e| e.to_string())?
+      .collect::<Result<Vec<_>, _>>()
+      .map_err(|e| e.to_string())?;
+    Ok(rows)
+}
+
+#[tauri::command]
+pub fn db_update_memory(
+    state: State<'_, DbState>,
+    id: String,
+    title: Option<String>,
+    content: Option<String>,
+    summary: Option<String>,
+    tags: Option<String>,
+    relevance_score: Option<f64>,
+    status: Option<String>,
+) -> Result<(), String> {
+    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let mut sets: Vec<String> = Vec::new();
+    let mut values: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+    if let Some(ref v) = title { sets.push("title = ?".to_string()); values.push(Box::new(v.clone())); }
+    if let Some(ref v) = content { sets.push("content = ?".to_string()); values.push(Box::new(v.clone())); }
+    if let Some(ref v) = summary { sets.push("summary = ?".to_string()); values.push(Box::new(v.clone())); }
+    if let Some(ref v) = tags { sets.push("tags = ?".to_string()); values.push(Box::new(v.clone())); }
+    if let Some(v) = relevance_score { sets.push("relevance_score = ?".to_string()); values.push(Box::new(v)); }
+    if let Some(ref v) = status { sets.push("status = ?".to_string()); values.push(Box::new(v.clone())); }
+    if sets.is_empty() { return Ok(()); }
+    sets.push("updated_at = datetime('now')".to_string());
+    values.push(Box::new(id));
+    let sql = format!("UPDATE memories SET {} WHERE id = ?", sets.join(", "));
+    let params_ref: Vec<&dyn rusqlite::types::ToSql> = values.iter().map(|b| b.as_ref()).collect();
+    conn.execute(&sql, params_ref.as_slice()).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn db_delete_memory(
+    state: State<'_, DbState>,
+    id: String,
+) -> Result<(), String> {
+    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    conn.execute("DELETE FROM memories WHERE id = ?1", params![id])
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn db_track_memory_access(
+    state: State<'_, DbState>,
+    id: String,
+) -> Result<(), String> {
+    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    conn.execute(
+        "UPDATE memories SET access_count = access_count + 1, last_accessed_at = datetime('now') WHERE id = ?1",
+        params![id],
+    ).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn db_decay_memories(
+    state: State<'_, DbState>,
+    project_id: Option<String>,
+    decay_factor: f64,
+    inactive_days: i64,
+    archive_threshold: f64,
+) -> Result<i64, String> {
+    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let project_filter = if project_id.is_some() { "AND project_id = ?4" } else { "" };
+
+    // Decay relevance_score for memories not accessed recently
+    let decay_sql = format!(
+        "UPDATE memories
+         SET relevance_score = MAX(0.01, relevance_score * ?1),
+             updated_at = datetime('now')
+         WHERE status = 'active'
+           AND created_by = 'agent'
+           AND (last_accessed_at IS NULL OR last_accessed_at < datetime('now', '-' || ?2 || ' days'))
+           {}",
+        project_filter
+    );
+
+    let mut params_vec: Vec<Box<dyn rusqlite::types::ToSql>> = vec![
+        Box::new(decay_factor),
+        Box::new(inactive_days),
+        Box::new(""), // placeholder for sqlite days concat
+    ];
+    if let Some(ref p) = project_id { params_vec.push(Box::new(p.clone())); }
+    let params_ref: Vec<&dyn rusqlite::types::ToSql> = params_vec.iter().map(|b| b.as_ref()).collect();
+    conn.execute(&decay_sql, params_ref.as_slice()).map_err(|e| e.to_string())?;
+
+    // Archive memories below threshold
+    let archive_filter = if project_id.is_some() { "AND project_id = ?2" } else { "" };
+    let archive_sql = format!(
+        "UPDATE memories SET status = 'archived', updated_at = datetime('now')
+         WHERE status = 'active' AND relevance_score < ?1 AND created_by = 'agent' {}",
+        archive_filter
+    );
+    let mut arch_params: Vec<Box<dyn rusqlite::types::ToSql>> = vec![Box::new(archive_threshold)];
+    if let Some(ref p) = project_id { arch_params.push(Box::new(p.clone())); }
+    let arch_ref: Vec<&dyn rusqlite::types::ToSql> = arch_params.iter().map(|b| b.as_ref()).collect();
+    let archived = conn.execute(&archive_sql, arch_ref.as_slice()).map_err(|e| e.to_string())? as i64;
+    Ok(archived)
+}
+
+#[derive(Serialize)]
+pub struct MemoryStats {
+    pub total: i64,
+    pub by_type: String,   // JSON object {type: count}
+    pub archived: i64,
+}
+
+#[tauri::command]
+pub fn db_get_memory_stats(
+    state: State<'_, DbState>,
+    project_id: Option<String>,
+) -> Result<MemoryStats, String> {
+    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let project_filter = if project_id.is_some() { "WHERE project_id = ?1 AND status = 'active'" } else { "WHERE status = 'active'" };
+    let archive_filter = if project_id.is_some() { "WHERE project_id = ?1 AND status = 'archived'" } else { "WHERE status = 'archived'" };
+
+    let mut p: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+    if let Some(ref pid) = project_id { p.push(Box::new(pid.clone())); }
+    let p_ref: Vec<&dyn rusqlite::types::ToSql> = p.iter().map(|b| b.as_ref()).collect();
+
+    let total: i64 = conn.query_row(
+        &format!("SELECT COUNT(*) FROM memories {}", project_filter),
+        p_ref.as_slice(),
+        |r| r.get(0),
+    ).unwrap_or(0);
+
+    let archived: i64 = conn.query_row(
+        &format!("SELECT COUNT(*) FROM memories {}", archive_filter),
+        p_ref.as_slice(),
+        |r| r.get(0),
+    ).unwrap_or(0);
+
+    // Group by type
+    let type_sql = format!(
+        "SELECT type, COUNT(*) FROM memories {} GROUP BY type",
+        project_filter
+    );
+    let mut stmt = conn.prepare(&type_sql).map_err(|e| e.to_string())?;
+    let type_rows: Vec<(String, i64)> = stmt.query_map(p_ref.as_slice(), |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+    }).map_err(|e| e.to_string())?
+      .collect::<Result<Vec<_>, _>>()
+      .map_err(|e| e.to_string())?;
+
+    let mut map = serde_json::Map::new();
+    for (t, c) in type_rows {
+        map.insert(t, serde_json::Value::Number(serde_json::Number::from(c)));
+    }
+    let by_type = serde_json::to_string(&map).unwrap_or_else(|_| "{}".to_string());
+
+    Ok(MemoryStats { total, by_type, archived })
 }
 
 // ─── Schema extraction from SQLite ─────────────────────────────────────────

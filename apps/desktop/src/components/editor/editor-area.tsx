@@ -20,6 +20,7 @@ import {
   DatabaseViewer,
 } from './viewers';
 import { DbSchemaViewer } from './viewers/db-schema';
+import { MemoryViewer } from './viewers/memory-viewer';
 import { ExtensionReadmeViewer } from './extension-readme-viewer';
 import { useEditorStore, useFileStore, useSettingsStore } from '../../stores';
 import { useAgentStore } from '../../stores/agent-store';
@@ -471,6 +472,8 @@ export function EditorArea() {
             <GitGraphView />
           ) : activeTab.type === 'db-schema' ? (
             <DbSchemaViewer sourceFile={activeTab.dbSchemaProps?.sourceFile ?? null} />
+          ) : activeTab.type === 'memory' && activeTab.memoryProps ? (
+            <MemoryViewer memoryId={activeTab.memoryProps.memoryId} />
           ) : activeTab.type === 'release-notes' && activeTab.releaseNotesProps ? (
             <MarkdownViewer
               content={activeTab.releaseNotesProps.body}

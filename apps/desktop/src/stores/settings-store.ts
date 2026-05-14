@@ -378,6 +378,7 @@ export const useSettingsStore = create<SettingsState>()(
         agent: true,
         devices: true,
         docker: true,
+        memories: true,
       },
       visibleExtensionViews: {},
 

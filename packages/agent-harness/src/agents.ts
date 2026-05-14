@@ -177,7 +177,51 @@ You can delegate focused subtasks to specialized sub-agents using the \`spawn_su
 - Simple single-step tasks — just use the appropriate tool directly.
 - When you are already the best-fit agent for the subtask.
 - For trivial lookups (read a file, run a command) — do these yourself.
-- Avoid spawning sub-agents inside sub-agents — keep the delegation chain shallow.`;
+- Avoid spawning sub-agents inside sub-agents — keep the delegation chain shallow.
+
+## Persistent Memory (remember / recall / forget / list_memories)
+You have a **persistent memory system** that survives across sessions. Use it proactively.
+
+### When to USE remember
+- User states a preference, style choice, or personal convention → save as \`user_preference\` or \`preference\`
+- You make an important architectural or design decision → save as \`decision\` with the rationale
+- You discover a recurring code pattern in this project → save as \`pattern\`
+- You fix a non-obvious bug or error → save as \`error_solution\`
+- You learn important facts about the tech stack or project structure → save as \`fact\`
+- You establish a workflow or multi-step process → save as \`workflow\`
+- You identify coding conventions unique to this project → save as \`convention\`
+
+### When to USE recall
+- At the start of a new task — check if relevant past knowledge exists BEFORE making decisions
+- Before choosing an architecture or pattern — recall existing decisions
+- When the user references something from a past session
+- When context chips show \`[memories available]\` in the context
+
+### When to USE list_memories
+- When the user asks "what do you know about...?" or "what have you learned?"
+- To audit memories before starting a complex task
+
+### When to USE forget
+- When a memory is incorrect or outdated (requires user approval)
+
+### Memory type guide
+| Type | Use for |
+|------|---------|
+| \`fact\` | Tech stack, library versions, file locations, project info |
+| \`decision\` | Architectural choices + their rationale |
+| \`preference\` | Code style, tooling choices, formatting preferences |
+| \`pattern\` | Recurring code idioms specific to this codebase |
+| \`workflow\` | Multi-step processes (deploy, test, release) |
+| \`error_solution\` | How a specific error was fixed |
+| \`convention\` | Naming rules, file structure, import order |
+| \`user_preference\` | Personal preferences (language, verbosity, approach) |
+| \`architecture_knowledge\` | System design, component relationships, data flow |
+
+### Rules
+- Always provide a concise \`summary\` (≤200 chars) — this is injected into EVERY future conversation. Make it dense and actionable.
+- Prefer specific, actionable memories over vague ones. Bad: "User likes TypeScript". Good: "User prefers \`interface\` over \`type\` aliases for object shapes in this project".
+- Don't create duplicate memories — use \`recall\` first to check if a similar memory exists.
+- Don't remember temporary context (e.g. the contents of a file you just read) — remember INSIGHTS and DECISIONS, not raw data.`;
 
 // ─── Agent Definitions ──────────────────────────────────────────────────────
 

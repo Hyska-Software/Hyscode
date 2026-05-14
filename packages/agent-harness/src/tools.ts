@@ -3,7 +3,7 @@
 // Each tool maps to Tauri backend commands via invoke().
 
 import type { ToolDefinition } from '@hyscode/ai-providers';
-import type { ToolHandler, ToolResult, ToolExecutionContext, ToolCategory, AgentQuestion } from './types';
+import type { ToolHandler, ToolResult, ToolExecutionContext, ToolCategory, AgentQuestion, MemoryType } from './types';
 
 // ─── Helper ─────────────────────────────────────────────────────────────────
 
@@ -2075,6 +2075,206 @@ export const runCodeTool = defineTool(
   },
 );
 
+// ─── Memory Tools ───────────────────────────────────────────────────────────
+
+export const rememberTool = defineTool(
+  'remember',
+  `Store knowledge in persistent memory so it survives across sessions.
+
+Use this proactively whenever you learn something worth remembering:
+- User preferences or coding style choices
+- Project architecture decisions and their rationale
+- Recurring patterns or conventions in this codebase
+- Error solutions that took effort to discover
+- Workflows and processes the user follows
+- Important facts about the project or tech stack
+
+Choose the most specific type:
+- fact: general project info, tech stack details, file locations
+- decision: architectural or design choices made with reasoning
+- preference: how the user likes things done (style, tooling, approach)
+- pattern: recurring code patterns or idioms used in this project
+- workflow: step-by-step processes the user follows
+- error_solution: how a specific bug or error was fixed
+- convention: naming, structure, or formatting rules for this project
+- user_preference: personal preferences (language, tone, tools)
+- architecture_knowledge: system design, component relationships, data flow
+
+The summary field (≤200 chars) is injected into every conversation — keep it dense and actionable.`,
+  {
+    title: { type: 'string', description: 'Short descriptive title (max 10 words)' },
+    content: { type: 'string', description: 'Full content to remember — be specific and complete' },
+    summary: { type: 'string', description: 'One-sentence summary (≤200 chars) for context injection. If omitted, auto-generated from content.' },
+    type: {
+      type: 'string',
+      enum: ['fact', 'decision', 'preference', 'pattern', 'workflow', 'error_solution', 'convention', 'user_preference', 'architecture_knowledge'],
+      description: 'Memory type — pick the most specific one that fits',
+    },
+    tags: {
+      type: 'array',
+      items: { type: 'string' },
+      description: 'Tags for filtering (e.g. ["typescript", "auth", "database"])',
+    },
+  },
+  ['title', 'content', 'type'],
+  'meta',
+  false,
+  async (input, ctx) => {
+    try {
+      if (!ctx.memoryManager) {
+        return { success: false, output: '', error: 'Memory system not available.' };
+      }
+      const content = input.content as string;
+      const summary = (input.summary as string | undefined)?.slice(0, 200) || '';
+      const memory = await ctx.memoryManager.create({
+        projectId: ctx.projectId,
+        type: (input.type as MemoryType) || 'fact',
+        title: input.title as string,
+        content,
+        summary,
+        tags: (input.tags as string[]) || [],
+        relevanceScore: 0.75,
+        createdBy: 'agent',
+        sourceConversationId: ctx.conversationId,
+      });
+      return {
+        success: true,
+        output: `Stored memory: "${memory.title}" [${memory.type}] (id: ${memory.id})\nSummary: ${memory.summary || '(auto-generated)'}`,
+        metadata: { action: 'memory_created', memory: { id: memory.id, title: memory.title, type: memory.type, summary: memory.summary } },
+      };
+    } catch (err) {
+      return { success: false, output: '', error: `Failed to store memory: ${err instanceof Error ? err.message : String(err)}` };
+    }
+  },
+);
+
+export const recallTool = defineTool(
+  'recall',
+  `Search persistent memory for knowledge from previous sessions.
+
+Use this at the start of a task to check if there is relevant prior knowledge:
+- Before making architectural decisions (check for existing decisions)
+- Before choosing patterns or conventions (check for established ones)
+- When debugging (check for known error solutions)
+- When the user asks about past work or preferences
+- When context chips show memories are available
+
+Search with natural language — the search uses full-text matching.`,
+  {
+    query: { type: 'string', description: 'What to search for (natural language)' },
+    limit: { type: 'integer', description: 'Max results (default: 5)' },
+    type: {
+      type: 'string',
+      enum: ['fact', 'decision', 'preference', 'pattern', 'workflow', 'error_solution', 'convention', 'user_preference', 'architecture_knowledge'],
+      description: 'Filter by memory type (optional)',
+    },
+  },
+  ['query'],
+  'meta',
+  false,
+  async (input, ctx) => {
+    try {
+      if (!ctx.memoryManager) {
+        return { success: false, output: '', error: 'Memory system not available.' };
+      }
+      const memories = await ctx.memoryManager.search({
+        projectId: ctx.projectId,
+        query: input.query as string,
+        types: input.type ? [input.type as MemoryType] : undefined,
+        limit: (input.limit as number) || 5,
+        status: 'active',
+      });
+      if (memories.length === 0) {
+        return { success: true, output: 'No relevant memories found.' };
+      }
+      const formatted = memories.map((m, i) =>
+        `${i + 1}. [${m.type}] ${m.title} (id: ${m.id})\n   ${(m.summary || m.content).slice(0, 200)}${m.tags.length ? `\n   tags: ${m.tags.join(', ')}` : ''}`
+      ).join('\n\n');
+      return {
+        success: true,
+        output: `Found ${memories.length} memor${memories.length === 1 ? 'y' : 'ies'}:\n\n${formatted}`,
+        metadata: { action: 'memory_recalled', count: memories.length },
+      };
+    } catch (err) {
+      return { success: false, output: '', error: `Failed to recall memories: ${err instanceof Error ? err.message : String(err)}` };
+    }
+  },
+);
+
+export const forgetTool = defineTool(
+  'forget',
+  'Archive a memory to remove it from active context. Use this to discard incorrect or outdated knowledge.',
+  {
+    id: { type: 'string', description: 'Memory ID to forget (use recall or list_memories to find IDs)' },
+    reason: { type: 'string', description: 'Why this memory should be forgotten' },
+  },
+  ['id'],
+  'meta',
+  true, // requires approval — mutating action
+  async (input, ctx) => {
+    try {
+      if (!ctx.memoryManager) {
+        return { success: false, output: '', error: 'Memory system not available.' };
+      }
+      await ctx.memoryManager.update(input.id as string, { status: 'archived' });
+      return {
+        success: true,
+        output: `Memory ${input.id} archived.${input.reason ? ` Reason: ${input.reason}` : ''}`,
+      };
+    } catch (err) {
+      return { success: false, output: '', error: `Failed to forget memory: ${err instanceof Error ? err.message : String(err)}` };
+    }
+  },
+);
+
+export const listMemoriesTool = defineTool(
+  'list_memories',
+  'List all active memories for this project. Use this to review what the agent has learned across sessions.',
+  {
+    type: {
+      type: 'string',
+      enum: ['fact', 'decision', 'preference', 'pattern', 'workflow', 'error_solution', 'convention', 'user_preference', 'architecture_knowledge'],
+      description: 'Filter by memory type (optional)',
+    },
+    limit: { type: 'integer', description: 'Max results to return (default: 20)' },
+  },
+  [],
+  'meta',
+  false,
+  async (input, ctx) => {
+    try {
+      if (!ctx.memoryManager) {
+        return { success: false, output: '', error: 'Memory system not available.' };
+      }
+      const memories = await ctx.memoryManager.list({
+        projectId: ctx.projectId,
+        types: input.type ? [input.type as MemoryType] : undefined,
+        limit: (input.limit as number) || 20,
+        status: 'active',
+      });
+      if (memories.length === 0) {
+        return { success: true, output: 'No memories found for this project.' };
+      }
+      const byType = new Map<string, typeof memories>();
+      for (const m of memories) {
+        const arr = byType.get(m.type) ?? [];
+        arr.push(m);
+        byType.set(m.type, arr);
+      }
+      const lines: string[] = [`${memories.length} memor${memories.length === 1 ? 'y' : 'ies'}:`];
+      for (const [type, mems] of byType) {
+        lines.push(`\n[${type}]`);
+        for (const m of mems) {
+          lines.push(`  • ${m.title} (${m.id}) — relevance: ${m.relevanceScore.toFixed(2)}`);
+        }
+      }
+      return { success: true, output: lines.join('\n') };
+    } catch (err) {
+      return { success: false, output: '', error: `Failed to list memories: ${err instanceof Error ? err.message : String(err)}` };
+    }
+  },
+);
+
 // ─── Export All Tools ───────────────────────────────────────────────────────
 
 export function getAllBuiltinTools(): ToolHandler[] {
@@ -2129,6 +2329,11 @@ export function getAllBuiltinTools(): ToolHandler[] {
     requestModeSwitchTool,
     askUserTool,
     detectProjectTypeTool,
+    // Memory
+    rememberTool,
+    recallTool,
+    forgetTool,
+    listMemoriesTool,
     // Docker
     dockerListContainersTool,
     dockerListImagesTool,

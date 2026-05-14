@@ -6,3 +6,4 @@ export { ExtensionsView } from './extensions-view';
 export { AgentSidebarView } from './agent-sidebar-view';
 export { DevicesView } from './devices-view';
 export { DockerView } from './docker-view';
+export { MemoriesView } from './memories-view';

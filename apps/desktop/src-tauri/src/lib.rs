@@ -166,6 +166,15 @@ pub fn run() {
             commands::db::db_save_diagram,
             commands::db::db_delete_diagram,
             commands::db::db_extract_schema,
+            // Memory commands
+            commands::db::db_create_memory,
+            commands::db::db_list_memories,
+            commands::db::db_search_memories,
+            commands::db::db_update_memory,
+            commands::db::db_delete_memory,
+            commands::db::db_track_memory_access,
+            commands::db::db_decay_memories,
+            commands::db::db_get_memory_stats,
             // Notification commands
             commands::notifications::notify_agent_done,
             // Device management commands

@@ -13,7 +13,8 @@ export type SidebarViewId =
   | 'extensions'
   | 'agent'
   | 'devices'
-  | 'docker';
+  | 'docker'
+  | 'memories';
 
 /** Full sidebar view type including extension-contributed views */
 export type SidebarView = SidebarViewId | (string & {});

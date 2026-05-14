@@ -33,6 +33,9 @@ import type { TurnRecord } from './types';
 import { TraceRecorder } from './trace-recorder';
 import type { ModePolicy } from './mode-policies';
 import { getModePolicy, adjustPolicyForModel } from './mode-policies';
+import type { MemoryManager } from './memory-manager';
+import { MemoryExtractor } from './memory-extractor';
+import { MemoryContextProvider } from './memory-context-provider';
 
 export interface HarnessOptions {
   config?: Partial<HarnessConfig>;
@@ -63,6 +66,8 @@ export interface HarnessOptions {
   agentTerminalPtyId?: string;
   /** Callback fired after a terminal command finishes (for environment context tracking). */
   onTerminalCommand?: (command: string, output: string, exitCode: number | null) => void;
+  /** Memory manager — enables persistent cross-session knowledge. */
+  memoryManager?: MemoryManager;
 }
 
 export class Harness {
@@ -108,6 +113,11 @@ export class Harness {
   // ─── Tracing & Policies ───────────────────────────────────────────
   private traceRecorder = new TraceRecorder();
   private _effectivePolicy: ModePolicy | null = null;
+
+  // ─── Memory System ────────────────────────────────────────────────
+  private memoryManager: MemoryManager | null = null;
+  private memoryExtractor = new MemoryExtractor();
+  private memoryContextProvider: MemoryContextProvider | null = null;
 
   constructor(options: HarnessOptions) {
     this.config = { ...DEFAULT_HARNESS_CONFIG, ...options.config };
@@ -166,6 +176,12 @@ export class Harness {
         runAgentTurn: (addon, msg, typeOverride) => this.runSingleTurn(addon, msg, typeOverride),
         savePlanFile: options.savePlanFile,
       });
+    }
+
+    // Initialize memory system if manager provided
+    if (options.memoryManager) {
+      this.memoryManager = options.memoryManager;
+      this.memoryContextProvider = new MemoryContextProvider(options.memoryManager, options.projectId);
     }
   }
 
@@ -408,6 +424,25 @@ export class Harness {
     // Set conversation history
     this.contextManager.setHistory(history);
 
+    // Inject relevant memories as a high-priority context source (async, best-effort)
+    if (this.memoryContextProvider) {
+      try {
+        const policy = this.getEffectivePolicy();
+        const memBlock = await this.memoryContextProvider.getContextBlock(userMessage, policy.maxInputTokens);
+        if (memBlock) {
+          this.contextManager.addSource({
+            id: 'memory-context',
+            type: 'context_chip',
+            priority: 'high',
+            content: memBlock,
+            tokenEstimate: Math.ceil(memBlock.length / 4),
+          });
+        }
+      } catch {
+        // Memory injection is non-critical — never block the turn
+      }
+    }
+
     // Add user message to history (with optional image attachments)
     const userMsgContent: import('@hyscode/ai-providers').MessageContent[] = [
       { type: 'text', text: userMessage },
@@ -596,6 +631,19 @@ export class Harness {
       if (toolCalls.length === 0) {
         this.traceRecorder.setHadToolCalls(false);
 
+        // ── Empty content recovery ──
+        // Some reasoning models (DeepSeek, Kimi, MiMo) occasionally emit only
+        // reasoning_content with no text or tool calls — the assistant message
+        // ends up as content: []. Inject a nudge so the model emits actual text
+        // rather than silently ending the turn with an empty response.
+        if (!assistantText.trim() && thinkingText.trim() && !verificationForced) {
+          this.traceRecorder.recordLoopWarning('empty_content_nudge', iteration);
+          middlewareInjections.push('[Please provide your response. Your reasoning is complete — now write the answer.]');
+          verificationForced = true;
+          this.traceRecorder.endIteration();
+          continue;
+        }
+
         // ── Pre-completion middleware check ──
         // Before accepting the exit, run hooks to see if we should force continuation.
         if (!verificationForced) {
@@ -657,6 +705,8 @@ export class Harness {
         toolCallId: '', // set per-call below
         invoke: this.invoke,
         listen: this.listen,
+        projectId: this.projectId,
+        memoryManager: this.memoryManager ?? undefined,
         onFileChange: (change) => {
           this.emit({ type: 'file_change_pending', change });
         },
@@ -849,6 +899,27 @@ export class Harness {
 
     const turnRecord = this.buildTurnRecord(stopReason, iteration, turnStart);
     turnRecord.verificationForced = verificationForced;
+
+    // ── Post-turn memory extraction (async, non-blocking) ──
+    // Run after the turn so it never delays the response to the user.
+    if (this.memoryManager && finalResponse && userMessage) {
+      const toolNames = this.toolCallHistory.map(tc => tc.toolName);
+      this.memoryExtractor.extractAndPersist(
+        this.memoryManager,
+        userMessage,
+        finalResponse,
+        toolNames,
+        this.projectId,
+        this.conversationId,
+      ).then((count) => {
+        if (count > 0) {
+          const extractedMems: Array<{ title: string; type: import('./types').MemoryType }> = [];
+          this.emit({ type: 'memories_extracted', count, memories: extractedMems });
+        }
+      }).catch(() => {
+        // Non-critical — never surface memory failures
+      });
+    }
 
     // Finalize trace and attach to turn record
     turnRecord.trace = this.traceRecorder.finalizeTrace(

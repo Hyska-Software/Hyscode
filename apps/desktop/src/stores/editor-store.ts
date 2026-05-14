@@ -10,7 +10,7 @@ export interface Tab {
   isDirty: boolean;
   isPinned: boolean;
   isPreview: boolean;
-  type: 'file' | 'diff' | 'terminal' | 'commit' | 'history' | 'release-notes' | 'extension-readme' | 'git-graph' | 'db-schema';
+  type: 'file' | 'diff' | 'terminal' | 'commit' | 'history' | 'release-notes' | 'extension-readme' | 'git-graph' | 'db-schema' | 'memory';
   viewerType: ViewerType;
   markdownMode?: 'preview' | 'code';
   diffProps?: {
@@ -39,6 +39,12 @@ export interface Tab {
   };
   /** Git graph props */
   gitGraphProps?: Record<string, never>;
+
+  /** Memory viewer props when type === 'memory' */
+  memoryProps?: {
+    memoryId: string;
+    title: string;
+  };
 
   /** DB Schema diagram props */
   dbSchemaProps?: {
@@ -78,6 +84,7 @@ interface EditorState {
   openHistoryTab: (snapshotId: string, originalPath: string, timestamp: string, content: string) => void;
   openGitGraphTab: () => void;
   openDbSchemaTab: (sourceFile?: string | null, diagramId?: string) => void;
+  openMemoryTab: (memoryId: string, title: string) => void;
   openReleaseNotesTab: (version: string, body: string) => void;
   openExtensionReadmeTab: (props: { extensionName: string; displayName: string; readmeContent: string; iconUrl?: string | null; version?: string; publisher?: string; description?: string; enabled?: boolean; categories?: string[]; activationEvents?: string[]; installedAt?: string; hasMain?: boolean; contributions?: { label: string; count: number }[] }) => void;
   closeTab: (id: string) => void;
@@ -272,8 +279,32 @@ export const useEditorStore = create<EditorState>()(
         state.activeTabId = id;
       }),
 
-    openReleaseNotesTab: (version: string, body: string) =>
+    openMemoryTab: (memoryId: string, title: string) =>
       set((state) => {
+        const id = `memory:${memoryId}`;
+        const existing = state.tabs.find((t) => t.id === id);
+        if (existing) {
+          state.activeTabId = existing.id;
+          return;
+        }
+        const label = title.length > 40 ? `${title.slice(0, 40)}…` : title;
+        const newTab: Tab = {
+          id,
+          filePath: id,
+          fileName: label,
+          language: 'plaintext',
+          isDirty: false,
+          isPinned: false,
+          isPreview: false,
+          type: 'memory',
+          viewerType: 'code',
+          memoryProps: { memoryId, title },
+        };
+        state.tabs.push(newTab);
+        state.activeTabId = id;
+      }),
+
+    openReleaseNotesTab: (version: string, body: string) =>      set((state) => {
         const id = `release-notes:${version}`;
         const existing = state.tabs.find((t) => t.id === id);
         if (existing) {

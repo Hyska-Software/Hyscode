@@ -2,6 +2,7 @@
 // Core types for the agent harness orchestration engine.
 
 import type { Message, StreamChunk, ToolDefinition, ThinkingConfig } from '@hyscode/ai-providers';
+import type { MemoryManager } from './memory-manager';
 
 // ─── Tool System ────────────────────────────────────────────────────────────
 
@@ -48,6 +49,10 @@ export interface ToolExecutionContext {
   agentTerminalPtyId?: string;
   /** Callback fired after a terminal command completes (for environment context tracking). */
   onTerminalCommand?: (command: string, output: string, exitCode: number | null) => void;
+  /** Project ID for scoped operations (e.g. memory) */
+  projectId?: string;
+  /** Memory manager for persistent cross-session knowledge */
+  memoryManager?: MemoryManager;
 }
 
 /** Emitted when a tool writes/edits/creates a file so the UI can track it */
@@ -320,7 +325,10 @@ export type HarnessEvent =
   | { type: 'context_gathered'; filePath: string; relevance: number; reason: string; tokenEstimate: number }
   | { type: 'context_dropped'; filePath: string }
   | { type: 'user_question_request'; id: string; title?: string; questions: AgentQuestion[] }
-  | { type: 'user_question_answered'; id: string; answers: AgentQuestionAnswer[] };
+  | { type: 'user_question_answered'; id: string; answers: AgentQuestionAnswer[] }
+  | { type: 'memories_extracted'; count: number; memories: Array<{ title: string; type: MemoryType }> }
+  | { type: 'memory_recalled'; memoryId: string; title: string }
+  | { type: 'memory_created'; memory: Pick<Memory, 'id' | 'title' | 'type' | 'summary'> };
 
 export type HarnessEventHandler = (event: HarnessEvent) => void;
 
@@ -445,6 +453,69 @@ export interface TurnRecord {
   timestamp: string;
   /** Full structured trace (attached by the harness after finalization) */
   trace?: import('./trace-recorder').Trace;
+}
+
+// ─── Memory System ──────────────────────────────────────────────────────────
+// Persistent cross-session knowledge store scoped per project.
+
+export type MemoryType =
+  | 'fact'
+  | 'decision'
+  | 'preference'
+  | 'pattern'
+  | 'workflow'
+  | 'error_solution'
+  | 'convention'
+  | 'user_preference'
+  | 'architecture_knowledge';
+
+export type MemoryStatus = 'active' | 'archived';
+export type MemoryCreatedBy = 'agent' | 'user' | 'system';
+
+export interface Memory {
+  id: string;
+  projectId?: string;
+  type: MemoryType;
+  title: string;
+  content: string;
+  /** Short summary (<=300 chars) for cheap context injection. */
+  summary: string;
+  tags: string[];
+  sourceConversationId?: string;
+  sourceMessageIds?: string[];
+  /** 0.0–1.0. Auto-decays when not accessed. Higher = injected sooner. */
+  relevanceScore: number;
+  accessCount: number;
+  lastAccessedAt?: string;
+  createdBy: MemoryCreatedBy;
+  status: MemoryStatus;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface MemoryQuery {
+  projectId?: string;
+  /** Free-text query for FTS5 search */
+  query?: string;
+  types?: MemoryType[];
+  tags?: string[];
+  minRelevance?: number;
+  status?: MemoryStatus;
+  limit?: number;
+  offset?: number;
+}
+
+/** Candidate memory extracted by the automatic extractor pipeline. */
+export interface MemoryExtraction {
+  type: MemoryType;
+  title: string;
+  content: string;
+  summary: string;
+  tags: string[];
+  /** Confidence in this extraction (0.0-1.0). Low confidence = not persisted. */
+  confidence: number;
+  /** Source message indices used for deduplication */
+  sourceSignature?: string;
 }
 
 // ─── Environment Context ────────────────────────────────────────────────────

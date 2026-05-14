@@ -2,7 +2,7 @@
 // Singleton that owns the Harness instance and wires its events → Zustand stores.
 // Lives outside React to avoid re-renders during streaming.
 
-import { Harness, SkillLoader, RuleLoader, applyPolicyOverride, getModePolicy } from '@hyscode/agent-harness';
+import { Harness, SkillLoader, RuleLoader, applyPolicyOverride, getModePolicy, MemoryManager } from '@hyscode/agent-harness';
 import type {
   HarnessEvent,
   AgentType,
@@ -23,6 +23,7 @@ import { listen as tauriListen } from '@tauri-apps/api/event';
 import { McpBridge } from './mcp-bridge';
 import { useAgentStore } from '@/stores/agent-store';
 import { useSettingsStore } from '@/stores/settings-store';
+import { useMemoryStore } from '@/stores/memory-store';
 import { useSkillsStore } from '@/stores/skills-store';
 import { useRulesStore } from '@/stores/rules-store';
 import { useFileStore } from '@/stores/file-store';
@@ -124,6 +125,15 @@ export class HarnessBridge {
     this._projectId = projectId;
     const settings = useSettingsStore.getState();
 
+    // Instantiate MemoryManager (bridges to Tauri SQLite memory commands)
+    const memoryManager = new MemoryManager(tauriInvokeRaw);
+
+    // Trigger one-time relevance decay on startup (best-effort, non-blocking)
+    memoryManager.decayRelevance(projectId).catch(() => {});
+
+    // Sync projectId to memory store so sidebar can query memories
+    useMemoryStore.getState().setProjectId(projectId);
+
     // Create SkillLoader with Tauri-backed file system callbacks
     const skillLoader = new SkillLoader({
       builtInPath: `${workspacePath}/node_modules/@hyscode/skills/dist`,
@@ -178,6 +188,7 @@ export class HarnessBridge {
       workspacePath,
       projectId,
       invoke: tauriInvokeRaw,
+      memoryManager,
       listen: async (event: string, handler: (payload: unknown) => void) => {
         const unlisten = await tauriListen(event, (e) => handler(e.payload));
         return unlisten;
@@ -507,7 +518,10 @@ export class HarnessBridge {
 
       dbg(`Resposta recebida (${response.length} chars, ${turnRecord.iterations} iterações, ${turnRecord.toolCalls.length} tool calls)`);
 
-      // Persist the structured turn record
+      // Persist conversation to DB FIRST (turn record has FK on conversationId)
+      await this.persistConversation(userMessage, response);
+
+      // Persist the structured turn record (requires conversation to exist)
       await this.persistTurnRecord(turnRecord);
 
       // Flush any remaining streaming text
@@ -515,9 +529,6 @@ export class HarnessBridge {
 
       // Update the last assistant message with the final response
       useAgentStore.getState().updateLastAssistantContent(response);
-
-      // Persist conversation to DB
-      await this.persistConversation(userMessage, response);
     } catch (err) {
       const rawMsg = err instanceof Error ? err.message : 'Unknown error';
       const friendlyMsg = parseProviderError(rawMsg);
@@ -1444,6 +1455,23 @@ Investigate the error, fix the underlying issue in the affected files, and verif
 
       case 'user_question_answered': {
         this.debug(`✅ User answered ${event.answers.length} question(s)`);
+        break;
+      }
+
+      case 'memories_extracted': {
+        const count = (event as { count?: number }).count ?? 0;
+        if (count > 0) {
+          this.debug(`🧠 Extracted ${count} memory/memories`);
+          // Reload from DB so sidebar reflects new memories
+          useMemoryStore.getState().loadMemories().catch(() => {});
+        }
+        break;
+      }
+
+      case 'memory_created': {
+        const mem = (event as { memory?: { title?: string } }).memory;
+        this.debug(`🧠 Memory created: ${mem?.title ?? '(unknown)'}`);
+        useMemoryStore.getState().loadMemories().catch(() => {});
         break;
       }
     }

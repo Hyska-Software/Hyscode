@@ -1,4 +1,4 @@
-import { Files, Search, GitBranch, Settings, Bot, Puzzle, Blocks, Smartphone, Container, CheckSquare, FolderKanban, LayoutList, type LucideIcon } from 'lucide-react';
+import { Files, Search, GitBranch, Settings, Bot, Puzzle, Blocks, Smartphone, Container, CheckSquare, FolderKanban, LayoutList, BrainCircuit, type LucideIcon } from 'lucide-react';
 import { useSettingsStore } from '../../stores';
 import { useGitStore } from '../../stores/git-store';
 import { useDockerStore } from '../../stores/docker-store';
@@ -20,6 +20,7 @@ const builtinItems: { id: BuiltinSidebarView; icon: LucideIcon; label: string }[
   { id: 'skills', icon: Puzzle, label: 'Skills' },
   { id: 'extensions', icon: Blocks, label: 'Extensions' },
   { id: 'agent', icon: Bot, label: 'Agent' },
+  { id: 'memories', icon: BrainCircuit, label: 'Memories' },
   { id: 'devices', icon: Smartphone, label: 'Devices' },
   { id: 'docker', icon: Container, label: 'Docker' },
 ];
