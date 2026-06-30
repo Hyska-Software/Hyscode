@@ -44,7 +44,8 @@ import type { MemoryManager } from './memory-manager';
 import { MemoryExtractor } from './memory-extractor';
 import { MemoryContextProvider } from './memory-context-provider';
 import { TurnController } from './turn-controller';
-import { selectToolDefinitions } from './tool-selection';
+import { selectToolPlan, type ToolSelectionDecision } from './tool-selection';
+import { RequestPreparation, estimateActualCost } from './request-preparation';
 
 export interface HarnessOptions {
   config?: Partial<HarnessConfig>;
@@ -144,6 +145,7 @@ export class Harness {
 
   // ─── Tracing & Policies ───────────────────────────────────────────
   private traceRecorder = new TraceRecorder();
+  private requestPreparation = new RequestPreparation();
   private _effectivePolicy: ModePolicy | null = null;
 
   // ─── Memory System ────────────────────────────────────────────────
@@ -169,6 +171,7 @@ export class Harness {
 
     // Initialize context manager
     this.contextManager = new ContextManager();
+    this.contextManager.setCostOptimization(this.config.costOptimization);
 
     // Initialize tool router
     this.toolRouter = new ToolRouter();
@@ -205,6 +208,7 @@ export class Harness {
     for (const tool of getAllBuiltinTools()) {
       this.toolRouter.register(tool);
     }
+    this.registerProgressiveToolAccess();
 
     // Register post-tool hooks
     this.postToolHooks.push(this.loopDetection);
@@ -519,6 +523,7 @@ export class Harness {
         const memBlock = await this.memoryContextProvider.getContextBlock(
           userMessage,
           policy.maxInputTokens,
+          this.config.costOptimization ? this.contextManager.getDeduplicationText() : '',
         );
         if (memBlock) {
           this.contextManager.addSource({
@@ -567,6 +572,12 @@ export class Harness {
     };
     /** Middleware-injected context messages for the next iteration */
     let middlewareInjections: string[] = [];
+    let selectedTools: import('@hyscode/ai-providers').ToolDefinition[] | null = null;
+    let toolSelectionDecisions: ToolSelectionDecision[] = [];
+    let selectedToolMode: AgentType | null = null;
+    let outputBudget = this.config.costOptimization
+      ? initialOutputBudget(this.agentType, policy.maxOutputTokens)
+      : policy.maxOutputTokens;
 
     while (iteration < maxIter && !this.cancelled) {
       this.turnController.transition('streaming');
@@ -595,15 +606,31 @@ export class Harness {
         policy.allowedToolCategories,
         agentDef.toolOverrides,
       );
-      const tools = selectToolDefinitions(
-        availableTools,
-        userMessage,
-        new Set(this.toolCallHistory.map((call) => call.toolName)),
-      );
+      if (!selectedTools || selectedToolMode !== this.agentType) {
+        const toolPlan = this.config.costOptimization
+          ? selectToolPlan(
+              availableTools,
+              userMessage,
+              new Set(this.toolCallHistory.map((call) => call.toolName)),
+              this.agentType,
+            )
+          : {
+              tools: availableTools,
+              decisions: availableTools.map((tool) => ({
+                name: tool.name,
+                selected: true,
+                reason: 'core' as const,
+              })),
+            };
+        selectedTools = toolPlan.tools;
+        toolSelectionDecisions = toolPlan.decisions;
+        selectedToolMode = this.agentType;
+      }
+      const tools = selectedTools;
       const snapshot = this.contextManager.buildSnapshot(
         tools,
         policy.maxInputTokens,
-        policy.maxOutputTokens,
+        outputBudget,
       );
       this.traceRecorder.recordContextSnapshot(
         snapshot.tokenBreakdown,
@@ -626,6 +653,8 @@ export class Harness {
 
       // Call LLM
       const registry = getProviderRegistry();
+      const provider = registry.get(this.config.providerId);
+      const model = provider?.models.find((candidate) => candidate.id === this.config.modelId);
 
       // Emit api_request_sent so the UI can track credit usage
       this.emit({
@@ -643,15 +672,24 @@ export class Harness {
       if (activeTurn.signal.aborted) abortFromTurn();
       else activeTurn.signal.addEventListener('abort', abortFromTurn, { once: true });
 
-      const chatParams = {
-        model: this.config.modelId,
-        messages: snapshot.messages,
-        systemPrompt: snapshot.systemPrompt,
-        tools: snapshot.tools,
-        maxTokens: policy.maxOutputTokens,
-        signal: abortController.signal,
+      const prepared = this.requestPreparation.prepare({
+        snapshot,
+        provider,
+        model,
+        modelId: this.config.modelId,
+        maxOutputTokens: outputBudget,
         thinking: this.config.thinking,
-        cachePrompt: true,
+        enabled: this.config.costOptimization,
+      });
+      this.traceRecorder.recordPreparedRequest(
+        prepared.cost,
+        prepared.stablePrefixHash,
+        prepared.optimizations,
+        toolSelectionDecisions,
+      );
+      const chatParams = {
+        ...prepared.params,
+        signal: abortController.signal,
       };
 
       let assistantText = '';
@@ -662,6 +700,7 @@ export class Harness {
         input: Record<string, unknown>;
         _rawInput?: string;
       }> = [];
+      let providerStopReason: import('@hyscode/ai-providers').StopReason | null = null;
 
       const timeoutPromise = new Promise<never>((_, reject) => {
         timeoutId = setTimeout(() => {
@@ -714,8 +753,7 @@ export class Harness {
                   break;
                 }
                 case 'done':
-                  // stopReason is tracked by the provider but the loop
-                  // relies solely on toolCalls.length to decide continuation.
+                  providerStopReason = chunk.stopReason;
                   break;
                 case 'usage':
                   // Each provider emits one consolidated usage chunk per API request.
@@ -730,6 +768,23 @@ export class Harness {
                     tokenUsage.cacheWriteTokens =
                       (tokenUsage.cacheWriteTokens ?? 0) + chunk.usage.cacheWriteTokens;
                   }
+                  if (chunk.usage.reasoningTokens !== undefined) {
+                    tokenUsage.reasoningTokens =
+                      (tokenUsage.reasoningTokens ?? 0) + chunk.usage.reasoningTokens;
+                  }
+                  tokenUsage.retryCount =
+                    (tokenUsage.retryCount ?? 0) + (chunk.usage.retryCount ?? 0);
+                  tokenUsage.possibleDuplicateCharge =
+                    Boolean(tokenUsage.possibleDuplicateCharge) ||
+                    Boolean(chunk.usage.possibleDuplicateCharge);
+                  this.requestPreparation.recordUsage(
+                    this.config.providerId,
+                    this.config.modelId,
+                    prepared.cost.estimatedInputTokens,
+                    chunk.usage,
+                  );
+                  tokenUsage.estimatedCostUsd =
+                    (tokenUsage.estimatedCostUsd ?? 0) + estimateActualCost(chunk.usage, model);
                   if (chunk.usage.totalTokens > 0) {
                     tokenUsage.totalTokens += chunk.usage.totalTokens;
                   } else {
@@ -783,6 +838,19 @@ export class Harness {
       // tool calls is the only reliable signal that the agent wants to continue.
       if (toolCalls.length === 0) {
         this.traceRecorder.setHadToolCalls(false);
+
+        if (
+          providerStopReason === 'max_tokens' &&
+          this.config.costOptimization &&
+          outputBudget < policy.maxOutputTokens
+        ) {
+          outputBudget = Math.min(policy.maxOutputTokens, outputBudget * 2);
+          middlewareInjections.push(
+            `[Continue the response from where it stopped. The output budget was increased to ${outputBudget} tokens.]`,
+          );
+          this.traceRecorder.endIteration();
+          continue;
+        }
 
         // ── Empty content recovery ──
         // Some reasoning models (DeepSeek, Kimi, MiMo) occasionally emit only
@@ -1031,6 +1099,9 @@ export class Harness {
               this.setAgentType(targetMode as AgentType);
               agentDef = getAgentDefinition(this.agentType);
               policy = this.getEffectivePolicy();
+              outputBudget = this.config.costOptimization
+                ? initialOutputBudget(this.agentType, policy.maxOutputTokens)
+                : policy.maxOutputTokens;
               maxIter = Math.max(iteration + 1, policy.maxIterations);
               record.output.output = `Mode switch APPROVED by user. The ${targetMode} agent has taken over this turn. Continue from this context summary:\n${contextSummary}`;
             } else {
@@ -1317,6 +1388,82 @@ export class Harness {
     });
   }
 
+  private registerProgressiveToolAccess(): void {
+    this.toolRouter.register({
+      definition: {
+        name: 'search_tools',
+        description:
+          'Search the compact catalog of registered tools before invoking a tool whose schema is not currently exposed.',
+        inputSchema: {
+          type: 'object',
+          properties: { query: { type: 'string' } },
+          required: ['query'],
+        },
+      },
+      category: 'meta',
+      requiresApproval: false,
+      execute: async (input) => {
+        const query = String(input.query ?? '').toLowerCase();
+        const terms = query.split(/\s+/).filter(Boolean);
+        const matches = this.toolRouter
+          .getToolDefinitions()
+          .filter((tool) => tool.name !== 'search_tools' && tool.name !== 'invoke_external_tool')
+          .filter(
+            (tool) =>
+              terms.length === 0 ||
+              terms.some((term) => `${tool.name} ${tool.description}`.toLowerCase().includes(term)),
+          )
+          .slice(0, 20)
+          .map(
+            (tool) =>
+              `${tool.name}: ${tool.description}\nSchema: ${JSON.stringify(tool.inputSchema)}`,
+          );
+        return {
+          success: true,
+          output: matches.length > 0 ? matches.join('\n\n') : 'No matching tools found.',
+        };
+      },
+    });
+    this.toolRouter.register({
+      definition: {
+        name: 'invoke_external_tool',
+        description:
+          'Invoke a tool found with search_tools. The target tool keeps its normal validation and approval policy.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            name: { type: 'string' },
+            input: { type: 'object' },
+          },
+          required: ['name', 'input'],
+        },
+      },
+      category: 'meta',
+      requiresApproval: false,
+      execute: async (input, context) => {
+        const name = String(input.name ?? '');
+        if (!name || name === 'search_tools' || name === 'invoke_external_tool') {
+          return { success: false, output: '', error: 'Invalid external tool name.' };
+        }
+        const handler = this.toolRouter.getHandler(name);
+        if (!handler) {
+          return {
+            success: false,
+            output: '',
+            error: `Tool "${name}" is not registered.`,
+          };
+        }
+        const nested = await this.toolRouter.execute(
+          name,
+          `${context.toolCallId}:external`,
+          (input.input as Record<string, unknown>) ?? {},
+          context,
+        );
+        return nested.output;
+      },
+    });
+  }
+
   private finishTurn(status: TurnStatus, tokenUsage: TokenUsage, error?: string): void {
     if (!this.turnController.finish(status)) return;
     const reason = status === 'loop_detected' ? 'error' : status;
@@ -1393,33 +1540,65 @@ export class Harness {
    * Called by the bridge before run() to provide the agent with workspace awareness.
    */
   injectEnvironmentContext(env: import('./types').EnvironmentContext): void {
-    const parts: string[] = [];
+    const addEnvironmentSource = (
+      id: string,
+      type: import('./types').ContextSource['type'],
+      content: string,
+      metadata?: Record<string, unknown>,
+    ): void => {
+      this.contextManager.addSource({
+        id,
+        type,
+        priority: 'high',
+        content,
+        tokenEstimate: Math.ceil(content.length / 4),
+        origin: 'environment',
+        identity: id,
+        expiresAfterTurn: this.contextManager.getTurnNumber(),
+        metadata,
+      });
+    };
 
-    parts.push(`<environment>`);
-    parts.push(`<workspace_root>${env.workspacePath}</workspace_root>`);
+    addEnvironmentSource(
+      'env-workspace',
+      'file_tree',
+      `<workspace_root>${env.workspacePath}</workspace_root>`,
+    );
 
     if (env.activeFile) {
       const preview =
         env.activeFile.content.length > 2000
           ? env.activeFile.content.slice(0, 2000) + '\n... [truncated]'
           : env.activeFile.content;
-      parts.push(
+      addEnvironmentSource(
+        'env-active-file',
+        'active_file',
         `<active_file path="${env.activeFile.path}" language="${env.activeFile.language}">\n${preview}\n</active_file>`,
+        { filePath: env.activeFile.path },
       );
     }
 
     if (env.selection) {
-      parts.push(
+      addEnvironmentSource(
+        'env-selection',
+        'selection',
         `<selection file="${env.selection.filePath}" lines="${env.selection.startLine}-${env.selection.endLine}">\n${env.selection.text}\n</selection>`,
+        { filePath: env.selection.filePath },
       );
     }
 
     if (env.directoryTree) {
-      parts.push(`<directory_tree>\n${env.directoryTree}\n</directory_tree>`);
+      addEnvironmentSource(
+        'env-tree',
+        'file_tree',
+        `<directory_tree>\n${env.directoryTree}\n</directory_tree>`,
+      );
     }
 
     if (env.gitState) {
-      parts.push(
+      addEnvironmentSource(
+        'env-git',
+        'git_diff',
         `<git branch="${env.gitState.branch}" uncommitted="${env.gitState.uncommittedFiles}">\n${env.gitState.summary}\n</git>`,
       );
     }
@@ -1429,22 +1608,22 @@ export class Harness {
         env.lastTerminalCommand.output.length > 1000
           ? env.lastTerminalCommand.output.slice(-1000)
           : env.lastTerminalCommand.output;
-      parts.push(
+      addEnvironmentSource(
+        'env-terminal',
+        'terminal',
         `<last_terminal_command exit="${env.lastTerminalCommand.exitCode}">\n$ ${env.lastTerminalCommand.command}\n${cmdOutput}\n</last_terminal_command>`,
       );
     }
-
-    parts.push(`</environment>`);
-
-    this.contextManager.addSource({
-      id: 'env-context',
-      type: 'active_file', // Reuses existing type for now
-      priority: 'high',
-      content: parts.join('\n'),
-      tokenEstimate: Math.ceil(parts.join('\n').length / 4),
-      origin: 'environment',
-      identity: 'environment:workspace',
-      expiresAfterTurn: this.contextManager.getTurnNumber(),
-    });
   }
+}
+
+function initialOutputBudget(mode: AgentType, maximum: number): number {
+  const defaults: Record<AgentType, number> = {
+    chat: 4_000,
+    plan: 8_000,
+    build: 8_000,
+    debug: 8_000,
+    review: 6_000,
+  };
+  return Math.min(maximum, defaults[mode]);
 }

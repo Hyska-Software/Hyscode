@@ -155,7 +155,8 @@ function ContextPieButton({
     usage && model?.outputPricePerMToken
       ? (usage.outputTokens / 1_000_000) * model.outputPricePerMToken
       : null;
-  const totalCost = inputCost != null && outputCost != null ? inputCost + outputCost : null;
+  const totalCost = usage?.estimatedCostUsd ??
+    (inputCost != null && outputCost != null ? inputCost + outputCost : null);
 
   useEffect(() => {
     if (!open) return;
@@ -225,6 +226,12 @@ function ContextPieButton({
                 <StatRow label="Input tokens" value={usage.inputTokens.toLocaleString()} />
                 <StatRow label="Output tokens" value={usage.outputTokens.toLocaleString()} />
                 <StatRow label="Total tokens" value={usage.totalTokens.toLocaleString()} accent />
+                {(usage.reasoningTokens ?? 0) > 0 && (
+                  <StatRow label="Reasoning tokens" value={(usage.reasoningTokens ?? 0).toLocaleString()} />
+                )}
+                {(usage.retryCount ?? 0) > 0 && (
+                  <StatRow label="Retries" value={String(usage.retryCount)} />
+                )}
                 {hasCache && (
                   <>
                     <StatRow label="  └ Cache read" value={cacheRead.toLocaleString()} />

@@ -43,9 +43,15 @@ export async function withRetry<T>(
         if (err.statusCode && !cfg.retryableStatuses.includes(err.statusCode)) {
           throw err;
         }
+        if (!err.statusCode) throw err;
+      } else {
+        // Unknown transport errors may occur after the provider accepted a billable
+        // request. Do not retry without an explicit pre-response retryable status.
+        throw err;
       }
 
       if (attempt < cfg.maxRetries) {
+        cfg.onRetry?.(attempt + 1, err);
         const delay = err instanceof ProviderError && err.retryAfterMs != null
           ? err.retryAfterMs
           : getDelay(attempt, cfg);

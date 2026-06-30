@@ -59,6 +59,8 @@ export { Harness } from './harness';
 export type { HarnessOptions } from './harness';
 
 export { ContextManager } from './context-manager';
+export { RequestPreparation, estimateActualCost } from './request-preparation';
+export type { PreparedChatRequest, RequestCostBreakdown } from './request-preparation';
 export { ToolRouter } from './tool-router';
 export { SkillLoader } from './skill-loader';
 export type { SkillLoaderConfig } from './skill-loader';

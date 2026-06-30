@@ -253,7 +253,7 @@ export interface ContextEntryDecision {
   category: keyof Omit<ContextTokenBreakdown, 'total' | 'dropped' | 'deduplicated'>;
   tokens: number;
   included: boolean;
-  reason?: 'budget' | 'duplicate' | 'expired';
+  reason?: 'budget' | 'duplicate' | 'expired' | 'superseded';
 }
 
 // ─── Agent Definitions ──────────────────────────────────────────────────────
@@ -354,6 +354,8 @@ export interface HarnessConfig {
   approval: ApprovalConfig;
   /** Thinking/reasoning configuration */
   thinking?: ThinkingConfig;
+  /** Enables eval-gated context and provider cost optimizations. */
+  costOptimization: boolean;
 }
 
 export type TurnStatus = 'complete' | 'max_iterations' | 'loop_detected' | 'cancelled' | 'error';
@@ -382,6 +384,7 @@ export const DEFAULT_HARNESS_CONFIG: HarnessConfig = {
   approval: {
     mode: 'manual',
   },
+  costOptimization: true,
 };
 
 // ─── Harness Events ─────────────────────────────────────────────────────────

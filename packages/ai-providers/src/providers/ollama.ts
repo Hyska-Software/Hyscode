@@ -6,6 +6,7 @@ import type {
   Message,
   ToolDefinition,
   FetchImpl,
+  ProviderCapabilities,
 } from '../types';
 import { ProviderError } from '../types';
 import { parseNDJSONStream } from '../retry';
@@ -86,6 +87,12 @@ function toOllamaTools(tools: ToolDefinition[]): OllamaTool[] {
 export class OllamaProvider implements AIProvider {
   readonly id = 'ollama' as const;
   readonly name = 'Ollama (Local)';
+  readonly capabilities: ProviderCapabilities = {
+    promptCache: 'none',
+    reasoningReplay: 'none',
+    nativeTokenCounting: false,
+    acceptsPromptCacheKey: false,
+  };
   models: AIModel[] = [];
 
   private baseUrl: string;

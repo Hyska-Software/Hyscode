@@ -7,6 +7,7 @@ import type {
   ToolDefinition,
   FetchImpl,
   ThinkingVariants,
+  ProviderCapabilities,
 } from '../types';
 import { ProviderError } from '../types';
 import { parseSSEStream } from '../retry';
@@ -317,6 +318,12 @@ const ANTHROPIC_MODELS: AIModel[] = [
 export class AnthropicProvider implements AIProvider {
   readonly id = 'anthropic' as const;
   readonly name = 'Anthropic';
+  readonly capabilities: ProviderCapabilities = {
+    promptCache: 'explicit-breakpoints',
+    reasoningReplay: 'none',
+    nativeTokenCounting: false,
+    acceptsPromptCacheKey: false,
+  };
   models: AIModel[] = [...ANTHROPIC_MODELS];
 
   private apiKey: string;

@@ -128,6 +128,7 @@ export class ProviderRegistry {
 
     // For streaming, we wrap the initial connection in retry but stream without retry
     // (retrying mid-stream would break the protocol)
+    let retryCount = 0;
     const stream = await withRetry(
       async () => {
         const iter = provider.chat({ ...chatParams, model });
@@ -136,17 +137,17 @@ export class ProviderRegistry {
         const first = await asyncIter.next();
         return { asyncIter, first };
       },
-      this.retryConfig,
+      { ...this.retryConfig, onRetry: () => { retryCount++; } },
     );
 
     if (!stream.first.done) {
-      yield stream.first.value;
+      yield withRetryUsage(stream.first.value, retryCount);
     }
 
     while (true) {
       const result = await stream.asyncIter.next();
       if (result.done) break;
-      yield result.value;
+      yield withRetryUsage(result.value, retryCount);
     }
   }
 
@@ -280,6 +281,12 @@ export class ProviderRegistry {
       }
     }
   }
+}
+
+function withRetryUsage(chunk: StreamChunk, retryCount: number): StreamChunk {
+  return chunk.type === 'usage'
+    ? { ...chunk, usage: { ...chunk.usage, retryCount, possibleDuplicateCharge: false } }
+    : chunk;
 }
 
 // ─── Singleton ──────────────────────────────────────────────────────────────

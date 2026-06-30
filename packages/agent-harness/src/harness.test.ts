@@ -36,6 +36,41 @@ function provider(toolName: string, input: Record<string, unknown>): AIProvider 
 afterEach(() => getProviderRegistry().unregister('harness-test'));
 
 describe('Harness lifecycle', () => {
+  it('starts with a bounded output budget and escalates only after max_tokens', async () => {
+    const budgets: number[] = [];
+    let call = 0;
+    const adaptiveProvider: AIProvider = {
+      id: 'harness-test',
+      name: 'Harness Test',
+      models: [{ ...model, maxOutputTokens: 16_000 }],
+      isConfigured: () => true,
+      listModels: async () => [{ ...model, maxOutputTokens: 16_000 }],
+      async *chat(params: ChatParams): AsyncIterable<StreamChunk> {
+        budgets.push(params.maxTokens ?? 0);
+        call++;
+        yield { type: 'text_delta', text: call === 1 ? 'partial' : 'complete' };
+        yield { type: 'done', stopReason: call === 1 ? 'max_tokens' : 'end_turn' };
+      },
+    };
+    getProviderRegistry().register(adaptiveProvider);
+    const harness = new Harness({
+      workspacePath: 'C:/workspace',
+      projectId: 'project',
+      invoke: async () => undefined as never,
+      config: {
+        providerId: 'harness-test',
+        modelId: 'test-model',
+        maxOutputTokens: 16_000,
+        maxIterations: 3,
+      },
+    });
+    harness.setAgentType('build');
+    harness.setConversationId('conversation');
+    const result = await harness.run('implement', []);
+    expect(budgets).toEqual([8_000, 16_000]);
+    expect(result.response).toBe('complete');
+  });
+
   it('returns a visible max-iteration outcome and one terminal event', async () => {
     getProviderRegistry().register(provider('read_file', { path: 'a.ts' }));
     const events: HarnessEvent[] = [];

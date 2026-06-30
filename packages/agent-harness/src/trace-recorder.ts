@@ -11,6 +11,8 @@ import type {
   ContextTokenBreakdown,
   ToolCallRecord,
 } from './types';
+import type { RequestCostBreakdown } from './request-preparation';
+import type { ToolSelectionDecision } from './tool-selection';
 
 // ─── Trace Types ────────────────────────────────────────────────────────────
 
@@ -40,6 +42,12 @@ export interface TraceIteration {
     tokenBreakdown: ContextTokenBreakdown;
     entries: ContextEntryDecision[];
     toolCount: number;
+  };
+  request?: {
+    cost: RequestCostBreakdown;
+    stablePrefixHash: string;
+    optimizations: string[];
+    toolSelection: ToolSelectionDecision[];
   };
 }
 
@@ -166,6 +174,16 @@ export class TraceRecorder {
   ): void {
     if (!this.currentIteration) return;
     this.currentIteration.context = { tokenBreakdown, entries, toolCount };
+  }
+
+  recordPreparedRequest(
+    cost: RequestCostBreakdown,
+    stablePrefixHash: string,
+    optimizations: string[],
+    toolSelection: ToolSelectionDecision[],
+  ): void {
+    if (!this.currentIteration) return;
+    this.currentIteration.request = { cost, stablePrefixHash, optimizations, toolSelection };
   }
 
   /** Begin a new iteration within the current trace. */

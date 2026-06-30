@@ -7,6 +7,7 @@ import type {
   ToolDefinition,
   StopReason,
   FetchImpl,
+  ProviderCapabilities,
 } from '../types';
 import { ProviderError } from '../types';
 import { parseSSEStream } from '../retry';
@@ -151,11 +152,7 @@ function parseOpenAIChunk(data: string): StreamChunk[] {
       return [
         {
           type: 'usage',
-          usage: {
-            inputTokens: usage.prompt_tokens ?? 0,
-            outputTokens: usage.completion_tokens ?? 0,
-            totalTokens: usage.total_tokens ?? 0,
-          },
+          usage: normalizeOpenAIUsage(usage),
         },
       ];
     }
@@ -177,11 +174,7 @@ function parseOpenAIChunk(data: string): StreamChunk[] {
     if (usage) {
       chunks.push({
         type: 'usage',
-        usage: {
-          inputTokens: usage.prompt_tokens ?? 0,
-          outputTokens: usage.completion_tokens ?? 0,
-          totalTokens: usage.total_tokens ?? 0,
-        },
+        usage: normalizeOpenAIUsage(usage),
       });
     }
     chunks.push({ type: 'done', stopReason: reasonMap[finishReason] ?? 'end_turn' });
@@ -214,6 +207,18 @@ function parseOpenAIChunk(data: string): StreamChunk[] {
   }
 
   return [];
+}
+
+function normalizeOpenAIUsage(usage: Record<string, unknown>): import('../types').TokenUsage {
+  const promptDetails = usage.prompt_tokens_details as Record<string, unknown> | undefined;
+  const completionDetails = usage.completion_tokens_details as Record<string, unknown> | undefined;
+  return {
+    inputTokens: Number(usage.prompt_tokens ?? 0),
+    outputTokens: Number(usage.completion_tokens ?? 0),
+    totalTokens: Number(usage.total_tokens ?? 0),
+    cacheReadTokens: Number(promptDetails?.cached_tokens ?? 0),
+    reasoningTokens: Number(completionDetails?.reasoning_tokens ?? 0),
+  };
 }
 
 // ─── Provider Implementation ────────────────────────────────────────────────
@@ -273,6 +278,14 @@ export class OpenAIProvider implements AIProvider {
   readonly id: string = 'openai';
   readonly name: string = 'OpenAI';
   models: AIModel[] = [...OPENAI_MODELS];
+  get capabilities(): ProviderCapabilities {
+    return {
+      promptCache: this.id === 'openai' ? 'automatic-keyed' : 'automatic',
+      reasoningReplay: this.requiresReasoningContent ? 'required' : 'model-dependent',
+      nativeTokenCounting: false,
+      acceptsPromptCacheKey: this.id === 'openai',
+    };
+  }
 
   protected apiKey: string;
   protected baseUrl: string;
@@ -324,6 +337,9 @@ export class OpenAIProvider implements AIProvider {
     if (params.topP !== undefined) body.top_p = params.topP;
     if (params.stopSequences?.length) body.stop = params.stopSequences;
     if (params.tools?.length) body.tools = toOpenAITools(params.tools);
+    if (params.promptCacheKey && this.capabilities.acceptsPromptCacheKey) {
+      body.prompt_cache_key = params.promptCacheKey;
+    }
     if (params.thinking?.enabled) {
       const isKimi = params.model.startsWith('kimi-') || params.model.startsWith('mimo-');
       if (isKimi) {

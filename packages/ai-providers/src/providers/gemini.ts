@@ -8,6 +8,7 @@ import type {
   StopReason,
   FetchImpl,
   ThinkingVariants,
+  ProviderCapabilities,
 } from '../types';
 import { ProviderError } from '../types';
 
@@ -143,6 +144,8 @@ function* parseGeminiResponse(data: string): Iterable<StreamChunk> {
           inputTokens: usage.promptTokenCount ?? 0,
           outputTokens: usage.candidatesTokenCount ?? 0,
           totalTokens: usage.totalTokenCount ?? 0,
+          cacheReadTokens: usage.cachedContentTokenCount ?? 0,
+          reasoningTokens: usage.thoughtsTokenCount ?? 0,
         },
       };
     }
@@ -206,6 +209,8 @@ function* parseGeminiResponse(data: string): Iterable<StreamChunk> {
         inputTokens: usageMeta.promptTokenCount ?? 0,
         outputTokens: usageMeta.candidatesTokenCount ?? 0,
         totalTokens: usageMeta.totalTokenCount ?? 0,
+        cacheReadTokens: usageMeta.cachedContentTokenCount ?? 0,
+        reasoningTokens: usageMeta.thoughtsTokenCount ?? 0,
       },
     };
   }
@@ -311,6 +316,12 @@ const GEMINI_MODELS: AIModel[] = [
 export class GeminiProvider implements AIProvider {
   readonly id = 'gemini' as const;
   readonly name = 'Google Gemini';
+  readonly capabilities: ProviderCapabilities = {
+    promptCache: 'automatic',
+    reasoningReplay: 'none',
+    nativeTokenCounting: false,
+    acceptsPromptCacheKey: false,
+  };
   models: AIModel[] = [...GEMINI_MODELS];
 
   private apiKey: string;

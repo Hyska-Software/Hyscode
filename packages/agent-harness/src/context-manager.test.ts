@@ -3,6 +3,42 @@ import type { Message } from '@hyscode/ai-providers';
 import { ContextManager } from './context-manager';
 
 describe('ContextManager protocol framing', () => {
+  it('reserves the complete configured output budget', () => {
+    const context = new ContextManager();
+    context.setHistory([{ role: 'user', content: [{ type: 'text', text: 'hello' }] }]);
+    const snapshot = context.buildSnapshot([], 32_000, 8_000);
+    expect(snapshot.budget.reserved.responseBuffer).toBe(8_000);
+    expect(snapshot.budget.available).toBeLessThanOrEqual(24_000);
+  });
+
+  it('places volatile context after reusable history and before the current turn', () => {
+    const context = new ContextManager();
+    context.addSource({ id: 'explicit', type: 'context_chip', priority: 'high', content: 'EXPLICIT', tokenEstimate: 2, origin: 'explicit' });
+    context.addSource({ id: 'memory', type: 'context_chip', priority: 'high', content: 'VOLATILE MEMORY', tokenEstimate: 4, origin: 'memory' });
+    context.setHistory([
+      { role: 'user', content: [{ type: 'text', text: 'OLD USER' }] },
+      { role: 'assistant', content: [{ type: 'text', text: 'OLD ANSWER' }] },
+    ]);
+    context.addMessage({ role: 'user', content: [{ type: 'text', text: 'CURRENT USER' }] });
+    const text = context.buildSnapshot([], 32_000, 4_000).messages.map((message) => message.content.map((item) => item.type === 'text' ? item.text : '').join('')).join('|');
+    expect(text.indexOf('EXPLICIT')).toBeLessThan(text.indexOf('OLD USER'));
+    expect(text.indexOf('OLD ANSWER')).toBeLessThan(text.indexOf('VOLATILE MEMORY'));
+    expect(text.indexOf('VOLATILE MEMORY')).toBeLessThan(text.indexOf('CURRENT USER'));
+  });
+
+  it('drops environment previews after an authoritative tool result supersedes them', () => {
+    const context = new ContextManager();
+    context.addSource({
+      id: 'env-active-file', type: 'active_file', priority: 'high', content: 'STALE PREVIEW',
+      tokenEstimate: 4, origin: 'environment', metadata: { filePath: 'src/a.ts' },
+    });
+    context.setHistory([]);
+    context.addMessage({ role: 'user', content: [{ type: 'text', text: 'inspect a.ts' }] });
+    context.addMessage({ role: 'assistant', content: [{ type: 'tool_call', id: 'read', name: 'read_file', input: { path: 'src/a.ts' } }] });
+    context.addMessage({ role: 'tool', content: [{ type: 'tool_result', toolCallId: 'read', output: 'fresh content' }] });
+    const snapshot = context.buildSnapshot([], 8_000, 1_000);
+    expect(snapshot.entries.find((entry) => entry.id === 'env-active-file')).toMatchObject({ included: false, reason: 'superseded' });
+  });
   it('always reserves the current user turn before optional context', () => {
     const context = new ContextManager();
     context.addSource({

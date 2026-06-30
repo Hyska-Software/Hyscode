@@ -29,4 +29,9 @@ describe('selectToolDefinitions', () => {
     const tools = [tool('read_file'), tool('mcp__github__issues')];
     expect(selectToolDefinitions(tools, 'use MCP to inspect issues', new Set())).toHaveLength(2);
   });
+
+  it('never exposes more than eight MCP schemas from a generic request', () => {
+    const tools = Array.from({ length: 20 }, (_, index) => tool(`mcp__server__tool_${index}`));
+    expect(selectToolDefinitions(tools, 'use MCP', new Set())).toHaveLength(8);
+  });
 });

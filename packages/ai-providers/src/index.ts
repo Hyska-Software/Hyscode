@@ -20,6 +20,9 @@ export type {
   StreamEvent,
   FetchImpl,
   ThinkingConfig,
+  ProviderCapabilities,
+  PromptCacheMode,
+  ReasoningReplayMode,
 } from './types';
 export { ProviderError } from './types';
 

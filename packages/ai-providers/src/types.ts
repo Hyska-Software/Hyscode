@@ -61,6 +61,20 @@ export interface TokenUsage {
   totalTokens: number;
   cacheReadTokens?: number;
   cacheWriteTokens?: number;
+  reasoningTokens?: number;
+  retryCount?: number;
+  estimatedCostUsd?: number;
+  possibleDuplicateCharge?: boolean;
+}
+
+export type PromptCacheMode = 'none' | 'automatic' | 'automatic-keyed' | 'explicit-breakpoints';
+export type ReasoningReplayMode = 'none' | 'model-dependent' | 'required';
+
+export interface ProviderCapabilities {
+  promptCache: PromptCacheMode;
+  reasoningReplay: ReasoningReplayMode;
+  nativeTokenCounting: boolean;
+  acceptsPromptCacheKey: boolean;
 }
 
 // ─── Stream Chunks ──────────────────────────────────────────────────────────
@@ -99,6 +113,7 @@ export interface ChatParams {
   systemPrompt?: string;
   /** Allow providers with prompt-cache support to mark stable prompt prefixes. */
   cachePrompt?: boolean;
+  promptCacheKey?: string;
   maxTokens?: number;
   temperature?: number;
   topP?: number;
@@ -160,6 +175,7 @@ export interface AIModel {
   supportsVision: boolean;
   inputPricePerMToken?: number;
   outputPricePerMToken?: number;
+  cachedInputPricePerMToken?: number;
   /** Thinking/reasoning capability declared by the provider */
   thinkingVariants?: ThinkingVariants;
 }
@@ -168,6 +184,7 @@ export interface AIProvider {
   readonly id: string;
   readonly name: string;
   models: AIModel[];
+  readonly capabilities?: ProviderCapabilities;
   chat(params: ChatParams): AsyncIterable<StreamChunk>;
   listModels(): Promise<AIModel[]>;
   isConfigured(): boolean;
@@ -180,6 +197,7 @@ export interface RetryConfig {
   baseDelayMs: number;
   maxDelayMs: number;
   retryableStatuses: number[];
+  onRetry?: (attempt: number, error: unknown) => void;
 }
 
 // ─── Provider Error ─────────────────────────────────────────────────────────

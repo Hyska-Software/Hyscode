@@ -38,6 +38,8 @@ export class ContextManager {
   private droppedMessages = 0;
   private droppedOrphanTools = 0;
   private turnNumber = 0;
+  private currentTurnStart = 0;
+  private costOptimization = true;
 
   // ─── Gathered Context (agent-managed) ─────────────────────────────
   // Files the agent autonomously decides are important to keep in context.
@@ -48,6 +50,10 @@ export class ContextManager {
 
   setAgent(agent: AgentDefinition): void {
     this.agentDef = agent;
+  }
+
+  setCostOptimization(enabled: boolean): void {
+    this.costOptimization = enabled;
   }
 
   setSystemPrompt(prompt: string | null): void {
@@ -175,6 +181,7 @@ export class ContextManager {
 
   setHistory(messages: Message[]): void {
     this.conversationHistory = messages;
+    this.currentTurnStart = messages.length;
   }
 
   addMessage(message: Message): void {
@@ -183,6 +190,24 @@ export class ContextManager {
 
   getHistory(): Message[] {
     return this.conversationHistory;
+  }
+
+  getDeduplicationText(): string {
+    const messageText = this.conversationHistory
+      .flatMap((message) => message.content)
+      .map((content) =>
+        content.type === 'text'
+          ? content.text
+          : content.type === 'tool_result'
+            ? content.output
+            : '',
+      )
+      .join('\n');
+    const explicitText = this.sources
+      .filter((source) => source.origin === 'explicit')
+      .map((source) => source.content)
+      .join('\n');
+    return `${messageText}\n${explicitText}`.toLowerCase();
   }
 
   // ─── Build Context Snapshot ─────────────────────────────────────────
@@ -202,9 +227,9 @@ export class ContextManager {
       reserved: {
         systemPrompt: systemTokens,
         toolDefinitions: toolTokens,
-        responseBuffer: Math.min(4096, maxOutputTokens),
+        responseBuffer: maxOutputTokens,
       },
-      available: maxInputTokens - systemTokens - toolTokens - Math.min(4096, maxOutputTokens),
+      available: Math.max(0, maxInputTokens - systemTokens - toolTokens - maxOutputTokens),
     };
 
     // Build messages within budget
@@ -352,7 +377,9 @@ export class ContextManager {
 
     const history = includedFrames.flat();
     const includedReadPaths = collectReadPaths(history);
-    const contextMessages: Message[] = [];
+    const stableContextMessages: Message[] = [];
+    const volatileContextMessages: Message[] = [];
+    const checkpointMessages: Message[] = [];
     const seen = new Set<string>();
     let automaticUsed = 0;
     const automaticBudget = Math.floor(availableTokens * AUTOMATIC_CONTEXT_BUDGET_FRACTION);
@@ -360,7 +387,7 @@ export class ContextManager {
       const checkpoint = buildHistoryCheckpoint(droppedFrames, Math.min(remaining, 500));
       const checkpointTokens = estimateMessageTokens([checkpoint]);
       if (checkpointTokens <= remaining) {
-        contextMessages.push(checkpoint);
+        checkpointMessages.push(checkpoint);
         remaining -= checkpointTokens;
         breakdown.recentHistory += checkpointTokens;
         entries.push({
@@ -384,6 +411,7 @@ export class ContextManager {
         origin: 'automatic' as const,
       })),
     ].sort((a, b) => PRIORITY_ORDER.indexOf(a.priority) - PRIORITY_ORDER.indexOf(b.priority));
+    const currentTurnMessages = this.conversationHistory.slice(this.currentTurnStart);
 
     for (const source of candidates) {
       const category =
@@ -404,12 +432,20 @@ export class ContextManager {
         ]) + CONTEXT_WRAPPER_TOKEN_ALLOWANCE;
       const isReadDuplicate =
         source.type === 'gathered_file' && includedReadPaths.has(identity.replace(/^file:/, ''));
+      const isSuperseded = this.costOptimization && isSourceSuperseded(source, currentTurnMessages);
       if (
         seen.has(`${identity}:${source.version ?? hashContent(source.content)}`) ||
-        isReadDuplicate
+        isReadDuplicate ||
+        isSuperseded
       ) {
         breakdown.deduplicated += tokens;
-        entries.push({ id: source.id, category, tokens, included: false, reason: 'duplicate' });
+        entries.push({
+          id: source.id,
+          category,
+          tokens,
+          included: false,
+          reason: isSuperseded ? 'superseded' : 'duplicate',
+        });
         continue;
       }
       const automatic = category !== 'explicit';
@@ -419,7 +455,11 @@ export class ContextManager {
         continue;
       }
       seen.add(`${identity}:${source.version ?? hashContent(source.content)}`);
-      contextMessages.push({
+      const target =
+        category === 'memory' || category === 'environment' || source.id === '__context_hints__'
+          ? volatileContextMessages
+          : stableContextMessages;
+      target.push({
         role: 'user',
         content: [{ type: 'text', text: `[Context: ${source.type}]\n${source.content}` }],
       });
@@ -429,7 +469,33 @@ export class ContextManager {
       entries.push({ id: source.id, category, tokens, included: true });
     }
 
-    return { messages: [...contextMessages, ...history], breakdown, entries };
+    if (!this.costOptimization) {
+      return {
+        messages: [
+          ...stableContextMessages,
+          ...volatileContextMessages,
+          ...checkpointMessages,
+          ...history,
+        ],
+        breakdown,
+        entries,
+      };
+    }
+    const currentTurnMessage = this.conversationHistory[this.currentTurnStart];
+    const currentTurnIndex = currentTurnMessage ? history.indexOf(currentTurnMessage) : -1;
+    const historicalHistory = currentTurnIndex >= 0 ? history.slice(0, currentTurnIndex) : [];
+    const currentHistory = currentTurnIndex >= 0 ? history.slice(currentTurnIndex) : history;
+    return {
+      messages: [
+        ...stableContextMessages,
+        ...checkpointMessages,
+        ...historicalHistory,
+        ...volatileContextMessages,
+        ...currentHistory,
+      ],
+      breakdown,
+      entries,
+    };
   }
 
   private buildProtocolFrames(messages: Message[]): Message[][] {
@@ -513,21 +579,59 @@ function collectReadPaths(messages: Message[]): Set<string> {
   return paths;
 }
 
+function isSourceSuperseded(source: ContextSource, messages: Message[]): boolean {
+  if (source.origin !== 'environment' && source.id !== '__context_hints__') return false;
+  const calls = messages
+    .flatMap((message) => message.content)
+    .filter(
+      (content): content is Extract<Message['content'][number], { type: 'tool_call' }> =>
+        content.type === 'tool_call',
+    );
+  if (source.id === '__context_hints__') {
+    return calls.some((call) => ['find_files', 'search_code', 'read_file'].includes(call.name));
+  }
+  if (source.id === 'env-tree') {
+    return calls.some((call) =>
+      ['list_directory', 'find_files', 'search_code'].includes(call.name),
+    );
+  }
+  if (source.id === 'env-git') {
+    return calls.some((call) => ['git_status', 'git_diff'].includes(call.name));
+  }
+  if (source.id === 'env-terminal') {
+    return calls.some((call) => call.name === 'run_terminal_command');
+  }
+  if (source.id === 'env-active-file') {
+    const sourcePath = normalizePath(String(source.metadata?.filePath ?? ''));
+    return calls.some(
+      (call) =>
+        call.name === 'read_file' && normalizePath(String(call.input.path ?? '')) === sourcePath,
+    );
+  }
+  return false;
+}
+
 function buildHistoryCheckpoint(frames: Message[][], tokenBudget: number): Message {
-  const facts: string[] = [];
-  for (const frame of frames) {
+  const errors: string[] = [];
+  const fileActions: string[] = [];
+  const recentText: string[] = [];
+  for (const frame of [...frames].reverse()) {
     for (const message of frame) {
       for (const content of message.content) {
         if (content.type === 'text' && content.text.trim()) {
-          facts.push(`${message.role}: ${content.text.replace(/\s+/g, ' ').slice(0, 240)}`);
+          recentText.push(`${message.role}: ${content.text.replace(/\s+/g, ' ').slice(0, 240)}`);
         } else if (content.type === 'tool_call') {
-          facts.push(`tool call: ${content.name}`);
+          const path = content.input.path ?? content.input.from ?? content.input.to;
+          if (path) fileActions.push(`tool call: ${content.name} ${String(path)}`);
         } else if (content.type === 'tool_result' && content.isError) {
-          facts.push(`tool error: ${content.output.replace(/\s+/g, ' ').slice(0, 240)}`);
+          errors.push(
+            `unresolved tool error: ${content.output.replace(/\s+/g, ' ').slice(0, 240)}`,
+          );
         }
       }
     }
   }
+  const facts = [...errors, ...fileActions, ...recentText];
   const charBudget = Math.max(120, tokenBudget * 4 - 80);
   const text = `<history_checkpoint frames="${frames.length}">\n${facts.join('\n').slice(0, charBudget)}\n</history_checkpoint>`;
   return { role: 'user', content: [{ type: 'text', text }] };
