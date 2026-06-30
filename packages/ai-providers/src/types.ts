@@ -77,8 +77,8 @@ export type StopReason = 'end_turn' | 'tool_use' | 'max_tokens' | 'stop_sequence
 export interface ThinkingConfig {
   /** Whether thinking is enabled */
   enabled: boolean;
-  /** Effort/level for providers that support it (OpenAI: low/medium/high, Anthropic adaptive: low/medium/high, Kimi: enabled/disabled) */
-  level?: 'low' | 'medium' | 'high' | 'enabled' | 'disabled' | 'none' | 'minimal' | 'xhigh';
+  /** Effort/level for providers that support it (OpenAI: low/medium/high/xhigh, Anthropic adaptive: low/medium/high, Anthropic budget: low/medium/high/max, Kimi: enabled/disabled) */
+  level?: 'low' | 'medium' | 'high' | 'enabled' | 'disabled' | 'none' | 'minimal' | 'xhigh' | 'max';
   /** Budget tokens for providers that support it (Anthropic manual mode) */
   budgetTokens?: number;
   /** Provider-native thinking type override */
@@ -118,6 +118,28 @@ export interface ChatResponse {
 
 // ─── Provider & Model ───────────────────────────────────────────────────────
 
+/** Thinking/reasoning variants supported by a model.
+ *  The `kind` selects the wire-format adapter; `levels` are the values the
+ *  underlying API accepts. When omitted, the model does not support thinking. */
+export type ThinkingKind =
+  | 'anthropic' // Anthropic messages: thinking: { type, effort | budget_tokens, display }
+  | 'openai' // OpenAI Responses / chat.completions: reasoning_effort
+  | 'gemini' // Gemini: thinkingConfig { includeThoughts, thinkingBudget }
+  | 'kimi' // Moonshot-compatible (Kimi, MiMo, GLM, MiniMax on chat/completions): thinking: { type }
+  | 'deepseek' // DeepSeek chat.completions: reasoning: { enabled }
+  | 'mistral' // Mistral: thinking: { enable }
+  | 'none';
+
+export interface ThinkingVariants {
+  kind: ThinkingKind;
+  /** Levels accepted by the model — undefined for kimi/deepseek (binary enabled/disabled) */
+  levels?: ReadonlyArray<'low' | 'medium' | 'high' | 'enabled' | 'disabled' | 'none' | 'minimal' | 'xhigh' | 'max'>;
+  /** Default level when thinking is enabled without an explicit value */
+  defaultLevel?: 'low' | 'medium' | 'high' | 'enabled';
+  /** True for Anthropic models that accept the 'adaptive' type (opus 4.6+, sonnet 4.6, fable 5) */
+  supportsAdaptive?: boolean;
+}
+
 export interface AIModel {
   id: string;
   name: string;
@@ -129,6 +151,8 @@ export interface AIModel {
   supportsVision: boolean;
   inputPricePerMToken?: number;
   outputPricePerMToken?: number;
+  /** Thinking/reasoning capability declared by the provider */
+  thinkingVariants?: ThinkingVariants;
 }
 
 export interface AIProvider {

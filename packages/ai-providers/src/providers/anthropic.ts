@@ -6,6 +6,7 @@ import type {
   Message,
   ToolDefinition,
   FetchImpl,
+  ThinkingVariants,
 } from '../types';
 import { ProviderError } from '../types';
 import { parseSSEStream } from '../retry';
@@ -217,6 +218,46 @@ function parseAnthropicEvent(
   }
 }
 
+// ─── Thinking variant presets ────────────────────────────────────────────────
+// Aligned with the official OpenCode built-in variants
+// (https://dev.opencode.ai/docs/models/#variants):
+//   Anthropic: high (default), max
+// For adaptive models (opus 4.6+, sonnet 4.6, fable 5) the level maps to
+// thinking.effort (low/medium/high; "max" → effort "high"). For budget models
+// (opus ≤4-5, opus-4-1, sonnet 4, sonnet 4-5) the level maps to a
+// thinking.budget_tokens preset.
+
+/** Map an OpenCode thinking level to a budget_tokens preset for non-adaptive
+ *  Anthropic models. The docs example uses 16000 for sonnet-4-5 ("high"). */
+function budgetTokensForLevel(level?: string): number {
+  switch (level) {
+    case 'low':
+      return 8_000;
+    case 'medium':
+      return 16_000;
+    case 'high':
+      return 24_000;
+    case 'max':
+      return 32_000;
+    default:
+      return 16_000;
+  }
+}
+
+export const ADAPTIVE_CLAUDE_VARIANTS: ThinkingVariants = {
+  kind: 'anthropic',
+  levels: ['low', 'medium', 'high', 'max'],
+  defaultLevel: 'high',
+  supportsAdaptive: true,
+};
+
+export const BUDGET_CLAUDE_VARIANTS: ThinkingVariants = {
+  kind: 'anthropic',
+  levels: ['low', 'medium', 'high', 'max'],
+  defaultLevel: 'high',
+  supportsAdaptive: false,
+};
+
 // ─── Provider Implementation ────────────────────────────────────────────────
 
 const ANTHROPIC_MODELS: AIModel[] = [
@@ -231,6 +272,7 @@ const ANTHROPIC_MODELS: AIModel[] = [
     supportsVision: true,
     inputPricePerMToken: 10,
     outputPricePerMToken: 50,
+    thinkingVariants: ADAPTIVE_CLAUDE_VARIANTS,
   },
   {
     id: 'claude-opus-4-8',
@@ -243,6 +285,7 @@ const ANTHROPIC_MODELS: AIModel[] = [
     supportsVision: true,
     inputPricePerMToken: 5,
     outputPricePerMToken: 25,
+    thinkingVariants: ADAPTIVE_CLAUDE_VARIANTS,
   },
   {
     id: 'claude-sonnet-4-6',
@@ -255,6 +298,7 @@ const ANTHROPIC_MODELS: AIModel[] = [
     supportsVision: true,
     inputPricePerMToken: 3,
     outputPricePerMToken: 15,
+    thinkingVariants: ADAPTIVE_CLAUDE_VARIANTS,
   },
   {
     id: 'claude-haiku-4-5',
@@ -319,15 +363,30 @@ export class AnthropicProvider implements AIProvider {
       body.stop_sequences = params.stopSequences;
     }
     if (params.thinking?.enabled) {
-      const thinkingConfig: Record<string, unknown> = {};
       const usesAdaptiveThinking = /claude-(?:fable-5|opus-4-[6-9]|sonnet-4-6)/.test(params.model);
-      thinkingConfig.type = usesAdaptiveThinking ? 'adaptive' : (params.thinking.type ?? 'enabled');
-      if (params.thinking.level) {
-        thinkingConfig.effort = params.thinking.level;
+      const thinkingConfig: Record<string, unknown> = {};
+
+      if (usesAdaptiveThinking) {
+        // Adaptive models accept thinking.type = 'adaptive' + an effort level.
+        // The official OpenCode Anthropic variants are high (default) and max;
+        // low/medium are also accepted by the API. "max" maps to effort "high"
+        // (the strongest adaptive effort) since adaptive has no discrete "max".
+        thinkingConfig.type = 'adaptive';
+        const effort =
+          params.thinking.level === 'max' ? 'high' : (params.thinking.level ?? 'high');
+        thinkingConfig.effort = effort;
+      } else {
+        // Budget models accept thinking.type = 'enabled' + budget_tokens.
+        // Sending "effort" here is invalid, so derive budget_tokens from the
+        // level preset unless the caller supplied an explicit budgetTokens.
+        thinkingConfig.type = params.thinking.type ?? 'enabled';
+        if (params.thinking.budgetTokens) {
+          thinkingConfig.budget_tokens = params.thinking.budgetTokens;
+        } else {
+          thinkingConfig.budget_tokens = budgetTokensForLevel(params.thinking.level);
+        }
       }
-      if (params.thinking.budgetTokens && !usesAdaptiveThinking) {
-        thinkingConfig.budget_tokens = params.thinking.budgetTokens;
-      }
+
       if (params.thinking.display) {
         thinkingConfig.display = params.thinking.display;
       }

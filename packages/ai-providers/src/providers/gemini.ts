@@ -7,8 +7,32 @@ import type {
   ToolDefinition,
   StopReason,
   FetchImpl,
+  ThinkingVariants,
 } from '../types';
 import { ProviderError } from '../types';
+
+// ─── Thinking variant presets ────────────────────────────────────────────────
+// Aligned with the official OpenCode built-in variants
+// (https://dev.opencode.ai/docs/models/#variants): Google supports low / high.
+// The Gemini API uses a numeric thinkingBudget; map the level to a token count.
+
+const GEMINI_THINKING_VARIANTS: ThinkingVariants = {
+  kind: 'gemini',
+  levels: ['low', 'high'],
+  defaultLevel: 'high',
+};
+
+/** Map an OpenCode Gemini thinking level to a thinkingBudget token count. */
+function thinkingBudgetForLevel(level?: string): number {
+  switch (level) {
+    case 'low':
+      return 0; // 0 disables thinking budget expansion beyond the minimum
+    case 'high':
+      return 24_576;
+    default:
+      return 24_576;
+  }
+}
 
 // ─── Gemini Message Formatting ──────────────────────────────────────────────
 
@@ -202,6 +226,7 @@ const GEMINI_MODELS: AIModel[] = [
     supportsVision: true,
     inputPricePerMToken: 2.0,
     outputPricePerMToken: 12.0,
+    thinkingVariants: GEMINI_THINKING_VARIANTS,
   },
   {
     id: 'gemini-3.5-flash',
@@ -214,6 +239,7 @@ const GEMINI_MODELS: AIModel[] = [
     supportsVision: true,
     inputPricePerMToken: 1.5,
     outputPricePerMToken: 9,
+    thinkingVariants: GEMINI_THINKING_VARIANTS,
   },
   {
     id: 'gemini-3-flash-preview',
@@ -226,6 +252,7 @@ const GEMINI_MODELS: AIModel[] = [
     supportsVision: true,
     inputPricePerMToken: 0.5,
     outputPricePerMToken: 3.0,
+    thinkingVariants: GEMINI_THINKING_VARIANTS,
   },
   {
     id: 'gemini-3.1-flash-lite',
@@ -238,6 +265,7 @@ const GEMINI_MODELS: AIModel[] = [
     supportsVision: true,
     inputPricePerMToken: 0.25,
     outputPricePerMToken: 1.5,
+    thinkingVariants: GEMINI_THINKING_VARIANTS,
   },
   // ── Gemini 2.5 stable models ──
   {
@@ -251,6 +279,7 @@ const GEMINI_MODELS: AIModel[] = [
     supportsVision: true,
     inputPricePerMToken: 1.25,
     outputPricePerMToken: 10.0,
+    thinkingVariants: GEMINI_THINKING_VARIANTS,
   },
   {
     id: 'gemini-2.5-flash',
@@ -263,6 +292,7 @@ const GEMINI_MODELS: AIModel[] = [
     supportsVision: true,
     inputPricePerMToken: 0.3,
     outputPricePerMToken: 2.5,
+    thinkingVariants: GEMINI_THINKING_VARIANTS,
   },
   {
     id: 'gemini-2.5-flash-lite',
@@ -325,7 +355,11 @@ export class GeminiProvider implements AIProvider {
     if (Object.keys(generationConfig).length) body.generationConfig = generationConfig;
 
     if (params.thinking?.enabled) {
-      body.thinkingConfig = { includeThoughts: true };
+      // Official OpenCode Gemini variants are low / high (effort/token budget).
+      // Map them to a thinkingBudget token count; includeThoughts surfaces the
+      // reasoning trace in the stream.
+      const budget = thinkingBudgetForLevel(params.thinking.level);
+      body.thinkingConfig = { includeThoughts: true, thinkingBudget: budget };
     }
 
     const url = `${this.baseUrl}/models/${params.model}:streamGenerateContent?alt=sse`;

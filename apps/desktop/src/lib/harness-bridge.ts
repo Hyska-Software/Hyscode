@@ -1712,7 +1712,7 @@ Investigate the error, fix the underlying issue in the affected files, and verif
     if (!cfg || !cfg.enabled) return undefined;
     return {
       enabled: true,
-      level: cfg.level as 'low' | 'medium' | 'high' | undefined,
+      level: cfg.level,
       budgetTokens: cfg.budgetTokens,
       display: cfg.display,
     };

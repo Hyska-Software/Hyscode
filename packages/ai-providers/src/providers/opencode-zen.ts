@@ -1,4 +1,4 @@
-import type { AIModel, ChatParams, StreamChunk, FetchImpl } from '../types';
+import type { AIModel, ChatParams, StreamChunk, FetchImpl, ThinkingVariants } from '../types';
 import { ProviderError } from '../types';
 import { OpenAIProvider, toOpenAIMessages, toOpenAITools } from './openai';
 import { AnthropicProvider } from './anthropic';
@@ -10,6 +10,7 @@ import { parseSSEStream } from '../retry';
 // Gemini models use the Google Gemini API format at /zen/v1/models/<model>.
 // GPT models use the OpenAI Responses API at /zen/v1/responses.
 // All other models use OpenAI-compatible chat completions at /zen/v1/chat/completions.
+// Source: https://dev.opencode.ai/docs/zen (last updated Jun 30, 2026)
 
 const ZEN_ANTHROPIC_MODELS = new Set([
   'claude-fable-5',
@@ -51,6 +52,52 @@ const ZEN_GPT_MODELS = new Set([
 
 const ZEN_GEMINI_MODELS = new Set(['gemini-3.5-flash', 'gemini-3.1-pro', 'gemini-3-flash']);
 
+// ─── Thinking variant presets ────────────────────────────────────────────────
+
+const THINKING_ADAPTIVE_CLAUDE: ThinkingVariants = {
+  kind: 'anthropic',
+  levels: ['low', 'medium', 'high', 'max'],
+  defaultLevel: 'high',
+  supportsAdaptive: true,
+};
+
+const THINKING_BUDGET_CLAUDE: ThinkingVariants = {
+  kind: 'anthropic',
+  levels: ['low', 'medium', 'high', 'max'],
+  defaultLevel: 'high',
+  supportsAdaptive: false,
+};
+
+const THINKING_OPENAI: ThinkingVariants = {
+  kind: 'openai',
+  levels: ['none', 'minimal', 'low', 'medium', 'high', 'xhigh'],
+  defaultLevel: 'medium',
+};
+
+const THINKING_GEMINI: ThinkingVariants = {
+  kind: 'gemini',
+  levels: ['low', 'high'],
+  defaultLevel: 'high',
+};
+
+const THINKING_KIMI: ThinkingVariants = {
+  kind: 'kimi',
+  levels: ['enabled', 'disabled'],
+  defaultLevel: 'enabled',
+};
+
+const THINKING_QWEN_ANTHROPIC: ThinkingVariants = {
+  kind: 'anthropic',
+  levels: ['enabled', 'disabled'],
+  defaultLevel: 'enabled',
+};
+
+const THINKING_DEEPSEEK: ThinkingVariants = {
+  kind: 'deepseek',
+  levels: ['enabled', 'disabled'],
+  defaultLevel: 'enabled',
+};
+
 // ─── Static Model List ──────────────────────────────────────────────────────
 // Sourced from https://dev.opencode.ai/docs/zen — models and pricing as of June 2026.
 // The listModels() method attempts to refresh this list from the live API.
@@ -68,6 +115,7 @@ const ZEN_MODELS: AIModel[] = [
     supportsVision: true,
     inputPricePerMToken: 10,
     outputPricePerMToken: 50,
+    thinkingVariants: THINKING_ADAPTIVE_CLAUDE,
   },
   {
     id: 'claude-opus-4-8',
@@ -80,6 +128,7 @@ const ZEN_MODELS: AIModel[] = [
     supportsVision: true,
     inputPricePerMToken: 5,
     outputPricePerMToken: 25,
+    thinkingVariants: THINKING_ADAPTIVE_CLAUDE,
   },
   {
     id: 'claude-opus-4-7',
@@ -92,6 +141,7 @@ const ZEN_MODELS: AIModel[] = [
     supportsVision: true,
     inputPricePerMToken: 5,
     outputPricePerMToken: 25,
+    thinkingVariants: THINKING_ADAPTIVE_CLAUDE,
   },
   {
     id: 'claude-opus-4-6',
@@ -104,6 +154,33 @@ const ZEN_MODELS: AIModel[] = [
     supportsVision: true,
     inputPricePerMToken: 5,
     outputPricePerMToken: 25,
+    thinkingVariants: THINKING_ADAPTIVE_CLAUDE,
+  },
+  {
+    id: 'claude-opus-4-5',
+    name: 'Claude Opus 4.5 (Zen)',
+    provider: 'opencode-zen',
+    contextWindow: 200_000,
+    maxOutputTokens: 32_000,
+    supportsTools: true,
+    supportsStreaming: true,
+    supportsVision: true,
+    inputPricePerMToken: 5,
+    outputPricePerMToken: 25,
+    thinkingVariants: THINKING_BUDGET_CLAUDE,
+  },
+  {
+    id: 'claude-opus-4-1',
+    name: 'Claude Opus 4.1 (Zen)',
+    provider: 'opencode-zen',
+    contextWindow: 200_000,
+    maxOutputTokens: 32_000,
+    supportsTools: true,
+    supportsStreaming: true,
+    supportsVision: true,
+    inputPricePerMToken: 15,
+    outputPricePerMToken: 75,
+    thinkingVariants: THINKING_BUDGET_CLAUDE,
   },
   {
     id: 'claude-sonnet-4-6',
@@ -116,6 +193,7 @@ const ZEN_MODELS: AIModel[] = [
     supportsVision: true,
     inputPricePerMToken: 3,
     outputPricePerMToken: 15,
+    thinkingVariants: THINKING_ADAPTIVE_CLAUDE,
   },
   {
     id: 'claude-sonnet-4-5',
@@ -128,6 +206,7 @@ const ZEN_MODELS: AIModel[] = [
     supportsVision: true,
     inputPricePerMToken: 3,
     outputPricePerMToken: 15,
+    thinkingVariants: THINKING_BUDGET_CLAUDE,
   },
   {
     id: 'claude-sonnet-4',
@@ -140,6 +219,7 @@ const ZEN_MODELS: AIModel[] = [
     supportsVision: true,
     inputPricePerMToken: 3,
     outputPricePerMToken: 15,
+    thinkingVariants: THINKING_BUDGET_CLAUDE,
   },
   {
     id: 'claude-haiku-4-5',
@@ -178,6 +258,7 @@ const ZEN_MODELS: AIModel[] = [
     supportsVision: true,
     inputPricePerMToken: 5,
     outputPricePerMToken: 30,
+    thinkingVariants: THINKING_OPENAI,
   },
   {
     id: 'gpt-5.5-pro',
@@ -190,6 +271,7 @@ const ZEN_MODELS: AIModel[] = [
     supportsVision: true,
     inputPricePerMToken: 30,
     outputPricePerMToken: 180,
+    thinkingVariants: THINKING_OPENAI,
   },
   {
     id: 'gpt-5.4',
@@ -202,6 +284,7 @@ const ZEN_MODELS: AIModel[] = [
     supportsVision: true,
     inputPricePerMToken: 2.5,
     outputPricePerMToken: 15,
+    thinkingVariants: THINKING_OPENAI,
   },
   {
     id: 'gpt-5.4-pro',
@@ -214,6 +297,7 @@ const ZEN_MODELS: AIModel[] = [
     supportsVision: true,
     inputPricePerMToken: 30,
     outputPricePerMToken: 180,
+    thinkingVariants: THINKING_OPENAI,
   },
   {
     id: 'gpt-5.4-mini',
@@ -226,6 +310,7 @@ const ZEN_MODELS: AIModel[] = [
     supportsVision: true,
     inputPricePerMToken: 0.75,
     outputPricePerMToken: 4.5,
+    thinkingVariants: THINKING_OPENAI,
   },
   {
     id: 'gpt-5.4-nano',
@@ -238,6 +323,7 @@ const ZEN_MODELS: AIModel[] = [
     supportsVision: true,
     inputPricePerMToken: 0.2,
     outputPricePerMToken: 1.25,
+    thinkingVariants: THINKING_OPENAI,
   },
   {
     id: 'gpt-5.3-codex',
@@ -250,6 +336,7 @@ const ZEN_MODELS: AIModel[] = [
     supportsVision: true,
     inputPricePerMToken: 1.75,
     outputPricePerMToken: 14,
+    thinkingVariants: THINKING_OPENAI,
   },
   {
     id: 'gpt-5.3-codex-spark',
@@ -262,6 +349,7 @@ const ZEN_MODELS: AIModel[] = [
     supportsVision: true,
     inputPricePerMToken: 1.75,
     outputPricePerMToken: 14,
+    thinkingVariants: THINKING_OPENAI,
   },
   {
     id: 'gpt-5.2',
@@ -274,6 +362,7 @@ const ZEN_MODELS: AIModel[] = [
     supportsVision: true,
     inputPricePerMToken: 1.75,
     outputPricePerMToken: 14,
+    thinkingVariants: THINKING_OPENAI,
   },
   {
     id: 'gpt-5.2-codex',
@@ -286,6 +375,7 @@ const ZEN_MODELS: AIModel[] = [
     supportsVision: true,
     inputPricePerMToken: 1.75,
     outputPricePerMToken: 14,
+    thinkingVariants: THINKING_OPENAI,
   },
   {
     id: 'gpt-5.1',
@@ -298,6 +388,7 @@ const ZEN_MODELS: AIModel[] = [
     supportsVision: true,
     inputPricePerMToken: 1.07,
     outputPricePerMToken: 8.5,
+    thinkingVariants: THINKING_OPENAI,
   },
   {
     id: 'gpt-5.1-codex',
@@ -310,6 +401,7 @@ const ZEN_MODELS: AIModel[] = [
     supportsVision: true,
     inputPricePerMToken: 1.07,
     outputPricePerMToken: 8.5,
+    thinkingVariants: THINKING_OPENAI,
   },
   {
     id: 'gpt-5.1-codex-max',
@@ -322,6 +414,7 @@ const ZEN_MODELS: AIModel[] = [
     supportsVision: true,
     inputPricePerMToken: 1.25,
     outputPricePerMToken: 10,
+    thinkingVariants: THINKING_OPENAI,
   },
   {
     id: 'gpt-5.1-codex-mini',
@@ -334,6 +427,7 @@ const ZEN_MODELS: AIModel[] = [
     supportsVision: true,
     inputPricePerMToken: 0.25,
     outputPricePerMToken: 2,
+    thinkingVariants: THINKING_OPENAI,
   },
   {
     id: 'gpt-5',
@@ -346,6 +440,7 @@ const ZEN_MODELS: AIModel[] = [
     supportsVision: true,
     inputPricePerMToken: 1.07,
     outputPricePerMToken: 8.5,
+    thinkingVariants: THINKING_OPENAI,
   },
   {
     id: 'gpt-5-codex',
@@ -358,6 +453,7 @@ const ZEN_MODELS: AIModel[] = [
     supportsVision: true,
     inputPricePerMToken: 1.07,
     outputPricePerMToken: 8.5,
+    thinkingVariants: THINKING_OPENAI,
   },
   {
     id: 'gpt-5-nano',
@@ -368,8 +464,8 @@ const ZEN_MODELS: AIModel[] = [
     supportsTools: true,
     supportsStreaming: true,
     supportsVision: true,
-    inputPricePerMToken: 0,
-    outputPricePerMToken: 0,
+    inputPricePerMToken: 0.05,
+    outputPricePerMToken: 0.4,
   },
 
   // ── Gemini models (/zen/v1/models/<model>) ────────────────────────────────
@@ -384,6 +480,7 @@ const ZEN_MODELS: AIModel[] = [
     supportsVision: true,
     inputPricePerMToken: 1.5,
     outputPricePerMToken: 9,
+    thinkingVariants: THINKING_GEMINI,
   },
   {
     id: 'gemini-3.1-pro',
@@ -396,6 +493,7 @@ const ZEN_MODELS: AIModel[] = [
     supportsVision: true,
     inputPricePerMToken: 2,
     outputPricePerMToken: 12,
+    thinkingVariants: THINKING_GEMINI,
   },
   {
     id: 'gemini-3-flash',
@@ -408,6 +506,7 @@ const ZEN_MODELS: AIModel[] = [
     supportsVision: true,
     inputPricePerMToken: 0.5,
     outputPricePerMToken: 3,
+    thinkingVariants: THINKING_GEMINI,
   },
 
   // ── Anthropic-compatible Qwen models (/zen/v1/messages) ──────────────────
@@ -422,6 +521,7 @@ const ZEN_MODELS: AIModel[] = [
     supportsVision: false,
     inputPricePerMToken: 2.5,
     outputPricePerMToken: 7.5,
+    thinkingVariants: THINKING_QWEN_ANTHROPIC,
   },
   {
     id: 'qwen3.7-plus',
@@ -434,6 +534,7 @@ const ZEN_MODELS: AIModel[] = [
     supportsVision: false,
     inputPricePerMToken: 0.4,
     outputPricePerMToken: 1.6,
+    thinkingVariants: THINKING_QWEN_ANTHROPIC,
   },
   {
     id: 'qwen3.6-plus',
@@ -446,6 +547,7 @@ const ZEN_MODELS: AIModel[] = [
     supportsVision: false,
     inputPricePerMToken: 0.5,
     outputPricePerMToken: 3,
+    thinkingVariants: THINKING_QWEN_ANTHROPIC,
   },
   {
     id: 'qwen3.5-plus',
@@ -458,7 +560,10 @@ const ZEN_MODELS: AIModel[] = [
     supportsVision: false,
     inputPricePerMToken: 0.2,
     outputPricePerMToken: 1.2,
+    thinkingVariants: THINKING_QWEN_ANTHROPIC,
   },
+
+  // ── OpenAI-compatible chat models (/zen/v1/chat/completions) ──────────────
   {
     id: 'minimax-m2.7',
     name: 'MiniMax M2.7 (Zen)',
@@ -470,6 +575,7 @@ const ZEN_MODELS: AIModel[] = [
     supportsVision: false,
     inputPricePerMToken: 0.3,
     outputPricePerMToken: 1.2,
+    thinkingVariants: THINKING_KIMI,
   },
   {
     id: 'minimax-m2.5',
@@ -482,18 +588,7 @@ const ZEN_MODELS: AIModel[] = [
     supportsVision: false,
     inputPricePerMToken: 0.3,
     outputPricePerMToken: 1.2,
-  },
-  {
-    id: 'minimax-m2.5-free',
-    name: 'MiniMax M2.5 Free (Zen)',
-    provider: 'opencode-zen',
-    contextWindow: 204_800,
-    maxOutputTokens: 16_384,
-    supportsTools: true,
-    supportsStreaming: true,
-    supportsVision: false,
-    inputPricePerMToken: 0,
-    outputPricePerMToken: 0,
+    thinkingVariants: THINKING_KIMI,
   },
   {
     id: 'glm-5.2',
@@ -506,6 +601,7 @@ const ZEN_MODELS: AIModel[] = [
     supportsVision: false,
     inputPricePerMToken: 1.4,
     outputPricePerMToken: 4.4,
+    thinkingVariants: THINKING_KIMI,
   },
   {
     id: 'glm-5.1',
@@ -518,6 +614,7 @@ const ZEN_MODELS: AIModel[] = [
     supportsVision: false,
     inputPricePerMToken: 1.4,
     outputPricePerMToken: 4.4,
+    thinkingVariants: THINKING_KIMI,
   },
   {
     id: 'glm-5',
@@ -530,6 +627,7 @@ const ZEN_MODELS: AIModel[] = [
     supportsVision: false,
     inputPricePerMToken: 1,
     outputPricePerMToken: 3.2,
+    thinkingVariants: THINKING_KIMI,
   },
   {
     id: 'kimi-k2.5',
@@ -542,6 +640,7 @@ const ZEN_MODELS: AIModel[] = [
     supportsVision: false,
     inputPricePerMToken: 0.6,
     outputPricePerMToken: 3,
+    thinkingVariants: THINKING_KIMI,
   },
   {
     id: 'kimi-k2.6',
@@ -554,6 +653,45 @@ const ZEN_MODELS: AIModel[] = [
     supportsVision: false,
     inputPricePerMToken: 0.95,
     outputPricePerMToken: 4,
+    thinkingVariants: THINKING_KIMI,
+  },
+  {
+    id: 'deepseek-v4-pro',
+    name: 'DeepSeek V4 Pro (Zen)',
+    provider: 'opencode-zen',
+    contextWindow: 128_000,
+    maxOutputTokens: 8_192,
+    supportsTools: true,
+    supportsStreaming: true,
+    supportsVision: false,
+    inputPricePerMToken: 1.74,
+    outputPricePerMToken: 3.48,
+    thinkingVariants: THINKING_DEEPSEEK,
+  },
+  {
+    id: 'deepseek-v4-flash',
+    name: 'DeepSeek V4 Flash (Zen)',
+    provider: 'opencode-zen',
+    contextWindow: 128_000,
+    maxOutputTokens: 8_192,
+    supportsTools: true,
+    supportsStreaming: true,
+    supportsVision: false,
+    inputPricePerMToken: 0.14,
+    outputPricePerMToken: 0.28,
+    thinkingVariants: THINKING_DEEPSEEK,
+  },
+  {
+    id: 'grok-build-0.1',
+    name: 'Grok Build 0.1 (Zen)',
+    provider: 'opencode-zen',
+    contextWindow: 128_000,
+    maxOutputTokens: 8_192,
+    supportsTools: true,
+    supportsStreaming: true,
+    supportsVision: false,
+    inputPricePerMToken: 1,
+    outputPricePerMToken: 2,
   },
   {
     id: 'big-pickle',
@@ -568,8 +706,8 @@ const ZEN_MODELS: AIModel[] = [
     outputPricePerMToken: 0,
   },
   {
-    id: 'ling-2.6-flash',
-    name: 'Ling 2.6 Flash (Zen)',
+    id: 'mimo-v2.5-free',
+    name: 'MiMo-V2.5 Free (Zen)',
     provider: 'opencode-zen',
     contextWindow: 128_000,
     maxOutputTokens: 8_192,
@@ -580,8 +718,8 @@ const ZEN_MODELS: AIModel[] = [
     outputPricePerMToken: 0,
   },
   {
-    id: 'hy3-preview-free',
-    name: 'Hy3 Preview Free (Zen)',
+    id: 'north-mini-code-free',
+    name: 'North Mini Code Free (Zen)',
     provider: 'opencode-zen',
     contextWindow: 128_000,
     maxOutputTokens: 8_192,
@@ -592,8 +730,8 @@ const ZEN_MODELS: AIModel[] = [
     outputPricePerMToken: 0,
   },
   {
-    id: 'nemotron-3-super-free',
-    name: 'Nemotron 3 Super Free (Zen)',
+    id: 'nemotron-3-ultra-free',
+    name: 'Nemotron 3 Ultra Free (Zen)',
     provider: 'opencode-zen',
     contextWindow: 128_000,
     maxOutputTokens: 8_192,
@@ -602,6 +740,19 @@ const ZEN_MODELS: AIModel[] = [
     supportsVision: false,
     inputPricePerMToken: 0,
     outputPricePerMToken: 0,
+  },
+  {
+    id: 'deepseek-v4-flash-free',
+    name: 'DeepSeek V4 Flash Free (Zen)',
+    provider: 'opencode-zen',
+    contextWindow: 128_000,
+    maxOutputTokens: 8_192,
+    supportsTools: true,
+    supportsStreaming: true,
+    supportsVision: false,
+    inputPricePerMToken: 0,
+    outputPricePerMToken: 0,
+    thinkingVariants: THINKING_DEEPSEEK,
   },
 ];
 
@@ -807,7 +958,7 @@ export class OpenCodeZenProvider extends OpenAIProvider {
 
   override async *chat(params: ChatParams): AsyncIterable<StreamChunk> {
     if (ZEN_ANTHROPIC_MODELS.has(params.model)) {
-      // Route Claude models through the Anthropic message format
+      // Route Claude and Anthropic-compatible Qwen models through the Anthropic message format
       yield* this.anthropicDelegate.chat(params);
     } else if (ZEN_GEMINI_MODELS.has(params.model)) {
       // Route Gemini models through the Gemini API format
@@ -816,7 +967,7 @@ export class OpenCodeZenProvider extends OpenAIProvider {
       // Route GPT models through the OpenAI Responses API
       yield* this.chatResponsesAPI(params);
     } else {
-      // All other models use OpenAI-compatible chat completions
+      // All other models (Kimi, MiniMax, GLM, DeepSeek, Grok, free tier) use OpenAI-compatible chat completions
       yield* super.chat(params);
     }
   }
