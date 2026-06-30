@@ -51,13 +51,11 @@ fn load_states() -> ExtensionStates {
 fn save_states(states: &ExtensionStates) -> Result<(), String> {
     let path = state_file();
     if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)
-            .map_err(|e| format!("Failed to create state dir: {}", e))?;
+        fs::create_dir_all(parent).map_err(|e| format!("Failed to create state dir: {}", e))?;
     }
     let json = serde_json::to_string_pretty(states)
         .map_err(|e| format!("Failed to serialize state: {}", e))?;
-    fs::write(&path, json)
-        .map_err(|e| format!("Failed to write state file: {}", e))?;
+    fs::write(&path, json).map_err(|e| format!("Failed to write state file: {}", e))?;
     Ok(())
 }
 
@@ -84,18 +82,27 @@ fn load_icon_as_data_uri(icon_name: &str, ext_path: &PathBuf) -> Option<String> 
         "png" => {
             use base64::prelude::*;
             let bytes = fs::read(&icon_path).ok()?;
-            Some(format!("data:image/png;base64,{}", BASE64_STANDARD.encode(&bytes)))
+            Some(format!(
+                "data:image/png;base64,{}",
+                BASE64_STANDARD.encode(&bytes)
+            ))
         }
         "jpg" | "jpeg" => {
             use base64::prelude::*;
             let bytes = fs::read(&icon_path).ok()?;
-            Some(format!("data:image/jpeg;base64,{}", BASE64_STANDARD.encode(&bytes)))
+            Some(format!(
+                "data:image/jpeg;base64,{}",
+                BASE64_STANDARD.encode(&bytes)
+            ))
         }
         _ => None,
     }
 }
 
-fn parse_manifest(manifest: &serde_json::Value, ext_path: &PathBuf) -> Result<ExtensionMeta, String> {
+fn parse_manifest(
+    manifest: &serde_json::Value,
+    ext_path: &PathBuf,
+) -> Result<ExtensionMeta, String> {
     let name = manifest
         .get("name")
         .and_then(|v| v.as_str())
@@ -103,8 +110,14 @@ fn parse_manifest(manifest: &serde_json::Value, ext_path: &PathBuf) -> Result<Ex
         .to_string();
 
     // Validate name (alphanumeric, hyphens, underscores only)
-    if !name.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '_') {
-        return Err(format!("Invalid extension name '{}': only alphanumeric, hyphens and underscores allowed", name));
+    if !name
+        .chars()
+        .all(|c| c.is_alphanumeric() || c == '-' || c == '_')
+    {
+        return Err(format!(
+            "Invalid extension name '{}': only alphanumeric, hyphens and underscores allowed",
+            name
+        ));
     }
 
     let display_name = manifest
@@ -139,13 +152,21 @@ fn parse_manifest(manifest: &serde_json::Value, ext_path: &PathBuf) -> Result<Ex
     let categories: Vec<String> = manifest
         .get("categories")
         .and_then(|v| v.as_array())
-        .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str().map(String::from))
+                .collect()
+        })
         .unwrap_or_default();
 
     let activation_events: Vec<String> = manifest
         .get("activationEvents")
         .and_then(|v| v.as_array())
-        .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str().map(String::from))
+                .collect()
+        })
         .unwrap_or_default();
 
     let has_main = manifest.get("main").and_then(|v| v.as_str()).is_some();
@@ -225,11 +246,9 @@ pub async fn extension_install_zip(zip_path: String) -> Result<ExtensionMeta, St
 
     let temp_dir = extensions_dir().join("__temp_install__");
     if temp_dir.exists() {
-        fs::remove_dir_all(&temp_dir)
-            .map_err(|e| format!("Failed to clean temp dir: {}", e))?;
+        fs::remove_dir_all(&temp_dir).map_err(|e| format!("Failed to clean temp dir: {}", e))?;
     }
-    fs::create_dir_all(&temp_dir)
-        .map_err(|e| format!("Failed to create temp dir: {}", e))?;
+    fs::create_dir_all(&temp_dir).map_err(|e| format!("Failed to create temp dir: {}", e))?;
 
     // Extract (ZIP or RAR, detected by magic bytes)
     if let Err(e) = extract_archive_to_dir(&archive_file, &temp_dir) {
@@ -238,8 +257,10 @@ pub async fn extension_install_zip(zip_path: String) -> Result<ExtensionMeta, St
     }
 
     // Find extension.json at root or one level deep
-    let manifest_path = find_extension_json(&temp_dir)
-        .ok_or_else(|| { let _ = fs::remove_dir_all(&temp_dir); "No extension.json found in archive.".to_string() })?;
+    let manifest_path = find_extension_json(&temp_dir).ok_or_else(|| {
+        let _ = fs::remove_dir_all(&temp_dir);
+        "No extension.json found in archive.".to_string()
+    })?;
 
     let ext_root = manifest_path.parent().unwrap().to_path_buf();
 
@@ -254,9 +275,15 @@ pub async fn extension_install_zip(zip_path: String) -> Result<ExtensionMeta, St
         .ok_or("extension.json missing 'name' field")?
         .to_string();
 
-    if !name.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '_') {
+    if !name
+        .chars()
+        .all(|c| c.is_alphanumeric() || c == '-' || c == '_')
+    {
         let _ = fs::remove_dir_all(&temp_dir);
-        return Err(format!("Invalid extension name '{}': only alphanumeric, hyphens and underscores allowed", name));
+        return Err(format!(
+            "Invalid extension name '{}': only alphanumeric, hyphens and underscores allowed",
+            name
+        ));
     }
 
     let dest = extensions_dir().join(&name);
@@ -266,11 +293,9 @@ pub async fn extension_install_zip(zip_path: String) -> Result<ExtensionMeta, St
     }
 
     if ext_root == temp_dir {
-        fs::rename(&temp_dir, &dest)
-            .map_err(|e| format!("Failed to move extension: {}", e))?;
+        fs::rename(&temp_dir, &dest).map_err(|e| format!("Failed to move extension: {}", e))?;
     } else {
-        fs::rename(&ext_root, &dest)
-            .map_err(|e| format!("Failed to move extension: {}", e))?;
+        fs::rename(&ext_root, &dest).map_err(|e| format!("Failed to move extension: {}", e))?;
         let _ = fs::remove_dir_all(&temp_dir);
     }
 
@@ -287,14 +312,16 @@ pub async fn extension_install_zip(zip_path: String) -> Result<ExtensionMeta, St
 #[tauri::command]
 pub async fn extension_uninstall(name: String) -> Result<(), String> {
     // Validate name to prevent path traversal
-    if !name.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '_') {
+    if !name
+        .chars()
+        .all(|c| c.is_alphanumeric() || c == '-' || c == '_')
+    {
         return Err("Invalid extension name.".to_string());
     }
 
     let dir = extensions_dir().join(&name);
     if dir.exists() {
-        fs::remove_dir_all(&dir)
-            .map_err(|e| format!("Failed to remove extension: {}", e))?;
+        fs::remove_dir_all(&dir).map_err(|e| format!("Failed to remove extension: {}", e))?;
     }
 
     // Remove from state
@@ -318,16 +345,15 @@ pub async fn extension_toggle(name: String, enabled: bool) -> Result<(), String>
 pub async fn extension_list() -> Result<Vec<ExtensionMeta>, String> {
     let dir = extensions_dir();
     if !dir.exists() {
-        fs::create_dir_all(&dir)
-            .map_err(|e| format!("Failed to create extensions dir: {}", e))?;
+        fs::create_dir_all(&dir).map_err(|e| format!("Failed to create extensions dir: {}", e))?;
         return Ok(vec![]);
     }
 
     let states = load_states();
     let mut extensions = Vec::new();
 
-    let entries = fs::read_dir(&dir)
-        .map_err(|e| format!("Failed to list extensions dir: {}", e))?;
+    let entries =
+        fs::read_dir(&dir).map_err(|e| format!("Failed to list extensions dir: {}", e))?;
 
     for entry in entries.flatten() {
         let path = entry.path();
@@ -336,7 +362,11 @@ pub async fn extension_list() -> Result<Vec<ExtensionMeta>, String> {
         }
 
         // Skip temp install dir
-        if path.file_name().map(|n| n == "__temp_install__").unwrap_or(false) {
+        if path
+            .file_name()
+            .map(|n| n == "__temp_install__")
+            .unwrap_or(false)
+        {
             continue;
         }
 
@@ -368,7 +398,11 @@ pub async fn extension_list() -> Result<Vec<ExtensionMeta>, String> {
     }
 
     // Sort by display name
-    extensions.sort_by(|a, b| a.display_name.to_lowercase().cmp(&b.display_name.to_lowercase()));
+    extensions.sort_by(|a, b| {
+        a.display_name
+            .to_lowercase()
+            .cmp(&b.display_name.to_lowercase())
+    });
 
     Ok(extensions)
 }
@@ -376,7 +410,10 @@ pub async fn extension_list() -> Result<Vec<ExtensionMeta>, String> {
 #[tauri::command]
 pub async fn extension_read_asset(name: String, asset_path: String) -> Result<String, String> {
     // Validate name
-    if !name.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '_') {
+    if !name
+        .chars()
+        .all(|c| c.is_alphanumeric() || c == '-' || c == '_')
+    {
         return Err("Invalid extension name.".to_string());
     }
 
@@ -396,16 +433,14 @@ pub async fn extension_read_asset(name: String, asset_path: String) -> Result<St
         return Err("Access denied: path traversal detected.".to_string());
     }
 
-    fs::read_to_string(&canonical_asset)
-        .map_err(|e| format!("Failed to read asset: {}", e))
+    fs::read_to_string(&canonical_asset).map_err(|e| format!("Failed to read asset: {}", e))
 }
 
 /// Get the extension directory path for the frontend to know where extensions live
 #[tauri::command]
 pub async fn extension_get_dir() -> Result<String, String> {
     let dir = extensions_dir();
-    fs::create_dir_all(&dir)
-        .map_err(|e| format!("Failed to create extensions dir: {}", e))?;
+    fs::create_dir_all(&dir).map_err(|e| format!("Failed to create extensions dir: {}", e))?;
     Ok(dir.to_string_lossy().to_string())
 }
 
@@ -487,8 +522,7 @@ fn save_git_sources(sources: &ExtensionGitSources) -> Result<(), String> {
     }
     let json = serde_json::to_string_pretty(sources)
         .map_err(|e| format!("Failed to serialize git sources: {}", e))?;
-    fs::write(&path, json)
-        .map_err(|e| format!("Failed to write git sources file: {}", e))?;
+    fs::write(&path, json).map_err(|e| format!("Failed to write git sources file: {}", e))?;
     Ok(())
 }
 
@@ -518,7 +552,10 @@ fn run_git(args: &[&str], cwd: Option<&PathBuf>) -> Result<String, String> {
 /// Normalize a git URL: add https:// scheme if missing, strip trailing .git.
 fn normalize_git_url(raw: &str) -> String {
     let trimmed = raw.trim().trim_end_matches('/');
-    let with_scheme = if trimmed.starts_with("http://") || trimmed.starts_with("https://") || trimmed.starts_with("git@") {
+    let with_scheme = if trimmed.starts_with("http://")
+        || trimmed.starts_with("https://")
+        || trimmed.starts_with("git@")
+    {
         trimmed.to_string()
     } else {
         format!("https://{}", trimmed)
@@ -548,13 +585,18 @@ fn find_extension_json(dir: &PathBuf) -> Option<PathBuf> {
 }
 
 /// Extract a ZIP or RAR archive into `dest`, auto-detected by magic bytes.
-fn extract_archive_to_dir(archive_path: &std::path::Path, dest: &std::path::Path) -> Result<(), String> {
+fn extract_archive_to_dir(
+    archive_path: &std::path::Path,
+    dest: &std::path::Path,
+) -> Result<(), String> {
     let header = {
         let mut buf = [0u8; 8];
-        let mut f = fs::File::open(archive_path)
-            .map_err(|e| format!("Failed to open archive: {}", e))?;
+        let mut f =
+            fs::File::open(archive_path).map_err(|e| format!("Failed to open archive: {}", e))?;
         use std::io::Read;
-        let n = f.read(&mut buf).map_err(|e| format!("Failed to read archive header: {}", e))?;
+        let n = f
+            .read(&mut buf)
+            .map_err(|e| format!("Failed to read archive header: {}", e))?;
         buf[..n].to_vec()
     };
 
@@ -570,13 +612,13 @@ fn extract_archive_to_dir(archive_path: &std::path::Path, dest: &std::path::Path
 }
 
 fn extract_zip_to_dir(zip_path: &std::path::Path, dest: &std::path::Path) -> Result<(), String> {
-    let file = fs::File::open(zip_path)
-        .map_err(|e| format!("Failed to open ZIP: {}", e))?;
-    let mut archive = zip::ZipArchive::new(file)
-        .map_err(|e| format!("Invalid ZIP archive: {}", e))?;
+    let file = fs::File::open(zip_path).map_err(|e| format!("Failed to open ZIP: {}", e))?;
+    let mut archive =
+        zip::ZipArchive::new(file).map_err(|e| format!("Invalid ZIP archive: {}", e))?;
 
     for i in 0..archive.len() {
-        let mut entry = archive.by_index(i)
+        let mut entry = archive
+            .by_index(i)
             .map_err(|e| format!("Failed to read ZIP entry #{}: {}", i, e))?;
 
         let entry_path = match entry.enclosed_name() {
@@ -587,15 +629,14 @@ fn extract_zip_to_dir(zip_path: &std::path::Path, dest: &std::path::Path) -> Res
         let out_path = dest.join(&entry_path);
 
         if entry.is_dir() {
-            fs::create_dir_all(&out_path)
-                .map_err(|e| format!("Failed to create dir: {}", e))?;
+            fs::create_dir_all(&out_path).map_err(|e| format!("Failed to create dir: {}", e))?;
         } else {
             if let Some(parent) = out_path.parent() {
                 fs::create_dir_all(parent)
                     .map_err(|e| format!("Failed to create parent dir: {}", e))?;
             }
-            let mut outfile = fs::File::create(&out_path)
-                .map_err(|e| format!("Failed to create file: {}", e))?;
+            let mut outfile =
+                fs::File::create(&out_path).map_err(|e| format!("Failed to create file: {}", e))?;
             io::copy(&mut entry, &mut outfile)
                 .map_err(|e| format!("Failed to extract file: {}", e))?;
         }
@@ -624,8 +665,7 @@ fn find_7zip() -> Option<std::path::PathBuf> {
 }
 
 fn extract_rar_to_dir(rar_path: &std::path::Path, dest: &std::path::Path) -> Result<(), String> {
-    fs::create_dir_all(dest)
-        .map_err(|e| format!("Failed to create extraction dir: {}", e))?;
+    fs::create_dir_all(dest).map_err(|e| format!("Failed to create extraction dir: {}", e))?;
 
     // Prefer 7-Zip (reliable on Windows for RAR4 and RAR5)
     if let Some(sz) = find_7zip() {
@@ -644,7 +684,9 @@ fn extract_rar_to_dir(rar_path: &std::path::Path, dest: &std::path::Path) -> Res
 
     // Fallback: unrar crate (bundles RARLab C++ library)
     let path_str = rar_path.to_str().ok_or("RAR path contains invalid UTF-8")?;
-    let dest_raw = dest.to_str().ok_or("Destination path contains invalid UTF-8")?;
+    let dest_raw = dest
+        .to_str()
+        .ok_or("Destination path contains invalid UTF-8")?;
     // Unrar C++ library requires a trailing path separator on Windows
     let dest_str = if dest_raw.ends_with('\\') || dest_raw.ends_with('/') {
         dest_raw.to_string()
@@ -668,11 +710,13 @@ fn extract_rar_to_dir(rar_path: &std::path::Path, dest: &std::path::Path) -> Res
                 let parent = parent.parent().unwrap_or(dest);
                 fs::create_dir_all(parent).ok();
 
-                cur = entry.extract_to(&dest_str).map_err(|e| format!(
-                    "RAR entry #{} ({:?}) → '{}': {} \
+                cur = entry.extract_to(&dest_str).map_err(|e| {
+                    format!(
+                        "RAR entry #{} ({:?}) → '{}': {} \
                      (hint: install 7-Zip for better RAR support)",
-                    idx, fname, dest_str, e
-                ))?;
+                        idx, fname, dest_str, e
+                    )
+                })?;
             }
         }
     }
@@ -725,8 +769,8 @@ pub async fn extension_install_git(
     run_git(&clone_args, None)?;
 
     // Find extension.json
-    let manifest_path = find_extension_json(&temp_clone_dir)
-        .ok_or("No extension.json found in repository.")?;
+    let manifest_path =
+        find_extension_json(&temp_clone_dir).ok_or("No extension.json found in repository.")?;
 
     let _ext_root = manifest_path.parent().unwrap().to_path_buf();
 
@@ -741,7 +785,10 @@ pub async fn extension_install_git(
         .ok_or("extension.json missing 'name' field")?
         .to_string();
 
-    if !name.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '_') {
+    if !name
+        .chars()
+        .all(|c| c.is_alphanumeric() || c == '-' || c == '_')
+    {
         let _ = fs::remove_dir_all(&temp_clone_dir);
         return Err(format!(
             "Invalid extension name '{}': only alphanumeric, hyphens and underscores allowed",
@@ -759,18 +806,20 @@ pub async fn extension_install_git(
         .map_err(|e| format!("Failed to move clone to final location: {}", e))?;
 
     // Re-derive manifest path inside final location
-    let final_manifest_path = find_extension_json(&final_clone_dir)
-        .ok_or("extension.json disappeared after move.")?;
+    let final_manifest_path =
+        find_extension_json(&final_clone_dir).ok_or("extension.json disappeared after move.")?;
     let final_ext_root = final_manifest_path.parent().unwrap().to_path_buf();
 
     // Get current commit SHA
-    let sha_output = run_git(&["rev-parse", "HEAD"], Some(&final_clone_dir))
-        .unwrap_or_default();
+    let sha_output = run_git(&["rev-parse", "HEAD"], Some(&final_clone_dir)).unwrap_or_default();
     let commit_sha = sha_output.trim().to_string();
 
     // Detect the actual default branch name
-    let actual_branch = run_git(&["rev-parse", "--abbrev-ref", "HEAD"], Some(&final_clone_dir))
-        .unwrap_or_default();
+    let actual_branch = run_git(
+        &["rev-parse", "--abbrev-ref", "HEAD"],
+        Some(&final_clone_dir),
+    )
+    .unwrap_or_default();
     let actual_branch = actual_branch.trim().to_string();
     let resolved_branch = if actual_branch.is_empty() {
         branch.unwrap_or_else(|| "HEAD".to_string())
@@ -866,7 +915,10 @@ pub async fn extension_check_git_updates() -> Result<Vec<GitUpdateInfo>, String>
 #[tauri::command]
 pub async fn extension_update_git(extension_name: String) -> Result<ExtensionMeta, String> {
     // Validate name
-    if !extension_name.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '_') {
+    if !extension_name
+        .chars()
+        .all(|c| c.is_alphanumeric() || c == '-' || c == '_')
+    {
         return Err("Invalid extension name.".to_string());
     }
 
@@ -875,7 +927,12 @@ pub async fn extension_update_git(extension_name: String) -> Result<ExtensionMet
         .sources
         .get(&extension_name)
         .cloned()
-        .ok_or_else(|| format!("Extension '{}' is not a git-sourced extension.", extension_name))?;
+        .ok_or_else(|| {
+            format!(
+                "Extension '{}' is not a git-sourced extension.",
+                extension_name
+            )
+        })?;
 
     let clone_dir = PathBuf::from(&source.local_clone_path);
     if !clone_dir.exists() {
@@ -889,20 +946,18 @@ pub async fn extension_update_git(extension_name: String) -> Result<ExtensionMet
     run_git(&["pull"], Some(&clone_dir))?;
 
     // Get new commit SHA
-    let sha_output = run_git(&["rev-parse", "HEAD"], Some(&clone_dir))
-        .unwrap_or_default();
+    let sha_output = run_git(&["rev-parse", "HEAD"], Some(&clone_dir)).unwrap_or_default();
     let new_sha = sha_output.trim().to_string();
 
     // Find extension root inside clone (may be one folder deep)
-    let manifest_path = find_extension_json(&clone_dir)
-        .ok_or("No extension.json found in cloned repository.")?;
+    let manifest_path =
+        find_extension_json(&clone_dir).ok_or("No extension.json found in cloned repository.")?;
     let ext_root = manifest_path.parent().unwrap().to_path_buf();
 
     // Re-install: copy to ~/.hyscode/extensions/{name}
     let dest = extensions_dir().join(&extension_name);
     if dest.exists() {
-        fs::remove_dir_all(&dest)
-            .map_err(|e| format!("Failed to remove old extension: {}", e))?;
+        fs::remove_dir_all(&dest).map_err(|e| format!("Failed to remove old extension: {}", e))?;
     }
     copy_dir_recursive(&ext_root, &dest)
         .map_err(|e| format!("Failed to copy updated extension: {}", e))?;
@@ -935,7 +990,10 @@ pub async fn extension_get_git_sources() -> Result<Vec<ExtensionGitSource>, Stri
 /// Call this alongside extension_uninstall if the extension was git-sourced.
 #[tauri::command]
 pub async fn extension_remove_git_source(extension_name: String) -> Result<(), String> {
-    if !extension_name.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '_') {
+    if !extension_name
+        .chars()
+        .all(|c| c.is_alphanumeric() || c == '-' || c == '_')
+    {
         return Err("Invalid extension name.".to_string());
     }
 
@@ -963,10 +1021,11 @@ pub async fn extension_install_from_store(download_url: String) -> Result<Extens
     let ts = chrono::Utc::now().timestamp_millis();
     let temp_dir = extensions_dir().join(format!("__temp_store_{}__", ts));
 
-    let cleanup = |dir: &PathBuf| { let _ = fs::remove_dir_all(dir); };
+    let cleanup = |dir: &PathBuf| {
+        let _ = fs::remove_dir_all(dir);
+    };
 
-    fs::create_dir_all(&temp_dir)
-        .map_err(|e| format!("Failed to create temp dir: {}", e))?;
+    fs::create_dir_all(&temp_dir).map_err(|e| format!("Failed to create temp dir: {}", e))?;
 
     // Download the archive
     let client = reqwest::Client::builder()
@@ -974,15 +1033,17 @@ pub async fn extension_install_from_store(download_url: String) -> Result<Extens
         .build()
         .map_err(|e| format!("Failed to build HTTP client: {}", e))?;
 
-    let response = client
-        .get(&download_url)
-        .send()
-        .await
-        .map_err(|e| { cleanup(&temp_dir); format!("Download failed: {}", e) })?;
+    let response = client.get(&download_url).send().await.map_err(|e| {
+        cleanup(&temp_dir);
+        format!("Download failed: {}", e)
+    })?;
 
     if !response.status().is_success() {
         cleanup(&temp_dir);
-        return Err(format!("Download failed with HTTP status {}", response.status()));
+        return Err(format!(
+            "Download failed with HTTP status {}",
+            response.status()
+        ));
     }
 
     let bytes = response.bytes().await.map_err(|e| {
@@ -1032,7 +1093,10 @@ pub async fn extension_install_from_store(download_url: String) -> Result<Extens
         .ok_or("extension.json missing 'name' field")?
         .to_string();
 
-    if !name.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '_') {
+    if !name
+        .chars()
+        .all(|c| c.is_alphanumeric() || c == '-' || c == '_')
+    {
         cleanup(&temp_dir);
         return Err(format!(
             "Invalid extension name '{}': only alphanumeric, hyphens and underscores allowed",
@@ -1048,11 +1112,9 @@ pub async fn extension_install_from_store(download_url: String) -> Result<Extens
     }
 
     if ext_root == extract_dir {
-        fs::rename(&extract_dir, &dest)
-            .map_err(|e| format!("Failed to move extension: {}", e))?;
+        fs::rename(&extract_dir, &dest).map_err(|e| format!("Failed to move extension: {}", e))?;
     } else {
-        fs::rename(&ext_root, &dest)
-            .map_err(|e| format!("Failed to move extension: {}", e))?;
+        fs::rename(&ext_root, &dest).map_err(|e| format!("Failed to move extension: {}", e))?;
     }
     cleanup(&temp_dir);
 

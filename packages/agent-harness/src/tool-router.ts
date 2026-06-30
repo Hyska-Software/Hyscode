@@ -2,24 +2,26 @@
 // Routes LLM tool calls to concrete implementations and manages approval flow.
 
 import type { ToolDefinition } from '@hyscode/ai-providers';
-import type {
-  ToolHandler,
-  ToolResult,
-  ToolCallRecord,
-  ToolExecutionContext,
-  ToolCategory,
-  ApprovalConfig,
-  PendingToolCall,
-  HarnessEventHandler,
-  ToolRiskLevel,
+import {
+  type ToolHandler,
+  type ToolResult,
+  type ToolCallRecord,
+  type ToolExecutionContext,
+  type ToolCategory,
+  type ApprovalConfig,
+  type PendingToolCall,
+  type HarnessEventHandler,
+  type ToolRiskLevel,
+  SAFE_TOOLS,
+  DESTRUCTIVE_TOOLS,
+  CATEGORY_RISK,
 } from './types';
-import { SAFE_TOOLS, DESTRUCTIVE_TOOLS, CATEGORY_RISK } from './types';
 
 export class ToolRouter {
   private handlers = new Map<string, ToolHandler>();
   private approvalConfig: ApprovalConfig = { mode: 'manual' };
   private eventHandler: HarnessEventHandler | null = null;
-  private approvalCallback: ((pending: PendingToolCall) => Promise<boolean>) | null = null;
+  private approvalCallback: ((pending: PendingToolCall, signal: AbortSignal) => Promise<boolean>) | null = null;
 
   // ─── Registration ───────────────────────────────────────────────────
 
@@ -42,7 +44,10 @@ export class ToolRouter {
   // ─── Configuration ──────────────────────────────────────────────────
 
   setApprovalConfig(config: ApprovalConfig): void {
-    this.approvalConfig = config;
+    this.approvalConfig = {
+      ...config,
+      sessionTrustedTools: config.sessionTrustedTools ?? this.approvalConfig.sessionTrustedTools,
+    };
   }
 
   setEventHandler(handler: HarnessEventHandler): void {
@@ -51,7 +56,7 @@ export class ToolRouter {
 
   /** Set callback for requesting user approval */
   setApprovalCallback(
-    callback: (pending: PendingToolCall) => Promise<boolean>,
+    callback: (pending: PendingToolCall, signal: AbortSignal) => Promise<boolean>,
   ): void {
     this.approvalCallback = callback;
   }
@@ -109,9 +114,15 @@ export class ToolRouter {
   ): Promise<ToolCallRecord> {
     const startTime = Date.now();
     const handler = this.handlers.get(toolName);
+    this.eventHandler?.({
+      type: 'tool_call_start',
+      toolCallId,
+      toolName,
+      input,
+    });
 
     if (!handler) {
-      return {
+      const record: ToolCallRecord = {
         id: toolCallId,
         toolName,
         input,
@@ -124,13 +135,57 @@ export class ToolRouter {
         approved: false,
         timestamp: new Date().toISOString(),
       };
+      this.emitResult(record);
+      return record;
+    }
+
+    const validationError = validateInput(handler.definition.inputSchema, input);
+    if (validationError) {
+      const record: ToolCallRecord = {
+        id: toolCallId,
+        toolName,
+        input,
+        output: { success: false, output: '', error: validationError },
+        durationMs: Date.now() - startTime,
+        approved: false,
+        timestamp: new Date().toISOString(),
+      };
+      this.emitResult(record);
+      return record;
+    }
+
+    if (context.signal.aborted) {
+      const record = this.cancelledRecord(toolName, toolCallId, input, startTime);
+      this.emitResult(record);
+      return record;
+    }
+
+    const dirtyUnsafeGitTools = new Set([
+      'git_checkout', 'git_pull', 'git_stash', 'git_merge', 'git_reset',
+    ]);
+    if (dirtyUnsafeGitTools.has(toolName) && context.hasDirtyBuffers?.()) {
+      const record: ToolCallRecord = {
+        id: toolCallId,
+        toolName,
+        input,
+        output: {
+          success: false,
+          output: '',
+          error: 'Git operation blocked because the editor has unsaved buffers. Save or revert them first.',
+        },
+        durationMs: Date.now() - startTime,
+        approved: false,
+        timestamp: new Date().toISOString(),
+      };
+      this.emitResult(record);
+      return record;
     }
 
     // Check approval
     const needsApproval = this.needsApproval(toolName, handler);
 
     if (needsApproval) {
-      const approved = await this.requestApproval(toolCallId, toolName, input);
+      const approved = await this.requestApproval(toolCallId, toolName, input, context.signal);
 
       if (!approved) {
         const result: ToolResult = {
@@ -138,7 +193,7 @@ export class ToolRouter {
           output: '',
           error: 'Tool call was rejected by the user.',
         };
-        return {
+        const record: ToolCallRecord = {
           id: toolCallId,
           toolName,
           input,
@@ -147,21 +202,26 @@ export class ToolRouter {
           approved: false,
           timestamp: new Date().toISOString(),
         };
+        this.emitResult(record);
+        return record;
       }
     }
 
-    // Emit start event
-    this.eventHandler?.({
-      type: 'tool_call_start',
-      toolCallId,
-      toolName,
-      input,
-    });
+    if (this.approvalConfig.mode === 'notify') {
+      this.eventHandler?.({
+        type: 'tool_call_notification',
+        toolCallId,
+        toolName,
+        description: this.describeToolCall(toolName, input),
+      });
+    }
 
     // Execute the tool
     let result: ToolResult;
     try {
-      result = await handler.execute(input, context);
+      result = context.signal.aborted
+        ? { success: false, output: '', error: 'Tool call cancelled.' }
+        : await executeWithAbort(handler.execute(input, context), context.signal);
     } catch (err) {
       result = {
         success: false,
@@ -273,6 +333,7 @@ export class ToolRouter {
     id: string,
     toolName: string,
     input: Record<string, unknown>,
+    signal: AbortSignal,
   ): Promise<boolean> {
     if (!this.approvalCallback) {
       // No callback set — auto-approve
@@ -290,6 +351,9 @@ export class ToolRouter {
           resolve(approved);
         }
       };
+      const onAbort = () => settle(false);
+      if (signal.aborted) return settle(false);
+      signal.addEventListener('abort', onAbort, { once: true });
 
       const pending: PendingToolCall = {
         id,
@@ -306,8 +370,37 @@ export class ToolRouter {
         pending,
       });
 
-      this.approvalCallback!(pending).then(settle);
+      this.approvalCallback!(pending, signal).then(settle).finally(() => {
+        signal.removeEventListener('abort', onAbort);
+      });
     });
+  }
+
+  private emitResult(record: ToolCallRecord): void {
+    this.eventHandler?.({
+      type: 'tool_call_result',
+      toolCallId: record.id,
+      toolName: record.toolName,
+      result: record.output,
+      durationMs: record.durationMs,
+    });
+  }
+
+  private cancelledRecord(
+    toolName: string,
+    toolCallId: string,
+    input: Record<string, unknown>,
+    startTime: number,
+  ): ToolCallRecord {
+    return {
+      id: toolCallId,
+      toolName,
+      input,
+      output: { success: false, output: '', error: 'Tool call cancelled.' },
+      durationMs: Date.now() - startTime,
+      approved: false,
+      timestamp: new Date().toISOString(),
+    };
   }
 
   private describeToolCall(toolName: string, input: Record<string, unknown>): string {
@@ -343,5 +436,44 @@ export class ToolRouter {
       default:
         return `${toolName}(${Object.keys(input).join(', ')})`;
     }
+  }
+}
+
+function validateInput(schema: Record<string, unknown>, input: Record<string, unknown>): string | null {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return 'Tool input must be an object.';
+  const required = Array.isArray(schema.required) ? schema.required as string[] : [];
+  for (const key of required) {
+    if (!(key in input) || input[key] === undefined || input[key] === null) {
+      return `Invalid tool input: missing required field "${key}".`;
+    }
+  }
+  const properties = (schema.properties ?? {}) as Record<string, { type?: string; enum?: unknown[] }>;
+  for (const [key, value] of Object.entries(input)) {
+    const property = properties[key];
+    if (!property) continue;
+    if (property.enum && !property.enum.includes(value)) return `Invalid tool input: "${key}" is not an allowed value.`;
+    if (property.type === 'array' && !Array.isArray(value)) return `Invalid tool input: "${key}" must be an array.`;
+    if (property.type === 'integer' && (!Number.isInteger(value))) return `Invalid tool input: "${key}" must be an integer.`;
+    if (property.type === 'number' && typeof value !== 'number') return `Invalid tool input: "${key}" must be a number.`;
+    if (property.type === 'boolean' && typeof value !== 'boolean') return `Invalid tool input: "${key}" must be a boolean.`;
+    if (property.type === 'string' && typeof value !== 'string') return `Invalid tool input: "${key}" must be a string.`;
+    if (property.type === 'object' && (typeof value !== 'object' || value === null || Array.isArray(value))) {
+      return `Invalid tool input: "${key}" must be an object.`;
+    }
+  }
+  return null;
+}
+
+async function executeWithAbort(execution: Promise<ToolResult>, signal: AbortSignal): Promise<ToolResult> {
+  if (signal.aborted) return { success: false, output: '', error: 'Tool call cancelled.' };
+  let onAbort: (() => void) | undefined;
+  const cancellation = new Promise<ToolResult>((resolve) => {
+    onAbort = () => resolve({ success: false, output: '', error: 'Tool call cancelled.' });
+    signal.addEventListener('abort', onAbort, { once: true });
+  });
+  try {
+    return await Promise.race([execution, cancellation]);
+  } finally {
+    if (onAbort) signal.removeEventListener('abort', onAbort);
   }
 }

@@ -67,7 +67,6 @@ export async function* parseSSEStream(
   response: Response,
   signal?: AbortSignal,
 ): AsyncIterable<string> {
-  console.log('[parseSSEStream] starting, status:', response.status, 'headers:', Object.fromEntries(response.headers.entries()));
   const reader = response.body?.getReader();
   if (!reader) throw new Error('Response body is not readable');
 
@@ -97,7 +96,6 @@ export async function* parseSSEStream(
 
       const data = extractFrameData(frame);
       if (data === null) continue;
-      console.log('[parseSSEStream] yielding data:', JSON.stringify(data));
       if (data === '[DONE]') return;
       yield data;
     }
@@ -106,20 +104,16 @@ export async function* parseSSEStream(
   try {
     while (true) {
       if (signal?.aborted) {
-        console.log('[parseSSEStream] aborted by signal');
         reader.cancel();
         return;
       }
 
       const { done, value } = await reader.read();
-      console.log('[parseSSEStream] read done=', done, 'valueLength=', value?.length);
       if (done) {
-        console.log('[parseSSEStream] stream done');
         break;
       }
 
       buffer += decoder.decode(value, { stream: true });
-      console.log('[parseSSEStream] buffer:', JSON.stringify(buffer));
 
       yield* processBuffer();
     }
@@ -132,7 +126,6 @@ export async function* parseSSEStream(
     if (buffer.trim()) {
       const data = extractFrameData(buffer);
       if (data !== null && data !== '[DONE]') {
-        console.log('[parseSSEStream] yielding final partial data:', JSON.stringify(data));
         yield data;
       }
     }

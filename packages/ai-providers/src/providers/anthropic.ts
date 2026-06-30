@@ -152,8 +152,12 @@ function parseAnthropicEvent(data: string, indexToId: Map<number, string>): Stre
 
     case 'message_delta':
       if (event.delta?.stop_reason) {
-        const stopReason = event.delta.stop_reason === 'tool_use' ? 'tool_use' :
-          event.delta.stop_reason === 'max_tokens' ? 'max_tokens' : 'end_turn';
+        const stopReason =
+          event.delta.stop_reason === 'tool_use'
+            ? 'tool_use'
+            : event.delta.stop_reason === 'max_tokens'
+              ? 'max_tokens'
+              : 'end_turn';
         return {
           type: 'done',
           stopReason,
@@ -165,8 +169,7 @@ function parseAnthropicEvent(data: string, indexToId: Map<number, string>): Stre
           usage: {
             inputTokens: event.usage.input_tokens ?? 0,
             outputTokens: event.usage.output_tokens ?? 0,
-            totalTokens:
-              (event.usage.input_tokens ?? 0) + (event.usage.output_tokens ?? 0),
+            totalTokens: (event.usage.input_tokens ?? 0) + (event.usage.output_tokens ?? 0),
           },
         };
       }
@@ -191,20 +194,20 @@ function parseAnthropicEvent(data: string, indexToId: Map<number, string>): Stre
 
 const ANTHROPIC_MODELS: AIModel[] = [
   {
-    id: 'claude-opus-4-7',
-    name: 'Claude Opus 4.7',
+    id: 'claude-fable-5',
+    name: 'Claude Fable 5',
     provider: 'anthropic',
     contextWindow: 1_000_000,
     maxOutputTokens: 128_000,
     supportsTools: true,
     supportsStreaming: true,
     supportsVision: true,
-    inputPricePerMToken: 5,
-    outputPricePerMToken: 25,
+    inputPricePerMToken: 10,
+    outputPricePerMToken: 50,
   },
   {
-    id: 'claude-opus-4-6',
-    name: 'Claude Opus 4.6',
+    id: 'claude-opus-4-8',
+    name: 'Claude Opus 4.8',
     provider: 'anthropic',
     contextWindow: 1_000_000,
     maxOutputTokens: 128_000,
@@ -219,7 +222,7 @@ const ANTHROPIC_MODELS: AIModel[] = [
     name: 'Claude Sonnet 4.6',
     provider: 'anthropic',
     contextWindow: 1_000_000,
-    maxOutputTokens: 64_000,
+    maxOutputTokens: 128_000,
     supportsTools: true,
     supportsStreaming: true,
     supportsVision: true,
@@ -290,13 +293,12 @@ export class AnthropicProvider implements AIProvider {
     }
     if (params.thinking?.enabled) {
       const thinkingConfig: Record<string, unknown> = {};
-      // Claude Opus 4.7+ uses adaptive thinking; earlier models use enabled
-      const isOpus47 = params.model.includes('opus-4-7');
-      thinkingConfig.type = isOpus47 ? 'adaptive' : (params.thinking.type ?? 'adaptive');
+      const usesAdaptiveThinking = /claude-(?:fable-5|opus-4-[6-9]|sonnet-4-6)/.test(params.model);
+      thinkingConfig.type = usesAdaptiveThinking ? 'adaptive' : (params.thinking.type ?? 'enabled');
       if (params.thinking.level) {
         thinkingConfig.effort = params.thinking.level;
       }
-      if (params.thinking.budgetTokens && !isOpus47) {
+      if (params.thinking.budgetTokens && !usesAdaptiveThinking) {
         thinkingConfig.budget_tokens = params.thinking.budgetTokens;
       }
       if (params.thinking.display) {
@@ -310,7 +312,7 @@ export class AnthropicProvider implements AIProvider {
       headers: {
         'Content-Type': 'application/json',
         'x-api-key': this.apiKey,
-        'Authorization': `Bearer ${this.apiKey}`,
+        Authorization: `Bearer ${this.apiKey}`,
         'anthropic-version': '2023-06-01',
         'anthropic-beta': 'prompt-caching-2024-07-31',
       },
@@ -321,9 +323,7 @@ export class AnthropicProvider implements AIProvider {
     if (!response.ok) {
       const errorBody = await response.text().catch(() => '');
       const retryAfterHeader = response.headers.get('Retry-After');
-      const retryAfterMs = retryAfterHeader
-        ? parseFloat(retryAfterHeader) * 1_000
-        : undefined;
+      const retryAfterMs = retryAfterHeader ? parseFloat(retryAfterHeader) * 1_000 : undefined;
       throw new ProviderError(
         `Anthropic API error: ${response.status} ${errorBody}`,
         'anthropic',

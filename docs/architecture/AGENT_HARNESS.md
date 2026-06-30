@@ -42,6 +42,14 @@ The **Harness** is the orchestration engine that powers agentic behavior in HysC
 - **Max tokens per turn**: configurable (default: 200k input, 16k output)
 - **Timeout**: configurable (default: 5 minutes per turn)
 
+### Turn Lifecycle
+
+Every run has a unique `turnId` and one terminal outcome: `complete`,
+`max_iterations`, `loop_detected`, `cancelled`, or `error`. Cancellation is
+propagated to provider streams, tool execution, approvals, mode switches, and
+agent questions through a shared `AbortSignal`. A harness rejects concurrent
+turns rather than allowing their events to interleave.
+
 ---
 
 ## SDD (Spec-Driven Development) Engine
@@ -153,9 +161,9 @@ interface TokenBudget {
 ```
 
 **Strategy:**
-1. Always include: system prompt, tool definitions, last 2 messages
+1. Always include complete protocol frames; assistant tool calls and their tool results are atomic
 2. Fill remaining budget with context sources by priority
-3. **Truncation**: older messages summarized, large files use relevant sections only
+3. **Truncation**: older complete frames are dropped; orphan tool messages are never sent
 4. **Sliding window**: when budget exhausted, oldest non-pinned messages are dropped
 
 ---
@@ -275,9 +283,10 @@ Tracks SDD execution state in SQLite for persistence across app restarts.
 ### Tables
 
 ```sql
-CREATE TABLE sdd_sessions (
+CREATE TABLE agent_sdd_sessions (
   id TEXT PRIMARY KEY,
   project_id TEXT NOT NULL,
+  conversation_id TEXT NOT NULL,
   description TEXT NOT NULL,
   spec TEXT,
   spec_approved INTEGER DEFAULT 0,
@@ -286,9 +295,9 @@ CREATE TABLE sdd_sessions (
   updated_at TEXT NOT NULL
 );
 
-CREATE TABLE sdd_tasks (
+CREATE TABLE agent_sdd_tasks (
   id TEXT PRIMARY KEY,
-  session_id TEXT NOT NULL REFERENCES sdd_sessions(id),
+  session_id TEXT NOT NULL REFERENCES agent_sdd_sessions(id),
   ordinal INTEGER NOT NULL,
   title TEXT NOT NULL,
   description TEXT NOT NULL,

@@ -1,9 +1,9 @@
+use super::utils::cmd;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter, State};
-use super::utils::cmd;
 
 // ─── Managed state for docker watch ─────────────────────────────────────────
 
@@ -41,14 +41,20 @@ struct DockerContainersUpdatedPayload {
 
 /// Run a docker CLI command and return stdout on success, Err on failure.
 fn run_docker(args: &[&str]) -> Result<String, String> {
-    let output = cmd("docker")
-        .args(args)
-        .output()
-        .map_err(|e| format!("Failed to run docker: {}. Is Docker installed and on PATH?", e))?;
+    let output = cmd("docker").args(args).output().map_err(|e| {
+        format!(
+            "Failed to run docker: {}. Is Docker installed and on PATH?",
+            e
+        )
+    })?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-        return Err(format!("docker {} failed: {}", args.join(" "), stderr.trim()));
+        return Err(format!(
+            "docker {} failed: {}",
+            args.join(" "),
+            stderr.trim()
+        ));
     }
 
     Ok(String::from_utf8_lossy(&output.stdout).to_string())

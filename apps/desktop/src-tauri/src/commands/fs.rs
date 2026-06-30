@@ -1,11 +1,11 @@
+use super::utils::cmd;
+use notify::{Config, Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use serde::Serialize;
 use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Mutex;
-use notify::{Config, RecommendedWatcher, RecursiveMode, Watcher, Event, EventKind};
 use tauri::{AppHandle, Emitter};
-use super::utils::cmd;
 
 #[derive(Serialize)]
 pub struct FileEntry {
@@ -141,13 +141,20 @@ pub fn stat_path(path: String) -> Result<FileStat, String> {
 }
 
 const IGNORED_DIRS: &[&str] = &[
-    "node_modules", "target", ".git", "dist", "build", ".next", "__pycache__", ".turbo",
+    "node_modules",
+    "target",
+    ".git",
+    "dist",
+    "build",
+    ".next",
+    "__pycache__",
+    ".turbo",
 ];
 
 const BINARY_EXTENSIONS: &[&str] = &[
-    "png", "jpg", "jpeg", "gif", "bmp", "ico", "svg", "woff", "woff2", "ttf", "otf", "eot",
-    "mp3", "mp4", "avi", "mov", "zip", "tar", "gz", "rar", "7z", "pdf", "exe", "dll", "so",
-    "dylib", "o", "a", "wasm", "lock",
+    "png", "jpg", "jpeg", "gif", "bmp", "ico", "svg", "woff", "woff2", "ttf", "otf", "eot", "mp3",
+    "mp4", "avi", "mov", "zip", "tar", "gz", "rar", "7z", "pdf", "exe", "dll", "so", "dylib", "o",
+    "a", "wasm", "lock",
 ];
 
 fn is_binary_file(name: &str) -> bool {
@@ -159,7 +166,13 @@ fn is_binary_file(name: &str) -> bool {
 }
 
 #[tauri::command]
-pub fn search_files(root: String, query: String, is_regex: Option<bool>, max_results: Option<usize>, show_hidden: Option<bool>) -> Result<Vec<SearchResult>, String> {
+pub fn search_files(
+    root: String,
+    query: String,
+    is_regex: Option<bool>,
+    max_results: Option<usize>,
+    show_hidden: Option<bool>,
+) -> Result<Vec<SearchResult>, String> {
     let root_path = PathBuf::from(&root);
     if !root_path.is_dir() {
         return Err(format!("Not a directory: {}", root));
@@ -234,8 +247,15 @@ pub fn search_files(root: String, query: String, is_regex: Option<bool>, max_res
         Ok(())
     }
 
-    walk(&root_path, &query, &regex_opt, &mut results, limit, show_hidden)
-        .map_err(|e| format!("Search error: {}", e))?;
+    walk(
+        &root_path,
+        &query,
+        &regex_opt,
+        &mut results,
+        limit,
+        show_hidden,
+    )
+    .map_err(|e| format!("Search error: {}", e))?;
 
     Ok(results)
 }
@@ -258,7 +278,12 @@ pub fn rename_path(from: String, to: String) -> Result<(), String> {
 /// Recursively search for files matching a glob-like pattern.
 /// Supports: `*` (any chars except `/`), `**` (any path segments), `?` (single char).
 #[tauri::command]
-pub fn find_files(base_path: String, pattern: String, max_results: Option<usize>, show_hidden: Option<bool>) -> Result<Vec<String>, String> {
+pub fn find_files(
+    base_path: String,
+    pattern: String,
+    max_results: Option<usize>,
+    show_hidden: Option<bool>,
+) -> Result<Vec<String>, String> {
     let root = PathBuf::from(&base_path);
     if !root.is_dir() {
         return Err(format!("Not a directory: {}", base_path));
@@ -300,7 +325,8 @@ pub fn find_files(base_path: String, pattern: String, max_results: Option<usize>
             let ft = entry.file_type()?;
 
             // Get path relative to root for matching
-            let rel = path.strip_prefix(root)
+            let rel = path
+                .strip_prefix(root)
                 .unwrap_or(&path)
                 .to_string_lossy()
                 .replace('\\', "/");
@@ -420,7 +446,7 @@ pub struct FsWatcherState(pub Mutex<HashMap<String, RecommendedWatcher>>);
 
 #[derive(Clone, Serialize)]
 pub struct FsChangeEvent {
-    pub kind: String,    // "create" | "modify" | "remove" | "rename"
+    pub kind: String, // "create" | "modify" | "remove" | "rename"
     pub paths: Vec<String>,
 }
 
@@ -434,7 +460,11 @@ fn event_kind_to_string(kind: &EventKind) -> Option<&'static str> {
 }
 
 #[tauri::command]
-pub fn fs_watch(path: String, app: AppHandle, state: tauri::State<'_, FsWatcherState>) -> Result<(), String> {
+pub fn fs_watch(
+    path: String,
+    app: AppHandle,
+    state: tauri::State<'_, FsWatcherState>,
+) -> Result<(), String> {
     let mut watchers = state.0.lock().map_err(|e| e.to_string())?;
 
     // If already watching this path, do nothing
@@ -452,20 +482,27 @@ pub fn fs_watch(path: String, app: AppHandle, state: tauri::State<'_, FsWatcherS
         move |res: Result<Event, notify::Error>| {
             if let Ok(event) = res {
                 if let Some(kind_str) = event_kind_to_string(&event.kind) {
-                    let paths: Vec<String> = event.paths.iter()
+                    let paths: Vec<String> = event
+                        .paths
+                        .iter()
                         .map(|p| p.to_string_lossy().to_string())
                         .collect();
-                    let _ = app_handle.emit("fs:changed", FsChangeEvent {
-                        kind: kind_str.to_string(),
-                        paths,
-                    });
+                    let _ = app_handle.emit(
+                        "fs:changed",
+                        FsChangeEvent {
+                            kind: kind_str.to_string(),
+                            paths,
+                        },
+                    );
                 }
             }
         },
         Config::default(),
-    ).map_err(|e| format!("Failed to create watcher: {}", e))?;
+    )
+    .map_err(|e| format!("Failed to create watcher: {}", e))?;
 
-    watcher.watch(&watch_path, RecursiveMode::Recursive)
+    watcher
+        .watch(&watch_path, RecursiveMode::Recursive)
         .map_err(|e| format!("Failed to watch path: {}", e))?;
 
     watchers.insert(path, watcher);
@@ -493,7 +530,8 @@ pub fn copy_path(from: String, to: String) -> Result<(), String> {
         copy_dir_recursive(&from_path, &to_path)
     } else {
         if let Some(parent) = to_path.parent() {
-            fs::create_dir_all(parent).map_err(|e| format!("Failed to create parent dirs: {}", e))?;
+            fs::create_dir_all(parent)
+                .map_err(|e| format!("Failed to create parent dirs: {}", e))?;
         }
         fs::copy(&from_path, &to_path)
             .map(|_| ())
@@ -546,7 +584,11 @@ pub fn reveal_path(path: String) -> Result<(), String> {
     #[cfg(target_os = "linux")]
     {
         // Try xdg-open on the parent directory
-        let target = if p.is_dir() { p } else { p.parent().unwrap_or(&p).to_path_buf() };
+        let target = if p.is_dir() {
+            p
+        } else {
+            p.parent().unwrap_or(&p).to_path_buf()
+        };
         cmd("xdg-open")
             .arg(target.to_string_lossy().to_string())
             .spawn()

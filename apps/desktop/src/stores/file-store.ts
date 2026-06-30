@@ -23,6 +23,7 @@ interface FileState {
   rootPath: string | null;
   tree: FileNode[];
   fileCache: Map<string, string>;
+  externalConflicts: Set<string>;
   showHidden: boolean;
   _watchUnlisten: UnlistenFn | null;
   _refreshTimer: ReturnType<typeof setTimeout> | null;
@@ -33,6 +34,7 @@ interface FileState {
   toggleExpand: (path: string) => void;
   setFileContent: (path: string, content: string) => void;
   getFileContent: (path: string) => string | undefined;
+  clearExternalConflict: (path: string) => void;
   loadDirectory: (path: string) => Promise<FileNode[]>;
   openFolder: (path: string) => Promise<void>;
   expandDirectory: (path: string) => Promise<void>;
@@ -106,6 +108,7 @@ export const useFileStore = create<FileState>()(
     rootPath: null,
     tree: [],
     fileCache: new Map(),
+    externalConflicts: new Set(),
     showHidden: (() => {
       try { return localStorage.getItem('hscode-show-hidden') === 'true'; } catch { return false; }
     })(),
@@ -151,6 +154,7 @@ export const useFileStore = create<FileState>()(
       }),
 
     getFileContent: (path) => get().fileCache.get(path),
+    clearExternalConflict: (path) => set((state) => { state.externalConflicts.delete(path); }),
 
     loadDirectory: async (path) => {
       const entries = await tauriFs.listDir(path, get().showHidden);
@@ -307,7 +311,7 @@ export const useFileStore = create<FileState>()(
         return;
       }
 
-      const unlisten = await listen<FsChangePayload>('fs:changed', (_event) => {
+      const unlisten = await listen<FsChangePayload>('fs:changed', (event) => {
         const current = get();
         if (current._refreshTimer) {
           clearTimeout(current._refreshTimer);
@@ -322,6 +326,32 @@ export const useFileStore = create<FileState>()(
           });
         }, 120);
         (get() as any)._refreshTimer = timer;
+
+        if (event.payload.kind === 'modify') {
+          void Promise.all([import('./editor-store'), import('./agent-store')]).then(async ([editorModule, agentModule]) => {
+            for (const path of event.payload.paths) {
+              const hasAgentEdit = agentModule.useAgentStore.getState().agentEditSessions.some((session) =>
+                session.filePath === path && (session.phase === 'streaming' || session.phase === 'pending_review'),
+              );
+              if (hasAgentEdit) continue;
+              const tab = editorModule.useEditorStore.getState().tabs.find((item) => item.filePath === path);
+              if (tab?.isDirty) {
+                set((state) => { state.externalConflicts.add(path); });
+                continue;
+              }
+              if (!get().fileCache.has(path)) continue;
+              try {
+                const content = await tauriFs.readFile(path);
+                set((state) => {
+                  state.fileCache.set(path, content);
+                  state.externalConflicts.delete(path);
+                });
+              } catch {
+                // Removed/non-text files are handled by the tree refresh.
+              }
+            }
+          });
+        }
       });
 
       set((state) => {

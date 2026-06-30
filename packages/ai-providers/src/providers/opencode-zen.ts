@@ -12,6 +12,8 @@ import { parseSSEStream } from '../retry';
 // All other models use OpenAI-compatible chat completions at /zen/v1/chat/completions.
 
 const ZEN_ANTHROPIC_MODELS = new Set([
+  'claude-fable-5',
+  'claude-opus-4-8',
   'claude-opus-4-7',
   'claude-opus-4-6',
   'claude-opus-4-5',
@@ -21,6 +23,10 @@ const ZEN_ANTHROPIC_MODELS = new Set([
   'claude-sonnet-4',
   'claude-haiku-4-5',
   'claude-3-5-haiku',
+  'qwen3.7-max',
+  'qwen3.7-plus',
+  'qwen3.6-plus',
+  'qwen3.5-plus',
 ]);
 
 const ZEN_GPT_MODELS = new Set([
@@ -43,17 +49,38 @@ const ZEN_GPT_MODELS = new Set([
   'gpt-5-nano',
 ]);
 
-const ZEN_GEMINI_MODELS = new Set([
-  'gemini-3.1-pro',
-  'gemini-3-flash',
-]);
+const ZEN_GEMINI_MODELS = new Set(['gemini-3.5-flash', 'gemini-3.1-pro', 'gemini-3-flash']);
 
 // ─── Static Model List ──────────────────────────────────────────────────────
-// Sourced from https://opencode.ai/docs/zen — models and pricing as of May 2026.
+// Sourced from https://dev.opencode.ai/docs/zen — models and pricing as of June 2026.
 // The listModels() method attempts to refresh this list from the live API.
 
 const ZEN_MODELS: AIModel[] = [
   // ── Claude models (Anthropic format) ──────────────────────────────────────
+  {
+    id: 'claude-fable-5',
+    name: 'Claude Fable 5 (Zen)',
+    provider: 'opencode-zen',
+    contextWindow: 1_000_000,
+    maxOutputTokens: 128_000,
+    supportsTools: true,
+    supportsStreaming: true,
+    supportsVision: true,
+    inputPricePerMToken: 10,
+    outputPricePerMToken: 50,
+  },
+  {
+    id: 'claude-opus-4-8',
+    name: 'Claude Opus 4.8 (Zen)',
+    provider: 'opencode-zen',
+    contextWindow: 1_000_000,
+    maxOutputTokens: 128_000,
+    supportsTools: true,
+    supportsStreaming: true,
+    supportsVision: true,
+    inputPricePerMToken: 5,
+    outputPricePerMToken: 25,
+  },
   {
     id: 'claude-opus-4-7',
     name: 'Claude Opus 4.7 (Zen)',
@@ -83,7 +110,7 @@ const ZEN_MODELS: AIModel[] = [
     name: 'Claude Sonnet 4.6 (Zen)',
     provider: 'opencode-zen',
     contextWindow: 1_000_000,
-    maxOutputTokens: 64_000,
+    maxOutputTokens: 128_000,
     supportsTools: true,
     supportsStreaming: true,
     supportsVision: true,
@@ -347,6 +374,18 @@ const ZEN_MODELS: AIModel[] = [
 
   // ── Gemini models (/zen/v1/models/<model>) ────────────────────────────────
   {
+    id: 'gemini-3.5-flash',
+    name: 'Gemini 3.5 Flash (Zen)',
+    provider: 'opencode-zen',
+    contextWindow: 1_048_576,
+    maxOutputTokens: 65_536,
+    supportsTools: true,
+    supportsStreaming: true,
+    supportsVision: true,
+    inputPricePerMToken: 1.5,
+    outputPricePerMToken: 9,
+  },
+  {
     id: 'gemini-3.1-pro',
     name: 'Gemini 3.1 Pro (Zen)',
     provider: 'opencode-zen',
@@ -371,7 +410,31 @@ const ZEN_MODELS: AIModel[] = [
     outputPricePerMToken: 3,
   },
 
-  // ── OpenAI-compatible models (/zen/v1/chat/completions) ───────────────────
+  // ── Anthropic-compatible Qwen models (/zen/v1/messages) ──────────────────
+  {
+    id: 'qwen3.7-max',
+    name: 'Qwen3.7 Max (Zen)',
+    provider: 'opencode-zen',
+    contextWindow: 262_144,
+    maxOutputTokens: 32_768,
+    supportsTools: true,
+    supportsStreaming: true,
+    supportsVision: false,
+    inputPricePerMToken: 2.5,
+    outputPricePerMToken: 7.5,
+  },
+  {
+    id: 'qwen3.7-plus',
+    name: 'Qwen3.7 Plus (Zen)',
+    provider: 'opencode-zen',
+    contextWindow: 262_144,
+    maxOutputTokens: 32_768,
+    supportsTools: true,
+    supportsStreaming: true,
+    supportsVision: false,
+    inputPricePerMToken: 0.4,
+    outputPricePerMToken: 1.6,
+  },
   {
     id: 'qwen3.6-plus',
     name: 'Qwen3.6 Plus (Zen)',
@@ -431,6 +494,18 @@ const ZEN_MODELS: AIModel[] = [
     supportsVision: false,
     inputPricePerMToken: 0,
     outputPricePerMToken: 0,
+  },
+  {
+    id: 'glm-5.2',
+    name: 'GLM 5.2 (Zen)',
+    provider: 'opencode-zen',
+    contextWindow: 200_000,
+    maxOutputTokens: 128_000,
+    supportsTools: true,
+    supportsStreaming: true,
+    supportsVision: false,
+    inputPricePerMToken: 1.4,
+    outputPricePerMToken: 4.4,
   },
   {
     id: 'glm-5.1',
@@ -555,11 +630,7 @@ export class OpenCodeZenProvider extends OpenAIProvider {
       this.fetchImpl,
     );
     // GeminiProvider uses baseUrl/models/<model>:streamGenerateContent
-    this.geminiDelegate = new GeminiProvider(
-      apiKey,
-      'https://opencode.ai/zen/v1',
-      this.fetchImpl,
-    );
+    this.geminiDelegate = new GeminiProvider(apiKey, 'https://opencode.ai/zen/v1', this.fetchImpl);
   }
 
   /**
@@ -576,12 +647,14 @@ export class OpenCodeZenProvider extends OpenAIProvider {
       const data = (await response.json()) as unknown;
       const items: unknown[] = Array.isArray(data)
         ? data
-        : (data as { data?: unknown[] }).data ?? [];
+        : ((data as { data?: unknown[] }).data ?? []);
 
       if (!items.length) return this.models;
 
       const normalized: AIModel[] = items
-        .filter((m): m is { id: string; name?: string } => typeof (m as { id?: unknown }).id === 'string')
+        .filter(
+          (m): m is { id: string; name?: string } => typeof (m as { id?: unknown }).id === 'string',
+        )
         .map((m) => {
           // Prefer the static entry for known models (preserves pricing + capabilities)
           const known = ZEN_MODELS.find((x) => x.id === m.id);
@@ -610,7 +683,11 @@ export class OpenCodeZenProvider extends OpenAIProvider {
    * The Responses API uses a different wire format from chat completions.
    */
   private async *chatResponsesAPI(params: ChatParams): AsyncIterable<StreamChunk> {
-    const messages = toOpenAIMessages(params.messages, params.systemPrompt, this.requiresReasoningContent);
+    const messages = toOpenAIMessages(
+      params.messages,
+      params.systemPrompt,
+      this.requiresReasoningContent,
+    );
 
     const body: Record<string, unknown> = {
       model: params.model,
@@ -667,10 +744,7 @@ export class OpenCodeZenProvider extends OpenAIProvider {
   /**
    * Parse a single SSE data chunk from the OpenAI Responses API.
    */
-  private parseResponsesChunk(
-    data: string,
-    currentToolId: string,
-  ): StreamChunk[] {
+  private parseResponsesChunk(data: string, currentToolId: string): StreamChunk[] {
     let parsed: Record<string, unknown>;
     try {
       parsed = JSON.parse(data);

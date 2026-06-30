@@ -17,6 +17,57 @@ function now(): string {
   return new Date().toISOString();
 }
 
+type RawPlanTask = {
+  title: string;
+  description: string;
+  files: string[];
+  dependencies: number[];
+};
+
+function parsePlanTasks(response: string): RawPlanTask[] {
+  const jsonMatch = response.match(/\[[\s\S]*\]/);
+  if (!jsonMatch) throw new Error('Plan response does not contain a JSON array.');
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(jsonMatch[0]);
+  } catch {
+    throw new Error('Plan response contains malformed JSON.');
+  }
+  if (!Array.isArray(parsed) || parsed.length === 0) {
+    throw new Error('Plan must be a non-empty JSON array.');
+  }
+
+  return parsed.map((value, index) => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      throw new Error(`Plan task ${index} must be an object.`);
+    }
+    const task = value as Record<string, unknown>;
+    if (typeof task.title !== 'string' || !task.title.trim()) {
+      throw new Error(`Plan task ${index} requires a non-empty title.`);
+    }
+    if (typeof task.description !== 'string' || !task.description.trim()) {
+      throw new Error(`Plan task ${index} requires a non-empty description.`);
+    }
+    if (!Array.isArray(task.files) || !task.files.every((file) => typeof file === 'string')) {
+      throw new Error(`Plan task ${index} files must be an array of strings.`);
+    }
+    if (!Array.isArray(task.dependencies) || !task.dependencies.every(Number.isInteger)) {
+      throw new Error(`Plan task ${index} dependencies must be an array of integer indices.`);
+    }
+    const dependencies = task.dependencies as number[];
+    if (dependencies.some((dependency) => dependency < 0 || dependency >= parsed.length || dependency === index)) {
+      throw new Error(`Plan task ${index} contains an invalid dependency index.`);
+    }
+    return {
+      title: task.title,
+      description: task.description,
+      files: task.files as string[],
+      dependencies,
+    };
+  });
+}
+
 // ─── Database Interface ─────────────────────────────────────────────────────
 // Abstraction over SQLite calls via Tauri.
 
@@ -41,10 +92,11 @@ export class PlanManager {
     this.db = db;
   }
 
-  async createSession(projectId: string, description: string): Promise<SddSession> {
+  async createSession(projectId: string, conversationId: string, description: string): Promise<SddSession> {
     const session: SddSession = {
       id: generateId(),
       projectId,
+      conversationId,
       description,
       spec: null,
       specApproved: false,
@@ -124,6 +176,10 @@ export class PlanManager {
     });
   }
 
+  async updateTask(taskId: string, updates: Partial<SddTask>): Promise<void> {
+    await this.db.updateTask(taskId, { ...updates, updatedAt: now() });
+  }
+
   /** Persist resolved dependencies for a task */
   async updateTaskDependencies(taskId: string, dependencies: string[]): Promise<void> {
     await this.db.updateTask(taskId, {
@@ -139,6 +195,10 @@ export class PlanManager {
     });
   }
 
+  async markReviewing(sessionId: string): Promise<void> {
+    await this.db.updateSession(sessionId, { status: 'reviewing', updatedAt: now() });
+  }
+
   async cancelSession(sessionId: string): Promise<void> {
     await this.db.updateSession(sessionId, {
       status: 'cancelled',
@@ -150,7 +210,7 @@ export class PlanManager {
   async getNextTask(sessionId: string): Promise<SddTask | null> {
     const tasks = await this.db.getTasksForSession(sessionId);
     const completedIds = new Set(
-      tasks.filter((t) => t.status === 'completed').map((t) => t.id),
+      tasks.filter((t) => t.status === 'completed' || t.status === 'skipped').map((t) => t.id),
     );
 
     for (const task of tasks) {
@@ -176,7 +236,7 @@ export interface SddEngineConfig {
   db: SddDatabase;
   eventHandler?: HarnessEventHandler;
   /** Called to run an agent turn (returns the text response) */
-  runAgentTurn: (systemPromptAddon: string, userMessage: string, agentTypeOverride?: import('./types').AgentType) => Promise<string>;
+  runAgentTurn: (systemPromptAddon: string, userMessage: string, agentTypeOverride?: import('./types').AgentType) => Promise<import('./types').TurnOutcome>;
   /** Optional: called when the spec is approved to persist the plan to disk */
   savePlanFile?: (sessionId: string, spec: string, tasks: import('./types').SddTask[]) => Promise<void>;
 }
@@ -208,17 +268,23 @@ export class SddEngine {
     this._paused = false;
   }
 
+  async cancel(sessionId: string): Promise<void> {
+    this._paused = true;
+    await this.planManager.cancelSession(sessionId);
+    this.emitPhaseChange('cancelled');
+  }
+
   // ─── Phase 1: Describe ──────────────────────────────────────────────
 
-  async startSession(projectId: string, description: string): Promise<SddSession> {
-    const session = await this.planManager.createSession(projectId, description);
+  async startSession(projectId: string, conversationId: string, description: string): Promise<SddSession> {
+    const session = await this.planManager.createSession(projectId, conversationId, description);
     this.emitPhaseChange('describing');
     return session;
   }
 
   // ─── Phase 2: Spec ──────────────────────────────────────────────────
 
-  async generateSpec(sessionId: string): Promise<string> {
+  async generateSpec(sessionId: string, feedback?: string): Promise<string> {
     const session = await this.planManager.getSession(sessionId);
     if (!session) throw new Error(`Session ${sessionId} not found`);
 
@@ -228,6 +294,7 @@ export class SddEngine {
 
 ## Feature Description
 ${session.description}
+${feedback ? `\n## Revision Feedback\n${feedback}` : ''}
 
 ## Required Output Format
 Write a Markdown specification document with these sections:
@@ -240,10 +307,14 @@ Write a Markdown specification document with these sections:
 
 Be specific and actionable. This spec will be used to generate an implementation plan.`;
 
-    const spec = await this.config.runAgentTurn(
+    const specOutcome = await this.config.runAgentTurn(
       'You are generating a specification document for a software feature. Be thorough and precise.',
       prompt,
     );
+    if (specOutcome.status !== 'complete') {
+      throw new Error(specOutcome.response || `Specification generation stopped with status ${specOutcome.status}.`);
+    }
+    const spec = specOutcome.response;
 
     await this.planManager.updateSpec(sessionId, spec);
     return spec;
@@ -276,21 +347,16 @@ Return a JSON array of tasks. Each task has:
 Return ONLY the JSON array, no other text.
 Order tasks so dependencies come first.`;
 
-    const planResponse = await this.config.runAgentTurn(
+    const planOutcome = await this.config.runAgentTurn(
       'You are a project planner. Generate a precise, ordered task list as JSON.',
       prompt,
     );
-
-    // Parse the JSON response
-    let rawTasks: Array<{ title: string; description: string; files: string[]; dependencies: number[] }>;
-    try {
-      // Extract JSON from response (might have markdown code fences)
-      const jsonMatch = planResponse.match(/\[[\s\S]*\]/);
-      if (!jsonMatch) throw new Error('No JSON array found');
-      rawTasks = JSON.parse(jsonMatch[0]);
-    } catch {
-      throw new Error('Failed to parse plan. Agent response was not valid JSON.');
+    if (planOutcome.status !== 'complete') {
+      throw new Error(planOutcome.response || `Plan generation stopped with status ${planOutcome.status}.`);
     }
+    const planResponse = planOutcome.response;
+
+    const rawTasks = parsePlanTasks(planResponse);
 
     // Convert index-based dependencies to ID-based
     const tasks = await this.planManager.setTasks(
@@ -334,7 +400,7 @@ Order tasks so dependencies come first.`;
 
   // ─── Phase 4: Execute ───────────────────────────────────────────────
 
-  async execute(sessionId: string): Promise<void> {
+  async execute(sessionId: string): Promise<'completed' | 'paused' | 'failed' | 'cancelled'> {
     this.emitPhaseChange('executing');
     this._paused = false;
     this._failedTask = null;
@@ -389,9 +455,19 @@ Complete this task by using the available tools. Read files before modifying the
 When done, provide a brief summary of what you did.`;
 
       try {
-        const output = await this.config.runAgentTurn(systemAddon, taskPrompt);
+        const outcome = await this.config.runAgentTurn(systemAddon, taskPrompt);
+        if (outcome.status === 'cancelled') {
+          await this.planManager.updateTaskStatus(task.id, 'pending');
+          this._paused = true;
+          return 'cancelled';
+        }
+        if (outcome.status !== 'complete') {
+          throw new Error(outcome.response || `Task stopped with status ${outcome.status}`);
+        }
+        const output = outcome.response;
 
         await this.planManager.updateTaskStatus(task.id, 'completed', output);
+        await this.planManager.updateTask(task.id, { toolCalls: outcome.toolCalls });
 
         const updatedTask = { ...task, status: 'completed' as SddTaskStatus, agentOutput: output };
         this.config.eventHandler?.({ type: 'sdd_task_complete', task: updatedTask });
@@ -410,17 +486,12 @@ When done, provide a brief summary of what you did.`;
 
         // Pause execution — user can choose to debug or skip
         this._paused = true;
-        break;
+        return 'failed';
       }
     }
 
-    // Check completion (only review if not paused due to failure)
-    if (!this._paused) {
-      const isComplete = await this.planManager.isComplete(sessionId);
-      if (isComplete) {
-        await this.review(sessionId);
-      }
-    }
+    if (this._paused) return 'paused';
+    return await this.planManager.isComplete(sessionId) ? 'completed' : 'paused';
   }
 
   /** Skip a specific task */
@@ -428,12 +499,22 @@ When done, provide a brief summary of what you did.`;
     await this.planManager.updateTaskStatus(taskId, 'skipped');
   }
 
+  async retryTask(taskId: string): Promise<void> {
+    await this.planManager.updateTaskStatus(taskId, 'pending');
+    if (this._failedTask?.id === taskId) this._failedTask = null;
+  }
+
   // ─── Phase 5: Review ───────────────────────────────────────────────
 
   async review(sessionId: string): Promise<string> {
     const session = await this.planManager.getSession(sessionId);
     if (!session) throw new Error(`Session ${sessionId} not found`);
+    if (session.status === 'completed') throw new Error(`Session ${sessionId} has already been reviewed.`);
+    if (!await this.planManager.isComplete(sessionId)) {
+      throw new Error('Cannot review an SDD session before every task is completed or skipped.');
+    }
 
+    await this.planManager.markReviewing(sessionId);
     this.emitPhaseChange('reviewing');
 
     const taskSummaries = session.tasks
@@ -459,16 +540,20 @@ ${taskSummaries}
 
 Provide a summary of the implementation and any issues found.`;
 
-    const reviewOutput = await this.config.runAgentTurn(
+    const reviewOutcome = await this.config.runAgentTurn(
       'You are reviewing a completed implementation. Be thorough but fair.',
       prompt,
       'review',
     );
 
+    if (reviewOutcome.status !== 'complete') {
+      throw new Error(reviewOutcome.response || `Review stopped with status ${reviewOutcome.status}`);
+    }
+
     await this.planManager.completeSession(sessionId);
     this.emitPhaseChange('completed');
 
-    return reviewOutput;
+    return reviewOutcome.response;
   }
 
   // ─── Helpers ────────────────────────────────────────────────────────

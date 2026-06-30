@@ -101,6 +101,13 @@ interface TauriCommands {
   db_list_messages: { args: { conversationId: string }; ret: Array<{ id: string; role: string; content: string; tool_calls: string | null; token_input: number; token_output: number; created_at: string }> };
   db_create_message: { args: { id: string; conversationId: string; role: string; content: string; toolCalls?: string; tokenInput?: number; tokenOutput?: number }; ret: void };
 
+  // Database: Agent SDD
+  db_sdd_upsert_session: { args: { sessionJson: string }; ret: void };
+  db_sdd_get_session: { args: { id: string }; ret: string | null };
+  db_sdd_list_sessions: { args: { projectId: string }; ret: string[] };
+  db_sdd_upsert_task: { args: { taskJson: string }; ret: void };
+  db_sdd_get_tasks: { args: { sessionId: string }; ret: string[] };
+
   // Database: Traces
   db_create_trace: { args: { id: string; conversationId: string; mode: string; provider: string; model: string; systemPromptHash?: string; systemPromptPreview?: string; systemPromptTokens?: number; toolCount?: number; iterations: string; tokenInput: number; tokenOutput: number; stopReason: string; verificationPerformed: boolean; verificationForced: boolean; filesModified?: string; errors?: string; loopWarnings?: string; durationMs: number }; ret: void };
   db_list_traces: { args: { conversationId: string }; ret: Array<{ id: string; conversation_id: string; mode: string; provider: string; model: string; system_prompt_hash: string | null; iterations: string; token_input: number; token_output: number; stop_reason: string; verification_performed: boolean; verification_forced: boolean; files_modified: string | null; errors: string | null; loop_warnings: string | null; duration_ms: number; created_at: string }> };

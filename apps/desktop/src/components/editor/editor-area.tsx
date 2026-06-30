@@ -53,7 +53,7 @@ export function EditorArea() {
   const activeTabId = useEditorStore((s) => s.activeTabId);
   const markDirty = useEditorStore((s) => s.markDirty);
   const setMarkdownMode = useEditorStore((s) => s.setMarkdownMode);
-  const { fileCache, setFileContent } = useFileStore();
+  const { fileCache, setFileContent, externalConflicts, clearExternalConflict } = useFileStore();
 
   // Editor settings
   const editorFontSize = useSettingsStore((s) => s.fontSize);
@@ -161,6 +161,7 @@ export function EditorArea() {
     try {
       await tauriFs.writeFile(activeTab.filePath, currentContent);
       markDirty(activeTab.id, false);
+      clearExternalConflict(activeTab.filePath);
       const lang = detectLspLanguage(activeTab.filePath) ?? activeTab.language ?? 'plaintext';
       LspBridge.onFileSaved(activeTab.filePath, lang, currentContent);
       // Record history snapshot (skip large files >1 MB, fire-and-forget)
@@ -172,7 +173,7 @@ export function EditorArea() {
     } catch (err) {
       console.error('Auto-save failed:', err);
     }
-  }, [activeTab?.id, activeTab?.filePath, activeTab?.language, markDirty]);
+  }, [activeTab?.id, activeTab?.filePath, activeTab?.language, markDirty, clearExternalConflict]);
 
   // Clear pending auto-save timer when tab changes
   useEffect(() => {
@@ -456,11 +457,17 @@ export function EditorArea() {
   }, [activeTab?.id, activeTab?.filePath, activeTab?.fileName, markDirty, saveCurrentFile]);
 
   const hasOpenTabs = tabs.length > 0;
+  const hasExternalConflict = Boolean(activeTab?.filePath && externalConflicts.has(activeTab.filePath));
 
   return (
     <div className="flex h-full flex-col">
       {hasOpenTabs && <EditorTabs />}
       <LspMissingBanner />
+      {hasExternalConflict && (
+        <div className="border-b border-amber-500/40 bg-amber-500/10 px-3 py-1.5 text-xs text-amber-200">
+          This file changed on disk while the editor buffer has unsaved changes. Save or revert the buffer before reloading.
+        </div>
+      )}
       <div className="relative flex-1 overflow-hidden">
         {/* ── Layer 1: Normal editor content (hidden when a terminal tab is active) ── */}
         <div className="absolute inset-0 flex flex-col" style={{ display: activeTab?.type === 'terminal' ? 'none' : 'flex' }}>

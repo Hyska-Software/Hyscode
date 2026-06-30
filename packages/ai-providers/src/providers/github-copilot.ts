@@ -16,7 +16,7 @@ import { OpenAIProvider } from './openai';
 // The provider itself is a thin OpenAI adapter — auth header injection is
 // handled by the Rust ai_stream_request proxy like all other providers.
 
-// Models current as of April 15, 2026 — see:
+// Models current as of June 30, 2026 — see:
 // https://docs.github.com/en/copilot/reference/ai-models/supported-models
 //
 // Copilot API (api.githubcopilot.com) model IDs follow the convention:
@@ -25,21 +25,11 @@ import { OpenAIProvider } from './openai';
 const COPILOT_MODELS: AIModel[] = [
   // ── 0× multiplier (free, all plans) ────────────────────────────────────
   {
-    id: 'gpt-4.1',
-    name: 'GPT-4.1 (Copilot)',
+    id: 'gpt-5.5',
+    name: 'GPT-5.5 (Copilot)',
     provider: 'github-copilot',
-    contextWindow: 1_048_576,
-    maxOutputTokens: 32_768,
-    supportsTools: true,
-    supportsStreaming: true,
-    supportsVision: true,
-  },
-  {
-    id: 'gpt-4o',
-    name: 'GPT-4o (Copilot)',
-    provider: 'github-copilot',
-    contextWindow: 128_000,
-    maxOutputTokens: 16_384,
+    contextWindow: 1_050_000,
+    maxOutputTokens: 128_000,
     supportsTools: true,
     supportsStreaming: true,
     supportsVision: true,
@@ -58,24 +48,23 @@ const COPILOT_MODELS: AIModel[] = [
     id: 'raptor-mini',
     name: 'Raptor Mini (Copilot)',
     provider: 'github-copilot',
-    contextWindow: 400_000,    // fine-tuned GPT-5 mini — same context limits
+    contextWindow: 400_000, // fine-tuned GPT-5 mini — same context limits
     maxOutputTokens: 128_000,
     supportsTools: true,
     supportsStreaming: true,
     supportsVision: false,
   },
-  // ── 0.25× multiplier ──────────────────────────────────────────────────
+  // ── 0.33× multiplier ──────────────────────────────────────────────────
   {
-    id: 'grok-code-fast-1',
-    name: 'Grok Code Fast 1 (Copilot)',
+    id: 'gemini-3.5-flash',
+    name: 'Gemini 3.5 Flash (Copilot)',
     provider: 'github-copilot',
-    contextWindow: 131_072,
-    maxOutputTokens: 32_768,
+    contextWindow: 1_048_576,
+    maxOutputTokens: 65_536,
     supportsTools: true,
     supportsStreaming: true,
-    supportsVision: false,
+    supportsVision: true,
   },
-  // ── 0.33× multiplier ──────────────────────────────────────────────────
   {
     id: 'claude-haiku-4.5',
     name: 'Claude Haiku 4.5 (Copilot)',
@@ -108,16 +97,6 @@ const COPILOT_MODELS: AIModel[] = [
   },
   // ── 1× multiplier (standard premium) ──────────────────────────────────
   {
-    id: 'claude-sonnet-4',
-    name: 'Claude Sonnet 4 (Copilot)',
-    provider: 'github-copilot',
-    contextWindow: 200_000,
-    maxOutputTokens: 64_000,
-    supportsTools: true,
-    supportsStreaming: true,
-    supportsVision: true,
-  },
-  {
     id: 'claude-sonnet-4.5',
     name: 'Claude Sonnet 4.5 (Copilot)',
     provider: 'github-copilot',
@@ -131,7 +110,7 @@ const COPILOT_MODELS: AIModel[] = [
     id: 'claude-sonnet-4.6',
     name: 'Claude Sonnet 4.6 (Copilot)',
     provider: 'github-copilot',
-    contextWindow: 1_048_576,  // Anthropic upgraded Sonnet 4.6 to 1M context
+    contextWindow: 1_048_576, // Anthropic upgraded Sonnet 4.6 to 1M context
     maxOutputTokens: 64_000,
     supportsTools: true,
     supportsStreaming: true,
@@ -158,21 +137,11 @@ const COPILOT_MODELS: AIModel[] = [
     supportsVision: true,
   },
   {
-    id: 'gpt-5.2',
-    name: 'GPT-5.2 (Copilot)',
+    id: 'mai-code-1-flash',
+    name: 'MAI-Code-1-Flash (Copilot)',
     provider: 'github-copilot',
-    contextWindow: 1_048_576,
-    maxOutputTokens: 128_000,
-    supportsTools: true,
-    supportsStreaming: true,
-    supportsVision: true,
-  },
-  {
-    id: 'gpt-5.2-codex',
-    name: 'GPT-5.2-Codex (Copilot)',
-    provider: 'github-copilot',
-    contextWindow: 1_048_576,
-    maxOutputTokens: 128_000,
+    contextWindow: 262_144,
+    maxOutputTokens: 32_768,
     supportsTools: true,
     supportsStreaming: true,
     supportsVision: false,
@@ -186,6 +155,26 @@ const COPILOT_MODELS: AIModel[] = [
     supportsTools: true,
     supportsStreaming: true,
     supportsVision: false,
+  },
+  {
+    id: 'claude-opus-4.8',
+    name: 'Claude Opus 4.8 (Copilot)',
+    provider: 'github-copilot',
+    contextWindow: 1_000_000,
+    maxOutputTokens: 128_000,
+    supportsTools: true,
+    supportsStreaming: true,
+    supportsVision: true,
+  },
+  {
+    id: 'claude-opus-4.8-fast',
+    name: 'Claude Opus 4.8 Fast (Copilot Preview)',
+    provider: 'github-copilot',
+    contextWindow: 1_000_000,
+    maxOutputTokens: 128_000,
+    supportsTools: true,
+    supportsStreaming: true,
+    supportsVision: true,
   },
   {
     id: 'gpt-5.4',
@@ -202,7 +191,7 @@ const COPILOT_MODELS: AIModel[] = [
     id: 'claude-opus-4.7',
     name: 'Claude Opus 4.7 (Copilot)',
     provider: 'github-copilot',
-    contextWindow: 1_048_576,  // Anthropic latest — 1M context
+    contextWindow: 1_048_576, // Anthropic latest — 1M context
     maxOutputTokens: 128_000,
     supportsTools: true,
     supportsStreaming: true,
@@ -238,11 +227,16 @@ export class GitHubCopilotProvider extends OpenAIProvider {
   constructor(apiKey: string, fetchImpl?: FetchImpl) {
     // apiKey here is the short-lived Copilot token.
     // Extra headers identify this as an editor integration.
-    super(apiKey, 'https://api.githubcopilot.com', {
-      'Editor-Version': 'HysCode/0.1.0',
-      'Editor-Plugin-Version': 'hyscode-copilot/0.1.0',
-      'Copilot-Integration-Id': 'vscode-chat',
-    }, fetchImpl);
+    super(
+      apiKey,
+      'https://api.githubcopilot.com',
+      {
+        'Editor-Version': 'HysCode/0.1.0',
+        'Editor-Plugin-Version': 'hyscode-copilot/0.1.0',
+        'Copilot-Integration-Id': 'vscode-chat',
+      },
+      fetchImpl,
+    );
   }
 
   override async *chat(params: ChatParams): AsyncIterable<StreamChunk> {

@@ -252,18 +252,20 @@ export function AgentMessages() {
     );
   }
 
+  const displayMessages = messages.filter((message) => message.role !== 'tool');
+
   return (
     <div className="flex-1 overflow-hidden">
       <ScrollArea className="h-full">
         <div className="flex flex-col gap-0.5 px-4 py-3 max-w-[720px] mx-auto w-full">
-          {messages.map((msg, idx) => {
-            const prevMsg = idx > 0 ? messages[idx - 1] : null;
-            const nextMsg = idx < messages.length - 1 ? messages[idx + 1] : null;
+          {displayMessages.map((msg, idx) => {
+            const prevMsg = idx > 0 ? displayMessages[idx - 1] : null;
+            const nextMsg = idx < displayMessages.length - 1 ? displayMessages[idx + 1] : null;
             const isConsecutiveAssistant =
               msg.role === 'assistant' && prevMsg?.role === 'assistant';
             const showSeparator =
               msg.role === 'assistant' && nextMsg?.role === 'user';
-            const isLast = idx === messages.length - 1;
+            const isLast = idx === displayMessages.length - 1;
 
             return (
               <MessageItem

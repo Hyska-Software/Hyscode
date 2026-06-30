@@ -1,8 +1,9 @@
 // ─── Context Manager ────────────────────────────────────────────────────────
 // Assembles the context window sent to the LLM, managing token budgets.
 
-import type { Message, ToolDefinition } from '@hyscode/ai-providers';
 import {
+  type Message,
+  type ToolDefinition,
   estimateMessageTokens,
   estimateToolDefinitionTokens,
   estimateSystemPromptTokens,
@@ -31,6 +32,8 @@ export class ContextManager {
   private activeRules: Rule[] = [];
   private agentDef: AgentDefinition | null = null;
   private systemPromptOverride: string | null = null;
+  private droppedMessages = 0;
+  private droppedOrphanTools = 0;
 
   // ─── Gathered Context (agent-managed) ─────────────────────────────
   // Files the agent autonomously decides are important to keep in context.
@@ -43,8 +46,12 @@ export class ContextManager {
     this.agentDef = agent;
   }
 
-  setSystemPrompt(prompt: string): void {
+  setSystemPrompt(prompt: string | null): void {
     this.systemPromptOverride = prompt;
+  }
+
+  getSystemPromptOverride(): string | null {
+    return this.systemPromptOverride;
   }
 
   setActiveSkills(skills: Skill[]): void {
@@ -73,6 +80,29 @@ export class ContextManager {
 
   clearSources(): void {
     this.sources = [];
+  }
+
+  /** Clear ephemeral sources and gathered files when switching conversations. */
+  clearConversationContext(): void {
+    this.clearSources();
+    this.clearGatheredFiles();
+    this.conversationHistory = [];
+  }
+
+  /** Backward-compatible explicit reset used by UI adapters. */
+  clearAll(): void {
+    this.clearConversationContext();
+  }
+
+  getDroppedMessageCount(): number {
+    return this.droppedMessages;
+  }
+
+  getDroppedCategories(): Array<'history' | 'orphan_tool'> {
+    const categories: Array<'history' | 'orphan_tool'> = [];
+    if (this.droppedMessages > this.droppedOrphanTools) categories.push('history');
+    if (this.droppedOrphanTools > 0) categories.push('orphan_tool');
+    return categories;
   }
 
   // ─── Gathered Context (Agent-Managed) ───────────────────────────────
@@ -145,7 +175,6 @@ export class ContextManager {
     maxInputTokens: number,
     maxOutputTokens: number,
   ): ContextSnapshot {
-    console.log('[ContextManager] buildSnapshot history roles:', JSON.stringify(this.conversationHistory.map(m => m.role)));
     const systemPrompt = this.buildSystemPrompt();
     const systemTokens = estimateSystemPromptTokens(systemPrompt);
     const toolTokens = estimateToolDefinitionTokens(tools);
@@ -237,16 +266,8 @@ export class ContextManager {
 
   private buildMessages(availableTokens: number): Message[] {
     let remaining = availableTokens;
-
-    // Step 1: Always include the last 2 messages (user question + any assistant response)
-    const mustInclude = this.conversationHistory.slice(-2);
-    const mustIncludeTokens = estimateMessageTokens(mustInclude);
-    remaining -= mustIncludeTokens;
-
-    if (remaining <= 0) {
-      // Even the last messages exceed budget — truncate them
-      return this.truncateMessages(mustInclude, availableTokens);
-    }
+    this.droppedMessages = 0;
+    this.droppedOrphanTools = 0;
 
     // Step 2: Add context sources by priority (non-always)
     const contextMessages: Message[] = [];
@@ -302,47 +323,52 @@ export class ContextManager {
       }
     }
 
-    // Step 4: Fill remaining budget with older conversation history
-    const olderHistory = this.conversationHistory.slice(0, -2);
-    const includedOlder: Message[] = [];
+    // Step 4: Include protocol frames atomically. An assistant tool-call message
+    // and its following tool-result message must never be split by truncation.
+    const frames = this.buildProtocolFrames(this.conversationHistory);
+    const includedFrames: Message[][] = [];
+    for (let index = frames.length - 1; index >= 0; index--) {
+      const frame = frames[index];
+      const tokens = estimateMessageTokens(frame);
+      if (tokens > remaining) {
+        this.droppedMessages += frames.slice(0, index + 1).reduce((sum, item) => sum + item.length, 0);
+        break;
+      }
+      includedFrames.unshift(frame);
+      remaining -= tokens;
+    }
 
-    // Walk backwards from most recent older messages
-    for (let i = olderHistory.length - 1; i >= 0; i--) {
-      const msg = olderHistory[i];
-      const tokens = estimateMessageTokens([msg]);
-      if (tokens <= remaining) {
-        includedOlder.unshift(msg);
-        remaining -= tokens;
+    let history = includedFrames.flat();
+    const firstUser = this.conversationHistory.find((message) => message.role === 'user');
+    if (history.length === 0 && frames.length > 0) {
+      const newest = frames[frames.length - 1];
+      history = this.truncateMessages(newest, remaining);
+    }
+    if (history.length > 0 && history[0].role !== 'user' && firstUser && !history.includes(firstUser)) {
+      const tokens = estimateMessageTokens([firstUser]);
+      if (tokens <= remaining) history.unshift(firstUser);
+    }
+
+    return [...gatheredMessages, ...contextMessages, ...history];
+  }
+
+  private buildProtocolFrames(messages: Message[]): Message[][] {
+    const frames: Message[][] = [];
+    for (let index = 0; index < messages.length; index++) {
+      const message = messages[index];
+      const hasToolCalls = message.role === 'assistant' && message.content.some((item) => item.type === 'tool_call');
+      if (hasToolCalls && messages[index + 1]?.role === 'tool') {
+        frames.push([message, messages[index + 1]]);
+        index++;
+      } else if (message.role !== 'tool') {
+        frames.push([message]);
       } else {
-        break; // Stop at first message that doesn't fit
+        // Orphan tool messages are invalid provider history and are discarded.
+        this.droppedMessages++;
+        this.droppedOrphanTools++;
       }
     }
-
-    // Combine: gathered context → user context → older history → must-include
-    //
-    // IMPORTANT: context/gathered messages MUST come BEFORE older history, never
-    // between history and mustInclude. When a prior turn ended with a tool_result
-    // as the last message (e.g. max_iterations or empty finalResponse), mustInclude
-    // starts with that tool_result and its paired assistant+tool_calls is at the end
-    // of includedOlder. Inserting any role:'user' context messages between them
-    // causes OpenAI/OpenRouter to reject with:
-    // "An assistant message with 'tool_calls' must be followed by tool messages"
-    const combined = [...gatheredMessages, ...contextMessages, ...includedOlder, ...mustInclude];
-    console.log('[ContextManager] buildMessages combined roles:', JSON.stringify(combined.map(m => m.role)));
-
-    // Ensure the first message has role 'user'. Anthropic (and others) reject
-    // conversations that start with an assistant message. This can happen when
-    // mustInclude is [assistant, tool] (after a tool-use iteration) and the
-    // original user message was dropped from olderHistory due to budget limits.
-    if (combined.length > 0 && combined[0].role !== 'user') {
-      // Find the original user message in olderHistory (should be first)
-      const firstUser = this.conversationHistory.find(m => m.role === 'user');
-      if (firstUser && !combined.includes(firstUser)) {
-        combined.unshift(firstUser);
-      }
-    }
-
-    return combined;
+    return frames;
   }
 
   private truncateMessages(messages: Message[], maxTokens: number): Message[] {

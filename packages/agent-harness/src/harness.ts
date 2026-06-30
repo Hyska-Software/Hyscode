@@ -2,40 +2,48 @@
 // The main orchestration engine that powers agentic behavior.
 // Implements the observe → think → plan → act → update loop.
 
-import type { Message } from '@hyscode/ai-providers';
-import { getProviderRegistry } from '@hyscode/ai-providers';
-import type {
-  HarnessConfig,
-  HarnessEvent,
-  HarnessEventHandler,
-  AgentType,
-  ToolCallRecord,
-  ConversationMode,
-  ToolExecutionContext,
-  ToolHandler,
-  Skill,
-  Rule,
-  AgentQuestion,
-  AgentQuestionAnswer,
+import { type Message, getProviderRegistry } from '@hyscode/ai-providers';
+import {
+  type HarnessConfig,
+  type HarnessEvent,
+  type HarnessEventHandler,
+  type AgentType,
+  type ToolCallRecord,
+  type ConversationMode,
+  type ToolExecutionContext,
+  type ToolHandler,
+  type Skill,
+  type Rule,
+  type AgentQuestion,
+  type AgentQuestionAnswer,
+  type TurnStatus,
+  type TurnOutcome,
+  type TurnRequest,
+  type TurnRecord,
+  DEFAULT_HARNESS_CONFIG,
 } from './types';
-import { DEFAULT_HARNESS_CONFIG } from './types';
 import { ContextManager } from './context-manager';
 import { ToolRouter } from './tool-router';
 import { getAllBuiltinTools } from './tools';
 import { getAgentDefinition } from './agents';
 import { SkillLoader } from './skill-loader';
 import { RuleLoader } from './rule-loader';
-import type { SddDatabase } from './sdd-engine';
-import { SddEngine } from './sdd-engine';
-import type { PreCompletionHook, PostToolHook, MiddlewareContext } from './middleware';
-import { verificationMiddleware, LoopDetectionMiddleware, AutoGatherMiddleware, compactToolOutput } from './middleware';
-import type { TurnRecord } from './types';
+import { type SddDatabase, SddEngine } from './sdd-engine';
+import {
+  type PreCompletionHook,
+  type PostToolHook,
+  type MiddlewareContext,
+  verificationMiddleware,
+  LoopDetectionMiddleware,
+  AutoGatherMiddleware,
+  compactToolOutput,
+} from './middleware';
 import { TraceRecorder } from './trace-recorder';
-import type { ModePolicy } from './mode-policies';
-import { getModePolicy, adjustPolicyForModel } from './mode-policies';
+import { type ModePolicy, getModePolicy, adjustPolicyForModel } from './mode-policies';
 import type { MemoryManager } from './memory-manager';
 import { MemoryExtractor } from './memory-extractor';
 import { MemoryContextProvider } from './memory-context-provider';
+import { TurnController } from './turn-controller';
 
 export interface HarnessOptions {
   config?: Partial<HarnessConfig>;
@@ -48,11 +56,11 @@ export interface HarnessOptions {
   /** Event handler for UI updates */
   onEvent?: HarnessEventHandler;
   /** Approval callback */
-  onApprovalRequest?: (pending: { id: string; toolName: string; input: Record<string, unknown>; description: string }) => Promise<boolean>;
+  onApprovalRequest?: (pending: { id: string; toolName: string; input: Record<string, unknown>; description: string }, signal: AbortSignal) => Promise<boolean>;
   /** Mode switch callback — returns true if approved, false if denied */
-  onModeSwitchRequest?: (request: { id: string; fromMode: string; toMode: string; reason: string; contextSummary: string }) => Promise<boolean>;
+  onModeSwitchRequest?: (request: { id: string; fromMode: string; toMode: string; reason: string; contextSummary: string }, signal: AbortSignal) => Promise<boolean>;
   /** User question callback — pauses agent loop, returns user answers */
-  onUserQuestionRequest?: (questions: AgentQuestion[], title?: string) => Promise<AgentQuestionAnswer[]>;
+  onUserQuestionRequest?: (id: string, questions: AgentQuestion[], title: string | undefined, signal: AbortSignal) => Promise<AgentQuestionAnswer[]>;
   /** SDD database interface */
   sddDb?: SddDatabase;
   /** Optional callback to save an approved SDD plan to disk */
@@ -68,6 +76,7 @@ export interface HarnessOptions {
   onTerminalCommand?: (command: string, output: string, exitCode: number | null) => void;
   /** Memory manager — enables persistent cross-session knowledge. */
   memoryManager?: MemoryManager;
+  hasDirtyBuffers?: () => boolean;
 }
 
 export class Harness {
@@ -87,15 +96,12 @@ export class Harness {
   private agentType: AgentType = 'build';
   private cancelled = false;
   private abortController: AbortController | null = null;
+  private turnController = new TurnController();
   private toolCallHistory: ToolCallRecord[] = [];
   private onModeSwitchRequest: HarnessOptions['onModeSwitchRequest'] = undefined;
   private onUserQuestionRequest: HarnessOptions['onUserQuestionRequest'] = undefined;
   private activeSkills: Skill[] = [];
   private activeRules: Rule[] = [];
-
-  // ─── Reentrancy Guard ─────────────────────────────────────────────
-  /** When true, `run()` skips SDD mode checks to allow recursive agent turns. */
-  private _inAgentTurn = false;
 
   // ─── Agent Terminal Integration ───────────────────────────────────
   private agentTerminalPtyId: string | undefined;
@@ -118,6 +124,7 @@ export class Harness {
   private memoryManager: MemoryManager | null = null;
   private memoryExtractor = new MemoryExtractor();
   private memoryContextProvider: MemoryContextProvider | null = null;
+  private hasDirtyBuffers: (() => boolean) | undefined;
 
   constructor(options: HarnessOptions) {
     this.config = { ...DEFAULT_HARNESS_CONFIG, ...options.config };
@@ -128,6 +135,7 @@ export class Harness {
     this.eventHandler = options.onEvent ?? null;
     this.skillLoader = options.skillLoader ?? null;
     this.ruleLoader = options.ruleLoader ?? null;
+    this.hasDirtyBuffers = options.hasDirtyBuffers;
 
     // Agent terminal integration
     this.agentTerminalPtyId = options.agentTerminalPtyId;
@@ -140,16 +148,21 @@ export class Harness {
     this.toolRouter = new ToolRouter();
     this.toolRouter.setApprovalConfig(this.config.approval);
     if (this.eventHandler) {
-      this.toolRouter.setEventHandler(this.eventHandler);
+      this.toolRouter.setEventHandler((event) => this.emit(event));
     }
     if (options.onApprovalRequest) {
-      this.toolRouter.setApprovalCallback(async (pending) => {
-        return options.onApprovalRequest!({
-          id: pending.id,
-          toolName: pending.toolName,
-          input: pending.input,
-          description: pending.description,
-        });
+      this.toolRouter.setApprovalCallback(async (pending, signal) => {
+        this.turnController.transition('awaiting_interaction');
+        try {
+          return await options.onApprovalRequest!({
+            id: pending.id,
+            toolName: pending.toolName,
+            input: pending.input,
+            description: pending.description,
+          }, signal);
+        } finally {
+          this.turnController.transition('executing_tools');
+        }
       });
     }
 
@@ -204,11 +217,16 @@ export class Harness {
 
   cancel(): void {
     this.cancelled = true;
+    this.turnController.cancel();
     this.abortController?.abort();
+    if (this.sddSessionId && this.sddEngine) void this.sddEngine.cancel(this.sddSessionId);
   }
 
-  setConfig(patch: Partial<Pick<HarnessConfig, 'providerId' | 'modelId' | 'maxIterations' | 'approval' | 'thinking'>>): void {
-    if (patch.providerId !== undefined) this.config.providerId = patch.providerId;
+  setConfig(patch: Partial<Pick<HarnessConfig, 'providerId' | 'modelId' | 'maxIterations' | 'maxInputTokens' | 'maxOutputTokens' | 'turnTimeoutMs' | 'approval' | 'thinking'>>): void {
+    if (patch.providerId !== undefined) {
+      this.config.providerId = patch.providerId;
+      this._effectivePolicy = null;
+    }
     if (patch.modelId !== undefined) {
       this.config.modelId = patch.modelId;
       this._effectivePolicy = null; // Invalidate — model change affects budgets
@@ -216,6 +234,12 @@ export class Harness {
     if (patch.maxIterations !== undefined) {
       this.config.maxIterations = patch.maxIterations;
       this._effectivePolicy = null; // Invalidate — iteration limit changed
+    }
+    if (patch.maxInputTokens !== undefined) this.config.maxInputTokens = patch.maxInputTokens;
+    if (patch.maxOutputTokens !== undefined) this.config.maxOutputTokens = patch.maxOutputTokens;
+    if (patch.turnTimeoutMs !== undefined) this.config.turnTimeoutMs = patch.turnTimeoutMs;
+    if (patch.maxInputTokens !== undefined || patch.maxOutputTokens !== undefined || patch.turnTimeoutMs !== undefined) {
+      this._effectivePolicy = null;
     }
     if (patch.approval !== undefined) {
       this.config.approval = patch.approval;
@@ -320,14 +344,17 @@ export class Harness {
   getEffectivePolicy(): ModePolicy {
     if (!this._effectivePolicy || this._effectivePolicy.mode !== this.agentType) {
       const base = getModePolicy(this.agentType);
-      // User-configured maxIterations takes precedence over the mode default
-      const merged: ModePolicy = {
-        ...base,
-        maxIterations: this.config.maxIterations ?? base.maxIterations,
+      const providerAdjusted = this.config.modelId
+        ? adjustPolicyForModel(base, this.config.modelId, this.config.providerId)
+        : { ...base };
+      // User settings are the final global safety ceilings.
+      this._effectivePolicy = {
+        ...providerAdjusted,
+        maxIterations: Math.min(providerAdjusted.maxIterations, this.config.maxIterations),
+        maxInputTokens: Math.min(providerAdjusted.maxInputTokens, this.config.maxInputTokens),
+        maxOutputTokens: Math.min(providerAdjusted.maxOutputTokens, this.config.maxOutputTokens),
+        turnTimeoutMs: Math.min(providerAdjusted.turnTimeoutMs, this.config.turnTimeoutMs),
       };
-      this._effectivePolicy = this.config.modelId
-        ? adjustPolicyForModel(merged, this.config.modelId)
-        : merged;
     }
     return this._effectivePolicy;
   }
@@ -380,18 +407,27 @@ export class Harness {
    * Run a full agent turn: user sends a message, agent responds (possibly with tool calls).
    * Returns the final assistant text response.
    */
+  async run(request: TurnRequest): Promise<TurnOutcome>;
+  async run(userMessage: string, history: Message[], imageContent?: Array<{ base64: string; mediaType: string }>): Promise<TurnOutcome>;
   async run(
-    userMessage: string,
-    history: Message[],
+    requestOrMessage: string | TurnRequest,
+    history: Message[] = [],
     imageContent?: Array<{ base64: string; mediaType: string }>,
-  ): Promise<{ response: string; toolCalls: ToolCallRecord[]; turnRecord: TurnRecord }> {
+  ): Promise<TurnOutcome> {
+    const userMessage = typeof requestOrMessage === 'string' ? requestOrMessage : requestOrMessage.userMessage;
+    if (typeof requestOrMessage !== 'string') {
+      history = requestOrMessage.history;
+      imageContent = requestOrMessage.images;
+    }
+    const activeTurn = this.turnController.begin();
     this.cancelled = false;
     this.toolCallHistory = [];
     this.loopDetection.resetCounts();
+    this.contextManager.clearGatheredFiles();
     const turnStart = Date.now();
 
     // Resolve effective policy for this mode + model
-    const policy = this.getEffectivePolicy();
+    let policy = this.getEffectivePolicy();
 
     // Start tracing for this turn
     this.traceRecorder.startTrace(
@@ -400,16 +436,6 @@ export class Harness {
       this.config.providerId,
       this.config.modelId,
     );
-
-    // In SDD mode, start a new session and return the spec for user review.
-    // Subsequent phases are driven by explicit approve/reject calls.
-    // Skip this check when called recursively from runAgentTurn (SDD task execution).
-    if (this._mode === 'sdd' && !this._inAgentTurn) {
-      const { spec } = await this.startSdd(userMessage);
-      const turnRecord = this.buildTurnRecord('complete', 1, turnStart);
-      turnRecord.trace = this.traceRecorder.finalizeTrace('complete', { input: 0, output: 0 }, []) ?? undefined;
-      return { response: spec, toolCalls: this.toolCallHistory, turnRecord };
-    }
 
     // In chat mode, override to chat agent
     if (this._mode === 'chat' && this.agentType !== 'chat') {
@@ -437,7 +463,7 @@ export class Harness {
             content: memBlock,
             tokenEstimate: Math.ceil(memBlock.length / 4),
           });
-        }
+        } else this.contextManager.removeSource('memory-context');
       } catch {
         // Memory injection is non-critical — never block the turn
       }
@@ -456,17 +482,20 @@ export class Harness {
     this.contextManager.addMessage(userMsg);
 
     // Agent loop
-    const agentDef = getAgentDefinition(this.agentType);
-    const maxIter = policy.maxIterations;
+    let agentDef = getAgentDefinition(this.agentType);
+    let maxIter = policy.maxIterations;
     let iteration = 0;
     let finalResponse = '';
     let consecutiveIdenticalCalls = 0;
     let lastToolCallSignature = '';
     let verificationForced = false;
+    let terminalStatus: TurnStatus = 'complete';
+    const tokenUsage = { input: 0, output: 0 };
     /** Middleware-injected context messages for the next iteration */
     let middlewareInjections: string[] = [];
 
     while (iteration < maxIter && !this.cancelled) {
+      this.turnController.transition('streaming');
       iteration++;
       this.traceRecorder.startIteration(iteration);
       this.emit({ type: 'turn_start', conversationId: this.conversationId, iteration });
@@ -497,6 +526,14 @@ export class Harness {
         policy.maxInputTokens,
         policy.maxOutputTokens,
       );
+      const droppedMessages = this.contextManager.getDroppedMessageCount();
+      if (droppedMessages > 0) {
+        this.emit({
+          type: 'context_overflow',
+          droppedMessages,
+          droppedCategories: this.contextManager.getDroppedCategories(),
+        });
+      }
 
       // Record system prompt in trace (first iteration only captures it)
       if (iteration === 1) {
@@ -518,6 +555,9 @@ export class Harness {
       let timeoutId: ReturnType<typeof setTimeout> | null = null;
       const abortController = new AbortController();
       this.abortController = abortController;
+      const abortFromTurn = () => abortController.abort(activeTurn.signal.reason);
+      if (activeTurn.signal.aborted) abortFromTurn();
+      else activeTurn.signal.addEventListener('abort', abortFromTurn, { once: true });
 
       const chatParams = {
         model: this.config.modelId,
@@ -541,7 +581,6 @@ export class Harness {
       });
 
       try {
-        console.log('[Harness] snapshot.messages roles:', JSON.stringify(snapshot.messages.map(m => m.role)));
         await Promise.race([
           (async () => {
             for await (const chunk of registry.chat({
@@ -584,6 +623,10 @@ export class Harness {
               // stopReason is tracked by the provider but the loop
               // relies solely on toolCalls.length to decide continuation.
               break;
+            case 'usage':
+              tokenUsage.input += chunk.usage.inputTokens;
+              tokenUsage.output += chunk.usage.outputTokens;
+              break;
             case 'error':
               throw new Error(chunk.error);
           }
@@ -595,14 +638,17 @@ export class Harness {
         if (timeoutId) clearTimeout(timeoutId);
         this.traceRecorder.recordError(err instanceof Error ? err.message : String(err));
         this.traceRecorder.endIteration();
-        this.emit({
-          type: 'turn_end',
-          reason: 'error',
-          error: err instanceof Error ? err.message : String(err),
-        });
-        throw err;
+        if (this.cancelled || activeTurn.signal.aborted) {
+          terminalStatus = 'cancelled';
+          finalResponse = 'Request cancelled.';
+          break;
+        }
+        terminalStatus = 'error';
+        finalResponse = err instanceof Error ? err.message : String(err);
+        break;
       } finally {
         if (timeoutId) clearTimeout(timeoutId);
+        activeTurn.signal.removeEventListener('abort', abortFromTurn);
       }
 
       // Add assistant response to history
@@ -620,8 +666,6 @@ export class Harness {
           })),
         ],
       };
-      console.log('[Harness] assistantMsg content blocks:', JSON.stringify(assistantMsg.content.map(c => c.type)));
-      console.log('[Harness] assistantMsg full:', JSON.stringify(assistantMsg));
       this.contextManager.addMessage(assistantMsg);
 
       // If no tool calls, we're done — the LLM gave a final text response.
@@ -646,7 +690,7 @@ export class Harness {
 
         // ── Pre-completion middleware check ──
         // Before accepting the exit, run hooks to see if we should force continuation.
-        if (!verificationForced) {
+        if (!verificationForced && policy.verificationRequired) {
           const mwCtx: MiddlewareContext = {
             mode: this.agentType,
             iteration,
@@ -675,6 +719,7 @@ export class Harness {
       }
 
       this.traceRecorder.setHadToolCalls(true);
+      this.turnController.transition('executing_tools');
 
       // Stuck detection: same tool call 3 times in a row
       const callSignature = toolCalls.map((tc) => `${tc.name}:${JSON.stringify(tc.input)}`).join('|');
@@ -683,9 +728,9 @@ export class Harness {
         this.traceRecorder.recordRepeatedCall();
         if (consecutiveIdenticalCalls >= 3) {
           finalResponse = assistantText + '\n\n[Agent loop detected repeated identical tool calls. Stopping.]';
+          terminalStatus = 'loop_detected';
           this.traceRecorder.recordLoopWarning('repeated_tool_calls', consecutiveIdenticalCalls);
           this.traceRecorder.endIteration();
-          this.emit({ type: 'turn_end', reason: 'error', error: 'Stuck in loop: repeated identical tool calls' });
           break;
         }
       } else {
@@ -703,12 +748,14 @@ export class Harness {
         workspacePath: this.workspacePath,
         conversationId: this.conversationId,
         toolCallId: '', // set per-call below
+        signal: activeTurn.signal,
         invoke: this.invoke,
         listen: this.listen,
         projectId: this.projectId,
         memoryManager: this.memoryManager ?? undefined,
+        hasDirtyBuffers: this.hasDirtyBuffers,
         onFileChange: (change) => {
-          this.emit({ type: 'file_change_pending', change });
+          if (!activeTurn.signal.aborted) this.emit({ type: 'file_change_pending', change });
         },
         // Agent terminal integration — shared PTY + command tracking
         agentTerminalPtyId: this.agentTerminalPtyId,
@@ -733,9 +780,14 @@ export class Harness {
           ? async (questions: AgentQuestion[], title?: string) => {
               const id = crypto.randomUUID();
               this.emit({ type: 'user_question_request', id, title, questions });
-              const answers = await this.onUserQuestionRequest!(questions, title);
-              this.emit({ type: 'user_question_answered', id, answers });
-              return answers;
+              this.turnController.transition('awaiting_interaction');
+              try {
+                const answers = await this.onUserQuestionRequest!(id, questions, title, activeTurn.signal);
+                this.emit({ type: 'user_question_answered', id, answers });
+                return answers;
+              } finally {
+                this.turnController.transition('executing_tools');
+              }
             }
           : undefined,
       };
@@ -828,17 +880,23 @@ export class Harness {
 
           // Wait for user approval/denial (like tool approvals)
           if (this.onModeSwitchRequest) {
+            this.turnController.transition('awaiting_interaction');
             const approved = await this.onModeSwitchRequest({
               id: switchRequest.id,
               fromMode: switchRequest.fromMode,
               toMode: switchRequest.toMode,
               reason: switchRequest.reason,
               contextSummary: switchRequest.contextSummary,
-            });
+            }, activeTurn.signal).finally(() => this.turnController.transition('executing_tools'));
             this.emit({ type: 'mode_switch_resolved', request: switchRequest, approved });
             // Override the tool output so the agent knows the user's decision
             if (approved) {
-              record.output.output = `Mode switch APPROVED by user. Switching to ${targetMode} agent now. You can stop — the ${targetMode} agent will take over with your context summary.`;
+              this.delegationChain.push({ fromMode: switchRequest.fromMode, toMode: targetMode, reason });
+              this.setAgentType(targetMode as AgentType);
+              agentDef = getAgentDefinition(this.agentType);
+              policy = this.getEffectivePolicy();
+              maxIter = Math.max(iteration + 1, policy.maxIterations);
+              record.output.output = `Mode switch APPROVED by user. The ${targetMode} agent has taken over this turn. Continue from this context summary:\n${contextSummary}`;
             } else {
               record.output.output = `Mode switch DENIED by user. The user chose to stay in the current mode (${this.agentType}). Ask the user what they'd like to change or adjust in the plan before proceeding. Do NOT request another mode switch immediately — engage with the user first.`;
             }
@@ -883,21 +941,25 @@ export class Harness {
       this.contextManager.addMessage(toolResults);
     }
 
-    const stopReason: TurnRecord['stopReason'] = this.cancelled
-      ? 'cancelled'
-      : iteration >= maxIter
-        ? 'max_iterations'
-        : 'complete';
-
-    if (this.cancelled) {
-      this.emit({ type: 'turn_end', reason: 'cancelled' });
-    } else if (iteration >= maxIter) {
-      this.emit({ type: 'turn_end', reason: 'max_iterations' });
-    } else {
-      this.emit({ type: 'turn_end', reason: 'complete' });
+    this.turnController.transition('completing');
+    if (this.cancelled || activeTurn.signal.aborted) terminalStatus = 'cancelled';
+    else if (terminalStatus !== 'loop_detected' && iteration >= maxIter) terminalStatus = 'max_iterations';
+    const stopReason: TurnRecord['stopReason'] = terminalStatus === 'loop_detected' ? 'error' : terminalStatus;
+    if (!finalResponse.trim() && terminalStatus === 'max_iterations') {
+      finalResponse = `The agent reached the ${maxIter}-iteration limit before producing a final response. Review the completed tool calls before continuing.`;
     }
+    if (!finalResponse.trim() && terminalStatus === 'cancelled') finalResponse = 'Request cancelled.';
+    this.finishTurn(
+      terminalStatus,
+      terminalStatus === 'loop_detected'
+        ? 'Stuck in loop: repeated identical tool calls'
+        : terminalStatus === 'error'
+          ? finalResponse
+          : undefined,
+    );
 
     const turnRecord = this.buildTurnRecord(stopReason, iteration, turnStart);
+    turnRecord.tokenUsage = tokenUsage;
     turnRecord.verificationForced = verificationForced;
 
     // ── Post-turn memory extraction (async, non-blocking) ──
@@ -931,6 +993,8 @@ export class Harness {
     ) ?? undefined;
 
     return {
+      turnId: activeTurn.turnId,
+      status: terminalStatus,
       response: finalResponse,
       toolCalls: this.toolCallHistory,
       turnRecord,
@@ -945,6 +1009,10 @@ export class Harness {
   /** Get the current SDD session ID */
   getSddSessionId(): string | null {
     return this.sddSessionId;
+  }
+
+  restoreSddSession(sessionId: string): void {
+    this.sddSessionId = sessionId;
   }
 
   /** Get the failed task from the current SDD session (if any) */
@@ -962,7 +1030,7 @@ export class Harness {
       throw new Error('SDD Engine not initialized (no database provided)');
     }
 
-    const session = await this.sddEngine.startSession(this.projectId, description);
+    const session = await this.sddEngine.startSession(this.projectId, this.conversationId, description);
     this.sddSessionId = session.id;
 
     const spec = await this.sddEngine.generateSpec(session.id);
@@ -987,13 +1055,13 @@ export class Harness {
    * Reject the SDD spec and regenerate it.
    * Returns the new spec text.
    */
-  async rejectSddSpec(_feedback?: string): Promise<string> {
+  async rejectSddSpec(feedback?: string): Promise<string> {
     if (!this.sddEngine || !this.sddSessionId) {
       throw new Error('No active SDD session');
     }
 
     // Regenerate with optional feedback
-    const spec = await this.sddEngine.generateSpec(this.sddSessionId);
+    const spec = await this.sddEngine.generateSpec(this.sddSessionId, feedback);
     return spec;
   }
 
@@ -1007,7 +1075,18 @@ export class Harness {
     }
 
     await this.sddEngine.approvePlan(this.sddSessionId);
-    await this.sddEngine.execute(this.sddSessionId);
+    const execution = await this.sddEngine.execute(this.sddSessionId);
+    if (execution !== 'completed') return `SDD execution ${execution}.`;
+    const review = await this.sddEngine.review(this.sddSessionId);
+    this.sddSessionId = null;
+    return review;
+  }
+
+  async resumeSddPlan(): Promise<string> {
+    if (!this.sddEngine || !this.sddSessionId) throw new Error('No active SDD session');
+    this.sddEngine.resume();
+    const execution = await this.sddEngine.execute(this.sddSessionId);
+    if (execution !== 'completed') return `SDD execution ${execution}.`;
     const review = await this.sddEngine.review(this.sddSessionId);
     this.sddSessionId = null;
     return review;
@@ -1022,7 +1101,7 @@ export class Harness {
     if (!this.sddEngine) {
       throw new Error('SDD Engine not initialized (no database provided)');
     }
-    const session = await this.sddEngine.startSession(this.projectId, description);
+    const session = await this.sddEngine.startSession(this.projectId, this.conversationId, description);
     this.sddSessionId = session.id;
     const spec = await this.sddEngine.generateSpec(session.id);
     return { sessionId: session.id, spec };
@@ -1046,16 +1125,15 @@ export class Harness {
     systemPromptAddon: string,
     userMessage: string,
     agentTypeOverride?: AgentType,
-  ): Promise<string> {
+  ): Promise<TurnOutcome> {
     const originalType = this.agentType;
-    const originalPrompt = agentTypeOverride
+    const turnPrompt = agentTypeOverride
       ? getAgentDefinition(agentTypeOverride).basePrompt
       : getAgentDefinition(this.agentType).basePrompt;
+    const originalPromptOverride = this.contextManager.getSystemPromptOverride();
     const originalMode = this._mode;
 
-    // Guard: prevent run() from re-entering SDD mode when called recursively
-    this._inAgentTurn = true;
-    // Force agent mode for the recursive call so the normal loop runs
+    // Force agent mode for the nested SDD phase call so the normal loop runs.
     this._mode = 'agent';
 
     if (agentTypeOverride) {
@@ -1064,23 +1142,33 @@ export class Harness {
     }
 
     // Temporarily modify system prompt
-    this.contextManager.setSystemPrompt(originalPrompt + '\n\n' + systemPromptAddon);
+    this.contextManager.setSystemPrompt(turnPrompt + '\n\n' + systemPromptAddon);
 
     try {
       const result = await this.run(userMessage, this.contextManager.getHistory());
-      return result.response;
+      return result;
     } finally {
       // Restore state
-      this._inAgentTurn = false;
       this._mode = originalMode;
       this.agentType = originalType;
       this._effectivePolicy = null;
-      this.contextManager.setSystemPrompt(originalPrompt);
+      this.contextManager.setAgent(getAgentDefinition(originalType));
+      this.contextManager.setSystemPrompt(originalPromptOverride);
     }
   }
 
   private emit(event: HarnessEvent): void {
-    this.eventHandler?.(event);
+    this.eventHandler?.({
+      ...event,
+      turnId: event.turnId ?? this.turnController.id,
+      conversationId: event.conversationId ?? this.conversationId,
+    });
+  }
+
+  private finishTurn(status: TurnStatus, error?: string): void {
+    if (!this.turnController.finish(status)) return;
+    const reason = status === 'loop_detected' ? 'error' : status;
+    this.emit({ type: 'turn_end', reason, error });
   }
 
   // ─── Turn Record Builder ────────────────────────────────────────────
@@ -1093,8 +1181,8 @@ export class Harness {
     const filesModified = [
       ...new Set(
         this.toolCallHistory
-          .filter((tc) => ['write_file', 'edit_file', 'create_file'].includes(tc.toolName))
-          .map((tc) => String(tc.input.path ?? '')),
+          .filter((tc) => ['write_file', 'edit_file', 'create_file', 'replace_lines', 'insert_lines', 'delete_file', 'rename_file', 'copy_file'].includes(tc.toolName))
+          .flatMap((tc) => [String(tc.input.path ?? tc.input.from ?? ''), String(tc.input.to ?? '')].filter(Boolean)),
       ),
     ];
 

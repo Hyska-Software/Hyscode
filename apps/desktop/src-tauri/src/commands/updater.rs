@@ -1,6 +1,6 @@
+use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter};
-use futures_util::StreamExt;
 
 // ── GitHub API response types ────────────────────────────────────────────────
 
@@ -79,8 +79,7 @@ struct DownloadProgress {
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
-const GITHUB_RELEASES_BASE: &str =
-    "https://api.github.com/repos/hyskasoftware/Hyscode/releases";
+const GITHUB_RELEASES_BASE: &str = "https://api.github.com/repos/hyskasoftware/Hyscode/releases";
 
 const USER_AGENT: &str = "HysCode-Updater";
 
@@ -123,10 +122,7 @@ fn is_safe_installer_path(path: &std::path::Path) -> bool {
     if !path.starts_with(&temp) {
         return false;
     }
-    let ext = path
-        .extension()
-        .and_then(|e| e.to_str())
-        .unwrap_or("");
+    let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
     matches!(ext, "exe" | "msi" | "dmg" | "AppImage" | "deb")
 }
 
@@ -138,8 +134,7 @@ async fn fetch_commits_between(
 ) -> Result<Vec<CommitInfo>, String> {
     let url = format!(
         "https://api.github.com/repos/hyskasoftware/Hyscode/compare/{}...{}",
-        base_tag,
-        head_tag
+        base_tag, head_tag
     );
     let response = client
         .get(&url)
@@ -164,9 +159,22 @@ async fn fetch_commits_between(
         .into_iter()
         .map(|c| CommitInfo {
             sha: c.sha.chars().take(7).collect(),
-            message: c.commit.message.lines().next().unwrap_or(&c.commit.message).to_string(),
+            message: c
+                .commit
+                .message
+                .lines()
+                .next()
+                .unwrap_or(&c.commit.message)
+                .to_string(),
             author: c.commit.author.name,
-            date: c.commit.author.date.split('T').next().unwrap_or(&c.commit.author.date).to_string(),
+            date: c
+                .commit
+                .author
+                .date
+                .split('T')
+                .next()
+                .unwrap_or(&c.commit.author.date)
+                .to_string(),
             url: c.html_url,
         })
         .collect();
@@ -181,7 +189,10 @@ async fn fetch_commits_between(
 /// highest semver (stable or pre-release).
 /// Returns `None` if up to date or no releases found.
 #[tauri::command]
-pub async fn updater_check(app: AppHandle, channel: Option<String>) -> Result<Option<ReleaseInfo>, String> {
+pub async fn updater_check(
+    app: AppHandle,
+    channel: Option<String>,
+) -> Result<Option<ReleaseInfo>, String> {
     let is_prerelease = channel.as_deref() == Some("pre-release");
     let client = reqwest::Client::new();
 
@@ -264,13 +275,14 @@ pub async fn updater_check(app: AppHandle, channel: Option<String>) -> Result<Op
         return Ok(None);
     }
 
-    let asset = select_platform_asset(&release.assets).ok_or_else(|| {
-        "No compatible installer found in this release".to_string()
-    })?;
+    let asset = select_platform_asset(&release.assets)
+        .ok_or_else(|| "No compatible installer found in this release".to_string())?;
 
     // Fetch commit history between current version and the new release
     let base_tag = format!("v{}", current_version);
-    let commits = fetch_commits_between(&client, &base_tag, &release.tag_name).await.unwrap_or_default();
+    let commits = fetch_commits_between(&client, &base_tag, &release.tag_name)
+        .await
+        .unwrap_or_default();
 
     Ok(Some(ReleaseInfo {
         version: release.tag_name.clone(),
@@ -316,8 +328,8 @@ pub async fn updater_download(
     let total = response.content_length().unwrap_or(0);
     let dest = std::env::temp_dir().join(&asset_name);
 
-    let mut file = std::fs::File::create(&dest)
-        .map_err(|e| format!("Failed to create temp file: {}", e))?;
+    let mut file =
+        std::fs::File::create(&dest).map_err(|e| format!("Failed to create temp file: {}", e))?;
 
     let mut stream = response.bytes_stream();
     let mut downloaded: u64 = 0;
@@ -368,10 +380,7 @@ pub async fn updater_download(
 
 /// Launch the downloaded installer and exit the application.
 #[tauri::command]
-pub async fn updater_install(
-    app: AppHandle,
-    installer_path: String,
-) -> Result<(), String> {
+pub async fn updater_install(app: AppHandle, installer_path: String) -> Result<(), String> {
     let path = std::path::PathBuf::from(&installer_path);
 
     // Security: ensure the path is in temp dir and has a valid extension

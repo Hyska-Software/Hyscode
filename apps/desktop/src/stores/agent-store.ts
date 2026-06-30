@@ -84,7 +84,7 @@ export function defaultPerTabState(mode: AgentMode = 'chat'): PerTabState {
     subAgents: [],
   };
 }
-export type MessageRole = 'user' | 'assistant';
+export type MessageRole = 'user' | 'assistant' | 'tool';
 
 export interface ToolCallDisplay {
   id: string;
@@ -159,6 +159,9 @@ export interface AgentEditSession {
   toolCallId: string;
   /** null when the file was newly created */
   originalContent: string | null;
+  /** Original on-disk content; differs from originalContent when Monaco was dirty. */
+  diskOriginalContent?: string | null;
+  wasDirty?: boolean;
   /** Content as it should appear after the edit */
   newContent: string;
   /** Current phase of the edit lifecycle */

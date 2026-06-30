@@ -1,7 +1,7 @@
+use super::git::{open_repo, GitRemoteInfo};
+use super::keychain::KeychainState;
 use serde::{Deserialize, Serialize};
 use tauri::State;
-use super::keychain::KeychainState;
-use super::git::{GitRemoteInfo, open_repo};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct CreatePullRequestPayload {
@@ -58,7 +58,9 @@ fn parse_github_remote_url(url: &str) -> Option<(String, String)> {
 #[tauri::command]
 pub fn git_remote_info(repo_path: String) -> Result<GitRemoteInfo, String> {
     let repo = open_repo(&repo_path)?;
-    let remotes = repo.remotes().map_err(|e| format!("Remotes error: {}", e))?;
+    let remotes = repo
+        .remotes()
+        .map_err(|e| format!("Remotes error: {}", e))?;
 
     for name in remotes.iter().flatten() {
         if name == "origin" {
@@ -99,7 +101,9 @@ pub async fn github_create_pull_request(
     // 1. Discover repo and get remote URL
     let remote_url = {
         let repo = open_repo(&repo_path)?;
-        let remotes = repo.remotes().map_err(|e| format!("Remotes error: {}", e))?;
+        let remotes = repo
+            .remotes()
+            .map_err(|e| format!("Remotes error: {}", e))?;
         remotes
             .iter()
             .flatten()
@@ -132,10 +136,7 @@ pub async fn github_create_pull_request(
         .build()
         .map_err(|e| format!("HTTP client error: {}", e))?;
 
-    let api_url = format!(
-        "https://api.github.com/repos/{}/{}/pulls",
-        owner, repo_name
-    );
+    let api_url = format!("https://api.github.com/repos/{}/{}/pulls", owner, repo_name);
 
     let resp = client
         .post(&api_url)

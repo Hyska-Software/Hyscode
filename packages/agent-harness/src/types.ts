@@ -27,6 +27,8 @@ export interface ToolExecutionContext {
   conversationId: string;
   /** The ID of the current tool call (set per-call by the harness) */
   toolCallId: string;
+  /** Aborted when the owning turn is cancelled or times out. */
+  signal: AbortSignal;
   /** Invoke a Tauri command */
   invoke: <T>(cmd: string, args?: Record<string, unknown>) => Promise<T>;
   /** Listen to a Tauri event. Returns an unlisten function. */
@@ -53,6 +55,8 @@ export interface ToolExecutionContext {
   projectId?: string;
   /** Memory manager for persistent cross-session knowledge */
   memoryManager?: MemoryManager;
+  /** Reports whether Monaco has unsaved buffers that Git mutations could overwrite. */
+  hasDirtyBuffers?: () => boolean;
 }
 
 /** Emitted when a tool writes/edits/creates a file so the UI can track it */
@@ -247,6 +251,7 @@ export type SddTaskStatus = 'pending' | 'in_progress' | 'completed' | 'skipped' 
 export interface SddSession {
   id: string;
   projectId: string;
+  conversationId: string;
   description: string;
   spec: string | null;
   specApproved: boolean;
@@ -292,6 +297,27 @@ export interface HarnessConfig {
   thinking?: ThinkingConfig;
 }
 
+export type TurnStatus =
+  | 'complete'
+  | 'max_iterations'
+  | 'loop_detected'
+  | 'cancelled'
+  | 'error';
+
+export type TurnRequest = {
+  userMessage: string;
+  history: Message[];
+  images?: Array<{ base64: string; mediaType: string }>;
+};
+
+export type TurnOutcome = {
+  turnId: string;
+  status: TurnStatus;
+  response: string;
+  toolCalls: ToolCallRecord[];
+  turnRecord: TurnRecord;
+};
+
 export const DEFAULT_HARNESS_CONFIG: HarnessConfig = {
   providerId: '',
   modelId: '',
@@ -307,15 +333,16 @@ export const DEFAULT_HARNESS_CONFIG: HarnessConfig = {
 // ─── Harness Events ─────────────────────────────────────────────────────────
 // Events emitted by the harness for UI updates.
 
-export type HarnessEvent =
+type HarnessEventPayload =
   | { type: 'turn_start'; conversationId: string; iteration: number }
   | { type: 'api_request_sent'; iteration: number; providerId: string; modelId: string }
   | { type: 'stream_chunk'; chunk: StreamChunk }
   | { type: 'tool_call_start'; toolCallId: string; toolName: string; input: Record<string, unknown> }
   | { type: 'tool_call_pending'; pending: PendingToolCall }
+  | { type: 'tool_call_notification'; toolCallId: string; toolName: string; description: string }
   | { type: 'tool_call_result'; toolCallId: string; toolName: string; result: ToolResult; durationMs: number }
   | { type: 'turn_end'; reason: 'complete' | 'max_iterations' | 'cancelled' | 'error'; error?: string }
-  | { type: 'context_overflow'; droppedMessages: number }
+  | { type: 'context_overflow'; droppedMessages: number; droppedCategories: Array<'history' | 'orphan_tool'> }
   | { type: 'sdd_phase_change'; phase: SddStatus }
   | { type: 'sdd_task_start'; task: SddTask }
   | { type: 'sdd_task_complete'; task: SddTask }
@@ -329,6 +356,12 @@ export type HarnessEvent =
   | { type: 'memories_extracted'; count: number; memories: Array<{ title: string; type: MemoryType }> }
   | { type: 'memory_recalled'; memoryId: string; title: string }
   | { type: 'memory_created'; memory: Pick<Memory, 'id' | 'title' | 'type' | 'summary'> };
+
+/** Every runtime event is correlated to its owning turn/conversation when applicable. */
+export type HarnessEvent = HarnessEventPayload & {
+  turnId?: string;
+  conversationId?: string;
+};
 
 export type HarnessEventHandler = (event: HarnessEvent) => void;
 

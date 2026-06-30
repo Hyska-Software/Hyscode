@@ -1,10 +1,10 @@
+use super::utils::cmd;
+use serde::Serialize;
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Child, Stdio};
 use std::sync::{Mutex, OnceLock};
-use serde::Serialize;
 use tauri::{Emitter, Manager};
-use super::utils::cmd;
 
 /// Cache of user PATH directories read from the Windows registry.
 /// Tauri GUI apps only inherit the system PATH; this supplements it with
@@ -197,17 +197,8 @@ pub async fn lsp_start(
 
     // Store the process
     let state = app.state::<LspState>();
-    let mut processes = state
-        .0
-        .lock()
-        .map_err(|e| format!("Lock error: {}", e))?;
-    processes.insert(
-        server_id.clone(),
-        LspProcess {
-            child,
-            stdin,
-        },
-    );
+    let mut processes = state.0.lock().map_err(|e| format!("Lock error: {}", e))?;
+    processes.insert(server_id.clone(), LspProcess { child, stdin });
 
     Ok(LspStartResult {
         server_id,
@@ -218,19 +209,13 @@ pub async fn lsp_start(
 #[tauri::command]
 pub async fn lsp_send(id: String, content: String, app: tauri::AppHandle) -> Result<(), String> {
     let state = app.state::<LspState>();
-    let mut processes = state
-        .0
-        .lock()
-        .map_err(|e| format!("Lock error: {}", e))?;
+    let mut processes = state.0.lock().map_err(|e| format!("Lock error: {}", e))?;
 
     let process = processes
         .get_mut(&id)
         .ok_or(format!("LSP process '{}' not found", id))?;
 
-    let stdin = process
-        .stdin
-        .as_mut()
-        .ok_or("LSP stdin not available")?;
+    let stdin = process.stdin.as_mut().ok_or("LSP stdin not available")?;
 
     let header = format!("Content-Length: {}\r\n\r\n", content.len());
     stdin
@@ -249,10 +234,7 @@ pub async fn lsp_send(id: String, content: String, app: tauri::AppHandle) -> Res
 #[tauri::command]
 pub async fn lsp_stop(id: String, app: tauri::AppHandle) -> Result<(), String> {
     let state = app.state::<LspState>();
-    let mut processes = state
-        .0
-        .lock()
-        .map_err(|e| format!("Lock error: {}", e))?;
+    let mut processes = state.0.lock().map_err(|e| format!("Lock error: {}", e))?;
 
     if let Some(mut process) = processes.remove(&id) {
         let _ = process.child.kill();
@@ -265,10 +247,7 @@ pub async fn lsp_stop(id: String, app: tauri::AppHandle) -> Result<(), String> {
 #[tauri::command]
 pub async fn lsp_list_active(app: tauri::AppHandle) -> Result<Vec<String>, String> {
     let state = app.state::<LspState>();
-    let processes = state
-        .0
-        .lock()
-        .map_err(|e| format!("Lock error: {}", e))?;
+    let processes = state.0.lock().map_err(|e| format!("Lock error: {}", e))?;
 
     Ok(processes.keys().cloned().collect())
 }
@@ -276,9 +255,7 @@ pub async fn lsp_list_active(app: tauri::AppHandle) -> Result<Vec<String>, Strin
 /// Returns true if `command` looks like an explicit path (absolute or contains
 /// path separators) rather than a bare binary name.
 fn is_explicit_path(command: &str) -> bool {
-    std::path::Path::new(command).is_absolute()
-        || command.contains('/')
-        || command.contains('\\')
+    std::path::Path::new(command).is_absolute() || command.contains('/') || command.contains('\\')
 }
 
 /// Push candidate paths for a directory into `v`.
@@ -332,7 +309,11 @@ fn lsp_candidate_paths(command: &str) -> Vec<std::path::PathBuf> {
             let base = PathBuf::from(&local);
             push_dir_candidates(&mut v, base.join("pnpm"), command);
             push_dir_candidates(&mut v, base.join("Yarn").join("bin"), command);
-            push_dir_candidates(&mut v, base.join("nvim-data").join("mason").join("bin"), command);
+            push_dir_candidates(
+                &mut v,
+                base.join("nvim-data").join("mason").join("bin"),
+                command,
+            );
         }
         // USERPROFILE-based managers
         if let Ok(profile) = std::env::var("USERPROFILE") {
@@ -345,7 +326,11 @@ fn lsp_candidate_paths(command: &str) -> Vec<std::path::PathBuf> {
             push_dir_candidates(&mut v, p.join(".local").join("bin"), command);
         }
         // Chocolatey system-wide
-        push_dir_candidates(&mut v, PathBuf::from(r"C:\ProgramData\chocolatey\bin"), command);
+        push_dir_candidates(
+            &mut v,
+            PathBuf::from(r"C:\ProgramData\chocolatey\bin"),
+            command,
+        );
         // GOPATH (may be a semicolon-separated list)
         if let Ok(gopath) = std::env::var("GOPATH") {
             for p in std::env::split_paths(&gopath) {
@@ -354,7 +339,11 @@ fn lsp_candidate_paths(command: &str) -> Vec<std::path::PathBuf> {
         }
         // LLVM suite (clangd, clang-format, etc.)
         push_dir_candidates(&mut v, PathBuf::from(r"C:\Program Files\LLVM\bin"), command);
-        push_dir_candidates(&mut v, PathBuf::from(r"C:\Program Files (x86)\LLVM\bin"), command);
+        push_dir_candidates(
+            &mut v,
+            PathBuf::from(r"C:\Program Files (x86)\LLVM\bin"),
+            command,
+        );
         // Flutter / Dart SDK – common install locations
         if let Ok(profile) = std::env::var("USERPROFILE") {
             let p = PathBuf::from(&profile);
@@ -391,7 +380,11 @@ fn lsp_candidate_paths(command: &str) -> Vec<std::path::PathBuf> {
         push_dir_candidates(&mut v, h.join(".yarn").join("bin"), command);
         push_dir_candidates(
             &mut v,
-            h.join(".config").join("yarn").join("global").join("node_modules").join(".bin"),
+            h.join(".config")
+                .join("yarn")
+                .join("global")
+                .join("node_modules")
+                .join(".bin"),
             command,
         );
         // npm global (default prefix)
@@ -407,13 +400,21 @@ fn lsp_candidate_paths(command: &str) -> Vec<std::path::PathBuf> {
         // nvim Mason LSP manager
         push_dir_candidates(
             &mut v,
-            h.join(".local").join("share").join("nvim").join("mason").join("bin"),
+            h.join(".local")
+                .join("share")
+                .join("nvim")
+                .join("mason")
+                .join("bin"),
             command,
         );
         // SDKMAN (jdtls / Java tooling)
         push_dir_candidates(
             &mut v,
-            h.join(".sdkman").join("candidates").join("jdtls").join("current").join("bin"),
+            h.join(".sdkman")
+                .join("candidates")
+                .join("jdtls")
+                .join("current")
+                .join("bin"),
             command,
         );
         // System paths (Homebrew Apple Silicon first, then standard Unix)
@@ -561,8 +562,16 @@ fn resolve_lsp_command(command: &str) -> String {
                 let preferred = lines
                     .iter()
                     .find(|p| p.to_ascii_lowercase().ends_with(".exe"))
-                    .or_else(|| lines.iter().find(|p| p.to_ascii_lowercase().ends_with(".cmd")))
-                    .or_else(|| lines.iter().find(|p| p.to_ascii_lowercase().ends_with(".bat")))
+                    .or_else(|| {
+                        lines
+                            .iter()
+                            .find(|p| p.to_ascii_lowercase().ends_with(".cmd"))
+                    })
+                    .or_else(|| {
+                        lines
+                            .iter()
+                            .find(|p| p.to_ascii_lowercase().ends_with(".bat"))
+                    })
                     .or_else(|| lines.first());
                 if let Some(path) = preferred {
                     return path.to_string();
@@ -605,10 +614,27 @@ fn resolve_lsp_command(command: &str) -> String {
             let mut candidates = Vec::new();
             push_dir_candidates(&mut candidates, dir.clone(), command);
             // Prefer .exe, then .cmd, then .bat
-            let found = candidates.iter()
-                .find(|p| p.is_file() && p.extension().map_or(false, |e| e.eq_ignore_ascii_case("exe")))
-                .or_else(|| candidates.iter().find(|p| p.is_file() && p.extension().map_or(false, |e| e.eq_ignore_ascii_case("cmd"))))
-                .or_else(|| candidates.iter().find(|p| p.is_file() && p.extension().map_or(false, |e| e.eq_ignore_ascii_case("bat"))))
+            let found = candidates
+                .iter()
+                .find(|p| {
+                    p.is_file()
+                        && p.extension()
+                            .map_or(false, |e| e.eq_ignore_ascii_case("exe"))
+                })
+                .or_else(|| {
+                    candidates.iter().find(|p| {
+                        p.is_file()
+                            && p.extension()
+                                .map_or(false, |e| e.eq_ignore_ascii_case("cmd"))
+                    })
+                })
+                .or_else(|| {
+                    candidates.iter().find(|p| {
+                        p.is_file()
+                            && p.extension()
+                                .map_or(false, |e| e.eq_ignore_ascii_case("bat"))
+                    })
+                })
                 .or_else(|| candidates.iter().find(|p| p.is_file()));
             if let Some(p) = found {
                 return p.to_string_lossy().to_string();

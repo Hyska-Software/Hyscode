@@ -4,11 +4,11 @@ use tauri::Manager;
 
 mod commands;
 
+use commands::db::DbState;
+use commands::docker::DockerWatchState;
+use commands::fs::FsWatcherState;
 use commands::keychain::KeychainState;
 use commands::lsp::LspState;
-use commands::db::DbState;
-use commands::fs::FsWatcherState;
-use commands::docker::DockerWatchState;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -24,7 +24,9 @@ pub fn run() {
         .manage(LspState(Mutex::new(HashMap::new())))
         .manage(FsWatcherState(Mutex::new(HashMap::new())))
         .manage(DockerWatchState(Mutex::new(HashMap::new())))
-        .manage(KeychainState(Arc::new(Mutex::new(commands::keychain::load_keychain()))))
+        .manage(KeychainState(Arc::new(Mutex::new(
+            commands::keychain::load_keychain(),
+        ))))
         .manage({
             let app_dir = dirs::data_dir()
                 .unwrap_or_else(|| std::path::PathBuf::from("."))
@@ -143,6 +145,11 @@ pub fn run() {
             commands::db::db_delete_conversation,
             commands::db::db_list_messages,
             commands::db::db_create_message,
+            commands::db::db_sdd_upsert_session,
+            commands::db::db_sdd_get_session,
+            commands::db::db_sdd_list_sessions,
+            commands::db::db_sdd_upsert_task,
+            commands::db::db_sdd_get_tasks,
             // Turn record commands
             commands::db::db_create_turn_record,
             // Trace commands

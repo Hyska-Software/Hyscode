@@ -1,10 +1,10 @@
+use super::utils::cmd;
 use git2::{
-    BranchType, Delta, DiffOptions, ErrorCode, IndexAddOption, Repository,
-    Signature, Sort, StatusOptions,
+    BranchType, Delta, DiffOptions, ErrorCode, IndexAddOption, Repository, Signature, Sort,
+    StatusOptions,
 };
 use serde::Serialize;
 use std::path::Path;
-use super::utils::cmd;
 
 // ── Serializable Types ──────────────────────────────────────────────────────
 
@@ -261,10 +261,7 @@ pub fn git_diff_hunks(
     opts.pathspec(&file_path);
 
     let diff = if staged {
-        let head_tree = repo
-            .head()
-            .ok()
-            .and_then(|h| h.peel_to_tree().ok());
+        let head_tree = repo.head().ok().and_then(|h| h.peel_to_tree().ok());
         repo.diff_tree_to_index(head_tree.as_ref(), None, Some(&mut opts))
     } else {
         repo.diff_index_to_workdir(None, Some(&mut opts))
@@ -297,10 +294,7 @@ pub fn git_diff_hunks(
 #[tauri::command]
 pub fn git_diff_staged_all(repo_path: String) -> Result<String, String> {
     let repo = open_repo(&repo_path)?;
-    let head_tree = repo
-        .head()
-        .ok()
-        .and_then(|h| h.peel_to_tree().ok());
+    let head_tree = repo.head().ok().and_then(|h| h.peel_to_tree().ok());
     let diff = repo
         .diff_tree_to_index(head_tree.as_ref(), None, None)
         .map_err(|e| format!("Diff error: {}", e))?;
@@ -329,21 +323,14 @@ pub fn git_diff_staged_all(repo_path: String) -> Result<String, String> {
 }
 
 #[tauri::command]
-pub fn git_diff_file(
-    repo_path: String,
-    file_path: String,
-    staged: bool,
-) -> Result<String, String> {
+pub fn git_diff_file(repo_path: String, file_path: String, staged: bool) -> Result<String, String> {
     let repo = open_repo(&repo_path)?;
     let mut opts = DiffOptions::new();
     opts.pathspec(&file_path);
 
     let diff = if staged {
         // Diff index vs HEAD
-        let head_tree = repo
-            .head()
-            .ok()
-            .and_then(|h| h.peel_to_tree().ok());
+        let head_tree = repo.head().ok().and_then(|h| h.peel_to_tree().ok());
         repo.diff_tree_to_index(head_tree.as_ref(), None, Some(&mut opts))
     } else {
         // Diff workdir vs index
@@ -368,10 +355,7 @@ pub fn git_diff_file(
 }
 
 #[tauri::command]
-pub fn git_file_content(
-    repo_path: String,
-    file_path: String,
-) -> Result<GitFileContent, String> {
+pub fn git_file_content(repo_path: String, file_path: String) -> Result<GitFileContent, String> {
     let repo = open_repo(&repo_path)?;
 
     // Get original content from HEAD
@@ -396,8 +380,7 @@ fn get_head_content(repo: &Repository, file_path: &str) -> Result<String, String
     let blob = repo
         .find_blob(entry.id())
         .map_err(|e| format!("Blob error: {}", e))?;
-    String::from_utf8(blob.content().to_vec())
-        .map_err(|e| format!("UTF-8 error: {}", e))
+    String::from_utf8(blob.content().to_vec()).map_err(|e| format!("UTF-8 error: {}", e))
 }
 
 #[tauri::command]
@@ -406,10 +389,7 @@ pub fn git_add(repo_path: String, paths: Vec<String>) -> Result<(), String> {
     let mut index = repo.index().map_err(|e| format!("Index error: {}", e))?;
 
     for path in &paths {
-        let full_path = repo
-            .workdir()
-            .ok_or("No working directory")?
-            .join(path);
+        let full_path = repo.workdir().ok_or("No working directory")?.join(path);
 
         if full_path.exists() {
             index
@@ -423,7 +403,9 @@ pub fn git_add(repo_path: String, paths: Vec<String>) -> Result<(), String> {
         }
     }
 
-    index.write().map_err(|e| format!("Index write error: {}", e))?;
+    index
+        .write()
+        .map_err(|e| format!("Index write error: {}", e))?;
     Ok(())
 }
 
@@ -441,7 +423,9 @@ pub fn git_add_all(repo_path: String) -> Result<(), String> {
         .update_all(["*"].iter(), None)
         .map_err(|e| format!("Update index error: {}", e))?;
 
-    index.write().map_err(|e| format!("Index write error: {}", e))?;
+    index
+        .write()
+        .map_err(|e| format!("Index write error: {}", e))?;
     Ok(())
 }
 
@@ -494,7 +478,9 @@ pub fn git_unstage(repo_path: String, paths: Vec<String>) -> Result<(), String> 
         }
     }
 
-    index.write().map_err(|e| format!("Index write error: {}", e))?;
+    index
+        .write()
+        .map_err(|e| format!("Index write error: {}", e))?;
     Ok(())
 }
 
@@ -521,8 +507,7 @@ pub fn git_discard(repo_path: String, paths: Vec<String>) -> Result<(), String> 
         } else {
             // Untracked file — delete it
             if full_path.exists() {
-                std::fs::remove_file(&full_path)
-                    .map_err(|e| format!("Delete error: {}", e))?;
+                std::fs::remove_file(&full_path).map_err(|e| format!("Delete error: {}", e))?;
             }
         }
     }
@@ -570,9 +555,15 @@ pub fn git_commit(repo_path: String, message: String) -> Result<String, String> 
 #[tauri::command]
 pub fn git_log(repo_path: String, limit: u32) -> Result<Vec<GitCommitInfo>, String> {
     let repo = open_repo(&repo_path)?;
-    let mut revwalk = repo.revwalk().map_err(|e| format!("Revwalk error: {}", e))?;
-    revwalk.push_head().map_err(|e| format!("Push head error: {}", e))?;
-    revwalk.set_sorting(Sort::TIME).map_err(|e| format!("Sort error: {}", e))?;
+    let mut revwalk = repo
+        .revwalk()
+        .map_err(|e| format!("Revwalk error: {}", e))?;
+    revwalk
+        .push_head()
+        .map_err(|e| format!("Push head error: {}", e))?;
+    revwalk
+        .set_sorting(Sort::TIME)
+        .map_err(|e| format!("Sort error: {}", e))?;
 
     let mut commits = Vec::new();
     for (i, oid_result) in revwalk.enumerate() {
@@ -607,9 +598,15 @@ pub fn git_log_file(
     limit: u32,
 ) -> Result<Vec<GitCommitInfo>, String> {
     let repo = open_repo(&repo_path)?;
-    let mut revwalk = repo.revwalk().map_err(|e| format!("Revwalk error: {}", e))?;
-    revwalk.push_head().map_err(|e| format!("Push head error: {}", e))?;
-    revwalk.set_sorting(Sort::TIME).map_err(|e| format!("Sort error: {}", e))?;
+    let mut revwalk = repo
+        .revwalk()
+        .map_err(|e| format!("Revwalk error: {}", e))?;
+    revwalk
+        .push_head()
+        .map_err(|e| format!("Push head error: {}", e))?;
+    revwalk
+        .set_sorting(Sort::TIME)
+        .map_err(|e| format!("Sort error: {}", e))?;
 
     let mut commits = Vec::new();
     let mut prev_blob_id = None;
@@ -622,14 +619,9 @@ pub fn git_log_file(
         let commit = repo
             .find_commit(oid)
             .map_err(|e| format!("Commit error: {}", e))?;
-        let tree = commit
-            .tree()
-            .map_err(|e| format!("Tree error: {}", e))?;
+        let tree = commit.tree().map_err(|e| format!("Tree error: {}", e))?;
 
-        let current_blob_id = tree
-            .get_path(Path::new(&file_path))
-            .ok()
-            .map(|e| e.id());
+        let current_blob_id = tree.get_path(Path::new(&file_path)).ok().map(|e| e.id());
 
         // Include commit if the file changed (its blob id differs from prev)
         let changed = match (&prev_blob_id, &current_blob_id) {
@@ -730,15 +722,9 @@ pub fn git_branch_list(repo_path: String) -> Result<Vec<GitBranchInfo>, String> 
 }
 
 #[tauri::command]
-pub fn git_branch_create(
-    repo_path: String,
-    name: String,
-    checkout: bool,
-) -> Result<(), String> {
+pub fn git_branch_create(repo_path: String, name: String, checkout: bool) -> Result<(), String> {
     let repo = open_repo(&repo_path)?;
-    let head = repo
-        .head()
-        .map_err(|e| format!("HEAD error: {}", e))?;
+    let head = repo.head().map_err(|e| format!("HEAD error: {}", e))?;
     let commit = head
         .peel_to_commit()
         .map_err(|e| format!("Peel error: {}", e))?;
@@ -814,11 +800,19 @@ pub fn git_ahead_behind(repo_path: String) -> Result<GitAheadBehind, String> {
 
     let head = match repo.head() {
         Ok(h) => h,
-        Err(_) => return Ok(GitAheadBehind { ahead: 0, behind: 0 }),
+        Err(_) => {
+            return Ok(GitAheadBehind {
+                ahead: 0,
+                behind: 0,
+            })
+        }
     };
 
     if !head.is_branch() {
-        return Ok(GitAheadBehind { ahead: 0, behind: 0 });
+        return Ok(GitAheadBehind {
+            ahead: 0,
+            behind: 0,
+        });
     }
 
     let local_oid = head.target().ok_or("No HEAD target")?;
@@ -826,18 +820,25 @@ pub fn git_ahead_behind(repo_path: String) -> Result<GitAheadBehind, String> {
     let branch_name = head.shorthand().unwrap_or("");
     let branch = match repo.find_branch(branch_name, BranchType::Local) {
         Ok(b) => b,
-        Err(_) => return Ok(GitAheadBehind { ahead: 0, behind: 0 }),
+        Err(_) => {
+            return Ok(GitAheadBehind {
+                ahead: 0,
+                behind: 0,
+            })
+        }
     };
 
     let upstream = match branch.upstream() {
         Ok(u) => u,
-        Err(_) => return Ok(GitAheadBehind { ahead: 0, behind: 0 }),
+        Err(_) => {
+            return Ok(GitAheadBehind {
+                ahead: 0,
+                behind: 0,
+            })
+        }
     };
 
-    let upstream_oid = upstream
-        .get()
-        .target()
-        .ok_or("No upstream target")?;
+    let upstream_oid = upstream.get().target().ok_or("No upstream target")?;
 
     let (ahead, behind) = repo
         .graph_ahead_behind(local_oid, upstream_oid)
@@ -848,8 +849,7 @@ pub fn git_ahead_behind(repo_path: String) -> Result<GitAheadBehind, String> {
 
 #[tauri::command]
 pub fn git_stash(repo_path: String, message: Option<String>) -> Result<(), String> {
-    let mut repo =
-        Repository::discover(&repo_path).map_err(|e| format!("Git error: {}", e))?;
+    let mut repo = Repository::discover(&repo_path).map_err(|e| format!("Git error: {}", e))?;
 
     let sig = repo
         .signature()
@@ -866,8 +866,7 @@ pub fn git_stash(repo_path: String, message: Option<String>) -> Result<(), Strin
 
 #[tauri::command]
 pub fn git_stash_list(repo_path: String) -> Result<Vec<GitStashEntry>, String> {
-    let mut repo =
-        Repository::discover(&repo_path).map_err(|e| format!("Git error: {}", e))?;
+    let mut repo = Repository::discover(&repo_path).map_err(|e| format!("Git error: {}", e))?;
 
     let mut stashes = Vec::new();
     repo.stash_foreach(|index, message, _oid| {
@@ -884,8 +883,7 @@ pub fn git_stash_list(repo_path: String) -> Result<Vec<GitStashEntry>, String> {
 
 #[tauri::command]
 pub fn git_stash_pop(repo_path: String, index: usize) -> Result<(), String> {
-    let mut repo =
-        Repository::discover(&repo_path).map_err(|e| format!("Git error: {}", e))?;
+    let mut repo = Repository::discover(&repo_path).map_err(|e| format!("Git error: {}", e))?;
 
     repo.stash_pop(index, None)
         .map_err(|e| format!("Stash pop error: {}", e))?;
@@ -899,7 +897,9 @@ pub fn git_stash_pop(repo_path: String, index: usize) -> Result<(), String> {
 pub fn git_commit_detail(repo_path: String, hash: String) -> Result<CommitDetail, String> {
     let repo = open_repo(&repo_path)?;
     let oid = git2::Oid::from_str(&hash).map_err(|e| format!("Invalid hash: {}", e))?;
-    let commit = repo.find_commit(oid).map_err(|e| format!("Commit not found: {}", e))?;
+    let commit = repo
+        .find_commit(oid)
+        .map_err(|e| format!("Commit not found: {}", e))?;
 
     let commit_tree = commit.tree().map_err(|e| format!("Tree error: {}", e))?;
 
@@ -938,7 +938,11 @@ pub fn git_commit_detail(repo_path: String, hash: String) -> Result<CommitDetail
         let mut per_file_opts = DiffOptions::new();
         per_file_opts.pathspec(&path);
         let per_file_diff = repo
-            .diff_tree_to_tree(parent_tree.as_ref(), Some(&commit_tree), Some(&mut per_file_opts))
+            .diff_tree_to_tree(
+                parent_tree.as_ref(),
+                Some(&commit_tree),
+                Some(&mut per_file_opts),
+            )
             .ok();
 
         let (insertions, deletions) = per_file_diff
@@ -984,7 +988,9 @@ pub fn git_commit_file_diff(
 ) -> Result<String, String> {
     let repo = open_repo(&repo_path)?;
     let oid = git2::Oid::from_str(&hash).map_err(|e| format!("Invalid hash: {}", e))?;
-    let commit = repo.find_commit(oid).map_err(|e| format!("Commit not found: {}", e))?;
+    let commit = repo
+        .find_commit(oid)
+        .map_err(|e| format!("Commit not found: {}", e))?;
 
     let commit_tree = commit.tree().map_err(|e| format!("Tree error: {}", e))?;
 
@@ -1040,12 +1046,19 @@ pub struct GraphCommit {
 #[tauri::command]
 pub fn git_log_graph(repo_path: String, limit: u32) -> Result<Vec<GraphCommit>, String> {
     let repo = open_repo(&repo_path)?;
-    let mut revwalk = repo.revwalk().map_err(|e| format!("Revwalk error: {}", e))?;
-    revwalk.push_head().map_err(|e| format!("Push head error: {}", e))?;
-    revwalk.set_sorting(Sort::TIME).map_err(|e| format!("Sort error: {}", e))?;
+    let mut revwalk = repo
+        .revwalk()
+        .map_err(|e| format!("Revwalk error: {}", e))?;
+    revwalk
+        .push_head()
+        .map_err(|e| format!("Push head error: {}", e))?;
+    revwalk
+        .set_sorting(Sort::TIME)
+        .map_err(|e| format!("Sort error: {}", e))?;
 
     // Collect all refs (branches + tags) → commit mapping
-    let mut ref_map: std::collections::HashMap<String, Vec<String>> = std::collections::HashMap::new();
+    let mut ref_map: std::collections::HashMap<String, Vec<String>> =
+        std::collections::HashMap::new();
 
     // Local branches
     if let Ok(branches) = repo.branches(Some(BranchType::Local)) {
@@ -1079,9 +1092,15 @@ pub fn git_log_graph(repo_path: String, limit: u32) -> Result<Vec<GraphCommit>, 
                         None
                     };
                     if let Some(commit_oid) = oid {
-                        ref_map.entry(commit_oid.to_string()).or_default().push(format!("tag:{}", tag_name));
+                        ref_map
+                            .entry(commit_oid.to_string())
+                            .or_default()
+                            .push(format!("tag:{}", tag_name));
                     } else {
-                        ref_map.entry(target.to_string()).or_default().push(format!("tag:{}", tag_name));
+                        ref_map
+                            .entry(target.to_string())
+                            .or_default()
+                            .push(format!("tag:{}", tag_name));
                     }
                 }
             }
@@ -1190,17 +1209,23 @@ pub fn git_reset(repo_path: String, mode: String, target: String) -> Result<Stri
 }
 
 #[tauri::command]
-pub fn git_blame(repo_path: String, file_path: String, line: Option<u32>) -> Result<Vec<GitBlameHunk>, String> {
+pub fn git_blame(
+    repo_path: String,
+    file_path: String,
+    line: Option<u32>,
+) -> Result<Vec<GitBlameHunk>, String> {
     let repo = open_repo(&repo_path)?;
 
     let mut opts = git2::BlameOptions::new();
     if let Some(l) = line {
-        let min_line = std::num::NonZeroU32::new(l).unwrap_or_else(|| std::num::NonZeroU32::new(1).unwrap());
+        let min_line =
+            std::num::NonZeroU32::new(l).unwrap_or_else(|| std::num::NonZeroU32::new(1).unwrap());
         opts.min_line(min_line.get() as usize);
         opts.max_line(min_line.get() as usize);
     }
 
-    let blame = repo.blame_file(std::path::Path::new(&file_path), Some(&mut opts))
+    let blame = repo
+        .blame_file(std::path::Path::new(&file_path), Some(&mut opts))
         .map_err(|e| format!("Blame error: {}", e))?;
 
     let mut hunks = Vec::new();
@@ -1215,7 +1240,8 @@ pub fn git_blame(repo_path: String, file_path: String, line: Option<u32>) -> Res
         let lines_in_hunk = hunk.lines_in_hunk() as u32;
         let start_line = hunk.final_start_line() as u32;
 
-        let message = repo.find_commit(hunk.final_commit_id())
+        let message = repo
+            .find_commit(hunk.final_commit_id())
             .ok()
             .and_then(|c| c.message().map(|m| m.to_string()))
             .unwrap_or_default();

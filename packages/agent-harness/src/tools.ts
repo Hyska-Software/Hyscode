@@ -623,6 +623,12 @@ export const runTerminalCommandTool = defineTool(
           exitCode = data.code ?? null;
         }
       });
+      const abortTerminal = () => {
+        const commandName = useSharedPty ? 'pty_write' : 'pty_kill';
+        const args = useSharedPty ? { ptyId, data: '\u0003' } : { ptyId };
+        void ctx.invoke(commandName, args).catch(() => undefined);
+      };
+      ctx.signal.addEventListener('abort', abortTerminal, { once: true });
 
       // For the shared PTY, cd into the target cwd first if it differs from workspace root
       if (useSharedPty && cwd !== ctx.workspacePath) {
@@ -660,7 +666,7 @@ export const runTerminalCommandTool = defineTool(
 
       // Wait for exit marker or timeout
       const startTime = Date.now();
-      while (Date.now() - startTime < timeoutMs && !exited && !markerFound) {
+      while (Date.now() - startTime < timeoutMs && !exited && !markerFound && !ctx.signal.aborted) {
         // Check if we've received the exit marker
         if (output.includes(exitMarker)) {
           const exitMatch = output.match(/EXIT_CODE:(-?\d+)/);
@@ -676,6 +682,7 @@ export const runTerminalCommandTool = defineTool(
       // Cleanup listeners
       unlisten();
       unlistenExit();
+      ctx.signal.removeEventListener('abort', abortTerminal);
 
       // Only kill the PTY if we spawned a disposable one
       if (!useSharedPty) {
@@ -684,6 +691,11 @@ export const runTerminalCommandTool = defineTool(
         } catch {
           // Ignore kill errors if PTY already exited
         }
+      }
+
+      if (ctx.signal.aborted) {
+        ctx.onTerminalCommand?.(command, output || '', null);
+        return { success: false, output: output || '', error: 'Command cancelled.' };
       }
 
       // For the shared PTY, cd back to workspace root after command (keep cwd stable)
@@ -1644,7 +1656,12 @@ export const deleteFileTool = defineTool(
   async (input, ctx) => {
     try {
       const filePath = resolvePath(input.path as string, ctx.workspacePath);
+      let originalContent: string | null = null;
+      try { originalContent = await ctx.invoke<string>('read_file', { path: filePath }); } catch { /* directory */ }
       await ctx.invoke('delete_path', { path: filePath });
+      if (originalContent !== null) {
+        ctx.onFileChange?.({ toolCallId: ctx.toolCallId, toolName: 'delete_file', filePath, originalContent, newContent: '' });
+      }
       return { success: true, output: `Deleted: ${input.path}` };
     } catch (err) {
       return { success: false, output: '', error: `Failed to delete: ${err instanceof Error ? err.message : String(err)}` };
@@ -1666,7 +1683,13 @@ export const renameFileTool = defineTool(
     try {
       const fromPath = resolvePath(input.from as string, ctx.workspacePath);
       const toPath = resolvePath(input.to as string, ctx.workspacePath);
+      let originalContent: string | null = null;
+      try { originalContent = await ctx.invoke<string>('read_file', { path: fromPath }); } catch { /* directory */ }
       await ctx.invoke('rename_path', { from: fromPath, to: toPath });
+      if (originalContent !== null) {
+        ctx.onFileChange?.({ toolCallId: ctx.toolCallId, toolName: 'rename_file', filePath: fromPath, originalContent, newContent: '' });
+        ctx.onFileChange?.({ toolCallId: ctx.toolCallId, toolName: 'rename_file', filePath: toPath, originalContent: null, newContent: originalContent });
+      }
       return { success: true, output: `Renamed: ${input.from} → ${input.to}` };
     } catch (err) {
       return { success: false, output: '', error: `Failed to rename: ${err instanceof Error ? err.message : String(err)}` };
@@ -1688,7 +1711,14 @@ export const copyFileTool = defineTool(
     try {
       const fromPath = resolvePath(input.from as string, ctx.workspacePath);
       const toPath = resolvePath(input.to as string, ctx.workspacePath);
+      let sourceContent: string | null = null;
+      let targetContent: string | null = null;
+      try { sourceContent = await ctx.invoke<string>('read_file', { path: fromPath }); } catch { /* directory */ }
+      try { targetContent = await ctx.invoke<string>('read_file', { path: toPath }); } catch { /* new target */ }
       await ctx.invoke('copy_path', { from: fromPath, to: toPath });
+      if (sourceContent !== null) {
+        ctx.onFileChange?.({ toolCallId: ctx.toolCallId, toolName: 'copy_file', filePath: toPath, originalContent: targetContent, newContent: sourceContent });
+      }
       return { success: true, output: `Copied: ${input.from} → ${input.to}` };
     } catch (err) {
       return { success: false, output: '', error: `Failed to copy: ${err instanceof Error ? err.message : String(err)}` };

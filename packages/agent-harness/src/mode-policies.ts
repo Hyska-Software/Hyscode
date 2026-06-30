@@ -83,7 +83,16 @@ const DEFAULT_POLICIES: Record<AgentType, ModePolicy> = {
     turnTimeoutMs: 300_000, // 5 minutes
     approvalMode: 'smart',
     verificationRequired: true,
-    allowedToolCategories: ['filesystem', 'terminal', 'git', 'code', 'browser', 'mcp', 'meta', 'docker'],
+    allowedToolCategories: [
+      'filesystem',
+      'terminal',
+      'git',
+      'code',
+      'browser',
+      'mcp',
+      'meta',
+      'docker',
+    ],
   },
   review: {
     mode: 'review',
@@ -192,7 +201,9 @@ export function getDefaultPolicy(mode: AgentType): ModePolicy {
  * Called by the bridge at startup with DB-loaded overrides.
  */
 export function applyPolicyOverride(mode: AgentType, patch: Partial<ModePolicy>): void {
-  const current = policyStore.get(mode) ?? { ...DEFAULT_POLICIES[mode] ?? DEFAULT_POLICIES.build };
+  const current = policyStore.get(mode) ?? {
+    ...(DEFAULT_POLICIES[mode] ?? DEFAULT_POLICIES.build),
+  };
   policyStore.set(mode, { ...current, ...patch, mode });
 }
 
@@ -235,7 +246,7 @@ const MODEL_PROFILES: ModelProfile[] = [
   {
     pattern: 'claude-sonnet-4-6',
     maxContext: 1_000_000,
-    recommendedMaxOutput: 64_000,
+    recommendedMaxOutput: 128_000,
     supportsToolCalling: true,
     supportsThinking: true,
   },
@@ -254,7 +265,7 @@ const MODEL_PROFILES: ModelProfile[] = [
     supportsThinking: false,
   },
   {
-    pattern: 'claude-opus-4-7|claude-opus-4-6',
+    pattern: 'claude-fable-5|claude-opus-4-8|claude-opus-4-7|claude-opus-4-6',
     maxContext: 1_000_000,
     recommendedMaxOutput: 128_000,
     supportsToolCalling: true,
@@ -264,6 +275,13 @@ const MODEL_PROFILES: ModelProfile[] = [
     pattern: 'claude-opus-4-5|claude-opus-4-1|claude-opus-4$',
     maxContext: 200_000,
     recommendedMaxOutput: 32_000,
+    supportsToolCalling: true,
+    supportsThinking: true,
+  },
+  {
+    pattern: 'gpt-5\\.5',
+    maxContext: 1_050_000,
+    recommendedMaxOutput: 128_000,
     supportsToolCalling: true,
     supportsThinking: true,
   },
@@ -310,14 +328,14 @@ const MODEL_PROFILES: ModelProfile[] = [
     supportsThinking: false,
   },
   {
-    pattern: 'gemini-2\.5|gemini-3|gemini-3\.1',
+    pattern: 'gemini-2\\.5|gemini-3(?:\\.1|\\.5)?',
     maxContext: 1_048_576,
     recommendedMaxOutput: 65_536,
     supportsToolCalling: true,
     supportsThinking: true,
   },
   {
-    pattern: 'kimi-k2\\.5|kimi-k2\\.6',
+    pattern: 'kimi-k2\\.5|kimi-k2\\.6|kimi-k2\\.7-code',
     maxContext: 262_144,
     recommendedMaxOutput: 16_384,
     supportsToolCalling: true,
@@ -388,17 +406,31 @@ const MODEL_PROFILES: ModelProfile[] = [
 
 /** Model ID prefixes known to be served via GitHub Copilot */
 const COPILOT_MODEL_IDS = new Set([
-  'gpt-4.1', 'gpt-4o', 'gpt-5-mini', 'gpt-5.2', 'gpt-5.2-codex',
-  'gpt-5.3-codex', 'gpt-5.4', 'gpt-5.4-mini', 'raptor-mini',
-  'claude-sonnet-4', 'claude-sonnet-4.5', 'claude-sonnet-4.6',
-  'claude-haiku-4.5', 'claude-opus-4.5', 'claude-opus-4.6', 'claude-opus-4.7',
-  'gemini-2.5-pro', 'gemini-3-flash', 'gemini-3.1-pro',
-  'grok-code-fast-1',
+  'gpt-5-mini',
+  'gpt-5.3-codex',
+  'gpt-5.4',
+  'gpt-5.4-mini',
+  'gpt-5.5',
+  'raptor-mini',
+  'mai-code-1-flash',
+  'claude-sonnet-4.5',
+  'claude-sonnet-4.6',
+  'claude-haiku-4.5',
+  'claude-opus-4.5',
+  'claude-opus-4.6',
+  'claude-opus-4.7',
+  'claude-opus-4.8',
+  'claude-opus-4.8-fast',
+  'gemini-2.5-pro',
+  'gemini-3-flash',
+  'gemini-3.1-pro',
+  'gemini-3.5-flash',
 ]);
 
 /** Check if a model ID belongs to a per-request-cost provider. */
-export function isPerRequestCostModel(modelId: string): boolean {
-  return COPILOT_MODEL_IDS.has(modelId);
+export function isPerRequestCostModel(modelId: string, providerId = ''): boolean {
+  const provider = providerId.toLowerCase();
+  return provider.includes('copilot') && COPILOT_MODEL_IDS.has(modelId);
 }
 
 /** Iteration caps for per-request-cost providers (per mode). */
@@ -428,7 +460,11 @@ export function getModelProfile(modelId: string): ModelProfile | null {
  * Adjust a policy's token budgets based on the model being used.
  * Returns a new policy with adjusted values (does not mutate the original).
  */
-export function adjustPolicyForModel(policy: ModePolicy, modelId: string): ModePolicy {
+export function adjustPolicyForModel(
+  policy: ModePolicy,
+  modelId: string,
+  providerId = '',
+): ModePolicy {
   const profile = getModelProfile(modelId);
   let adjusted = profile
     ? {
@@ -438,16 +474,13 @@ export function adjustPolicyForModel(policy: ModePolicy, modelId: string): ModeP
       }
     : { ...policy };
 
-  // Per-request-cost providers (GitHub Copilot): reduce iterations and
-  // disable forced verification to minimize API requests per turn.
-  if (isPerRequestCostModel(modelId)) {
+  // Per-request-cost providers (GitHub Copilot): reduce iterations while
+  // preserving the mode/DB verification requirement.
+  if (isPerRequestCostModel(modelId, providerId)) {
     const cap = PER_REQUEST_ITERATION_CAPS[policy.mode] ?? policy.maxIterations;
     adjusted = {
       ...adjusted,
       maxIterations: Math.min(adjusted.maxIterations, cap),
-      // Let the LLM self-verify in its own text rather than forcing a
-      // round-trip verification call that costs an extra API request.
-      verificationRequired: false,
     };
   }
 

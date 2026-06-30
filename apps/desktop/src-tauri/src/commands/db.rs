@@ -1,8 +1,8 @@
-use rusqlite::{params, Connection};
-use serde::Serialize;
+use git2;
+use rusqlite::{params, Connection, OptionalExtension};
+use serde::{Deserialize, Serialize};
 use std::sync::Mutex;
 use tauri::State;
-use git2;
 
 // ─── Managed state ──────────────────────────────────────────────────────────
 
@@ -30,6 +30,8 @@ pub fn open_database(app_dir: &std::path::Path) -> Connection {
         .expect("failed to run migration 007");
     conn.execute_batch(include_str!("../../migrations/008_memories.sql"))
         .expect("failed to run migration 008");
+    conn.execute_batch(include_str!("../../migrations/009_agent_sdd.sql"))
+        .expect("failed to run migration 009");
     conn
 }
 
@@ -453,9 +455,7 @@ pub struct ModePolicyRow {
 }
 
 #[tauri::command]
-pub fn db_list_mode_policies(
-    state: State<'_, DbState>,
-) -> Result<Vec<ModePolicyRow>, String> {
+pub fn db_list_mode_policies(state: State<'_, DbState>) -> Result<Vec<ModePolicyRow>, String> {
     let conn = state.0.lock().map_err(|e| e.to_string())?;
     let mut stmt = conn
         .prepare(
@@ -504,23 +504,54 @@ pub fn db_update_mode_policy(
     // Build dynamic SET clause for non-null fields
     let mut sets = Vec::new();
     let mut values: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
-    if let Some(v) = max_iterations { sets.push("max_iterations = ?"); values.push(Box::new(v)); }
-    if let Some(v) = max_input_tokens { sets.push("max_input_tokens = ?"); values.push(Box::new(v)); }
-    if let Some(v) = max_output_tokens { sets.push("max_output_tokens = ?"); values.push(Box::new(v)); }
-    if let Some(v) = turn_timeout_ms { sets.push("turn_timeout_ms = ?"); values.push(Box::new(v)); }
-    if let Some(ref v) = approval_mode { sets.push("approval_mode = ?"); values.push(Box::new(v.clone())); }
-    if let Some(v) = verification_required { sets.push("verification_required = ?"); values.push(Box::new(v)); }
-    if let Some(ref v) = allowed_tool_categories { sets.push("allowed_tool_categories = ?"); values.push(Box::new(v.clone())); }
-    if let Some(ref v) = tool_overrides { sets.push("tool_overrides = ?"); values.push(Box::new(v.clone())); }
-    if let Some(ref v) = skill_triggers { sets.push("skill_triggers = ?"); values.push(Box::new(v.clone())); }
+    if let Some(v) = max_iterations {
+        sets.push("max_iterations = ?");
+        values.push(Box::new(v));
+    }
+    if let Some(v) = max_input_tokens {
+        sets.push("max_input_tokens = ?");
+        values.push(Box::new(v));
+    }
+    if let Some(v) = max_output_tokens {
+        sets.push("max_output_tokens = ?");
+        values.push(Box::new(v));
+    }
+    if let Some(v) = turn_timeout_ms {
+        sets.push("turn_timeout_ms = ?");
+        values.push(Box::new(v));
+    }
+    if let Some(ref v) = approval_mode {
+        sets.push("approval_mode = ?");
+        values.push(Box::new(v.clone()));
+    }
+    if let Some(v) = verification_required {
+        sets.push("verification_required = ?");
+        values.push(Box::new(v));
+    }
+    if let Some(ref v) = allowed_tool_categories {
+        sets.push("allowed_tool_categories = ?");
+        values.push(Box::new(v.clone()));
+    }
+    if let Some(ref v) = tool_overrides {
+        sets.push("tool_overrides = ?");
+        values.push(Box::new(v.clone()));
+    }
+    if let Some(ref v) = skill_triggers {
+        sets.push("skill_triggers = ?");
+        values.push(Box::new(v.clone()));
+    }
     if sets.is_empty() {
         return Ok(());
     }
     sets.push("updated_at = datetime('now')");
     values.push(Box::new(mode));
-    let sql = format!("UPDATE mode_policies SET {} WHERE mode = ?", sets.join(", "));
+    let sql = format!(
+        "UPDATE mode_policies SET {} WHERE mode = ?",
+        sets.join(", ")
+    );
     let params: Vec<&dyn rusqlite::types::ToSql> = values.iter().map(|b| b.as_ref()).collect();
-    conn.execute(&sql, params.as_slice()).map_err(|e| e.to_string())?;
+    conn.execute(&sql, params.as_slice())
+        .map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -596,10 +627,7 @@ pub fn db_upsert_open_tab(
 }
 
 #[tauri::command]
-pub fn db_remove_open_tab(
-    state: State<'_, DbState>,
-    id: String,
-) -> Result<(), String> {
+pub fn db_remove_open_tab(state: State<'_, DbState>, id: String) -> Result<(), String> {
     let conn = state.0.lock().map_err(|e| e.to_string())?;
     conn.execute("DELETE FROM open_tabs WHERE id = ?1", params![id])
         .map_err(|e| e.to_string())?;
@@ -716,13 +744,13 @@ pub fn file_history_get(
 }
 
 #[tauri::command]
-pub fn file_history_clear(
-    state: State<'_, DbState>,
-    file_path: String,
-) -> Result<(), String> {
+pub fn file_history_clear(state: State<'_, DbState>, file_path: String) -> Result<(), String> {
     let conn = state.0.lock().map_err(|e| e.to_string())?;
-    conn.execute("DELETE FROM file_history WHERE file_path = ?1", params![file_path])
-        .map_err(|e| e.to_string())?;
+    conn.execute(
+        "DELETE FROM file_history WHERE file_path = ?1",
+        params![file_path],
+    )
+    .map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -770,24 +798,23 @@ pub fn db_list_diagrams(
 }
 
 #[tauri::command]
-pub fn db_get_diagram(
-    state: State<'_, DbState>,
-    id: String,
-) -> Result<DiagramRow, String> {
+pub fn db_get_diagram(state: State<'_, DbState>, id: String) -> Result<DiagramRow, String> {
     let conn = state.0.lock().map_err(|e| e.to_string())?;
     conn.query_row(
         "SELECT id, project_id, name, content, source_file, created_at, updated_at
          FROM diagrams WHERE id = ?1",
         params![id],
-        |row| Ok(DiagramRow {
-            id: row.get(0)?,
-            project_id: row.get(1)?,
-            name: row.get(2)?,
-            content: row.get(3)?,
-            source_file: row.get(4)?,
-            created_at: row.get(5)?,
-            updated_at: row.get(6)?,
-        }),
+        |row| {
+            Ok(DiagramRow {
+                id: row.get(0)?,
+                project_id: row.get(1)?,
+                name: row.get(2)?,
+                content: row.get(3)?,
+                source_file: row.get(4)?,
+                created_at: row.get(5)?,
+                updated_at: row.get(6)?,
+            })
+        },
     )
     .map_err(|e| e.to_string())
 }
@@ -817,10 +844,7 @@ pub fn db_save_diagram(
 }
 
 #[tauri::command]
-pub fn db_delete_diagram(
-    state: State<'_, DbState>,
-    id: String,
-) -> Result<(), String> {
+pub fn db_delete_diagram(state: State<'_, DbState>, id: String) -> Result<(), String> {
     let conn = state.0.lock().map_err(|e| e.to_string())?;
     conn.execute("DELETE FROM diagrams WHERE id = ?1", params![id])
         .map_err(|e| e.to_string())?;
@@ -878,7 +902,8 @@ pub fn db_create_memory(
         conn.execute(
             "INSERT OR IGNORE INTO projects (id, name, path) VALUES (?1, ?2, ?3)",
             params![pid, proj_name, pid],
-        ).map_err(|e| e.to_string())?;
+        )
+        .map_err(|e| e.to_string())?;
     }
 
     conn.execute(
@@ -890,30 +915,34 @@ pub fn db_create_memory(
             source_conversation_id, source_message_ids, score, by,
         ],
     ).map_err(|e| e.to_string())?;
-    let row = conn.query_row(
-        "SELECT id, project_id, type, title, content, summary, tags,
+    let row = conn
+        .query_row(
+            "SELECT id, project_id, type, title, content, summary, tags,
                 source_conversation_id, relevance_score, access_count, last_accessed_at,
                 created_by, status, created_at, updated_at
          FROM memories WHERE id = ?1",
-        params![id],
-        |row| Ok(MemoryRow {
-            id: row.get(0)?,
-            project_id: row.get(1)?,
-            memory_type: row.get(2)?,
-            title: row.get(3)?,
-            content: row.get(4)?,
-            summary: row.get(5)?,
-            tags: row.get(6)?,
-            source_conversation_id: row.get(7)?,
-            relevance_score: row.get(8)?,
-            access_count: row.get(9)?,
-            last_accessed_at: row.get(10)?,
-            created_by: row.get(11)?,
-            status: row.get(12)?,
-            created_at: row.get(13)?,
-            updated_at: row.get(14)?,
-        }),
-    ).map_err(|e| e.to_string())?;
+            params![id],
+            |row| {
+                Ok(MemoryRow {
+                    id: row.get(0)?,
+                    project_id: row.get(1)?,
+                    memory_type: row.get(2)?,
+                    title: row.get(3)?,
+                    content: row.get(4)?,
+                    summary: row.get(5)?,
+                    tags: row.get(6)?,
+                    source_conversation_id: row.get(7)?,
+                    relevance_score: row.get(8)?,
+                    access_count: row.get(9)?,
+                    last_accessed_at: row.get(10)?,
+                    created_by: row.get(11)?,
+                    status: row.get(12)?,
+                    created_at: row.get(13)?,
+                    updated_at: row.get(14)?,
+                })
+            },
+        )
+        .map_err(|e| e.to_string())?;
     Ok(row)
 }
 
@@ -961,33 +990,40 @@ pub fn db_list_memories(
     // Build params dynamically
     let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
     let mut param_values: Vec<Box<dyn rusqlite::types::ToSql>> = vec![Box::new(st.to_string())];
-    if let Some(ref p) = project_id { param_values.push(Box::new(p.clone())); }
-    if let Some(ref t) = memory_type { param_values.push(Box::new(t.clone())); }
+    if let Some(ref p) = project_id {
+        param_values.push(Box::new(p.clone()));
+    }
+    if let Some(ref t) = memory_type {
+        param_values.push(Box::new(t.clone()));
+    }
     param_values.push(Box::new(lim));
     param_values.push(Box::new(off));
 
-    let params_ref: Vec<&dyn rusqlite::types::ToSql> = param_values.iter().map(|b| b.as_ref()).collect();
-    let rows = stmt.query_map(params_ref.as_slice(), |row| {
-        Ok(MemoryRow {
-            id: row.get(0)?,
-            project_id: row.get(1)?,
-            memory_type: row.get(2)?,
-            title: row.get(3)?,
-            content: row.get(4)?,
-            summary: row.get(5)?,
-            tags: row.get(6)?,
-            source_conversation_id: row.get(7)?,
-            relevance_score: row.get(8)?,
-            access_count: row.get(9)?,
-            last_accessed_at: row.get(10)?,
-            created_by: row.get(11)?,
-            status: row.get(12)?,
-            created_at: row.get(13)?,
-            updated_at: row.get(14)?,
+    let params_ref: Vec<&dyn rusqlite::types::ToSql> =
+        param_values.iter().map(|b| b.as_ref()).collect();
+    let rows = stmt
+        .query_map(params_ref.as_slice(), |row| {
+            Ok(MemoryRow {
+                id: row.get(0)?,
+                project_id: row.get(1)?,
+                memory_type: row.get(2)?,
+                title: row.get(3)?,
+                content: row.get(4)?,
+                summary: row.get(5)?,
+                tags: row.get(6)?,
+                source_conversation_id: row.get(7)?,
+                relevance_score: row.get(8)?,
+                access_count: row.get(9)?,
+                last_accessed_at: row.get(10)?,
+                created_by: row.get(11)?,
+                status: row.get(12)?,
+                created_at: row.get(13)?,
+                updated_at: row.get(14)?,
+            })
         })
-    }).map_err(|e| e.to_string())?
-      .collect::<Result<Vec<_>, _>>()
-      .map_err(|e| e.to_string())?;
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
     Ok(rows)
 }
 
@@ -1016,7 +1052,9 @@ pub fn db_search_memories(
     if let Some(ref types) = memory_types {
         let type_list: Vec<String> = serde_json::from_str(types).unwrap_or_default();
         if !type_list.is_empty() {
-            let placeholders: Vec<String> = type_list.iter().enumerate()
+            let placeholders: Vec<String> = type_list
+                .iter()
+                .enumerate()
                 .map(|(i, _)| format!("?{}", i + 10)) // Use high-numbered params
                 .collect();
             conditions.push(format!("m.type IN ({})", placeholders.join(",")));
@@ -1039,11 +1077,11 @@ pub fn db_search_memories(
     );
 
     let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
-    let mut param_values: Vec<Box<dyn rusqlite::types::ToSql>> = vec![
-        Box::new(query.clone()),
-        Box::new(lim),
-    ];
-    if let Some(ref p) = project_id { param_values.push(Box::new(p.clone())); }
+    let mut param_values: Vec<Box<dyn rusqlite::types::ToSql>> =
+        vec![Box::new(query.clone()), Box::new(lim)];
+    if let Some(ref p) = project_id {
+        param_values.push(Box::new(p.clone()));
+    }
 
     // Add type params if needed
     if let Some(ref types) = memory_types {
@@ -1053,28 +1091,31 @@ pub fn db_search_memories(
         }
     }
 
-    let params_ref: Vec<&dyn rusqlite::types::ToSql> = param_values.iter().map(|b| b.as_ref()).collect();
-    let rows = stmt.query_map(params_ref.as_slice(), |row| {
-        Ok(MemoryRow {
-            id: row.get(0)?,
-            project_id: row.get(1)?,
-            memory_type: row.get(2)?,
-            title: row.get(3)?,
-            content: row.get(4)?,
-            summary: row.get(5)?,
-            tags: row.get(6)?,
-            source_conversation_id: row.get(7)?,
-            relevance_score: row.get(8)?,
-            access_count: row.get(9)?,
-            last_accessed_at: row.get(10)?,
-            created_by: row.get(11)?,
-            status: row.get(12)?,
-            created_at: row.get(13)?,
-            updated_at: row.get(14)?,
+    let params_ref: Vec<&dyn rusqlite::types::ToSql> =
+        param_values.iter().map(|b| b.as_ref()).collect();
+    let rows = stmt
+        .query_map(params_ref.as_slice(), |row| {
+            Ok(MemoryRow {
+                id: row.get(0)?,
+                project_id: row.get(1)?,
+                memory_type: row.get(2)?,
+                title: row.get(3)?,
+                content: row.get(4)?,
+                summary: row.get(5)?,
+                tags: row.get(6)?,
+                source_conversation_id: row.get(7)?,
+                relevance_score: row.get(8)?,
+                access_count: row.get(9)?,
+                last_accessed_at: row.get(10)?,
+                created_by: row.get(11)?,
+                status: row.get(12)?,
+                created_at: row.get(13)?,
+                updated_at: row.get(14)?,
+            })
         })
-    }).map_err(|e| e.to_string())?
-      .collect::<Result<Vec<_>, _>>()
-      .map_err(|e| e.to_string())?;
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
     Ok(rows)
 }
 
@@ -1092,26 +1133,44 @@ pub fn db_update_memory(
     let conn = state.0.lock().map_err(|e| e.to_string())?;
     let mut sets: Vec<String> = Vec::new();
     let mut values: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
-    if let Some(ref v) = title { sets.push("title = ?".to_string()); values.push(Box::new(v.clone())); }
-    if let Some(ref v) = content { sets.push("content = ?".to_string()); values.push(Box::new(v.clone())); }
-    if let Some(ref v) = summary { sets.push("summary = ?".to_string()); values.push(Box::new(v.clone())); }
-    if let Some(ref v) = tags { sets.push("tags = ?".to_string()); values.push(Box::new(v.clone())); }
-    if let Some(v) = relevance_score { sets.push("relevance_score = ?".to_string()); values.push(Box::new(v)); }
-    if let Some(ref v) = status { sets.push("status = ?".to_string()); values.push(Box::new(v.clone())); }
-    if sets.is_empty() { return Ok(()); }
+    if let Some(ref v) = title {
+        sets.push("title = ?".to_string());
+        values.push(Box::new(v.clone()));
+    }
+    if let Some(ref v) = content {
+        sets.push("content = ?".to_string());
+        values.push(Box::new(v.clone()));
+    }
+    if let Some(ref v) = summary {
+        sets.push("summary = ?".to_string());
+        values.push(Box::new(v.clone()));
+    }
+    if let Some(ref v) = tags {
+        sets.push("tags = ?".to_string());
+        values.push(Box::new(v.clone()));
+    }
+    if let Some(v) = relevance_score {
+        sets.push("relevance_score = ?".to_string());
+        values.push(Box::new(v));
+    }
+    if let Some(ref v) = status {
+        sets.push("status = ?".to_string());
+        values.push(Box::new(v.clone()));
+    }
+    if sets.is_empty() {
+        return Ok(());
+    }
     sets.push("updated_at = datetime('now')".to_string());
     values.push(Box::new(id));
     let sql = format!("UPDATE memories SET {} WHERE id = ?", sets.join(", "));
     let params_ref: Vec<&dyn rusqlite::types::ToSql> = values.iter().map(|b| b.as_ref()).collect();
-    conn.execute(&sql, params_ref.as_slice()).map_err(|e| e.to_string())?;
+    conn.execute(&sql, params_ref.as_slice())
+        .map_err(|e| e.to_string())?;
     Ok(())
 }
 
 #[tauri::command]
-pub fn db_delete_memory(
-    state: State<'_, DbState>,
-    id: String,
-) -> Result<(), String> {
+pub fn db_delete_memory(state: State<'_, DbState>, id: String) -> Result<(), String> {
     let conn = state.0.lock().map_err(|e| e.to_string())?;
     conn.execute("DELETE FROM memories WHERE id = ?1", params![id])
         .map_err(|e| e.to_string())?;
@@ -1119,10 +1178,7 @@ pub fn db_delete_memory(
 }
 
 #[tauri::command]
-pub fn db_track_memory_access(
-    state: State<'_, DbState>,
-    id: String,
-) -> Result<(), String> {
+pub fn db_track_memory_access(state: State<'_, DbState>, id: String) -> Result<(), String> {
     let conn = state.0.lock().map_err(|e| e.to_string())?;
     conn.execute(
         "UPDATE memories SET access_count = access_count + 1, last_accessed_at = datetime('now') WHERE id = ?1",
@@ -1140,7 +1196,11 @@ pub fn db_decay_memories(
     archive_threshold: f64,
 ) -> Result<i64, String> {
     let conn = state.0.lock().map_err(|e| e.to_string())?;
-    let project_filter = if project_id.is_some() { "AND project_id = ?4" } else { "" };
+    let project_filter = if project_id.is_some() {
+        "AND project_id = ?4"
+    } else {
+        ""
+    };
 
     // Decay relevance_score for memories not accessed recently
     let decay_sql = format!(
@@ -1159,28 +1219,41 @@ pub fn db_decay_memories(
         Box::new(inactive_days),
         Box::new(""), // placeholder for sqlite days concat
     ];
-    if let Some(ref p) = project_id { params_vec.push(Box::new(p.clone())); }
-    let params_ref: Vec<&dyn rusqlite::types::ToSql> = params_vec.iter().map(|b| b.as_ref()).collect();
-    conn.execute(&decay_sql, params_ref.as_slice()).map_err(|e| e.to_string())?;
+    if let Some(ref p) = project_id {
+        params_vec.push(Box::new(p.clone()));
+    }
+    let params_ref: Vec<&dyn rusqlite::types::ToSql> =
+        params_vec.iter().map(|b| b.as_ref()).collect();
+    conn.execute(&decay_sql, params_ref.as_slice())
+        .map_err(|e| e.to_string())?;
 
     // Archive memories below threshold
-    let archive_filter = if project_id.is_some() { "AND project_id = ?2" } else { "" };
+    let archive_filter = if project_id.is_some() {
+        "AND project_id = ?2"
+    } else {
+        ""
+    };
     let archive_sql = format!(
         "UPDATE memories SET status = 'archived', updated_at = datetime('now')
          WHERE status = 'active' AND relevance_score < ?1 AND created_by = 'agent' {}",
         archive_filter
     );
     let mut arch_params: Vec<Box<dyn rusqlite::types::ToSql>> = vec![Box::new(archive_threshold)];
-    if let Some(ref p) = project_id { arch_params.push(Box::new(p.clone())); }
-    let arch_ref: Vec<&dyn rusqlite::types::ToSql> = arch_params.iter().map(|b| b.as_ref()).collect();
-    let archived = conn.execute(&archive_sql, arch_ref.as_slice()).map_err(|e| e.to_string())? as i64;
+    if let Some(ref p) = project_id {
+        arch_params.push(Box::new(p.clone()));
+    }
+    let arch_ref: Vec<&dyn rusqlite::types::ToSql> =
+        arch_params.iter().map(|b| b.as_ref()).collect();
+    let archived = conn
+        .execute(&archive_sql, arch_ref.as_slice())
+        .map_err(|e| e.to_string())? as i64;
     Ok(archived)
 }
 
 #[derive(Serialize)]
 pub struct MemoryStats {
     pub total: i64,
-    pub by_type: String,   // JSON object {type: count}
+    pub by_type: String, // JSON object {type: count}
     pub archived: i64,
 }
 
@@ -1190,24 +1263,38 @@ pub fn db_get_memory_stats(
     project_id: Option<String>,
 ) -> Result<MemoryStats, String> {
     let conn = state.0.lock().map_err(|e| e.to_string())?;
-    let project_filter = if project_id.is_some() { "WHERE project_id = ?1 AND status = 'active'" } else { "WHERE status = 'active'" };
-    let archive_filter = if project_id.is_some() { "WHERE project_id = ?1 AND status = 'archived'" } else { "WHERE status = 'archived'" };
+    let project_filter = if project_id.is_some() {
+        "WHERE project_id = ?1 AND status = 'active'"
+    } else {
+        "WHERE status = 'active'"
+    };
+    let archive_filter = if project_id.is_some() {
+        "WHERE project_id = ?1 AND status = 'archived'"
+    } else {
+        "WHERE status = 'archived'"
+    };
 
     let mut p: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
-    if let Some(ref pid) = project_id { p.push(Box::new(pid.clone())); }
+    if let Some(ref pid) = project_id {
+        p.push(Box::new(pid.clone()));
+    }
     let p_ref: Vec<&dyn rusqlite::types::ToSql> = p.iter().map(|b| b.as_ref()).collect();
 
-    let total: i64 = conn.query_row(
-        &format!("SELECT COUNT(*) FROM memories {}", project_filter),
-        p_ref.as_slice(),
-        |r| r.get(0),
-    ).unwrap_or(0);
+    let total: i64 = conn
+        .query_row(
+            &format!("SELECT COUNT(*) FROM memories {}", project_filter),
+            p_ref.as_slice(),
+            |r| r.get(0),
+        )
+        .unwrap_or(0);
 
-    let archived: i64 = conn.query_row(
-        &format!("SELECT COUNT(*) FROM memories {}", archive_filter),
-        p_ref.as_slice(),
-        |r| r.get(0),
-    ).unwrap_or(0);
+    let archived: i64 = conn
+        .query_row(
+            &format!("SELECT COUNT(*) FROM memories {}", archive_filter),
+            p_ref.as_slice(),
+            |r| r.get(0),
+        )
+        .unwrap_or(0);
 
     // Group by type
     let type_sql = format!(
@@ -1215,11 +1302,13 @@ pub fn db_get_memory_stats(
         project_filter
     );
     let mut stmt = conn.prepare(&type_sql).map_err(|e| e.to_string())?;
-    let type_rows: Vec<(String, i64)> = stmt.query_map(p_ref.as_slice(), |row| {
-        Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
-    }).map_err(|e| e.to_string())?
-      .collect::<Result<Vec<_>, _>>()
-      .map_err(|e| e.to_string())?;
+    let type_rows: Vec<(String, i64)> = stmt
+        .query_map(p_ref.as_slice(), |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+        })
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
 
     let mut map = serde_json::Map::new();
     for (t, c) in type_rows {
@@ -1227,7 +1316,11 @@ pub fn db_get_memory_stats(
     }
     let by_type = serde_json::to_string(&map).unwrap_or_else(|_| "{}".to_string());
 
-    Ok(MemoryStats { total, by_type, archived })
+    Ok(MemoryStats {
+        total,
+        by_type,
+        archived,
+    })
 }
 
 // ─── Schema extraction from SQLite ─────────────────────────────────────────
@@ -1322,3 +1415,205 @@ pub fn db_extract_schema(db_path: String) -> Result<Vec<ExtractedTable>, String>
     Ok(tables)
 }
 
+// ─── Agent SDD persistence ─────────────────────────────────────────────────
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentSddSessionRow {
+    pub id: String,
+    pub project_id: String,
+    pub conversation_id: String,
+    pub description: String,
+    pub spec: Option<String>,
+    pub spec_approved: bool,
+    pub status: String,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentSddTaskRow {
+    pub id: String,
+    pub session_id: String,
+    pub ordinal: i64,
+    pub title: String,
+    pub description: String,
+    pub files: Vec<String>,
+    pub dependencies: Vec<String>,
+    pub status: String,
+    pub agent_output: Option<String>,
+    pub tool_calls: serde_json::Value,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[tauri::command]
+pub fn db_sdd_upsert_session(
+    state: State<'_, DbState>,
+    session_json: String,
+) -> Result<(), String> {
+    let session: AgentSddSessionRow =
+        serde_json::from_str(&session_json).map_err(|e| e.to_string())?;
+    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    conn.execute(
+        "INSERT INTO agent_sdd_sessions
+         (id, project_id, conversation_id, description, spec, spec_approved, status, created_at, updated_at)
+         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)
+         ON CONFLICT(id) DO UPDATE SET project_id=excluded.project_id,
+           conversation_id=excluded.conversation_id, description=excluded.description,
+           spec=excluded.spec, spec_approved=excluded.spec_approved,
+           status=excluded.status, updated_at=excluded.updated_at",
+        params![session.id, session.project_id, session.conversation_id, session.description,
+            session.spec, session.spec_approved, session.status, session.created_at, session.updated_at],
+    ).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+fn read_sdd_session(row: &rusqlite::Row<'_>) -> rusqlite::Result<AgentSddSessionRow> {
+    Ok(AgentSddSessionRow {
+        id: row.get(0)?,
+        project_id: row.get(1)?,
+        conversation_id: row.get(2)?,
+        description: row.get(3)?,
+        spec: row.get(4)?,
+        spec_approved: row.get(5)?,
+        status: row.get(6)?,
+        created_at: row.get(7)?,
+        updated_at: row.get(8)?,
+    })
+}
+
+#[tauri::command]
+pub fn db_sdd_get_session(state: State<'_, DbState>, id: String) -> Result<Option<String>, String> {
+    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let row = conn.query_row(
+        "SELECT id,project_id,conversation_id,description,spec,spec_approved,status,created_at,updated_at
+         FROM agent_sdd_sessions WHERE id=?1",
+        params![id], read_sdd_session,
+    ).optional().map_err(|e| e.to_string())?;
+    row.map(|value| serde_json::to_string(&value).map_err(|e| e.to_string()))
+        .transpose()
+}
+
+#[tauri::command]
+pub fn db_sdd_list_sessions(
+    state: State<'_, DbState>,
+    project_id: String,
+) -> Result<Vec<String>, String> {
+    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let mut stmt = conn.prepare(
+        "SELECT id,project_id,conversation_id,description,spec,spec_approved,status,created_at,updated_at
+         FROM agent_sdd_sessions WHERE project_id=?1 ORDER BY updated_at DESC",
+    ).map_err(|e| e.to_string())?;
+    let mapped = stmt
+        .query_map(params![project_id], read_sdd_session)
+        .map_err(|e| e.to_string())?;
+    mapped
+        .map(|row| {
+            row.map_err(|e| e.to_string())
+                .and_then(|value| serde_json::to_string(&value).map_err(|e| e.to_string()))
+        })
+        .collect()
+}
+
+#[tauri::command]
+pub fn db_sdd_upsert_task(state: State<'_, DbState>, task_json: String) -> Result<(), String> {
+    let task: AgentSddTaskRow = serde_json::from_str(&task_json).map_err(|e| e.to_string())?;
+    let files = serde_json::to_string(&task.files).map_err(|e| e.to_string())?;
+    let dependencies = serde_json::to_string(&task.dependencies).map_err(|e| e.to_string())?;
+    let tool_calls = serde_json::to_string(&task.tool_calls).map_err(|e| e.to_string())?;
+    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    conn.execute(
+        "INSERT INTO agent_sdd_tasks
+         (id,session_id,ordinal,title,description,files,dependencies,status,agent_output,tool_calls,created_at,updated_at)
+         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)
+         ON CONFLICT(id) DO UPDATE SET ordinal=excluded.ordinal,title=excluded.title,
+           description=excluded.description,files=excluded.files,dependencies=excluded.dependencies,
+           status=excluded.status,agent_output=excluded.agent_output,tool_calls=excluded.tool_calls,
+           updated_at=excluded.updated_at",
+        params![task.id, task.session_id, task.ordinal, task.title, task.description, files,
+            dependencies, task.status, task.agent_output, tool_calls, task.created_at, task.updated_at],
+    ).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn db_sdd_get_tasks(
+    state: State<'_, DbState>,
+    session_id: String,
+) -> Result<Vec<String>, String> {
+    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let mut stmt = conn.prepare(
+        "SELECT id,session_id,ordinal,title,description,files,dependencies,status,agent_output,tool_calls,created_at,updated_at
+         FROM agent_sdd_tasks WHERE session_id=?1 ORDER BY ordinal",
+    ).map_err(|e| e.to_string())?;
+    let mapped = stmt
+        .query_map(params![session_id], |row| {
+            let files: String = row.get(5)?;
+            let dependencies: String = row.get(6)?;
+            let tool_calls: String = row.get(9)?;
+            Ok(AgentSddTaskRow {
+                id: row.get(0)?,
+                session_id: row.get(1)?,
+                ordinal: row.get(2)?,
+                title: row.get(3)?,
+                description: row.get(4)?,
+                files: serde_json::from_str(&files).unwrap_or_default(),
+                dependencies: serde_json::from_str(&dependencies).unwrap_or_default(),
+                status: row.get(7)?,
+                agent_output: row.get(8)?,
+                tool_calls: serde_json::from_str(&tool_calls)
+                    .unwrap_or_else(|_| serde_json::json!([])),
+                created_at: row.get(10)?,
+                updated_at: row.get(11)?,
+            })
+        })
+        .map_err(|e| e.to_string())?;
+    mapped
+        .map(|row| {
+            row.map_err(|e| e.to_string())
+                .and_then(|value| serde_json::to_string(&value).map_err(|e| e.to_string()))
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod sdd_migration_tests {
+    use super::open_database;
+    use std::error::Error;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn migrates_legacy_sdd_rows() -> Result<(), Box<dyn Error>> {
+        let suffix = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
+        let directory = std::env::temp_dir().join(format!("hyscode-sdd-migration-{suffix}"));
+        let connection = open_database(&directory);
+        connection.execute_batch(
+            "INSERT INTO projects (id,name,path) VALUES ('project','Project','/project');
+             INSERT INTO conversations (id,project_id,title,mode) VALUES ('conversation','project','Test','chat');
+             INSERT INTO sdd_sessions (id,conversation_id,description,spec,phase,status)
+               VALUES ('session','conversation','Feature','# Spec','execute','active');
+             INSERT INTO sdd_tasks (id,session_id,title,description,status,sort_order,files,output)
+               VALUES ('task','session','Implement','Do it','running',1,'[\"a.ts\"]','working');",
+        )?;
+        connection.execute_batch(include_str!("../../migrations/009_agent_sdd.sql"))?;
+
+        let session_status: String = connection.query_row(
+            "SELECT status FROM agent_sdd_sessions WHERE id='session'",
+            [],
+            |row| row.get(0),
+        )?;
+        let task_status: String = connection.query_row(
+            "SELECT status FROM agent_sdd_tasks WHERE id='task'",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(session_status, "executing");
+        assert_eq!(task_status, "in_progress");
+
+        drop(connection);
+        std::fs::remove_dir_all(directory)?;
+        Ok(())
+    }
+}

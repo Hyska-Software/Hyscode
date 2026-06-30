@@ -65,17 +65,14 @@ fn is_private_host(hostname: &str) -> bool {
 }
 
 fn validate_url(url: &str) -> Result<url::Url, String> {
-    let parsed =
-        url::Url::parse(url).map_err(|_| "Invalid URL format.".to_string())?;
+    let parsed = url::Url::parse(url).map_err(|_| "Invalid URL format.".to_string())?;
 
     if parsed.scheme() != "http" && parsed.scheme() != "https" {
         return Err("Only http and https URLs are allowed.".to_string());
     }
 
     if is_private_host(parsed.host_str().unwrap_or("")) {
-        return Err(
-            "Fetching internal/private addresses is not allowed.".to_string()
-        );
+        return Err("Fetching internal/private addresses is not allowed.".to_string());
     }
 
     Ok(parsed)
@@ -160,7 +157,9 @@ pub async fn web_fetch(args: WebFetchArgs) -> Result<WebFetchResult, String> {
             cut -= 1;
         }
         text.truncate(cut);
-        text.push_str("\n\n[… truncated — use web_fetch again with higher max_length to read more]");
+        text.push_str(
+            "\n\n[… truncated — use web_fetch again with higher max_length to read more]",
+        );
     }
 
     let text_len = text.len();
@@ -199,7 +198,9 @@ fn extract_readable_text(html: &str, _url: &str) -> ExtractedText {
 
     // Remove script/style/nav/header/footer/aside tags
     let mut cleaned_html = html.to_string();
-    for tag in ["script", "style", "nav", "header", "footer", "aside", "noscript"] {
+    for tag in [
+        "script", "style", "nav", "header", "footer", "aside", "noscript",
+    ] {
         let selector = match Selector::parse(tag) {
             Ok(s) => s,
             Err(_) => continue,
@@ -218,7 +219,10 @@ fn extract_readable_text(html: &str, _url: &str) -> ExtractedText {
 
     if let Some(main) = cleaned_doc.select(&Selector::parse("main").unwrap()).next() {
         text_parts.push(extract_text_from_element(&main));
-    } else if let Some(article) = cleaned_doc.select(&Selector::parse("article").unwrap()).next() {
+    } else if let Some(article) = cleaned_doc
+        .select(&Selector::parse("article").unwrap())
+        .next()
+    {
         text_parts.push(extract_text_from_element(&article));
     } else if let Some(body) = cleaned_doc.select(&Selector::parse("body").unwrap()).next() {
         text_parts.push(extract_text_from_element(&body));
@@ -280,10 +284,7 @@ pub async fn web_search(args: WebSearchArgs) -> Result<WebSearchResult, String> 
 
     // Use DuckDuckGo HTML search (no API key required)
     let encoded = urlencoding::encode(query);
-    let search_url = format!(
-        "https://html.duckduckgo.com/html/?q={}",
-        encoded
-    );
+    let search_url = format!("https://html.duckduckgo.com/html/?q={}", encoded);
 
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(30))
@@ -301,10 +302,7 @@ pub async fn web_search(args: WebSearchArgs) -> Result<WebSearchResult, String> 
 
     let status = resp.status();
     if !status.is_success() {
-        return Err(format!(
-            "Search engine returned HTTP {}",
-            status.as_u16()
-        ));
+        return Err(format!("Search engine returned HTTP {}", status.as_u16()));
     }
 
     let html = resp

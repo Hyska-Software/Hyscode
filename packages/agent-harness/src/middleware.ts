@@ -57,6 +57,10 @@ const VERIFICATION_COMMAND_PATTERNS = [
 
 /** Agent modes that require verification before exit */
 const MODES_REQUIRING_VERIFICATION: Set<AgentType> = new Set(['build', 'debug', 'review']);
+const FILE_MUTATION_TOOLS = new Set([
+  'write_file', 'edit_file', 'create_file', 'replace_lines', 'insert_lines',
+  'delete_file', 'rename_file', 'copy_file',
+]);
 
 function hasVerificationEvidence(toolCalls: ToolCallRecord[]): boolean {
   const editedFiles = new Set<string>();
@@ -79,7 +83,7 @@ function hasVerificationEvidence(toolCalls: ToolCallRecord[]): boolean {
     }
 
     // Track edited and read files
-    if (['write_file', 'edit_file', 'create_file'].includes(tc.toolName)) {
+    if (FILE_MUTATION_TOOLS.has(tc.toolName)) {
       editedFiles.add(String(tc.input.path ?? ''));
     }
     if (tc.toolName === 'read_file') {
@@ -116,7 +120,7 @@ export const verificationMiddleware: PreCompletionHook = {
 
     // Check if any file-modifying tool was used
     const hasEdits = ctx.toolCallHistory.some((tc) =>
-      ['write_file', 'edit_file', 'create_file'].includes(tc.toolName),
+      FILE_MUTATION_TOOLS.has(tc.toolName),
     );
     if (!hasEdits) return null;
 
@@ -160,7 +164,7 @@ export class LoopDetectionMiddleware implements PostToolHook {
 
   afterTool(toolName: string, record: ToolCallRecord, _ctx: MiddlewareContext): string | null {
     // Only track file-editing tools
-    if (!['write_file', 'edit_file'].includes(toolName)) return null;
+    if (!FILE_MUTATION_TOOLS.has(toolName)) return null;
 
     const filePath = String(record.input.path ?? '');
     if (!filePath) return null;

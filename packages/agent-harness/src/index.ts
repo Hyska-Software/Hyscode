@@ -40,6 +40,9 @@ export type {
   AgentTaskStatus,
   AgentTask,
   TurnRecord,
+  TurnRequest,
+  TurnOutcome,
+  TurnStatus,
   EnvironmentContext,
   // Memory system
   Memory,

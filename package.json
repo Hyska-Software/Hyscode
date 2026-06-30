@@ -12,6 +12,7 @@
     "build": "turbo build",
     "lint": "turbo lint",
     "typecheck": "turbo typecheck",
+    "test": "turbo test",
     "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,css,md}\"",
     "format:check": "prettier --check \"**/*.{ts,tsx,js,jsx,json,css,md}\"",
     "build:prod": "pwsh -ExecutionPolicy Bypass -File ./scripts/build-windows.ps1",
@@ -20,9 +21,13 @@
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.10.1",
+    "eslint": "^9.39.4",
+    "eslint-plugin-react-hooks": "^5.2.0",
     "prettier": "^3.5.0",
     "turbo": "^2.5.0",
-    "typescript": "^5.8.0"
+    "typescript": "^5.8.0",
+    "typescript-eslint": "^8.62.1",
+    "vitest": "^3.2.6"
   },
   "dependencies": {
     "@xterm/addon-fit": "^0.11.0",

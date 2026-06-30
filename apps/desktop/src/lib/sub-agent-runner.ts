@@ -18,7 +18,7 @@ export interface SubAgentRunnerOptions {
     toolName: string;
     input: Record<string, unknown>;
     description: string;
-  }) => Promise<boolean>;
+  }, signal: AbortSignal) => Promise<boolean>;
   onUpdate: (patch: Partial<SubAgentState>) => void;
   activeSkills: Skill[];
   activeRules: Rule[];

@@ -84,7 +84,9 @@ function toGeminiContents(messages: Message[]): GeminiContent[] {
   return result;
 }
 
-function toGeminiTools(tools: ToolDefinition[]): { functionDeclarations: GeminiFunctionDeclaration[] } {
+function toGeminiTools(tools: ToolDefinition[]): {
+  functionDeclarations: GeminiFunctionDeclaration[];
+} {
   return {
     functionDeclarations: tools.map((t) => ({
       name: t.name,
@@ -137,7 +139,11 @@ function* parseGeminiResponse(data: string): Iterable<StreamChunk> {
         hasFunctionCalls = true;
         const callId = `gemini_${part.functionCall.name}_${Date.now()}`;
         yield { type: 'tool_call_start', id: callId, name: part.functionCall.name };
-        yield { type: 'tool_call_delta', id: callId, input: JSON.stringify(part.functionCall.args ?? {}) };
+        yield {
+          type: 'tool_call_delta',
+          id: callId,
+          input: JSON.stringify(part.functionCall.args ?? {}),
+        };
         yield { type: 'tool_call_end', id: callId };
       }
     }
@@ -184,7 +190,7 @@ function* parseGeminiResponse(data: string): Iterable<StreamChunk> {
 // ─── Provider Implementation ────────────────────────────────────────────────
 
 const GEMINI_MODELS: AIModel[] = [
-  // ── Gemini 3.x Preview models ──
+  // ── Gemini 3.x models ──
   {
     id: 'gemini-3.1-pro-preview',
     name: 'Gemini 3.1 Pro Preview',
@@ -196,6 +202,18 @@ const GEMINI_MODELS: AIModel[] = [
     supportsVision: true,
     inputPricePerMToken: 2.0,
     outputPricePerMToken: 12.0,
+  },
+  {
+    id: 'gemini-3.5-flash',
+    name: 'Gemini 3.5 Flash',
+    provider: 'gemini',
+    contextWindow: 1_048_576,
+    maxOutputTokens: 65_536,
+    supportsTools: true,
+    supportsStreaming: true,
+    supportsVision: true,
+    inputPricePerMToken: 1.5,
+    outputPricePerMToken: 9,
   },
   {
     id: 'gemini-3-flash-preview',
@@ -210,8 +228,8 @@ const GEMINI_MODELS: AIModel[] = [
     outputPricePerMToken: 3.0,
   },
   {
-    id: 'gemini-3.1-flash-lite-preview',
-    name: 'Gemini 3.1 Flash-Lite Preview',
+    id: 'gemini-3.1-flash-lite',
+    name: 'Gemini 3.1 Flash-Lite',
     provider: 'gemini',
     contextWindow: 1_048_576,
     maxOutputTokens: 65_536,
@@ -269,7 +287,11 @@ export class GeminiProvider implements AIProvider {
   private baseUrl: string;
   private fetchImpl: FetchImpl;
 
-  constructor(apiKey: string, baseUrl = 'https://generativelanguage.googleapis.com/v1beta', fetchImpl?: FetchImpl) {
+  constructor(
+    apiKey: string,
+    baseUrl = 'https://generativelanguage.googleapis.com/v1beta',
+    fetchImpl?: FetchImpl,
+  ) {
     this.apiKey = apiKey;
     this.baseUrl = baseUrl;
     this.fetchImpl = fetchImpl ?? globalThis.fetch.bind(globalThis);
@@ -321,9 +343,7 @@ export class GeminiProvider implements AIProvider {
     if (!response.ok) {
       const errorBody = await response.text().catch(() => '');
       const retryAfterHeader = response.headers.get('Retry-After');
-      const retryAfterMs = retryAfterHeader
-        ? parseFloat(retryAfterHeader) * 1_000
-        : undefined;
+      const retryAfterMs = retryAfterHeader ? parseFloat(retryAfterHeader) * 1_000 : undefined;
       throw new ProviderError(
         `Gemini API error: ${response.status} ${errorBody}`,
         'gemini',

@@ -1,8 +1,8 @@
 use serde::{Deserialize, Serialize};
 use tauri::{Emitter, State, Window};
 
-use super::keychain::KeychainState;
 use super::github_oauth::ensure_copilot_token;
+use super::keychain::KeychainState;
 
 #[derive(Debug, Deserialize)]
 pub struct AiStreamRequest {
@@ -81,7 +81,10 @@ pub async fn ai_stream_request(
             match ensure_copilot_token(keychain.0.clone()).await {
                 Ok(token) => Some(token),
                 Err(e) => {
-                    eprintln!("[ai_stream_request] Copilot token regeneration failed: {}", e);
+                    eprintln!(
+                        "[ai_stream_request] Copilot token regeneration failed: {}",
+                        e
+                    );
                     None
                 }
             }
@@ -119,9 +122,7 @@ pub async fn ai_stream_request(
 
         let mut current_api_key = api_key;
 
-        let mut req_builder = client
-            .post(&request.url)
-            .timeout(timeout);
+        let mut req_builder = client.post(&request.url).timeout(timeout);
 
         // Add user-provided headers
         for (key, value) in &request.headers {
@@ -162,15 +163,14 @@ pub async fn ai_stream_request(
             match ensure_copilot_token(keychain_arc).await {
                 Ok(new_token) => {
                     current_api_key = Some(new_token);
-                    let mut retry_builder = client
-                        .post(&request.url)
-                        .timeout(timeout);
+                    let mut retry_builder = client.post(&request.url).timeout(timeout);
                     for (key, value) in &request.headers {
                         retry_builder = retry_builder.header(key.as_str(), value.as_str());
                     }
                     if let Some(ref key) = current_api_key {
                         let (header_name, header_value) = get_auth_header(&request.provider, key);
-                        retry_builder = retry_builder.header(header_name.as_str(), header_value.as_str());
+                        retry_builder =
+                            retry_builder.header(header_name.as_str(), header_value.as_str());
                     }
                     retry_builder = retry_builder.body(request.body.clone());
                     if let Ok(retry_resp) = retry_builder.send().await {
@@ -253,10 +253,7 @@ pub async fn ai_stream_request(
 /// Cancel an in-progress streaming request.
 /// Currently this just signals — actual cancellation depends on the reqwest client.
 #[tauri::command]
-pub async fn ai_stream_cancel(
-    window: Window,
-    request_id: String,
-) -> Result<(), String> {
+pub async fn ai_stream_cancel(window: Window, request_id: String) -> Result<(), String> {
     // Emit a cancel event that the frontend can use to stop processing chunks
     let _ = window.emit(
         "ai:chunk",

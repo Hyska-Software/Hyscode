@@ -96,7 +96,7 @@ pub async fn claude_agent_run(
                 .ok()
                 .and_then(|p| p.parent().map(|d| d.to_path_buf()))
                 .unwrap_or_default();
-            
+
             #[cfg(target_os = "windows")]
             let binary_name = "claude-agent.exe";
             #[cfg(not(target_os = "windows"))]
@@ -230,10 +230,7 @@ pub async fn claude_agent_run(
 
 /// Cancel a running Claude Agent sidecar request.
 #[tauri::command]
-pub async fn claude_agent_cancel(
-    window: Window,
-    request_id: String,
-) -> Result<(), String> {
+pub async fn claude_agent_cancel(window: Window, request_id: String) -> Result<(), String> {
     let _ = window.emit(
         "agent:chunk",
         ClaudeAgentChunk {

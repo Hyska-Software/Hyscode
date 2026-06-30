@@ -1,6 +1,6 @@
+use super::utils::cmd;
 use serde::{Deserialize, Serialize};
 use tauri::Emitter;
-use super::utils::cmd;
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -146,7 +146,10 @@ fn flutter_bin_from_root(root: &str) -> String {
 
 #[cfg(target_os = "windows")]
 fn platform_tools_bin(sdk_root: &str) -> String {
-    format!("{}\\platform-tools\\adb.exe", sdk_root.trim_end_matches(['\\', '/']))
+    format!(
+        "{}\\platform-tools\\adb.exe",
+        sdk_root.trim_end_matches(['\\', '/'])
+    )
 }
 #[cfg(not(target_os = "windows"))]
 fn platform_tools_bin(sdk_root: &str) -> String {
@@ -155,7 +158,10 @@ fn platform_tools_bin(sdk_root: &str) -> String {
 
 #[cfg(target_os = "windows")]
 fn emulator_bin_from_root(sdk_root: &str) -> String {
-    format!("{}\\emulator\\emulator.exe", sdk_root.trim_end_matches(['\\', '/']))
+    format!(
+        "{}\\emulator\\emulator.exe",
+        sdk_root.trim_end_matches(['\\', '/'])
+    )
 }
 #[cfg(not(target_os = "windows"))]
 fn emulator_bin_from_root(sdk_root: &str) -> String {
@@ -163,26 +169,42 @@ fn emulator_bin_from_root(sdk_root: &str) -> String {
 }
 
 #[cfg(target_os = "windows")]
-fn flutter_default_bin() -> &'static str { "flutter.bat" }
+fn flutter_default_bin() -> &'static str {
+    "flutter.bat"
+}
 #[cfg(not(target_os = "windows"))]
-fn flutter_default_bin() -> &'static str { "flutter" }
+fn flutter_default_bin() -> &'static str {
+    "flutter"
+}
 
 #[cfg(target_os = "windows")]
-fn adb_default_bin() -> &'static str { "adb.exe" }
+fn adb_default_bin() -> &'static str {
+    "adb.exe"
+}
 #[cfg(not(target_os = "windows"))]
-fn adb_default_bin() -> &'static str { "adb" }
+fn adb_default_bin() -> &'static str {
+    "adb"
+}
 
 // ── Platform normalization ────────────────────────────────────────────────────
 
 fn normalize_platform(raw: &str) -> String {
     let p = raw.to_lowercase();
-    if p.contains("android") { "android".to_string() }
-    else if p.contains("ios") { "ios".to_string() }
-    else if p.contains("web") || p.contains("chrome") { "web".to_string() }
-    else if p.contains("linux") { "linux".to_string() }
-    else if p.contains("darwin") || p.contains("macos") { "macos".to_string() }
-    else if p.contains("windows") { "windows".to_string() }
-    else { p }
+    if p.contains("android") {
+        "android".to_string()
+    } else if p.contains("ios") {
+        "ios".to_string()
+    } else if p.contains("web") || p.contains("chrome") {
+        "web".to_string()
+    } else if p.contains("linux") {
+        "linux".to_string()
+    } else if p.contains("darwin") || p.contains("macos") {
+        "macos".to_string()
+    } else if p.contains("windows") {
+        "windows".to_string()
+    } else {
+        p
+    }
 }
 
 // ── Commands ──────────────────────────────────────────────────────────────────
@@ -199,10 +221,7 @@ pub async fn check_sdk_paths(
     let sdk_root = resolve_android_sdk_root(android_sdk_path.as_deref());
 
     // Test Flutter — `flutter --version` outputs "Flutter X.Y.Z • channel …"
-    let (flutter_found, flutter_version) = match cmd(&flutter.path)
-        .arg("--version")
-        .output()
-    {
+    let (flutter_found, flutter_version) = match cmd(&flutter.path).arg("--version").output() {
         Ok(out) => {
             let text = String::from_utf8_lossy(&out.stdout);
             let version = text
@@ -222,21 +241,23 @@ pub async fn check_sdk_paths(
             let version = text
                 .lines()
                 .find(|l| l.contains("Android Debug Bridge version"))
-                .map(|l| {
-                    l.split("version ")
-                        .nth(1)
-                        .unwrap_or("")
-                        .trim()
-                        .to_string()
-                });
+                .map(|l| l.split("version ").nth(1).unwrap_or("").trim().to_string());
             (true, version)
         }
         Err(_) => (false, None),
     };
 
     SdkPaths {
-        flutter_bin: if flutter_found { Some(flutter.path) } else { None },
-        flutter_source: if flutter_found { Some(flutter.source) } else { None },
+        flutter_bin: if flutter_found {
+            Some(flutter.path)
+        } else {
+            None
+        },
+        flutter_source: if flutter_found {
+            Some(flutter.source)
+        } else {
+            None
+        },
         flutter_version,
         adb_bin: if adb_found { Some(adb.path) } else { None },
         adb_source: if adb_found { Some(adb.source) } else { None },
@@ -259,17 +280,16 @@ pub async fn list_devices(
     let mut any_tool_found = false;
 
     // ── Flutter devices ───────────────────────────────────────────────────────
-    if let Ok(out) = cmd(&flutter.path)
-        .args(["devices", "--machine"])
-        .output()
-    {
+    if let Ok(out) = cmd(&flutter.path).args(["devices", "--machine"]).output() {
         any_tool_found = true;
         if out.status.success() {
             let stdout = String::from_utf8_lossy(&out.stdout);
             if let Ok(raw) = serde_json::from_str::<Vec<serde_json::Value>>(stdout.trim()) {
                 for v in raw {
                     let id = v["id"].as_str().unwrap_or("").to_string();
-                    if id.is_empty() { continue; }
+                    if id.is_empty() {
+                        continue;
+                    }
                     devices.push(DeviceInfo {
                         id,
                         name: v["name"].as_str().unwrap_or("Unknown").to_string(),
@@ -298,7 +318,9 @@ pub async fn list_devices(
         //   emulator-5554   device product:sdk_gphone model:sdk_gphone device:generic
         for line in stdout.lines().skip(1) {
             let line = line.trim();
-            if line.is_empty() || line.starts_with('*') { continue; }
+            if line.is_empty() || line.starts_with('*') {
+                continue;
+            }
 
             let mut cols = line.splitn(2, char::is_whitespace);
             let serial = match cols.next() {
@@ -308,7 +330,9 @@ pub async fn list_devices(
             let rest = cols.next().unwrap_or("").trim();
 
             // Skip if already reported by Flutter
-            if devices.iter().any(|d| d.id == serial) { continue; }
+            if devices.iter().any(|d| d.id == serial) {
+                continue;
+            }
 
             let available = rest.starts_with("device");
             let emulator = serial.starts_with("emulator-");
@@ -352,16 +376,15 @@ pub async fn list_emulators(
     let mut emulators: Vec<EmulatorInfo> = Vec::new();
 
     // ── Flutter emulators ─────────────────────────────────────────────────────
-    if let Ok(out) = cmd(&flutter.path)
-        .args(["emulators", "--machine"])
-        .output()
-    {
+    if let Ok(out) = cmd(&flutter.path).args(["emulators", "--machine"]).output() {
         if out.status.success() {
             let stdout = String::from_utf8_lossy(&out.stdout);
             if let Ok(raw) = serde_json::from_str::<Vec<serde_json::Value>>(stdout.trim()) {
                 for v in raw {
                     let id = v["id"].as_str().unwrap_or("").to_string();
-                    if id.is_empty() { continue; }
+                    if id.is_empty() {
+                        continue;
+                    }
                     emulators.push(EmulatorInfo {
                         id,
                         name: v["name"].as_str().unwrap_or("Unknown").to_string(),
@@ -383,9 +406,14 @@ pub async fn list_emulators(
         let stdout = String::from_utf8_lossy(&out.stdout);
         for avd in stdout.lines() {
             let avd = avd.trim();
-            if avd.is_empty() { continue; }
+            if avd.is_empty() {
+                continue;
+            }
             // Deduplicate by checking if Flutter already reported this AVD
-            if emulators.iter().any(|e| e.id == avd || e.name == avd || e.id.contains(avd)) {
+            if emulators
+                .iter()
+                .any(|e| e.id == avd || e.name == avd || e.id.contains(avd))
+            {
                 continue;
             }
             emulators.push(EmulatorInfo {
@@ -443,7 +471,7 @@ pub async fn run_on_device(
     app: tauri::AppHandle,
     state: tauri::State<'_, super::pty::PtyState>,
 ) -> Result<String, String> {
-    use portable_pty::{CommandBuilder};
+    use portable_pty::CommandBuilder;
     use std::io::Read;
 
     let flutter = resolve_flutter(flutter_sdk_path.as_deref());
@@ -500,7 +528,10 @@ pub async fn run_on_device(
             let sep = ";";
             #[cfg(not(target_os = "windows"))]
             let sep = ":";
-            cmd.env("PATH", format!("{}{}{}", flutter_bin_dir, sep, current_path));
+            cmd.env(
+                "PATH",
+                format!("{}{}{}", flutter_bin_dir, sep, current_path),
+            );
         }
     }
 

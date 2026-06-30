@@ -37,7 +37,11 @@ interface OpenAITool {
   function: { name: string; description: string; parameters: Record<string, unknown> };
 }
 
-export function toOpenAIMessages(messages: Message[], systemPrompt?: string, alwaysReasoningContent = false): OpenAIMessage[] {
+export function toOpenAIMessages(
+  messages: Message[],
+  systemPrompt?: string,
+  alwaysReasoningContent = false,
+): OpenAIMessage[] {
   const result: OpenAIMessage[] = [];
 
   if (systemPrompt) {
@@ -46,7 +50,10 @@ export function toOpenAIMessages(messages: Message[], systemPrompt?: string, alw
 
   for (const msg of messages) {
     if (msg.role === 'system') {
-      result.push({ role: 'system', content: msg.content.map(c => c.type === 'text' ? c.text : '').join('') });
+      result.push({
+        role: 'system',
+        content: msg.content.map((c) => (c.type === 'text' ? c.text : '')).join(''),
+      });
       continue;
     }
 
@@ -88,7 +95,6 @@ export function toOpenAIMessages(messages: Message[], systemPrompt?: string, alw
         // Use a single space as minimal non-empty placeholder to satisfy validation.
         assistantMsg.reasoning_content = reasoningContent || ' ';
       }
-      console.log('[toOpenAIMessages] assistant msg:', { textLen: textParts.join('').length, toolCount: toolCalls.length, thinkingLen: reasoningContent.length, alwaysReasoningContent, shouldAddReasoning, hasReasoning: 'reasoning_content' in assistantMsg });
       if (!textParts.length && !toolCalls.length) assistantMsg.content = '';
       result.push(assistantMsg);
       continue;
@@ -107,9 +113,10 @@ export function toOpenAIMessages(messages: Message[], systemPrompt?: string, alw
     }
     result.push({
       role: 'user',
-      content: contentParts.length === 1 && contentParts[0].type === 'text'
-        ? contentParts[0].text
-        : contentParts,
+      content:
+        contentParts.length === 1 && contentParts[0].type === 'text'
+          ? contentParts[0].text
+          : contentParts,
     });
   }
 
@@ -141,14 +148,16 @@ function parseOpenAIChunk(data: string): StreamChunk[] {
   if (!choices?.length) {
     // Usage-only chunk (no choices).
     if (usage) {
-      return [{
-        type: 'usage',
-        usage: {
-          inputTokens: usage.prompt_tokens ?? 0,
-          outputTokens: usage.completion_tokens ?? 0,
-          totalTokens: usage.total_tokens ?? 0,
+      return [
+        {
+          type: 'usage',
+          usage: {
+            inputTokens: usage.prompt_tokens ?? 0,
+            outputTokens: usage.completion_tokens ?? 0,
+            totalTokens: usage.total_tokens ?? 0,
+          },
         },
-      }];
+      ];
     }
     return [];
   }
@@ -211,6 +220,18 @@ function parseOpenAIChunk(data: string): StreamChunk[] {
 
 const OPENAI_MODELS: AIModel[] = [
   {
+    id: 'gpt-5.5',
+    name: 'GPT-5.5',
+    provider: 'openai',
+    contextWindow: 1_050_000,
+    maxOutputTokens: 128_000,
+    supportsTools: true,
+    supportsStreaming: true,
+    supportsVision: true,
+    inputPricePerMToken: 5,
+    outputPricePerMToken: 30,
+  },
+  {
     id: 'gpt-5.4',
     name: 'GPT-5.4',
     provider: 'openai',
@@ -261,7 +282,12 @@ export class OpenAIProvider implements AIProvider {
    *  on every assistant+tool_calls message even when the proxy strips thinking deltas. */
   protected requiresReasoningContent = false;
 
-  constructor(apiKey: string, baseUrl = 'https://api.openai.com/v1', extraHeaders: Record<string, string> = {}, fetchImpl?: FetchImpl) {
+  constructor(
+    apiKey: string,
+    baseUrl = 'https://api.openai.com/v1',
+    extraHeaders: Record<string, string> = {},
+    fetchImpl?: FetchImpl,
+  ) {
     this.apiKey = apiKey;
     this.baseUrl = baseUrl;
     this.defaultHeaders = extraHeaders;
@@ -277,9 +303,11 @@ export class OpenAIProvider implements AIProvider {
   }
 
   async *chat(params: ChatParams): AsyncIterable<StreamChunk> {
-    const messages = toOpenAIMessages(params.messages, params.systemPrompt, this.requiresReasoningContent);
-    console.log('[OpenAIProvider] requiresReasoningContent=', this.requiresReasoningContent, 'model=', params.model);
-    console.log('[OpenAIProvider] toOpenAIMessages output:', JSON.stringify(messages.map(m => ({ role: m.role, hasToolCalls: !!m.tool_calls, hasReasoning: 'reasoning_content' in m, reasoningLength: m.reasoning_content?.length }))));
+    const messages = toOpenAIMessages(
+      params.messages,
+      params.systemPrompt,
+      this.requiresReasoningContent,
+    );
 
     const body: Record<string, unknown> = {
       model: params.model,
@@ -288,7 +316,10 @@ export class OpenAIProvider implements AIProvider {
       stream_options: { include_usage: true },
     };
 
-    if (params.maxTokens) body.max_tokens = params.maxTokens;
+    if (params.maxTokens) {
+      if (this.id === 'openai') body.max_completion_tokens = params.maxTokens;
+      else body.max_tokens = params.maxTokens;
+    }
     if (params.temperature !== undefined) body.temperature = params.temperature;
     if (params.topP !== undefined) body.top_p = params.topP;
     if (params.stopSequences?.length) body.stop = params.stopSequences;
@@ -306,12 +337,6 @@ export class OpenAIProvider implements AIProvider {
     }
 
     const requestBody = JSON.stringify(body);
-    const bodyMessages = body.messages as Array<{ role?: string; tool_calls?: unknown[]; reasoning_content?: string }> | undefined;
-    const assistantMsgIdx = bodyMessages?.findIndex(m => m.role === 'assistant' && m.tool_calls);
-    if (assistantMsgIdx !== undefined && assistantMsgIdx >= 0) {
-      const am = bodyMessages![assistantMsgIdx];
-      console.log('[OpenAIProvider] request body assistant msg raw:', JSON.stringify({ role: am.role, tool_calls: am.tool_calls, reasoning_content: am.reasoning_content }));
-    }
     const response = await this.fetchImpl(`${this.baseUrl}/chat/completions`, {
       method: 'POST',
       headers: {
@@ -326,9 +351,7 @@ export class OpenAIProvider implements AIProvider {
     if (!response.ok) {
       const errorBody = await response.text().catch(() => '');
       const retryAfterHeader = response.headers.get('Retry-After');
-      const retryAfterMs = retryAfterHeader
-        ? parseFloat(retryAfterHeader) * 1_000
-        : undefined;
+      const retryAfterMs = retryAfterHeader ? parseFloat(retryAfterHeader) * 1_000 : undefined;
       throw new ProviderError(
         `${this.name} API error: ${response.status} ${errorBody}`,
         this.id,
@@ -338,17 +361,13 @@ export class OpenAIProvider implements AIProvider {
       );
     }
 
-    console.log('[OpenAIProvider] response status:', response.status, 'ok:', response.ok);
-
     // Track tool call IDs across delta chunks.
     // OpenAI never sends tool_call_end — we must synthesize it when a new
     // tool starts or the stream finishes with stopReason 'tool_use'.
     let currentToolCallId = '';
 
     for await (const data of parseSSEStream(response, params.signal)) {
-      console.log('[OpenAIProvider] raw SSE data:', data);
       const chunks = parseOpenAIChunk(data);
-      console.log('[OpenAIProvider] parsed chunk:', chunks);
 
       for (const chunk of chunks) {
         if (chunk.type === 'tool_call_start' && chunk.id) {

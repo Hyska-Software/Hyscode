@@ -4,7 +4,7 @@
 // Reads a JSON request from stdin, calls the SDK's query() function,
 // and writes NDJSON events to stdout for the Tauri host to consume.
 
-import { query, type Message as SdkMessage } from '@anthropic-ai/claude-agent-sdk';
+import { query } from '@anthropic-ai/claude-agent-sdk';
 
 // ─── Protocol Types ──────────────────────────────────────────────────────────
 
@@ -65,57 +65,68 @@ async function main(): Promise<void> {
     }
   }
 
-  // Convert messages to SDK format
-  const messages: SdkMessage[] = request.messages.map((m) => ({
-    role: m.role,
-    content: m.content,
-  }));
+  const prompt = request.messages
+    .map((message) => `${message.role === 'user' ? 'User' : 'Assistant'}:\n${message.content}`)
+    .join('\n\n');
 
   try {
-    const result = await query({
-      model: request.model,
-      systemPrompt: request.systemPrompt ?? 'You are a helpful coding assistant.',
-      messages,
-      maxTurns: request.maxTurns ?? 10,
-      abortController: new AbortController(),
+    const result = query({
+      prompt,
       options: {
-        maxConnections: 1,
+        model: request.model,
+        systemPrompt: request.systemPrompt ?? 'You are a helpful coding assistant.',
+        maxTurns: request.maxTurns ?? 10,
+        abortController: new AbortController(),
+        cwd: request.cwd,
+        allowedTools: request.allowedTools,
+        env: {
+          ...process.env,
+          ANTHROPIC_API_KEY: request.apiKey,
+          CLAUDE_AGENT_SDK_CLIENT_APP: 'hyscode/0.3.1',
+        },
       },
     });
 
     // Process the result messages
-    for (const msg of result) {
-      if (msg.role === 'assistant') {
-        if (typeof msg.content === 'string') {
-          emit({ type: 'text', content: msg.content });
-        } else if (Array.isArray(msg.content)) {
-          for (const block of msg.content) {
-            if (block.type === 'text') {
-              emit({ type: 'text', content: block.text });
-            } else if (block.type === 'thinking') {
-              emit({ type: 'thinking', content: block.thinking });
-            } else if (block.type === 'tool_use') {
-              emit({
-                type: 'tool_use',
-                callId: block.id,
-                toolName: block.name,
-                toolInput: JSON.stringify(block.input),
-              });
-            }
+    for await (const msg of result) {
+      if (msg.type === 'assistant') {
+        for (const block of msg.message.content) {
+          if (block.type === 'text') {
+            emit({ type: 'text', content: block.text });
+          } else if (block.type === 'thinking') {
+            emit({ type: 'thinking', content: block.thinking });
+          } else if (block.type === 'tool_use') {
+            emit({
+              type: 'tool_use',
+              callId: block.id,
+              toolName: block.name,
+              toolInput: JSON.stringify(block.input),
+            });
           }
         }
-      } else if (msg.role === 'tool') {
-        if (Array.isArray(msg.content)) {
-          for (const block of msg.content) {
-            if (block.type === 'tool_result') {
-              emit({
-                type: 'tool_result',
-                callId: block.tool_use_id,
-                content: typeof block.content === 'string' ? block.content : JSON.stringify(block.content),
-              });
-            }
+      } else if (msg.type === 'user' && Array.isArray(msg.message.content)) {
+        for (const block of msg.message.content) {
+          if (block.type === 'tool_result') {
+            emit({
+              type: 'tool_result',
+              callId: block.tool_use_id,
+              content:
+                typeof block.content === 'string' ? block.content : JSON.stringify(block.content),
+            });
           }
         }
+      } else if (msg.type === 'result') {
+        emit({
+          type: 'usage',
+          inputTokens: msg.usage.input_tokens,
+          outputTokens: msg.usage.output_tokens,
+        });
+        if (msg.subtype !== 'success') {
+          emit({ type: 'error', error: msg.errors.join('\n') || msg.subtype });
+          return;
+        }
+        emit({ type: 'done', stopReason: msg.stop_reason ?? 'end_turn' });
+        return;
       }
     }
 

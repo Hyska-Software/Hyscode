@@ -56,12 +56,13 @@ The Agent Panel is the primary interface for AI interaction in HysCode. It suppo
 
 ### Chat Mode (default)
 
-Standard conversational interaction with the AI. Agent can use all available tools.
+Standard conversational interaction with the AI. Chat mode is intentionally non-mutating.
 
 - Free-form text input
 - Agent responds with text and optional tool calls
 - Context chips for adding files/symbols
-- Full tool access (with approval workflow)
+- Read-only filesystem, Git inspection, browser, and meta tools
+- Mutating work requires switching to Build or Debug mode
 
 ### Build Mode (SDD)
 

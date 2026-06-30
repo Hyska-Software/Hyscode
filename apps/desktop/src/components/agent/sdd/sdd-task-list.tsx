@@ -1,4 +1,4 @@
-import { Check, Circle, Loader2, AlertCircle, SkipForward, Pause, Play } from 'lucide-react';
+import { Check, Circle, Loader2, AlertCircle, SkipForward, Pause, Play, RotateCcw } from 'lucide-react';
 import { useState } from 'react';
 import { useAgentStore } from '@/stores/agent-store';
 import { HarnessBridge } from '@/lib/harness-bridge';
@@ -20,6 +20,7 @@ export function SddTaskList() {
   const sddProgress = useAgentStore((s) => s.sddProgress);
   const sddPhase = useAgentStore((s) => s.sddPhase);
   const isStreaming = useAgentStore((s) => s.isStreaming);
+  const failedTask = useAgentStore((s) => s.sddFailedTask);
   const [paused, setPaused] = useState(false);
 
   if (tasks.length === 0) return null;
@@ -30,20 +31,35 @@ export function SddTaskList() {
   const handlePauseResume = () => {
     try {
       const bridge = HarnessBridge.get();
-      if (paused) {
-        bridge.resumeSdd();
+      if (paused || failedTask) {
+        void bridge.resumeSdd();
+        useAgentStore.getState().setSddFailedTask(null);
       } else {
         bridge.pauseSdd();
       }
-      setPaused(!paused);
+      setPaused(!(paused || failedTask));
     } catch {
       // bridge not ready
     }
   };
 
-  const handleSkipTask = (taskId: string) => {
+  const handleRetryTask = async (taskId: string) => {
     try {
-      HarnessBridge.get().skipSddTask(taskId);
+      await HarnessBridge.get().retrySddTask(taskId);
+      useAgentStore.getState().setSddFailedTask(null);
+      setPaused(true);
+    } catch {
+      // bridge not ready
+    }
+  };
+
+  const handleSkipTask = async (taskId: string) => {
+    try {
+      await HarnessBridge.get().skipSddTask(taskId);
+      if (failedTask?.id === taskId) {
+        useAgentStore.getState().setSddFailedTask(null);
+        setPaused(true);
+      }
     } catch {
       // bridge not ready
     }
@@ -81,9 +97,9 @@ export function SddTaskList() {
                     />
                   }
                 >
-                  {paused ? <Play className="h-3 w-3" /> : <Pause className="h-3 w-3" />}
+                  {paused || failedTask ? <Play className="h-3 w-3" /> : <Pause className="h-3 w-3" />}
                 </TooltipTrigger>
-                <TooltipContent side="top">{paused ? 'Resume' : 'Pause'}</TooltipContent>
+                <TooltipContent side="top">{paused || failedTask ? 'Resume' : 'Pause'}</TooltipContent>
               </Tooltip>
             </>
           )}
@@ -105,7 +121,7 @@ export function SddTaskList() {
         {tasks.map((task, i) => {
           const statusConfig = STATUS_ICONS[task.status];
           const Icon = statusConfig.icon;
-          const canSkip = task.status === 'pending' || task.status === 'in_progress';
+          const canSkip = task.status === 'pending' || task.status === 'in_progress' || task.status === 'failed';
           return (
             <div
               key={task.id}
@@ -140,6 +156,23 @@ export function SddTaskList() {
                   </div>
                 )}
               </div>
+              {task.status === 'failed' && (
+                <Tooltip>
+                  <TooltipTrigger
+                    render={
+                      <Button
+                        variant="ghost"
+                        size="icon-xs"
+                        onClick={() => handleRetryTask(task.id)}
+                        className="h-5 w-5 opacity-0 transition-opacity group-hover:opacity-100 text-muted-foreground hover:text-accent"
+                      />
+                    }
+                  >
+                    <RotateCcw className="h-3 w-3" />
+                  </TooltipTrigger>
+                  <TooltipContent side="top">Retry task</TooltipContent>
+                </Tooltip>
+              )}
               {canSkip && (
                 <Tooltip>
                   <TooltipTrigger

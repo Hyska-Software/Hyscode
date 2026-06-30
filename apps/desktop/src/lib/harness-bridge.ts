@@ -15,6 +15,8 @@ import type {
   ToolCategory,
   EnvironmentContext,
   TurnRecord,
+  SddDatabase,
+  SddSession,
 } from '@hyscode/agent-harness';
 import type { Message, ToolDefinition, MessageContent } from '@hyscode/ai-providers';
 import { tauriInvokeRaw } from './tauri-invoke';
@@ -98,9 +100,59 @@ function humanizeErrorMessage(msg: string, raw: string): string {
   return 'An unexpected error occurred. Please try again.';
 }
 
+function createSddDatabase(): SddDatabase {
+  const parseSession = (value: string): SddSession => ({ ...JSON.parse(value), tasks: [] }) as SddSession;
+  const parseTask = (value: string): SddTask => JSON.parse(value) as SddTask;
+  const taskCache = new Map<string, SddTask>();
+  return {
+    createSession: async (session) => {
+      await tauriInvokeRaw('db_sdd_upsert_session', { sessionJson: JSON.stringify(session) });
+    },
+    updateSession: async (id, updates) => {
+      const raw = await tauriInvokeRaw<string | null>('db_sdd_get_session', { id });
+      if (!raw) throw new Error(`SDD session ${id} not found`);
+      await tauriInvokeRaw('db_sdd_upsert_session', {
+        sessionJson: JSON.stringify({ ...parseSession(raw), ...updates }),
+      });
+    },
+    getSession: async (id) => {
+      const raw = await tauriInvokeRaw<string | null>('db_sdd_get_session', { id });
+      return raw ? parseSession(raw) : null;
+    },
+    listSessions: async (projectId) => {
+      const rows = await tauriInvokeRaw<string[]>('db_sdd_list_sessions', { projectId });
+      return rows.map(parseSession);
+    },
+    createTask: async (task) => {
+      await tauriInvokeRaw('db_sdd_upsert_task', { taskJson: JSON.stringify(task) });
+      taskCache.set(task.id, task);
+    },
+    updateTask: async (id, updates) => {
+      const current = taskCache.get(id);
+      if (!current) throw new Error(`SDD task ${id} is not loaded`);
+      const updated = { ...current, ...updates };
+      await tauriInvokeRaw('db_sdd_upsert_task', { taskJson: JSON.stringify(updated) });
+      taskCache.set(id, updated);
+    },
+    getTasksForSession: async (sessionId) => {
+      const rows = await tauriInvokeRaw<string[]>('db_sdd_get_tasks', { sessionId });
+      const tasks = rows.map(parseTask);
+      for (const task of tasks) taskCache.set(task.id, task);
+      return tasks;
+    },
+  };
+}
+
 // ─── Singleton ──────────────────────────────────────────────────────────────
 
 let _instance: HarnessBridge | null = null;
+
+type MutationSnapshot = {
+  diskBefore: string | null;
+  bufferBefore: string | null;
+  wasDirty: boolean;
+  tabId: string | null;
+};
 
 export class HarnessBridge {
   private harness: Harness;
@@ -114,6 +166,7 @@ export class HarnessBridge {
   private pendingToolResults: Array<{ toolCallId: string; output: string; isError: boolean }> = [];
   /** Tool call IDs seen in the current iteration (for building assistant blocks). */
   private currentIterationToolCalls: Array<{ id: string; name: string; input: Record<string, unknown> }> = [];
+  private mutationSnapshots = new Map<string, MutationSnapshot>();
 
   // ─── Agent Terminal Integration ───────────────────────────────────
   /** Pool of terminal store session ids owned by the agent, keyed by conversationId */
@@ -187,8 +240,10 @@ export class HarnessBridge {
     this.harness = new Harness({
       workspacePath,
       projectId,
-      invoke: tauriInvokeRaw,
+      invoke: (command, args) => this.invokeForHarness(command, args),
       memoryManager,
+      sddDb: createSddDatabase(),
+      hasDirtyBuffers: () => useEditorStore.getState().tabs.some((tab) => tab.type === 'file' && tab.isDirty),
       listen: async (event: string, handler: (payload: unknown) => void) => {
         const unlisten = await tauriListen(event, (e) => handler(e.payload));
         return unlisten;
@@ -232,9 +287,9 @@ export class HarnessBridge {
         thinking: this.buildThinkingConfig(settings.activeProviderId, settings.activeModelId),
       },
       onEvent: (event) => this.handleEvent(event),
-      onApprovalRequest: (pending) => this.handleApprovalRequest(pending),
-      onModeSwitchRequest: (request) => this.handleModeSwitchRequest(request),
-      onUserQuestionRequest: (questions, title) => this.handleUserQuestionRequest(questions, title),
+      onApprovalRequest: (pending, signal) => this.handleApprovalRequest(pending, signal),
+      onModeSwitchRequest: (request, signal) => this.handleModeSwitchRequest(request, signal),
+      onUserQuestionRequest: (id, questions, title, signal) => this.handleUserQuestionRequest(id, questions, title, signal),
       skillLoader,
       ruleLoader,
     });
@@ -347,6 +402,7 @@ export class HarnessBridge {
       providerId,
       modelId,
       maxIterations: settings.maxIterations,
+      maxOutputTokens: settings.maxTokens,
       approval: approvalConfig,
       thinking: this.buildThinkingConfig(providerId, modelId),
     });
@@ -366,11 +422,13 @@ export class HarnessBridge {
 
     // Reset per-turn credit counter
     useAgentStore.getState().resetApiRequestCount();
+    useAgentStore.getState().setTokenUsage(null);
 
     // Map store.mode → ConversationMode for the harness
     let harnessMode: ConversationMode = 'agent';
     if (store.mode === 'chat') harnessMode = 'chat';
-    if (store.mode === 'build' && store.sddPhase) harnessMode = 'sdd';
+    // SDD phases are driven by the explicit start/approve/resume methods. Chat
+    // messages in a build tab must still execute as normal agent turns.
     this.harness.setMode(harnessMode);
     dbg(`Modo: ${harnessMode} (agent: ${store.mode})`);
 
@@ -510,7 +568,7 @@ export class HarnessBridge {
 
       dbg(`Enviando para LLM (${history.length} msgs no histórico)...`);
 
-      const { response, turnRecord } = await this.harness.run(
+      const { response, turnRecord, status } = await this.harness.run(
         userMessage,
         history,
         imageContent.length > 0 ? imageContent : undefined,
@@ -528,7 +586,8 @@ export class HarnessBridge {
       useAgentStore.getState().flushStreamingText();
 
       // Update the last assistant message with the final response
-      useAgentStore.getState().updateLastAssistantContent(response);
+      if (status === 'error') useAgentStore.getState().updateLastAssistantError(parseProviderError(response));
+      else useAgentStore.getState().updateLastAssistantContent(response);
     } catch (err) {
       const rawMsg = err instanceof Error ? err.message : 'Unknown error';
       const friendlyMsg = parseProviderError(rawMsg);
@@ -556,7 +615,6 @@ export class HarnessBridge {
     }
     this._subAgentRunners.clear();
     this.harness.cancel();
-    useAgentStore.getState().setStreaming(false);
   }
 
   /** Pause SDD execution after the current task finishes */
@@ -566,15 +624,30 @@ export class HarnessBridge {
   }
 
   /** Resume SDD execution */
-  resumeSdd(): void {
-    this.harness.getSddEngine()?.resume();
-    this.debug('SDD resumed');
+  async resumeSdd(): Promise<void> {
+    const store = useAgentStore.getState();
+    store.setStreaming(true);
+    try {
+      const result = await this.harness.resumeSddPlan();
+      if (!result.startsWith('SDD execution ')) {
+        store.addMessage({ id: crypto.randomUUID(), role: 'assistant', content: result, timestamp: Date.now() });
+      }
+      this.debug(result);
+    } finally {
+      store.setStreaming(false);
+    }
   }
 
   /** Skip a specific SDD task */
-  skipSddTask(taskId: string): void {
-    this.harness.getSddEngine()?.skipTask(taskId);
+  async skipSddTask(taskId: string): Promise<void> {
+    await this.harness.getSddEngine()?.skipTask(taskId);
     this.debug(`SDD task skipped: ${taskId}`);
+  }
+
+  async retrySddTask(taskId: string): Promise<void> {
+    await this.harness.getSddEngine()?.retryTask(taskId);
+    useAgentStore.getState().updateSddTask(taskId, { status: 'pending', agentOutput: null });
+    this.debug(`SDD task queued for retry: ${taskId}`);
   }
 
   /**
@@ -634,6 +707,7 @@ Investigate the error, fix the underlying issue in the affected files, and verif
     store.setSddPhase('describing');
 
     try {
+      await this.ensureConversationExists(description);
       const { spec } = await this.harness.startSdd(description);
       store.setSddSpec(spec);
       // Phase changes are emitted by the SDD engine events → handleEvent
@@ -715,6 +789,7 @@ Investigate the error, fix the underlying issue in the affected files, and verif
     store.setSddPhase('describing');
 
     try {
+      await this.ensureConversationExists(description);
       const { sessionId, spec } = await this.harness.promoteToSdd(description);
       store.setSddSpec(spec);
       this.debug(`Conversation promoted to SDD session ${sessionId}`);
@@ -736,14 +811,16 @@ Investigate the error, fix the underlying issue in the affected files, and verif
 
     try {
       const review = await this.harness.approveSddPlan();
-      // Add the review as an assistant message
-      store.addMessage({
-        id: crypto.randomUUID(),
-        role: 'assistant',
-        content: review,
-        timestamp: Date.now(),
-      });
-      this.debug('SDD execution complete');
+      if (review.startsWith('SDD execution ')) this.debug(review);
+      else {
+        store.addMessage({
+          id: crypto.randomUUID(),
+          role: 'assistant',
+          content: review,
+          timestamp: Date.now(),
+        });
+        this.debug('SDD execution complete');
+      }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       this.debug(`SDD plan execution error: ${msg}`);
@@ -813,17 +890,8 @@ Investigate the error, fix the underlying issue in the affected files, and verif
     if (!change || change.status !== 'pending') return;
 
     if (!accepted) {
-      // Revert: restore original content or delete newly-created file
-      try {
-        if (change.originalContent === null) {
-          await tauriFs.deletePath(change.filePath);
-        } else {
-          await tauriFs.writeFile(change.filePath, change.originalContent);
-        }
-      } catch (err) {
-        console.warn('[HarnessBridge] Failed to revert file change:', err);
-      }
-    }
+      await this.restoreMutationSnapshot(change.filePath, { originalContent: change.originalContent });
+    } else this.acceptMutationSnapshot(change.filePath);
 
     store.resolvePendingFileChange(id, accepted);
   }
@@ -835,17 +903,9 @@ Investigate the error, fix the underlying issue in the affected files, and verif
 
     if (!accepted) {
       for (const change of pending) {
-        try {
-          if (change.originalContent === null) {
-            await tauriFs.deletePath(change.filePath);
-          } else {
-            await tauriFs.writeFile(change.filePath, change.originalContent);
-          }
-        } catch (err) {
-          console.warn('[HarnessBridge] Failed to revert file change:', err);
-        }
+        await this.restoreMutationSnapshot(change.filePath, { originalContent: change.originalContent });
       }
-    }
+    } else for (const change of pending) this.acceptMutationSnapshot(change.filePath);
 
     store.resolveAllPendingFileChanges(accepted);
   }
@@ -858,22 +918,8 @@ Investigate the error, fix the underlying issue in the affected files, and verif
     );
     if (!session) return;
 
-    if (!accepted) {
-      try {
-        if (session.originalContent === null) {
-          await tauriFs.deletePath(session.filePath);
-        } else {
-          await tauriFs.writeFile(session.filePath, session.originalContent);
-        }
-      } catch (err) {
-        console.warn('[HarnessBridge] Failed to revert edit session:', err);
-      }
-      // Sync file cache: revert to original or remove entry
-      const fileStore = useFileStore.getState();
-      if (session.originalContent !== null) {
-        fileStore.setFileContent(session.filePath, session.originalContent);
-      }
-    }
+    if (!accepted) await this.restoreMutationSnapshot(session.filePath, session);
+    else this.acceptMutationSnapshot(session.filePath);
 
     store.resolveEditSession(id, accepted);
 
@@ -894,20 +940,10 @@ Investigate the error, fix the underlying issue in the affected files, and verif
     );
 
     if (!accepted) {
-      const fileStore = useFileStore.getState();
       for (const session of active) {
-        try {
-          if (session.originalContent === null) {
-            await tauriFs.deletePath(session.filePath);
-          } else {
-            await tauriFs.writeFile(session.filePath, session.originalContent);
-            fileStore.setFileContent(session.filePath, session.originalContent);
-          }
-        } catch (err) {
-          console.warn('[HarnessBridge] Failed to revert edit session:', err);
-        }
+        await this.restoreMutationSnapshot(session.filePath, session);
       }
-    }
+    } else for (const session of active) this.acceptMutationSnapshot(session.filePath);
 
     store.resolveAllEditSessions(accepted);
     store.resolveAllPendingFileChanges(accepted);
@@ -921,17 +957,32 @@ Investigate the error, fix the underlying issue in the affected files, and verif
     this.clearSessionTrust();
     // Clear context sources so previous session's context doesn't bleed into the new one
     this.clearTabContext();
+    this.restoreSddForConversation(conversationId).catch((error) => {
+      this.debug(`Failed to restore SDD session: ${error instanceof Error ? error.message : String(error)}`);
+    });
     this.debug(`Session restored: ${conversationId}`);
+  }
+
+  private async restoreSddForConversation(conversationId: string): Promise<void> {
+    const rows = await tauriInvokeRaw<string[]>('db_sdd_list_sessions', { projectId: this._projectId });
+    const sessions = rows.map((row) => JSON.parse(row) as SddSession);
+    const active = sessions.find((session) =>
+      session.conversationId === conversationId && !['completed', 'cancelled'].includes(session.status),
+    );
+    if (!active) return;
+    const taskRows = await tauriInvokeRaw<string[]>('db_sdd_get_tasks', { sessionId: active.id });
+    const tasks = taskRows.map((row) => JSON.parse(row) as SddTask);
+    this.harness.restoreSddSession(active.id);
+    const store = useAgentStore.getState();
+    store.setSddPhase(active.status);
+    store.setSddSpec(active.spec);
+    store.setSddTasks(tasks);
   }
 
   /** Clear harness context sources (call when switching tabs or restoring sessions). */
   clearTabContext(): void {
-    try {
-      const ctx = this.harness.getContextManager() as { clearAll?: () => void };
-      ctx.clearAll?.();
-    } catch {
-      // Context manager might not support clearAll — safe to ignore
-    }
+    this.harness.getContextManager().clearConversationContext();
+    useAgentStore.getState().setGatheredContext([]);
   }
 
   /**
@@ -1041,7 +1092,7 @@ Investigate the error, fix the underlying issue in the affected files, and verif
     const handler: ToolHandler = {
       definition: {
         name: 'spawn_subagent',
-        description: 'Delegate a focused subtask to a specialized sub-agent that runs autonomously and returns its result. Use this to parallelize work or apply a specialist agent (e.g. review, debug) to a specific subtask. Not available in chat mode.',
+        description: 'Delegate a focused subtask to a specialized sub-agent. The parent waits for the sub-agent to finish and then receives its result. Use this to apply a specialist agent (for example review or debug) to a self-contained subtask. Not available in chat mode.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -1107,7 +1158,7 @@ Investigate the error, fix the underlying issue in the affected files, and verif
             const unlisten = await tauriListen(event, (e) => handler(e.payload));
             return unlisten;
           },
-          onApproval: (pending) => bridge.handleApprovalRequest(pending),
+          onApproval: (pending, signal) => bridge.handleApprovalRequest(pending, signal),
           onUpdate: (patch) => store.updateSubAgent(subAgentId, patch),
           activeSkills: bridge.harness.getActiveSkills(),
           activeRules: bridge.harness.getActiveRules(),
@@ -1218,10 +1269,13 @@ Investigate the error, fix the underlying issue in the affected files, and verif
           store.appendThinkingText(chunk.text);
         }
         if (chunk.type === 'usage') {
+          const current = useAgentStore.getState().tokenUsage;
+          const inputTokens = (current?.inputTokens ?? 0) + chunk.usage.inputTokens;
+          const outputTokens = (current?.outputTokens ?? 0) + chunk.usage.outputTokens;
           store.setTokenUsage({
-            inputTokens: chunk.usage.inputTokens,
-            outputTokens: chunk.usage.outputTokens,
-            totalTokens: chunk.usage.totalTokens,
+            inputTokens,
+            outputTokens,
+            totalTokens: inputTokens + outputTokens,
           });
         }
         break;
@@ -1248,7 +1302,22 @@ Investigate the error, fix the underlying issue in the affected files, and verif
 
       case 'tool_call_pending': {
         const pending = event.pending;
-        store.updateToolCall(pending.id, { status: 'pending' });
+        const existing = useAgentStore.getState().pendingToolCalls.some((call) => call.id === pending.id);
+        if (!existing) {
+          store.addToolCall({
+            id: pending.id,
+            name: pending.toolName,
+            input: pending.input,
+            status: 'pending',
+            startedAt: Date.now(),
+          });
+          this.currentIterationToolCalls.push({ id: pending.id, name: pending.toolName, input: pending.input });
+        } else store.updateToolCall(pending.id, { status: 'pending' });
+        break;
+      }
+
+      case 'tool_call_notification': {
+        this.debug(`Tool auto-approved: ${event.toolName} — ${event.description}`);
         break;
       }
 
@@ -1306,17 +1375,6 @@ Investigate the error, fix the underlying issue in the affected files, and verif
             status: 'ok',
           });
         }
-        if (meta?.action === 'mode_switch' && meta.targetMode) {
-          const currentMode = useAgentStore.getState().mode;
-          const request = {
-            id: crypto.randomUUID(),
-            fromMode: currentMode,
-            toMode: meta.targetMode as AgentType,
-            reason: (meta.reason as string) || '',
-            contextSummary: (meta.contextSummary as string) || '',
-          };
-          store.setPendingModeSwitch(request);
-        }
         break;
       }
 
@@ -1358,6 +1416,7 @@ Investigate the error, fix the underlying issue in the affected files, and verif
 
       case 'file_change_pending': {
         const c = event.change;
+        const snapshot = this.mutationSnapshots.get(c.filePath);
         const isNewFile = c.originalContent === null;
         const hunks = computeDiffHunks(c.originalContent, c.newContent);
 
@@ -1381,6 +1440,8 @@ Investigate the error, fix the underlying issue in the affected files, and verif
           toolName: c.toolName,
           toolCallId: c.toolCallId,
           originalContent: c.originalContent,
+          diskOriginalContent: snapshot?.diskBefore,
+          wasDirty: snapshot?.wasDirty,
           newContent: c.newContent,
           phase: initialPhase,
           isNewFile,
@@ -1482,7 +1543,7 @@ Investigate the error, fix the underlying issue in the affected files, and verif
     toolName: string;
     input: Record<string, unknown>;
     description: string;
-  }): Promise<boolean> {
+  }, signal: AbortSignal): Promise<boolean> {
     const settings = useSettingsStore.getState();
     const mode = settings.approvalMode;
 
@@ -1527,6 +1588,13 @@ Investigate the error, fix the underlying issue in the affected files, and verif
     // Wait for UI resolution
     return new Promise<boolean>((resolve) => {
       this.approvalResolvers.set(pending.id, resolve);
+      const cancel = () => {
+        if (!this.approvalResolvers.delete(pending.id)) return;
+        useAgentStore.getState().removePendingApproval(pending.id);
+        resolve(false);
+      };
+      if (signal.aborted) cancel();
+      else signal.addEventListener('abort', cancel, { once: true });
     });
   }
 
@@ -1540,7 +1608,7 @@ Investigate the error, fix the underlying issue in the affected files, and verif
     toMode: string;
     reason: string;
     contextSummary: string;
-  }): Promise<boolean> {
+  }, signal: AbortSignal): Promise<boolean> {
     this.debug(`Delegação solicitada: ${request.fromMode} → ${request.toMode} (${request.reason})`);
 
     // Push to store so ModeSwitchDialog renders
@@ -1556,14 +1624,22 @@ Investigate the error, fix the underlying issue in the affected files, and verif
     // Wait for UI resolution (resolveModeSwitch calls our resolver)
     return new Promise<boolean>((resolve) => {
       this.modeSwitchResolvers.set(request.id, resolve);
+      const cancel = () => {
+        if (!this.modeSwitchResolvers.delete(request.id)) return;
+        useAgentStore.getState().setPendingModeSwitch(null);
+        resolve(false);
+      };
+      if (signal.aborted) cancel();
+      else signal.addEventListener('abort', cancel, { once: true });
     });
   }
 
   private async handleUserQuestionRequest(
+    id: string,
     questions: import('@hyscode/agent-harness').AgentQuestion[],
     title?: string,
+    signal?: AbortSignal,
   ): Promise<import('@hyscode/agent-harness').AgentQuestionAnswer[]> {
-    const id = crypto.randomUUID();
     this.debug(`Agent is asking ${questions.length} question(s): ${title ?? '(no title)'}`);
 
     // Push to store so AgentQuestionCard renders
@@ -1573,6 +1649,13 @@ Investigate the error, fix the underlying issue in the affected files, and verif
     // Wait for UI resolution
     return new Promise<import('@hyscode/agent-harness').AgentQuestionAnswer[]>((resolve) => {
       this.userQuestionResolvers.set(id, resolve);
+      const cancel = () => {
+        if (!this.userQuestionResolvers.delete(id)) return;
+        useAgentStore.getState().setPendingUserQuestion(null);
+        resolve([]);
+      };
+      if (signal?.aborted) cancel();
+      else signal?.addEventListener('abort', cancel, { once: true });
     });
   }
 
@@ -1654,7 +1737,7 @@ Investigate the error, fix the underlying issue in the affected files, and verif
       }));
       store.addMessage({
         id: crypto.randomUUID(),
-        role: 'user',
+        role: 'tool',
         content: '', // UI won't render this; blocks carry the real data
         blocks: resultBlocks,
         timestamp: Date.now(),
@@ -1673,7 +1756,6 @@ Investigate the error, fix the underlying issue in the affected files, and verif
    */
   private buildHistory(messages: Array<import('@/stores/agent-store').ChatMessage>): Message[] {
     const result: Message[] = [];
-    console.log('[HarnessBridge] buildHistory input messages:', messages.length, JSON.stringify(messages.map(m => ({ role: m.role, hasBlocks: !!m.blocks, blockTypes: m.blocks?.map(b => b.type), hasThinking: !!m.thinking }))));
     for (const msg of messages) {
       if (msg.blocks && msg.blocks.length > 0) {
         // Determine the correct role: if all blocks are tool_result, the role
@@ -1681,7 +1763,7 @@ Investigate the error, fix the underlying issue in the affected files, and verif
         // Copilot) format them correctly. Without this, tool_result blocks
         // stored as role='user' cause empty content in toOpenAIMessages → 400.
         const hasToolResult = msg.blocks.some(b => b.type === 'tool_result');
-        const role = hasToolResult ? 'tool' : (msg.role as 'user' | 'assistant');
+        const role = hasToolResult ? 'tool' : (msg.role as 'user' | 'assistant' | 'tool');
         const blocks = [...msg.blocks];
         // Re-inject thinking block if it was stored separately but missing from blocks
         // (Kimi/MiMo require reasoning_content on every assistant message with tool_calls)
@@ -1694,13 +1776,12 @@ Investigate the error, fix the underlying issue in the affected files, and verif
         });
       } else if (msg.content) {
         result.push({
-          role: msg.role as 'user' | 'assistant',
+          role: msg.role as 'user' | 'assistant' | 'tool',
           content: [{ type: 'text', text: msg.content }],
         });
       }
       // Skip messages with no content and no blocks (e.g. empty tool_result placeholders)
     }
-    console.log('[HarnessBridge] buildHistory output:', JSON.stringify(result.map(m => ({ role: m.role, blockTypes: m.content.map(c => c.type) }))));
     return result;
   }
 
@@ -1914,15 +1995,6 @@ ${hints.map(h => `- ${h}`).join('\n')}
     if (!conversationId) return;
 
     try {
-      // Enrich with token usage from store (populated by stream events)
-      const tokenUsage = store.tokenUsage;
-      if (tokenUsage) {
-        record.tokenUsage = {
-          input: tokenUsage.inputTokens,
-          output: tokenUsage.outputTokens,
-        };
-      }
-
       await tauriInvokeRaw('db_create_turn_record', {
         id: record.id,
         conversationId,
@@ -2029,6 +2101,96 @@ ${hints.map(h => `- ${h}`).join('\n')}
       // DB persistence is best-effort; don't break the chat flow
       console.warn('[HarnessBridge] Failed to persist conversation:', err);
     }
+  }
+
+  private async ensureConversationExists(titleSource: string): Promise<void> {
+    const store = useAgentStore.getState();
+    const conversationId = store.conversationId;
+    if (!conversationId) throw new Error('Cannot start SDD without a conversation ID.');
+    await tauriInvokeRaw('db_ensure_project', { id: this._projectId, path: this._projectId });
+    try {
+      await tauriInvokeRaw('db_create_conversation', {
+        id: conversationId,
+        projectId: this._projectId,
+        title: titleSource.slice(0, 80) || 'SDD Session',
+        mode: store.mode,
+        modelId: useSettingsStore.getState().activeModelId ?? null,
+        providerId: useSettingsStore.getState().activeProviderId ?? null,
+      });
+    } catch {
+      // Existing conversation is the expected path after the first SDD action.
+    }
+  }
+
+  private async invokeForHarness<T>(command: string, args?: Record<string, unknown>): Promise<T> {
+    const path = typeof args?.path === 'string' ? args.path : null;
+    if (command === 'read_file' && path) {
+      const tab = useEditorStore.getState().tabs.find((item) => item.filePath === path && item.type === 'file');
+      const buffered = useFileStore.getState().getFileContent(path);
+      if (tab?.isDirty && buffered !== undefined) return buffered as T;
+    }
+
+    const mutationPaths: string[] = [];
+    if (path && ['write_file', 'create_file', 'delete_path'].includes(command)) mutationPaths.push(path);
+    if (['rename_path', 'copy_path'].includes(command)) {
+      if (typeof args?.from === 'string') mutationPaths.push(args.from);
+      if (typeof args?.to === 'string') mutationPaths.push(args.to);
+    }
+    for (const mutationPath of mutationPaths) await this.captureMutationSnapshot(mutationPath);
+    return tauriInvokeRaw<T>(command, args);
+  }
+
+  private async captureMutationSnapshot(path: string): Promise<void> {
+    if (this.mutationSnapshots.has(path)) return;
+    let diskBefore: string | null = null;
+    try {
+      diskBefore = await tauriInvokeRaw<string>('read_file', { path });
+    } catch {
+      // New file or directory.
+    }
+    const tab = useEditorStore.getState().tabs.find((item) => item.filePath === path && item.type === 'file');
+    const bufferBefore = useFileStore.getState().getFileContent(path) ?? diskBefore;
+    this.mutationSnapshots.set(path, {
+      diskBefore,
+      bufferBefore,
+      wasDirty: tab?.isDirty ?? false,
+      tabId: tab?.id ?? null,
+    });
+  }
+
+  private async restoreMutationSnapshot(
+    path: string,
+    session?: Pick<AgentEditSession, 'diskOriginalContent' | 'originalContent' | 'wasDirty'>,
+  ): Promise<void> {
+    const captured = this.mutationSnapshots.get(path);
+    const diskBefore = captured?.diskBefore ?? session?.diskOriginalContent ?? session?.originalContent ?? null;
+    const bufferBefore = captured?.bufferBefore ?? session?.originalContent ?? diskBefore;
+    try {
+      if (diskBefore === null) await tauriFs.deletePath(path);
+      else await tauriFs.writeFile(path, diskBefore);
+    } catch (error) {
+      console.warn('[HarnessBridge] Failed to restore disk snapshot:', error);
+    }
+    if (bufferBefore !== null) {
+      useFileStore.getState().setFileContent(path, bufferBefore);
+      useAgentStore.setState((draft) => {
+        const edit = draft.agentEditSessions.find((item) =>
+          item.filePath === path && (item.phase === 'streaming' || item.phase === 'pending_review'),
+        );
+        if (edit) edit.newContent = bufferBefore;
+      });
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    }
+    const tabId = captured?.tabId ?? useEditorStore.getState().tabs.find((tab) => tab.filePath === path)?.id;
+    if (tabId) useEditorStore.getState().markDirty(tabId, captured?.wasDirty ?? session?.wasDirty ?? false);
+    this.mutationSnapshots.delete(path);
+  }
+
+  private acceptMutationSnapshot(path: string): void {
+    const captured = this.mutationSnapshots.get(path);
+    const tabId = captured?.tabId ?? useEditorStore.getState().tabs.find((tab) => tab.filePath === path)?.id;
+    if (tabId) useEditorStore.getState().markDirty(tabId, false);
+    this.mutationSnapshots.delete(path);
   }
 
   // ─── Agent Terminal Integration ──────────────────────────────────────

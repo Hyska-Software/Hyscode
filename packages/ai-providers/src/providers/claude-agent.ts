@@ -1,9 +1,4 @@
-import type {
-  AIProvider,
-  AIModel,
-  ChatParams,
-  StreamChunk,
-} from '../types';
+import type { AIProvider, AIModel, ChatParams, StreamChunk } from '../types';
 
 // ─── Claude Agent Provider ──────────────────────────────────────────────────
 // Wraps the Claude Agent SDK sidecar. Chat requests are dispatched to the
@@ -14,8 +9,20 @@ import type {
 
 const CLAUDE_AGENT_MODELS: AIModel[] = [
   {
-    id: 'claude-opus-4-7',
-    name: 'Claude Opus 4.7 (Agent)',
+    id: 'claude-fable-5',
+    name: 'Claude Fable 5 (Agent)',
+    provider: 'claude-agent',
+    contextWindow: 1_000_000,
+    maxOutputTokens: 128_000,
+    supportsTools: true,
+    supportsStreaming: true,
+    supportsVision: true,
+    inputPricePerMToken: 10,
+    outputPricePerMToken: 50,
+  },
+  {
+    id: 'claude-opus-4-8',
+    name: 'Claude Opus 4.8 (Agent)',
     provider: 'claude-agent',
     contextWindow: 1_000_000,
     maxOutputTokens: 128_000,
@@ -30,24 +37,12 @@ const CLAUDE_AGENT_MODELS: AIModel[] = [
     name: 'Claude Sonnet 4.6 (Agent)',
     provider: 'claude-agent',
     contextWindow: 1_000_000,
-    maxOutputTokens: 64_000,
+    maxOutputTokens: 128_000,
     supportsTools: true,
     supportsStreaming: true,
     supportsVision: true,
     inputPricePerMToken: 3,
     outputPricePerMToken: 15,
-  },
-  {
-    id: 'claude-opus-4-6',
-    name: 'Claude Opus 4.6 (Agent)',
-    provider: 'claude-agent',
-    contextWindow: 1_000_000,
-    maxOutputTokens: 128_000,
-    supportsTools: true,
-    supportsStreaming: true,
-    supportsVision: true,
-    inputPricePerMToken: 5,
-    outputPricePerMToken: 25,
   },
   {
     id: 'claude-haiku-4-5',
@@ -58,8 +53,8 @@ const CLAUDE_AGENT_MODELS: AIModel[] = [
     supportsTools: true,
     supportsStreaming: true,
     supportsVision: true,
-    inputPricePerMToken: 0.8,
-    outputPricePerMToken: 4,
+    inputPricePerMToken: 1,
+    outputPricePerMToken: 5,
   },
 ];
 
@@ -106,7 +101,7 @@ export class ClaudeAgentProvider implements AIProvider {
 
     // Flatten messages to simple role/content pairs for the sidecar
     const messages = params.messages.map((m) => ({
-      role: m.role === 'user' ? 'user' as const : 'assistant' as const,
+      role: m.role === 'user' ? ('user' as const) : ('assistant' as const),
       content: m.content
         .map((c) => (c.type === 'text' ? c.text : ''))
         .filter(Boolean)
