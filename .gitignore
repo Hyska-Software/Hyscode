@@ -28,3 +28,4 @@ apps/desktop/src-tauri/binaries/*.exe
 *.key
 *.pub
 hyska
+apps/desktop/.git_disabled/
