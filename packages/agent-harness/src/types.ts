@@ -1,7 +1,7 @@
 // ─── Agent Harness Types ────────────────────────────────────────────────────
 // Core types for the agent harness orchestration engine.
 
-import type { Message, StreamChunk, ToolDefinition, ThinkingConfig } from '@hyscode/ai-providers';
+import type { Message, StreamChunk, ToolDefinition, ThinkingConfig, TokenUsage } from '@hyscode/ai-providers';
 import type { MemoryManager } from './memory-manager';
 
 // ─── Tool System ────────────────────────────────────────────────────────────
@@ -341,7 +341,7 @@ type HarnessEventPayload =
   | { type: 'tool_call_pending'; pending: PendingToolCall }
   | { type: 'tool_call_notification'; toolCallId: string; toolName: string; description: string }
   | { type: 'tool_call_result'; toolCallId: string; toolName: string; result: ToolResult; durationMs: number }
-  | { type: 'turn_end'; reason: 'complete' | 'max_iterations' | 'cancelled' | 'error'; error?: string }
+  | { type: 'turn_end'; reason: 'complete' | 'max_iterations' | 'cancelled' | 'error'; error?: string; tokenUsage: TokenUsage }
   | { type: 'context_overflow'; droppedMessages: number; droppedCategories: Array<'history' | 'orphan_tool'> }
   | { type: 'sdd_phase_change'; phase: SddStatus }
   | { type: 'sdd_task_start'; task: SddTask }
@@ -470,8 +470,8 @@ export interface TurnRecord {
   iterations: number;
   /** All tool calls executed during this turn */
   toolCalls: ToolCallRecord[];
-  /** Token usage for this turn */
-  tokenUsage: { input: number; output: number };
+  /** Token usage for this turn (includes prompt cache fields when provider reports them) */
+  tokenUsage: TokenUsage;
   /** Why the turn ended */
   stopReason: 'complete' | 'max_iterations' | 'cancelled' | 'error';
   /** Whether the agent performed verification (test/lint/diff) */

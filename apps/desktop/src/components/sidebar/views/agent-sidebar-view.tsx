@@ -241,7 +241,7 @@ function SessionsSection() {
   const loading = useAgentStore((s) => s.sessionsLoading);
   const currentId = useAgentStore((s) => s.conversationId);
   const messageCount = useAgentStore((s) => s.messages.length);
-  const tokenUsage = useAgentStore((s) => s.tokenUsage);
+  const sessionTokenUsage = useAgentStore((s) => s.sessionTokenUsage);
   const setHistoryOpen = useAgentStore((s) => s.setHistoryOpen);
   const activeModelId = useSettingsStore((s) => s.activeModelId);
   const projectId = useProjectStore((s) => s.rootPath ?? undefined);
@@ -269,10 +269,10 @@ function SessionsSection() {
         <div className="mt-1 flex items-center gap-2 text-[9px] text-muted-foreground">
           <Zap className="h-2.5 w-2.5 shrink-0" />
           <span>{messageCount} msgs</span>
-          {tokenUsage && (
+          {sessionTokenUsage && sessionTokenUsage.totalTokens > 0 && (
             <>
               <span>·</span>
-              <span className="tabular-nums">{(tokenUsage.totalTokens / 1000).toFixed(1)}k tok</span>
+              <span className="tabular-nums">{(sessionTokenUsage.totalTokens / 1000).toFixed(1)}k tok</span>
             </>
           )}
           {activeModelId && (

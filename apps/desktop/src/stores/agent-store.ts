@@ -1,7 +1,9 @@
 import { create } from 'zustand';
 import { immer } from 'zustand/middleware/immer';
 import type { AgentType, SddStatus, SddTask, ModeSwitchRequest, AgentQuestion } from '@hyscode/agent-harness';
-import type { MessageContent } from '@hyscode/ai-providers';
+import type { MessageContent, TokenUsage } from '@hyscode/ai-providers';
+
+export type { TokenUsage };
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -40,6 +42,7 @@ export interface PerTabState {
   sddProgress: number;
   sddFailedTask: import('@hyscode/agent-harness').SddTask | null;
   tokenUsage: TokenUsage | null;
+  sessionTokenUsage: TokenUsage | null;
   apiRequestCount: number;
   lastApiRequestAt: number | null;
   agentTasks: Array<{ id: number; title: string; status: string }>;
@@ -75,6 +78,7 @@ export function defaultPerTabState(mode: AgentMode = 'chat'): PerTabState {
     sddProgress: 0,
     sddFailedTask: null,
     tokenUsage: null,
+    sessionTokenUsage: null,
     apiRequestCount: 0,
     lastApiRequestAt: null,
     agentTasks: [],
@@ -116,12 +120,6 @@ export interface PendingApproval {
   toolName: string;
   input: Record<string, unknown>;
   description: string;
-}
-
-export interface TokenUsage {
-  inputTokens: number;
-  outputTokens: number;
-  totalTokens: number;
 }
 
 export type FileChangeStatus = 'pending' | 'accepted' | 'rejected';
@@ -232,6 +230,8 @@ interface AgentState {
 
   // Token usage
   tokenUsage: TokenUsage | null;
+  /** Cumulative token usage across all turns in the current conversation. */
+  sessionTokenUsage: TokenUsage | null;
 
   // API request / credit tracking (per-turn counter, reset each conversation)
   apiRequestCount: number;
@@ -329,6 +329,7 @@ interface AgentState {
 
   // Token usage
   setTokenUsage: (usage: TokenUsage | null) => void;
+  setSessionTokenUsage: (usage: TokenUsage | null) => void;
 
   // API request / credit tracking
   incrementApiRequestCount: () => void;
@@ -379,6 +380,7 @@ export const useAgentStore = create<AgentState>()(
     sddProgress: 0,
     sddFailedTask: null,
     tokenUsage: null,
+    sessionTokenUsage: null,
     apiRequestCount: 0,
     lastApiRequestAt: null,
     agentTasks: [],
@@ -553,6 +555,7 @@ export const useAgentStore = create<AgentState>()(
         state.sddProgress = 0;
         state.sddFailedTask = null;
         state.tokenUsage = null;
+        state.sessionTokenUsage = null;
         state.apiRequestCount = 0;
         state.lastApiRequestAt = null;
         state.agentTasks = [];
@@ -709,6 +712,11 @@ export const useAgentStore = create<AgentState>()(
     setTokenUsage: (usage) =>
       set((state) => {
         state.tokenUsage = usage;
+      }),
+
+    setSessionTokenUsage: (usage) =>
+      set((state) => {
+        state.sessionTokenUsage = usage;
       }),
 
     // ─── API Request / Credit Tracking ───────────────────────────────
@@ -922,6 +930,7 @@ function _extractTab(s: any): PerTabState {
     sddProgress: s.sddProgress,
     sddFailedTask: s.sddFailedTask,
     tokenUsage: s.tokenUsage,
+    sessionTokenUsage: s.sessionTokenUsage,
     apiRequestCount: s.apiRequestCount,
     lastApiRequestAt: s.lastApiRequestAt,
     agentTasks: s.agentTasks,
@@ -953,6 +962,7 @@ function _applyTab(s: any, ps: PerTabState): void {
   s.sddProgress = ps.sddProgress;
   s.sddFailedTask = ps.sddFailedTask;
   s.tokenUsage = ps.tokenUsage;
+  s.sessionTokenUsage = ps.sessionTokenUsage;
   s.apiRequestCount = ps.apiRequestCount;
   s.lastApiRequestAt = ps.lastApiRequestAt;
   s.agentTasks = ps.agentTasks;

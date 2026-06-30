@@ -91,7 +91,25 @@ interface AnthropicSSEEvent {
   [key: string]: any;
 }
 
-function parseAnthropicEvent(data: string, indexToId: Map<number, string>): StreamChunk | null {
+/**
+ * Per-request usage state. Anthropic emits usage twice per request (message_start
+ * carries input + cache fields; message_delta carries the final output). The
+ * parser coalesces these so callers see exactly one consolidated usage chunk
+ * per request — additive accumulation across iterations works correctly.
+ */
+interface AnthropicUsageState {
+  inputTokens: number;
+  cacheReadTokens?: number;
+  cacheWriteTokens?: number;
+  outputTokens: number;
+  emitted: boolean;
+}
+
+function parseAnthropicEvent(
+  data: string,
+  indexToId: Map<number, string>,
+  usage: AnthropicUsageState,
+): StreamChunk | null {
   let event: AnthropicSSEEvent;
   try {
     event = JSON.parse(data);
@@ -102,17 +120,14 @@ function parseAnthropicEvent(data: string, indexToId: Map<number, string>): Stre
   switch (event.type) {
     case 'message_start':
       if (event.message?.usage) {
-        return {
-          type: 'usage',
-          usage: {
-            inputTokens: event.message.usage.input_tokens ?? 0,
-            outputTokens: event.message.usage.output_tokens ?? 0,
-            totalTokens:
-              (event.message.usage.input_tokens ?? 0) + (event.message.usage.output_tokens ?? 0),
-            cacheReadTokens: event.message.usage.cache_read_input_tokens,
-            cacheWriteTokens: event.message.usage.cache_creation_input_tokens,
-          },
-        };
+        // Capture input + cache; do NOT emit yet. We'll emit one consolidated
+        // usage chunk when the request ends (message_delta) so accumulation
+        // across iterations doesn't double-count.
+        usage.inputTokens = event.message.usage.input_tokens ?? 0;
+        usage.outputTokens = event.message.usage.output_tokens ?? 0;
+        usage.cacheReadTokens = event.message.usage.cache_read_input_tokens;
+        usage.cacheWriteTokens = event.message.usage.cache_creation_input_tokens;
+        usage.emitted = false;
       }
       return null;
 
@@ -151,6 +166,28 @@ function parseAnthropicEvent(data: string, indexToId: Map<number, string>): Stre
       return null;
 
     case 'message_delta':
+      if (event.usage) {
+        // Final output count for this request. Combine with the input + cache
+        // we captured in message_start and emit a single consolidated usage
+        // chunk. If a usage chunk was already emitted (rare edge: server
+        // sends message_delta twice), update the output only and re-emit.
+        usage.outputTokens = event.usage.output_tokens ?? usage.outputTokens;
+        if (usage.emitted) {
+          return null;
+        }
+        usage.emitted = true;
+        const total = usage.inputTokens + usage.outputTokens;
+        return {
+          type: 'usage',
+          usage: {
+            inputTokens: usage.inputTokens,
+            outputTokens: usage.outputTokens,
+            totalTokens: total,
+            cacheReadTokens: usage.cacheReadTokens,
+            cacheWriteTokens: usage.cacheWriteTokens,
+          },
+        };
+      }
       if (event.delta?.stop_reason) {
         const stopReason =
           event.delta.stop_reason === 'tool_use'
@@ -161,16 +198,6 @@ function parseAnthropicEvent(data: string, indexToId: Map<number, string>): Stre
         return {
           type: 'done',
           stopReason,
-        };
-      }
-      if (event.usage) {
-        return {
-          type: 'usage',
-          usage: {
-            inputTokens: event.usage.input_tokens ?? 0,
-            outputTokens: event.usage.output_tokens ?? 0,
-            totalTokens: (event.usage.input_tokens ?? 0) + (event.usage.output_tokens ?? 0),
-          },
         };
       }
       return null;
@@ -335,9 +362,11 @@ export class AnthropicProvider implements AIProvider {
 
     // Content block index → tool use ID mapping (populated by parseAnthropicEvent)
     const indexToId = new Map<number, string>();
+    // Per-request usage accumulator (reset for each chat() call).
+    const usage: AnthropicUsageState = { inputTokens: 0, outputTokens: 0, emitted: false };
 
     for await (const data of parseSSEStream(response, params.signal)) {
-      const chunk = parseAnthropicEvent(data, indexToId);
+      const chunk = parseAnthropicEvent(data, indexToId, usage);
       if (!chunk) continue;
       yield chunk;
     }

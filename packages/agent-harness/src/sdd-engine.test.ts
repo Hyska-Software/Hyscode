@@ -39,7 +39,7 @@ function outcome(response: string): TurnOutcome {
       mode: 'build',
       iterations: 1,
       toolCalls: [],
-      tokenUsage: { input: 1, output: 1 },
+      tokenUsage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
       stopReason: 'complete',
       verificationPerformed: false,
       verificationForced: false,

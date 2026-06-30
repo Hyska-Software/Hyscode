@@ -2,7 +2,7 @@
 // The main orchestration engine that powers agentic behavior.
 // Implements the observe → think → plan → act → update loop.
 
-import { type Message, getProviderRegistry } from '@hyscode/ai-providers';
+import { type Message, type TokenUsage, getProviderRegistry } from '@hyscode/ai-providers';
 import {
   type HarnessConfig,
   type HarnessEvent,
@@ -490,7 +490,13 @@ export class Harness {
     let lastToolCallSignature = '';
     let verificationForced = false;
     let terminalStatus: TurnStatus = 'complete';
-    const tokenUsage = { input: 0, output: 0 };
+    const tokenUsage: TokenUsage = {
+      inputTokens: 0,
+      outputTokens: 0,
+      totalTokens: 0,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+    };
     /** Middleware-injected context messages for the next iteration */
     let middlewareInjections: string[] = [];
 
@@ -624,8 +630,23 @@ export class Harness {
               // relies solely on toolCalls.length to decide continuation.
               break;
             case 'usage':
-              tokenUsage.input += chunk.usage.inputTokens;
-              tokenUsage.output += chunk.usage.outputTokens;
+              // Each provider emits one consolidated usage chunk per API request.
+              // Sum across iterations of a multi-iteration turn.
+              tokenUsage.inputTokens += chunk.usage.inputTokens;
+              tokenUsage.outputTokens += chunk.usage.outputTokens;
+              if (chunk.usage.cacheReadTokens !== undefined) {
+                tokenUsage.cacheReadTokens =
+                  (tokenUsage.cacheReadTokens ?? 0) + chunk.usage.cacheReadTokens;
+              }
+              if (chunk.usage.cacheWriteTokens !== undefined) {
+                tokenUsage.cacheWriteTokens =
+                  (tokenUsage.cacheWriteTokens ?? 0) + chunk.usage.cacheWriteTokens;
+              }
+              if (chunk.usage.totalTokens > 0) {
+                tokenUsage.totalTokens += chunk.usage.totalTokens;
+              } else {
+                tokenUsage.totalTokens = tokenUsage.inputTokens + tokenUsage.outputTokens;
+              }
               break;
             case 'error':
               throw new Error(chunk.error);
@@ -951,6 +972,7 @@ export class Harness {
     if (!finalResponse.trim() && terminalStatus === 'cancelled') finalResponse = 'Request cancelled.';
     this.finishTurn(
       terminalStatus,
+      tokenUsage,
       terminalStatus === 'loop_detected'
         ? 'Stuck in loop: repeated identical tool calls'
         : terminalStatus === 'error'
@@ -1165,10 +1187,10 @@ export class Harness {
     });
   }
 
-  private finishTurn(status: TurnStatus, error?: string): void {
+  private finishTurn(status: TurnStatus, tokenUsage: TokenUsage, error?: string): void {
     if (!this.turnController.finish(status)) return;
     const reason = status === 'loop_detected' ? 'error' : status;
-    this.emit({ type: 'turn_end', reason, error });
+    this.emit({ type: 'turn_end', reason, error, tokenUsage });
   }
 
   // ─── Turn Record Builder ────────────────────────────────────────────
@@ -1201,7 +1223,13 @@ export class Harness {
       mode: this.agentType,
       iterations,
       toolCalls: this.toolCallHistory,
-      tokenUsage: { input: 0, output: 0 }, // Populated by bridge from stream events
+      tokenUsage: {
+        inputTokens: 0,
+        outputTokens: 0,
+        totalTokens: 0,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+      }, // Replaced with the turn's authoritative totals by the caller.
       stopReason,
       verificationPerformed,
       verificationForced: false, // Updated by caller if needed

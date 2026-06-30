@@ -152,6 +152,7 @@ pub fn run() {
             commands::db::db_sdd_get_tasks,
             // Turn record commands
             commands::db::db_create_turn_record,
+            commands::db::db_get_conversation_token_usage,
             // Trace commands
             commands::db::db_create_trace,
             commands::db::db_list_traces,

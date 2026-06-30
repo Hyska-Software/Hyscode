@@ -26,10 +26,9 @@ import { useSettingsStore } from '@/stores/settings-store';
 import { getProviderRegistry } from '@hyscode/ai-providers';
 import { TerminalPanel } from '@/components/terminal';
 import type { AIModel } from '@hyscode/ai-providers';
+import { resolveContextWindow } from '@/lib/context-window';
 
 // ─── Context Window Pie Popup ─────────────────────────────────────────────────
-
-const CONTEXT_WINDOW_FALLBACK = 200_000;
 
 /** Look up the active model from the provider registry */
 function useActiveModel(): AIModel | null {
@@ -79,13 +78,23 @@ function PieChart({ pct, size = 14, color = 'var(--color-accent)' }: { pct: numb
   );
 }
 
-function ContextPieButton({ usage, messageCount }: { usage: TokenUsage | null; messageCount: number }) {
+function ContextPieButton({
+  usage,
+  sessionUsage,
+  messageCount,
+}: {
+  usage: TokenUsage | null;
+  sessionUsage: TokenUsage | null;
+  messageCount: number;
+}) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const model = useActiveModel();
-  const contextWindow = model?.contextWindow ?? CONTEXT_WINDOW_FALLBACK;
-  const pct = usage ? usage.inputTokens / contextWindow : 0;
+  const modelId = useSettingsStore((s) => s.activeModelId);
+  const contextWindow = resolveContextWindow(model, modelId ?? undefined);
+  const pct = usage && contextWindow ? usage.inputTokens / contextWindow : 0;
   const pctDisplay = Math.round(pct * 100);
+  const hasContextWindow = contextWindow != null;
 
   // Cost estimation
   const inputCost = usage && model?.inputPricePerMToken
@@ -105,7 +114,18 @@ function ContextPieButton({ usage, messageCount }: { usage: TokenUsage | null; m
     return () => document.removeEventListener('mousedown', handler);
   }, [open]);
 
-  const pieColor = pct > 0.8 ? '#f87171' : pct > 0.6 ? '#fb923c' : 'var(--color-accent)';
+  const pieColor = !hasContextWindow
+    ? 'var(--color-muted-foreground)'
+    : pct > 0.8
+      ? '#f87171'
+      : pct > 0.6
+        ? '#fb923c'
+        : 'var(--color-accent)';
+
+  const cacheRead = usage?.cacheReadTokens ?? 0;
+  const cacheWrite = usage?.cacheWriteTokens ?? 0;
+  const effectiveInput = usage ? Math.max(usage.inputTokens - cacheRead, 0) : 0;
+  const hasCache = cacheRead > 0 || cacheWrite > 0;
 
   return (
     <div ref={ref} className="relative">
@@ -121,32 +141,48 @@ function ContextPieButton({ usage, messageCount }: { usage: TokenUsage | null; m
             />
           }
         >
-          <PieChart pct={pct} size={14} color={pieColor} />
+          <PieChart pct={hasContextWindow ? pct : 0} size={14} color={pieColor} />
         </TooltipTrigger>
         <TooltipContent side="bottom">Context usage</TooltipContent>
       </Tooltip>
 
       {open && (
-        <div className="absolute right-0 top-7 z-50 w-56 rounded-lg border border-border/50 bg-surface-raised shadow-lg shadow-black/20 backdrop-blur-sm">
+        <div className="absolute right-0 top-7 z-50 w-60 rounded-lg border border-border/50 bg-surface-raised shadow-lg shadow-black/20 backdrop-blur-sm">
           {/* Header */}
           <div className="flex items-center gap-2 border-b border-border/30 px-3 py-2">
-            <PieChart pct={pct} size={32} color={pieColor} />
+            <PieChart pct={hasContextWindow ? pct : 0} size={32} color={pieColor} />
             <div className="flex flex-col">
-              <span className="text-[11px] font-semibold text-foreground">{pctDisplay}% used</span>
-              <span className="text-[9px] text-muted-foreground">of ~{(contextWindow / 1000).toFixed(0)}k context window</span>
+              <span className="text-[11px] font-semibold text-foreground">
+                {hasContextWindow ? `${pctDisplay}% used` : 'Context unknown'}
+              </span>
+              <span className="text-[9px] text-muted-foreground">
+                {hasContextWindow
+                  ? `of ~${(contextWindow! / 1000).toFixed(0)}k context window`
+                  : 'Model context window not registered'}
+              </span>
             </div>
           </div>
 
-          {/* Stats */}
-          <div className="flex flex-col gap-0 px-3 py-2">
+          {/* This turn */}
+          <div className="flex flex-col gap-0 px-3 pt-2">
+            <span className="text-[9px] font-semibold uppercase tracking-wider text-muted-foreground/80">This turn</span>
             {usage ? (
               <>
                 <StatRow label="Input tokens" value={usage.inputTokens.toLocaleString()} />
                 <StatRow label="Output tokens" value={usage.outputTokens.toLocaleString()} />
                 <StatRow label="Total tokens" value={usage.totalTokens.toLocaleString()} accent />
+                {hasCache && (
+                  <>
+                    <StatRow label="  └ Cache read" value={cacheRead.toLocaleString()} />
+                    {cacheWrite > 0 && (
+                      <StatRow label="  └ Cache write" value={cacheWrite.toLocaleString()} />
+                    )}
+                    <StatRow label="Effective input" value={effectiveInput.toLocaleString()} />
+                  </>
+                )}
               </>
             ) : (
-              <span className="text-[10px] text-muted-foreground">No data yet</span>
+              <span className="py-1 text-[10px] text-muted-foreground">No data yet</span>
             )}
             {totalCost != null && (
               <>
@@ -159,15 +195,33 @@ function ContextPieButton({ usage, messageCount }: { usage: TokenUsage | null; m
             <StatRow label="Messages" value={String(messageCount)} />
           </div>
 
-          {/* Progress bar */}
-          <div className="px-3 pb-2.5">
-            <div className="h-1 w-full overflow-hidden rounded-full bg-muted">
-              <div
-                className="h-full rounded-full transition-all"
-                style={{ width: `${Math.min(pctDisplay, 100)}%`, background: pieColor }}
-              />
+          {/* Session totals */}
+          {sessionUsage && (sessionUsage.inputTokens > 0 || sessionUsage.outputTokens > 0) && (
+            <div className="mt-1 border-t border-border/30 px-3 py-2">
+              <span className="text-[9px] font-semibold uppercase tracking-wider text-muted-foreground/80">Session totals</span>
+              <StatRow label="Input tokens" value={sessionUsage.inputTokens.toLocaleString()} />
+              <StatRow label="Output tokens" value={sessionUsage.outputTokens.toLocaleString()} />
+              <StatRow label="Total tokens" value={sessionUsage.totalTokens.toLocaleString()} accent />
+              {(sessionUsage.cacheReadTokens ?? 0) > 0 && (
+                <StatRow label="Cache read" value={(sessionUsage.cacheReadTokens ?? 0).toLocaleString()} />
+              )}
+              {(sessionUsage.cacheWriteTokens ?? 0) > 0 && (
+                <StatRow label="Cache write" value={(sessionUsage.cacheWriteTokens ?? 0).toLocaleString()} />
+              )}
             </div>
-          </div>
+          )}
+
+          {/* Progress bar */}
+          {hasContextWindow && (
+            <div className="px-3 pb-2.5 pt-2">
+              <div className="h-1 w-full overflow-hidden rounded-full bg-muted">
+                <div
+                  className="h-full rounded-full transition-all"
+                  style={{ width: `${Math.min(pctDisplay, 100)}%`, background: pieColor }}
+                />
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -222,6 +276,7 @@ export function AgentPanel({ hideChangedFiles }: { hideChangedFiles?: boolean } 
   const clearConversation = useAgentStore((s) => s.clearConversation);
   const messageCount = useAgentStore((s) => s.messages.length);
   const tokenUsage = useAgentStore((s) => s.tokenUsage);
+  const sessionTokenUsage = useAgentStore((s) => s.sessionTokenUsage);
   const historyOpen = useAgentStore((s) => s.historyOpen);
   const setHistoryOpen = useAgentStore((s) => s.setHistoryOpen);
   const rulesOpen = useLayoutStore((s) => s.rulesPanelOpen);
@@ -336,7 +391,7 @@ export function AgentPanel({ hideChangedFiles }: { hideChangedFiles?: boolean } 
             </TooltipContent>
           </Tooltip>
           <CreditUsageIndicator />
-          <ContextPieButton usage={tokenUsage} messageCount={messageCount} />
+          <ContextPieButton usage={tokenUsage} sessionUsage={sessionTokenUsage} messageCount={messageCount} />
           <Tooltip>
             <TooltipTrigger
               render={

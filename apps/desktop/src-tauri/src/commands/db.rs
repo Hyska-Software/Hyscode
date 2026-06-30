@@ -32,7 +32,36 @@ pub fn open_database(app_dir: &std::path::Path) -> Connection {
         .expect("failed to run migration 008");
     conn.execute_batch(include_str!("../../migrations/009_agent_sdd.sql"))
         .expect("failed to run migration 009");
+    apply_migration_010(&conn);
     conn
+}
+
+/// Migration 010: token usage + cache columns. Idempotent — checks
+/// `pragma_table_info` for each column before adding it. Safe to run on
+/// fresh DBs, on DBs already partially migrated, and on DBs that have the
+/// full schema.
+fn apply_migration_010(conn: &Connection) {
+    let additions: &[(&str, &str, &str)] = &[
+        ("turn_records", "token_total", "ALTER TABLE turn_records ADD COLUMN token_total INTEGER NOT NULL DEFAULT 0"),
+        ("turn_records", "token_cache_read", "ALTER TABLE turn_records ADD COLUMN token_cache_read INTEGER NOT NULL DEFAULT 0"),
+        ("turn_records", "token_cache_write", "ALTER TABLE turn_records ADD COLUMN token_cache_write INTEGER NOT NULL DEFAULT 0"),
+        ("traces", "token_total", "ALTER TABLE traces ADD COLUMN token_total INTEGER NOT NULL DEFAULT 0"),
+        ("traces", "token_cache_read", "ALTER TABLE traces ADD COLUMN token_cache_read INTEGER NOT NULL DEFAULT 0"),
+        ("traces", "token_cache_write", "ALTER TABLE traces ADD COLUMN token_cache_write INTEGER NOT NULL DEFAULT 0"),
+    ];
+    for (table, column, ddl) in additions {
+        let exists: bool = conn
+            .query_row(
+                "SELECT COUNT(*) > 0 FROM pragma_table_info(?1) WHERE name = ?2",
+                params![table, column],
+                |row| row.get(0),
+            )
+            .unwrap_or(false);
+        if !exists {
+            conn.execute_batch(ddl)
+                .unwrap_or_else(|e| panic!("failed to add column {table}.{column}: {e}"));
+        }
+    }
 }
 
 // ─── Row types ──────────────────────────────────────────────────────────────
@@ -289,6 +318,9 @@ pub fn db_create_turn_record(
     tool_calls: Option<String>,
     token_input: i64,
     token_output: i64,
+    token_total: i64,
+    token_cache_read: i64,
+    token_cache_write: i64,
     stop_reason: String,
     verification_performed: bool,
     verification_forced: bool,
@@ -297,8 +329,8 @@ pub fn db_create_turn_record(
 ) -> Result<(), String> {
     let conn = state.0.lock().map_err(|e| e.to_string())?;
     conn.execute(
-        "INSERT INTO turn_records (id, conversation_id, mode, iterations, tool_calls, token_input, token_output, stop_reason, verification_performed, verification_forced, files_modified, duration_ms)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+        "INSERT INTO turn_records (id, conversation_id, mode, iterations, tool_calls, token_input, token_output, token_total, token_cache_read, token_cache_write, stop_reason, verification_performed, verification_forced, files_modified, duration_ms)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
         params![
             id,
             conversation_id,
@@ -307,6 +339,9 @@ pub fn db_create_turn_record(
             tool_calls,
             token_input,
             token_output,
+            token_total,
+            token_cache_read,
+            token_cache_write,
             stop_reason,
             verification_performed as i64,
             verification_forced as i64,
@@ -316,6 +351,48 @@ pub fn db_create_turn_record(
     )
     .map_err(|e| e.to_string())?;
     Ok(())
+}
+
+#[derive(Serialize)]
+pub struct TokenUsageRow {
+    pub input_tokens: i64,
+    pub output_tokens: i64,
+    pub total_tokens: i64,
+    pub cache_read_tokens: i64,
+    pub cache_write_tokens: i64,
+}
+
+/// Sum token usage across all turn records in a conversation.
+/// Returns zeros when the conversation has no turn records yet.
+#[tauri::command]
+pub fn db_get_conversation_token_usage(
+    state: State<'_, DbState>,
+    conversation_id: String,
+) -> Result<TokenUsageRow, String> {
+    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let row = conn
+        .query_row(
+            "SELECT
+                COALESCE(SUM(token_input), 0),
+                COALESCE(SUM(token_output), 0),
+                COALESCE(SUM(token_total), 0),
+                COALESCE(SUM(token_cache_read), 0),
+                COALESCE(SUM(token_cache_write), 0)
+             FROM turn_records
+             WHERE conversation_id = ?1",
+            params![conversation_id],
+            |row| {
+                Ok(TokenUsageRow {
+                    input_tokens: row.get(0)?,
+                    output_tokens: row.get(1)?,
+                    total_tokens: row.get(2)?,
+                    cache_read_tokens: row.get(3)?,
+                    cache_write_tokens: row.get(4)?,
+                })
+            },
+        )
+        .map_err(|e| e.to_string())?;
+    Ok(row)
 }
 
 // ─── Trace commands ─────────────────────────────────────────────────────────
@@ -356,6 +433,9 @@ pub fn db_create_trace(
     iterations: String,
     token_input: i64,
     token_output: i64,
+    token_total: i64,
+    token_cache_read: i64,
+    token_cache_write: i64,
     stop_reason: String,
     verification_performed: bool,
     verification_forced: bool,
@@ -366,8 +446,8 @@ pub fn db_create_trace(
 ) -> Result<(), String> {
     let conn = state.0.lock().map_err(|e| e.to_string())?;
     conn.execute(
-        "INSERT INTO traces (id, conversation_id, mode, provider, model, system_prompt_hash, system_prompt_preview, system_prompt_tokens, tool_count, iterations, token_input, token_output, stop_reason, verification_performed, verification_forced, files_modified, errors, loop_warnings, duration_ms)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)",
+        "INSERT INTO traces (id, conversation_id, mode, provider, model, system_prompt_hash, system_prompt_preview, system_prompt_tokens, tool_count, iterations, token_input, token_output, token_total, token_cache_read, token_cache_write, stop_reason, verification_performed, verification_forced, files_modified, errors, loop_warnings, duration_ms)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22)",
         params![
             id,
             conversation_id,
@@ -381,6 +461,9 @@ pub fn db_create_trace(
             iterations,
             token_input,
             token_output,
+            token_total,
+            token_cache_read,
+            token_cache_write,
             stop_reason,
             verification_performed,
             verification_forced,

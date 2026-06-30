@@ -29,3 +29,4 @@ apps/desktop/src-tauri/binaries/*.exe
 *.pub
 hyska
 apps/desktop/.git_disabled/
+.kilo/

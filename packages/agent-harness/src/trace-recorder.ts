@@ -4,6 +4,7 @@
 // tool sequences, token budgets, timing, errors, and stop reasons.
 // Traces are stored in SQLite and can be queried for recurring failure patterns.
 
+import type { TokenUsage } from '@hyscode/ai-providers';
 import type {
   AgentType,
   ToolCallRecord,
@@ -55,8 +56,8 @@ export interface Trace {
   toolCount: number;
   /** Per-iteration records */
   iterations: TraceIteration[];
-  /** Aggregated token usage */
-  tokenUsage: { input: number; output: number };
+  /** Aggregated token usage (includes prompt cache fields when provider reports them) */
+  tokenUsage: TokenUsage;
   /** Stop reason */
   stopReason: 'complete' | 'max_iterations' | 'cancelled' | 'error';
   /** Verification flags */
@@ -133,7 +134,7 @@ export class TraceRecorder {
       errors: [],
       loopWarnings: [],
       filesModified: [],
-      tokenUsage: { input: 0, output: 0 },
+      tokenUsage: { inputTokens: 0, outputTokens: 0, totalTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 },
       timestamp: new Date().toISOString(),
     };
     this.errors = [];
@@ -229,7 +230,7 @@ export class TraceRecorder {
   /** Finalize the trace with summary data. */
   finalizeTrace(
     stopReason: 'complete' | 'max_iterations' | 'cancelled' | 'error',
-    tokenUsage: { input: number; output: number },
+    tokenUsage: TokenUsage,
     filesModified: string[],
     verificationPerformed?: boolean,
     verificationForced?: boolean,
@@ -307,8 +308,8 @@ export function analyzeTraces(traces: Trace[]): TraceAnalysisSummary {
   const avgIterations = traces.reduce((sum, t) => sum + t.iterations.length, 0) / traces.length;
   const avgDurationMs = traces.reduce((sum, t) => sum + t.durationMs, 0) / traces.length;
   const avgTokensPerTurn = {
-    input: traces.reduce((sum, t) => sum + t.tokenUsage.input, 0) / traces.length,
-    output: traces.reduce((sum, t) => sum + t.tokenUsage.output, 0) / traces.length,
+    input: traces.reduce((sum, t) => sum + t.tokenUsage.inputTokens, 0) / traces.length,
+    output: traces.reduce((sum, t) => sum + t.tokenUsage.outputTokens, 0) / traces.length,
   };
 
   // Tool usage + failures

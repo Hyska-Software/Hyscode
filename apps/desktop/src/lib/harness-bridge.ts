@@ -18,7 +18,7 @@ import type {
   SddDatabase,
   SddSession,
 } from '@hyscode/agent-harness';
-import type { Message, ToolDefinition, MessageContent } from '@hyscode/ai-providers';
+import type { Message, ToolDefinition, MessageContent, TokenUsage } from '@hyscode/ai-providers';
 import { tauriInvokeRaw } from './tauri-invoke';
 import { tauriFs } from './tauri-fs';
 import { listen as tauriListen } from '@tauri-apps/api/event';
@@ -960,6 +960,9 @@ Investigate the error, fix the underlying issue in the affected files, and verif
     this.restoreSddForConversation(conversationId).catch((error) => {
       this.debug(`Failed to restore SDD session: ${error instanceof Error ? error.message : String(error)}`);
     });
+    // Refresh cumulative token usage for the restored session from the DB.
+    useAgentStore.getState().setSessionTokenUsage(null);
+    void this.refreshSessionUsage();
     this.debug(`Session restored: ${conversationId}`);
   }
 
@@ -1006,6 +1009,9 @@ Investigate the error, fix the underlying issue in the affected files, and verif
     // Point the harness at the new tab's conversation
     if (state.conversationId) {
       this.harness.setConversationId(state.conversationId);
+      // Refresh cumulative token usage for the new active tab from the DB.
+      useAgentStore.getState().setSessionTokenUsage(null);
+      void this.refreshSessionUsage();
     }
     this.debug(`Harness synced to tab: ${state.activeTabId} (conv: ${state.conversationId ?? 'none'})`);
   }
@@ -1269,13 +1275,28 @@ Investigate the error, fix the underlying issue in the affected files, and verif
           store.appendThinkingText(chunk.text);
         }
         if (chunk.type === 'usage') {
+          // Each provider emits one consolidated usage chunk per API request.
+          // Sum across the iterations of a multi-iteration turn. Cache fields
+          // (Anthropic prompt caching) are preserved when the chunk includes
+          // them; a chunk that omits them contributes 0.
+          const u = chunk.usage;
           const current = useAgentStore.getState().tokenUsage;
-          const inputTokens = (current?.inputTokens ?? 0) + chunk.usage.inputTokens;
-          const outputTokens = (current?.outputTokens ?? 0) + chunk.usage.outputTokens;
+          const inputTokens = (current?.inputTokens ?? 0) + u.inputTokens;
+          const outputTokens = (current?.outputTokens ?? 0) + u.outputTokens;
+          const cacheReadTokens =
+            (current?.cacheReadTokens ?? 0) + (u.cacheReadTokens ?? 0);
+          const cacheWriteTokens =
+            (current?.cacheWriteTokens ?? 0) + (u.cacheWriteTokens ?? 0);
+          const totalTokens =
+            u.totalTokens > 0
+              ? (current?.totalTokens ?? 0) + u.totalTokens
+              : inputTokens + outputTokens;
           store.setTokenUsage({
             inputTokens,
             outputTokens,
-            totalTokens: inputTokens + outputTokens,
+            totalTokens,
+            cacheReadTokens,
+            cacheWriteTokens,
           });
         }
         break;
@@ -1384,12 +1405,21 @@ Investigate the error, fix the underlying issue in the affected files, and verif
         } else {
           this.debug(`Turno encerrado: ${event.reason}`);
         }
+        // Authoritative reconciliation: the harness's final tokenUsage is the
+        // source of truth. Overwrite any per-iteration accumulation in the
+        // store so the UI shows the exact turn total.
+        if (event.tokenUsage) {
+          useAgentStore.getState().setTokenUsage(event.tokenUsage);
+        }
         // Flush streaming text FIRST so it commits to the last assistant message
         // before finalizeIterationBlocks() inserts a user tool_result message.
         // If flushed after, the last message would be 'user' and flushStreamingText
         // would create a duplicate assistant message with the same content.
         useAgentStore.getState().flushStreamingText();
         this.finalizeIterationBlocks();
+        // Refresh cumulative session usage from the DB (fire-and-forget; the
+        // turn record is persisted right after this event in runTurn).
+        void this.refreshSessionUsage();
         break;
       }
 
@@ -2001,8 +2031,11 @@ ${hints.map(h => `- ${h}`).join('\n')}
         mode: record.mode,
         iterations: record.iterations,
         toolCalls: JSON.stringify(record.toolCalls),
-        tokenInput: record.tokenUsage?.input ?? 0,
-        tokenOutput: record.tokenUsage?.output ?? 0,
+        tokenInput: record.tokenUsage?.inputTokens ?? 0,
+        tokenOutput: record.tokenUsage?.outputTokens ?? 0,
+        tokenTotal: record.tokenUsage?.totalTokens ?? 0,
+        tokenCacheRead: record.tokenUsage?.cacheReadTokens ?? 0,
+        tokenCacheWrite: record.tokenUsage?.cacheWriteTokens ?? 0,
         stopReason: record.stopReason,
         verificationPerformed: record.verificationPerformed,
         verificationForced: record.verificationForced,
@@ -2025,8 +2058,11 @@ ${hints.map(h => `- ${h}`).join('\n')}
             systemPromptTokens: record.trace.systemPromptTokens,
             toolCount: record.trace.toolCount,
             iterations: JSON.stringify(record.trace.iterations),
-            tokenInput: record.trace.tokenUsage.input,
-            tokenOutput: record.trace.tokenUsage.output,
+            tokenInput: record.trace.tokenUsage.inputTokens,
+            tokenOutput: record.trace.tokenUsage.outputTokens,
+            tokenTotal: record.trace.tokenUsage.totalTokens,
+            tokenCacheRead: record.trace.tokenUsage.cacheReadTokens ?? 0,
+            tokenCacheWrite: record.trace.tokenUsage.cacheWriteTokens ?? 0,
             stopReason: record.trace.stopReason,
             verificationPerformed: record.trace.verificationPerformed,
             verificationForced: record.trace.verificationForced,
@@ -2042,6 +2078,27 @@ ${hints.map(h => `- ${h}`).join('\n')}
     } catch (e) {
       // Turn record persistence is best-effort
       console.warn('[HarnessBridge] Failed to persist turn record', e);
+    }
+  }
+
+  /**
+   * Recompute cumulative token usage for the active conversation from the DB
+   * (sum across persisted turn_records) and write it to the store as
+   * `sessionTokenUsage`. Fire-and-forget; the UI only updates best-effort.
+   */
+  private async refreshSessionUsage(): Promise<void> {
+    const conversationId = useAgentStore.getState().conversationId;
+    if (!conversationId) return;
+    try {
+      const usage = await tauriInvokeRaw<TokenUsage | null>(
+        'db_get_conversation_token_usage',
+        { conversationId },
+      );
+      if (usage) {
+        useAgentStore.getState().setSessionTokenUsage(usage);
+      }
+    } catch (e) {
+      console.warn('[HarnessBridge] Failed to refresh session usage', e);
     }
   }
 
