@@ -224,7 +224,7 @@ export class OpenRouterProvider extends OpenAIProvider {
             id: m.id,
             name: m.name,
             provider: 'openrouter',
-            contextWindow: m.context_length ?? 128_000,
+            contextWindow: m.context_length ?? 1_000_000,
             maxOutputTokens: m.top_provider?.max_completion_tokens ?? 8_192,
             supportsTools: m.supported_parameters?.includes('tools') ?? false,
             supportsStreaming: true,

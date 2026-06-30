@@ -1244,11 +1244,17 @@ Investigate the error, fix the underlying issue in the affected files, and verif
       case 'turn_start': {
         this.debug(`Iteração ${event.iteration} — aguardando LLM...`);
 
-        // On subsequent turns, finalize the previous iteration's blocks,
-        // flush current text, and create a fresh assistant message
+        // On subsequent turns, commit the previous iteration's streamed text,
+        // finalize its structured blocks, and create a fresh empty assistant.
+        // ORDER MATTERS: flushStreamingText() must run BEFORE
+        // finalizeIterationBlocks(). Between iterations, `streamingText` is
+        // never cleared, so if finalize() runs first it appends a `role: 'tool'`
+        // message and flush() then sees `last.role !== 'assistant'` and pushes a
+        // duplicate assistant with the previous iteration's text. This mirrors
+        // the ordering in the `turn_end` handler (see comment above that case).
         if (event.iteration > 1) {
-          this.finalizeIterationBlocks();
           store.flushStreamingText();
+          this.finalizeIterationBlocks();
           store.addMessage({
             id: crypto.randomUUID(),
             role: 'assistant',

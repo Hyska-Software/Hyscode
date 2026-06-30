@@ -110,7 +110,7 @@ export class OllamaProvider implements AIProvider {
         id: m.name,
         name: m.name,
         provider: 'ollama',
-        contextWindow: 128_000, // Most modern models support at least 128k
+        contextWindow: 1_000_000, // Conservative upper bound; Ollama models vary widely
         maxOutputTokens: 8_192,
         supportsTools: true, // Assume true, will fail gracefully if not
         supportsStreaming: true,
