@@ -14,26 +14,24 @@ export function SddSpecReview({ onApprove, onReject }: SddSpecReviewProps) {
   if (!sddSpec) return null;
 
   return (
-    <div className="flex flex-col gap-3 rounded-lg border border-accent/20 bg-accent/5 p-4">
+    <div className="mx-4 my-3 border-l-2 border-accent/30 pl-3">
       {/* Header */}
-      <div className="flex items-center gap-2">
-        <FileText className="h-4 w-4 text-accent" />
-        <span className="text-[12px] font-semibold text-foreground">
-          Specification Review
-        </span>
+      <div className="mb-2 flex items-center gap-2">
+        <FileText className="h-3.5 w-3.5 text-accent/80" />
+        <span className="text-[12px] font-medium text-foreground/90">Specification Review</span>
       </div>
 
       {/* Spec content */}
-      <div className="max-h-60 overflow-y-auto rounded-md bg-surface-raised p-3">
-        <MarkdownContent content={sddSpec} className="text-[11px]" />
+      <div className="max-h-60 overflow-y-auto rounded-md bg-muted/20 p-3">
+        <MarkdownContent content={sddSpec} className="text-[11.5px]" />
       </div>
 
       {/* Actions */}
-      <div className="flex items-center gap-2">
+      <div className="mt-3 flex items-center gap-2">
         <Button
           size="sm"
           onClick={onApprove}
-          className="h-7 gap-1.5 bg-green-600 px-3 text-[11px] hover:bg-green-700"
+          className="h-7 gap-1.5 bg-green-600 px-3 text-[11px] hover:bg-green-500"
         >
           <Check className="h-3 w-3" />
           Approve & Build

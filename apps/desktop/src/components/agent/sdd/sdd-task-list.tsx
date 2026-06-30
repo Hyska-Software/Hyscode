@@ -1,4 +1,13 @@
-import { Check, Circle, Loader2, AlertCircle, SkipForward, Pause, Play, RotateCcw } from 'lucide-react';
+import {
+  Check,
+  Circle,
+  Loader2,
+  AlertCircle,
+  SkipForward,
+  Pause,
+  Play,
+  RotateCcw,
+} from 'lucide-react';
 import { useState } from 'react';
 import { useAgentStore } from '@/stores/agent-store';
 import { HarnessBridge } from '@/lib/harness-bridge';
@@ -7,12 +16,15 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { cn } from '@/lib/utils';
 import type { SddTaskStatus } from '@hyscode/agent-harness';
 
-const STATUS_ICONS: Record<SddTaskStatus, { icon: typeof Check; color: string; animate?: boolean }> = {
-  pending: { icon: Circle, color: 'text-muted-foreground/50' },
+const STATUS_ICONS: Record<
+  SddTaskStatus,
+  { icon: typeof Check; color: string; animate?: boolean }
+> = {
+  pending: { icon: Circle, color: 'text-muted-foreground/35' },
   in_progress: { icon: Loader2, color: 'text-accent', animate: true },
-  completed: { icon: Check, color: 'text-green-400' },
-  skipped: { icon: SkipForward, color: 'text-yellow-400' },
-  failed: { icon: AlertCircle, color: 'text-red-400' },
+  completed: { icon: Check, color: 'text-green-400/80' },
+  skipped: { icon: SkipForward, color: 'text-yellow-400/80' },
+  failed: { icon: AlertCircle, color: 'text-red-400/80' },
 };
 
 export function SddTaskList() {
@@ -74,16 +86,16 @@ export function SddTaskList() {
   };
 
   return (
-    <div className="flex flex-col gap-2 rounded-lg border border-surface-raised bg-background p-3">
+    <div className="mx-4 my-3 border-l-2 border-foreground/[0.08] pl-3">
       {/* Header with progress + controls */}
       <div className="flex items-center justify-between">
-        <span className="text-[11px] font-semibold text-foreground">
+        <span className="text-[11px] font-medium text-foreground/85">
           {isPlanReview ? 'Review Plan' : 'Tasks'}
         </span>
         <div className="flex items-center gap-1.5">
           {isExecuting && (
             <>
-              <span className="text-[10px] tabular-nums text-muted-foreground">
+              <span className="text-[10px] tabular-nums text-muted-foreground/60">
                 {sddProgress}%
               </span>
               <Tooltip>
@@ -93,13 +105,19 @@ export function SddTaskList() {
                       variant="ghost"
                       size="icon-xs"
                       onClick={handlePauseResume}
-                      className="h-5 w-5 text-muted-foreground hover:text-foreground"
+                      className="h-5 w-5 text-muted-foreground/60 hover:text-foreground"
                     />
                   }
                 >
-                  {paused || failedTask ? <Play className="h-3 w-3" /> : <Pause className="h-3 w-3" />}
+                  {paused || failedTask ? (
+                    <Play className="h-3 w-3" />
+                  ) : (
+                    <Pause className="h-3 w-3" />
+                  )}
                 </TooltipTrigger>
-                <TooltipContent side="top">{paused || failedTask ? 'Resume' : 'Pause'}</TooltipContent>
+                <TooltipContent side="top">
+                  {paused || failedTask ? 'Resume' : 'Pause'}
+                </TooltipContent>
               </Tooltip>
             </>
           )}
@@ -108,7 +126,7 @@ export function SddTaskList() {
 
       {/* Progress bar (only during execution) */}
       {isExecuting && (
-        <div className="h-1 w-full rounded-full bg-muted">
+        <div className="mt-1.5 h-1 w-full rounded-full bg-foreground/[0.06]">
           <div
             className="h-full rounded-full bg-accent transition-all duration-300"
             style={{ width: `${sddProgress}%` }}
@@ -117,15 +135,16 @@ export function SddTaskList() {
       )}
 
       {/* Task list */}
-      <div className="flex flex-col gap-1">
+      <div className="mt-2 flex flex-col gap-1">
         {tasks.map((task, i) => {
           const statusConfig = STATUS_ICONS[task.status];
           const Icon = statusConfig.icon;
-          const canSkip = task.status === 'pending' || task.status === 'in_progress' || task.status === 'failed';
+          const canSkip =
+            task.status === 'pending' || task.status === 'in_progress' || task.status === 'failed';
           return (
             <div
               key={task.id}
-              className="group flex items-start gap-2 rounded-md px-2 py-1.5 hover:bg-surface-raised"
+              className="group flex items-start gap-2 rounded-md px-2 py-1.5 transition-colors hover:bg-foreground/[0.02]"
             >
               <Icon
                 className={cn(
@@ -135,11 +154,11 @@ export function SddTaskList() {
                 )}
               />
               <div className="min-w-0 flex-1">
-                <span className="text-[11px] font-medium text-foreground">
+                <span className="text-[11px] font-medium text-foreground/85">
                   {i + 1}. {task.title}
                 </span>
                 {task.description && (
-                  <p className="mt-0.5 text-[10px] leading-relaxed text-muted-foreground">
+                  <p className="mt-0.5 text-[10px] leading-relaxed text-muted-foreground/65">
                     {task.description}
                   </p>
                 )}
@@ -148,7 +167,7 @@ export function SddTaskList() {
                     {task.files.map((f) => (
                       <span
                         key={f}
-                        className="rounded bg-surface-raised px-1.5 py-0.5 text-[9px] font-mono text-muted-foreground"
+                        className="rounded bg-muted/40 px-1.5 py-0.5 font-mono text-[9px] text-muted-foreground/70"
                       >
                         {f.split(/[\\/]/).pop()}
                       </span>
@@ -164,7 +183,7 @@ export function SddTaskList() {
                         variant="ghost"
                         size="icon-xs"
                         onClick={() => handleRetryTask(task.id)}
-                        className="h-5 w-5 opacity-0 transition-opacity group-hover:opacity-100 text-muted-foreground hover:text-accent"
+                        className="h-5 w-5 text-muted-foreground/60 opacity-0 transition-opacity hover:text-accent group-hover:opacity-100"
                       />
                     }
                   >
@@ -181,7 +200,7 @@ export function SddTaskList() {
                         variant="ghost"
                         size="icon-xs"
                         onClick={() => handleSkipTask(task.id)}
-                        className="h-5 w-5 opacity-0 transition-opacity group-hover:opacity-100 text-muted-foreground hover:text-yellow-400"
+                        className="h-5 w-5 text-muted-foreground/60 opacity-0 transition-opacity hover:text-yellow-400 group-hover:opacity-100"
                       />
                     }
                   >
@@ -197,7 +216,7 @@ export function SddTaskList() {
 
       {/* Plan approval button — shown when plan is ready for review */}
       {isPlanReview && (
-        <div className="flex justify-end gap-2 pt-1">
+        <div className="flex justify-end gap-2 pt-2">
           <Button
             variant="default"
             size="sm"

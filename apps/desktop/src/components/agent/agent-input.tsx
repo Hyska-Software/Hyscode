@@ -1,13 +1,32 @@
-import { Send, Square, ChevronDown, Settings, MessageSquare, Hammer, Search, Bug, ClipboardList, Shield, Zap, SlidersHorizontal, Check, ArrowRight, Plus, Brain, Bell, ShieldCheck, Paperclip, X, ImageIcon, AlertTriangle } from 'lucide-react';
+import {
+  Send,
+  Square,
+  ChevronDown,
+  Settings,
+  MessageSquare,
+  Hammer,
+  Search,
+  Bug,
+  ClipboardList,
+  Shield,
+  Zap,
+  SlidersHorizontal,
+  Check,
+  ArrowRight,
+  Plus,
+  Brain,
+  Bell,
+  ShieldCheck,
+  Paperclip,
+  X,
+  ImageIcon,
+  AlertTriangle,
+} from 'lucide-react';
 import { useState, useRef, useMemo, useCallback } from 'react';
 import { ContextMentionPicker } from './context-mention-picker';
 import { Textarea } from '@/components/ui/textarea';
 import { Button } from '@/components/ui/button';
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from '@/components/ui/tooltip';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -56,14 +75,22 @@ function useActiveModelInfo(): ModelInfo | null {
 
 function processImageFile(file: File): Promise<AttachedImage | null> {
   return new Promise((resolve) => {
-    if (!ACCEPTED_IMAGE_TYPES.includes(file.type)) { resolve(null); return; }
-    if (file.size > MAX_IMAGE_SIZE) { resolve(null); return; }
+    if (!ACCEPTED_IMAGE_TYPES.includes(file.type)) {
+      resolve(null);
+      return;
+    }
+    if (file.size > MAX_IMAGE_SIZE) {
+      resolve(null);
+      return;
+    }
     const reader = new FileReader();
     reader.onload = () => {
       const dataUrl = reader.result as string;
-      // data:image/png;base64,XXXXX
       const commaIdx = dataUrl.indexOf(',');
-      if (commaIdx < 0) { resolve(null); return; }
+      if (commaIdx < 0) {
+        resolve(null);
+        return;
+      }
       const base64 = dataUrl.slice(commaIdx + 1);
       const previewUrl = URL.createObjectURL(file);
       resolve({
@@ -87,7 +114,6 @@ interface AgentCapability {
   description: string;
   badge: string;
   color: string;
-  activeColor: string;
   placeholder: string;
 }
 
@@ -98,7 +124,6 @@ const AGENT_CAPABILITIES: Record<AgentMode, AgentCapability> = {
     description: 'General-purpose assistant for questions and explanations.',
     badge: 'read-only',
     color: 'text-blue-400',
-    activeColor: 'bg-blue-500/15 text-blue-400',
     placeholder: 'Ask anything...',
   },
   build: {
@@ -107,7 +132,6 @@ const AGENT_CAPABILITIES: Record<AgentMode, AgentCapability> = {
     description: 'Implements features, writes code, creates files, runs commands.',
     badge: 'full access',
     color: 'text-accent',
-    activeColor: 'bg-accent/15 text-accent',
     placeholder: 'Describe what to build...',
   },
   review: {
@@ -116,7 +140,6 @@ const AGENT_CAPABILITIES: Record<AgentMode, AgentCapability> = {
     description: 'Reviews code for bugs, security, performance, best practices.',
     badge: 'read-only',
     color: 'text-purple-400',
-    activeColor: 'bg-purple-500/15 text-purple-400',
     placeholder: 'What should I review?',
   },
   debug: {
@@ -125,7 +148,6 @@ const AGENT_CAPABILITIES: Record<AgentMode, AgentCapability> = {
     description: 'Diagnoses and fixes bugs, errors, and unexpected behavior.',
     badge: 'full access',
     color: 'text-red-400',
-    activeColor: 'bg-red-500/15 text-red-400',
     placeholder: 'Describe the bug or error...',
   },
   plan: {
@@ -134,7 +156,6 @@ const AGENT_CAPABILITIES: Record<AgentMode, AgentCapability> = {
     description: 'Plans architecture, writes specs, designs systems.',
     badge: 'writes docs',
     color: 'text-amber-400',
-    activeColor: 'bg-amber-500/15 text-amber-400',
     placeholder: 'Describe what to plan or design...',
   },
 };
@@ -200,7 +221,14 @@ const APPROVAL_CONFIG: Record<ApprovalMode, ApprovalConfig> = {
   },
 };
 
-const APPROVAL_MODES: ApprovalMode[] = ['manual', 'smart', 'session-trust', 'notify', 'yolo', 'custom'];
+const APPROVAL_MODES: ApprovalMode[] = [
+  'manual',
+  'smart',
+  'session-trust',
+  'notify',
+  'yolo',
+  'custom',
+];
 
 // ─── Provider & model catalog (mirrors ai-tab.tsx) ──────────────────────────
 // (Moved to @/lib/provider-catalog — imported above)
@@ -228,7 +256,8 @@ export function AgentInput() {
 
   const activeModel = useActiveModel();
   const activeModelInfo = useActiveModelInfo();
-  const showVisionWarning = attachedImages.length > 0 && activeModel != null && !activeModel.supportsVision;
+  const showVisionWarning =
+    attachedImages.length > 0 && activeModel != null && !activeModel.supportsVision;
 
   const thinkingKey = `${activeProviderId ?? ''}::${activeModelId ?? ''}`;
   const thinkingSettings = useSettingsStore((s) => s.thinkingSettings);
@@ -261,10 +290,9 @@ export function AgentInput() {
   }, [activeModelId, availableModels, groupedModels]);
 
   const handleModelChange = (modelId: string) => {
-    useSettingsStore.getState().setActiveProvider(
-      useSettingsStore.getState().activeProviderId ?? '',
-      modelId,
-    );
+    useSettingsStore
+      .getState()
+      .setActiveProvider(useSettingsStore.getState().activeProviderId ?? '', modelId);
   };
 
   const handleModelChangeWithProvider = (providerId: string, modelId: string) => {
@@ -324,12 +352,15 @@ export function AgentInput() {
     }
   }, []);
 
-  const handleFileInputChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files?.length) {
-      addImagesFromFiles(e.target.files);
-      e.target.value = ''; // reset so same file can be re-selected
-    }
-  }, [addImagesFromFiles]);
+  const handleFileInputChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      if (e.target.files?.length) {
+        addImagesFromFiles(e.target.files);
+        e.target.value = ''; // reset so same file can be re-selected
+      }
+    },
+    [addImagesFromFiles],
+  );
 
   const handlePaste = useCallback((e: React.ClipboardEvent) => {
     const items = e.clipboardData?.items;
@@ -345,7 +376,7 @@ export function AgentInput() {
       e.preventDefault();
       addImagesFromFiles(imageFiles);
     }
-  }, [addImagesFromFiles]);
+  }, []);
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
     const hasImages = Array.from(e.dataTransfer.types).includes('Files');
@@ -363,16 +394,19 @@ export function AgentInput() {
     }
   }, []);
 
-  const handleDrop = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    setIsDragOver(false);
-    if (e.dataTransfer.files?.length) {
-      addImagesFromFiles(e.dataTransfer.files);
-    }
-  }, [addImagesFromFiles]);
+  const handleDrop = useCallback(
+    (e: React.DragEvent) => {
+      e.preventDefault();
+      setIsDragOver(false);
+      if (e.dataTransfer.files?.length) {
+        addImagesFromFiles(e.dataTransfer.files);
+      }
+    },
+    [addImagesFromFiles],
+  );
 
   return (
-    <div className="shrink-0 px-2.5 pt-1.5 pb-2.5 flex flex-col gap-1.5">
+    <div className="shrink-0 px-4 pb-4 pt-2">
       {/* Hidden file input for image picker */}
       <input
         ref={fileInputRef}
@@ -383,22 +417,23 @@ export function AgentInput() {
         onChange={handleFileInputChange}
       />
 
-      {/* Vision warning (outside the frame) */}
+      {/* Vision warning */}
       {showVisionWarning && (
-        <div className="flex items-center gap-1.5 rounded-md bg-amber-500/10 px-2.5 py-1.5 text-[10px] text-amber-400">
+        <div className="mb-2 flex items-center gap-1.5 text-[10px] text-warning">
           <AlertTriangle className="h-3 w-3 shrink-0" />
           <span>{activeModel.name} does not support vision. Images will be ignored.</span>
         </div>
       )}
 
-      {/* ── Unified input frame ── */}
+      {/* ── Minimal input frame ── */}
       <div
         ref={inputWrapperRef}
         className={cn(
-          'relative flex flex-col rounded-xl bg-surface-raised',
-          'ring-1 ring-inset ring-foreground/[0.07] shadow-sm shadow-black/[0.1]',
-          'transition-all focus-within:ring-accent/[0.22]',
-          isDragOver && 'ring-accent/[0.45]',
+          'group/input relative flex flex-col overflow-hidden rounded-xl transition-all',
+          'bg-foreground/[0.025]',
+          'border border-foreground/[0.06]',
+          'focus-within:border-foreground/[0.1]',
+          isDragOver && 'border-accent/40',
         )}
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
@@ -406,8 +441,8 @@ export function AgentInput() {
       >
         {/* Drag-to-drop overlay */}
         {isDragOver && (
-          <div className="absolute inset-0 z-20 flex items-center justify-center rounded-xl bg-accent/10 pointer-events-none">
-            <div className="flex items-center gap-1.5 text-[11px] text-accent font-medium">
+          <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center bg-accent/5">
+            <div className="flex items-center gap-1.5 text-[11px] font-medium text-accent">
               <ImageIcon className="h-4 w-4" />
               Drop images here
             </div>
@@ -416,21 +451,17 @@ export function AgentInput() {
 
         {/* Image preview strip */}
         {attachedImages.length > 0 && (
-          <div className="flex flex-wrap gap-1.5 px-3 pt-2.5">
+          <div className="flex flex-wrap gap-2 px-3 pt-3">
             {attachedImages.map((img) => (
               <div
                 key={img.id}
-                className="group/img relative h-12 w-12 shrink-0 rounded-md border border-border/40 bg-muted overflow-hidden"
+                className="group/img relative h-10 w-10 shrink-0 overflow-hidden rounded-md bg-muted/50"
                 title={img.name}
               >
-                <img
-                  src={img.previewUrl}
-                  alt={img.name}
-                  className="h-full w-full object-cover"
-                />
+                <img src={img.previewUrl} alt={img.name} className="h-full w-full object-cover" />
                 <button
                   onClick={() => useAgentStore.getState().removeAttachedImage(img.id)}
-                  className="absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full bg-surface-raised border border-border/50 text-muted-foreground opacity-0 group-hover/img:opacity-100 transition-opacity hover:text-foreground hover:bg-red-500/20"
+                  className="absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full bg-background text-muted-foreground opacity-0 transition-opacity hover:text-foreground group-hover/img:opacity-100"
                 >
                   <X className="h-2.5 w-2.5" />
                 </button>
@@ -440,7 +471,7 @@ export function AgentInput() {
         )}
 
         {/* Textarea */}
-        <div className="relative px-1 py-0.5">
+        <div className="relative px-3 pt-2">
           <ContextMentionPicker
             open={mentionPickerOpen}
             onClose={() => setMentionPickerOpen(false)}
@@ -453,15 +484,21 @@ export function AgentInput() {
               const val = e.target.value;
               setInput(val);
               // Detect '@' typed at the end or after a space
-              if (val.endsWith('@') && (val.length === 1 || val[val.length - 2] === ' ' || val[val.length - 2] === '\n')) {
+              if (
+                val.endsWith('@') &&
+                (val.length === 1 || val[val.length - 2] === ' ' || val[val.length - 2] === '\n')
+              ) {
                 setMentionPickerOpen(true);
               }
             }}
             onPaste={handlePaste}
-            placeholder={currentCap.placeholder}
-            className="max-h-32 min-h-[40px] w-full border-0 bg-transparent px-2.5 text-xs leading-relaxed focus-visible:ring-0 resize-none overflow-y-auto"
+            placeholder={`${currentCap.placeholder} (Enter para enviar, Shift+Enter para nova linha)`}
+            className="max-h-40 min-h-[52px] w-full resize-none border-0 bg-transparent px-0 py-1.5 text-[13px] leading-[1.6] text-foreground/90 placeholder:text-muted-foreground/50 focus-visible:ring-0 focus-visible:ring-offset-0"
             onKeyDown={(e) => {
-              if (mentionPickerOpen && (e.key === 'Escape' || e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
+              if (
+                mentionPickerOpen &&
+                (e.key === 'Escape' || e.key === 'ArrowDown' || e.key === 'ArrowUp')
+              ) {
                 // Let the picker handle these keys
                 return;
               }
@@ -477,99 +514,141 @@ export function AgentInput() {
           />
         </div>
 
-        {/* Separator between textarea and toolbar */}
-        <div className="h-px bg-foreground/[0.06]" />
-
-        {/* Bottom toolbar: agent pills + model left, actions right */}
-        <div className="flex items-center justify-between gap-2 px-2.5 py-1.5">
-        {/* Agent mode + model + approval selectors */}
-        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1">
-          {/* Agent mode dropdown */}
-          {(() => {
-            const cap = AGENT_CAPABILITIES[mode];
-            const ModeIcon = cap.icon;
-            return (
-              <DropdownMenu>
-                <DropdownMenuTrigger className={cn(
-                  'flex cursor-pointer items-center gap-1 rounded-pill bg-background px-2 py-[3px] text-[10px] font-medium transition-colors focus:outline-none',
-                  cap.activeColor,
-                )}>
-                  <ModeIcon className="h-3 w-3 shrink-0" />
-                  <span>{cap.label}</span>
-                  <ChevronDown className="h-2.5 w-2.5 shrink-0 opacity-60" />
-                </DropdownMenuTrigger>
-                <DropdownMenuContent side="top" className="min-w-[200px]">
-                  <div className="px-2 pb-1 pt-1.5 text-[9px] uppercase tracking-wider text-muted-foreground">
-                    Agent Mode
-                  </div>
-                  <DropdownMenuSeparator />
-                  {AGENT_MODES.map((m) => {
-                    const c = AGENT_CAPABILITIES[m];
-                    const Icon = c.icon;
-                    const isActive = mode === m;
-                    return (
-                      <DropdownMenuItem
-                        key={m}
-                        onClick={() => handleModeChange(m)}
-                        className={cn(isActive && 'bg-accent/10')}
-                      >
-                        <div className="flex w-full items-center gap-2">
-                          <Icon className={cn('h-3.5 w-3.5 shrink-0', c.color)} />
-                          <div className="flex min-w-0 flex-1 flex-col">
-                            <span className="text-[11px] font-medium">{c.label}</span>
-                            <span className="text-[9px] text-muted-foreground leading-tight">{c.description}</span>
-                          </div>
-                          <span className={cn('shrink-0 text-[9px] font-medium', c.color)}>{c.badge}</span>
-                          {isActive && <Check className="h-3 w-3 shrink-0 text-accent" />}
-                        </div>
-                      </DropdownMenuItem>
-                    );
-                  })}
-                </DropdownMenuContent>
-              </DropdownMenu>
-            );
-          })()}
-
-          {/* Delegation chain badge */}
-          {delegationChain.length > 0 && (
-            <span className="flex items-center gap-1 rounded-pill bg-cyan-500/10 px-2 py-[3px] text-[10px] font-medium text-cyan-400">
-              <ArrowRight className="h-2.5 w-2.5" />
-              delegated
-            </span>
-          )}
-
-          {/* Model selector */}
-          <DropdownMenu>
-            <DropdownMenuTrigger className="flex cursor-pointer items-center gap-0.5 rounded-pill bg-muted px-2 py-[3px] text-[10px] text-muted-foreground transition-colors hover:text-foreground focus:outline-none">
-              <span className="truncate max-w-[100px]">{activeModelLabel}</span>
-              <ChevronDown className="h-2.5 w-2.5 shrink-0" />
-            </DropdownMenuTrigger>
-            <DropdownMenuContent side="top" className="min-w-[200px] max-h-72 overflow-auto">
-              {useAllProviders ? (
-                /* Grouped: all providers */
-                groupedModels.map(({ provider, models }, idx) => (
-                  <div key={provider.id}>
-                    {idx > 0 && <DropdownMenuSeparator />}
-                    <DropdownMenuGroup>
-                      <DropdownMenuLabel className="text-[9px] uppercase tracking-wider text-muted-foreground px-2 py-1">
-                        {provider.name}
-                      </DropdownMenuLabel>
-                      {models.map((m) => (
+        {/* Bottom toolbar: selectors left, actions right */}
+        <div className="flex items-center justify-between gap-2 px-2.5 pb-2 pt-1">
+          {/* Agent mode + model + approval selectors */}
+          <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
+            {/* Agent mode dropdown */}
+            {(() => {
+              const cap = AGENT_CAPABILITIES[mode];
+              const ModeIcon = cap.icon;
+              return (
+                <DropdownMenu>
+                  <DropdownMenuTrigger
+                    className={cn(
+                      'flex h-7 cursor-pointer items-center gap-1 rounded-lg border border-foreground/[0.07] bg-transparent px-2 text-[11px] font-medium transition-colors focus:outline-none',
+                      'text-foreground/75 hover:border-foreground/[0.14] hover:bg-foreground/[0.03] hover:text-foreground',
+                    )}
+                  >
+                    <ModeIcon className={cn('h-3 w-3 shrink-0', cap.color)} />
+                    <span>{cap.label}</span>
+                    <ChevronDown className="h-2.5 w-2.5 shrink-0 opacity-50" />
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent side="top" className="min-w-[200px]">
+                    <div className="px-2 pb-1 pt-1.5 text-[9px] uppercase tracking-wider text-muted-foreground">
+                      Agent Mode
+                    </div>
+                    <DropdownMenuSeparator />
+                    {AGENT_MODES.map((m) => {
+                      const c = AGENT_CAPABILITIES[m];
+                      const Icon = c.icon;
+                      const isActive = mode === m;
+                      return (
                         <DropdownMenuItem
-                          key={m.id}
-                          onClick={() => handleModelChangeWithProvider(provider.id, m.id)}
-                          className={cn(
-                            activeModelId === m.id && activeProviderId === provider.id && 'bg-accent/10 text-accent',
-                          )}
+                          key={m}
+                          onClick={() => handleModeChange(m)}
+                          className={cn(isActive && 'bg-accent/10')}
                         >
-                          <div className="flex flex-col">
-                            <span className="text-[11px]">{m.name}</span>
-                            <span className="text-[9px] text-muted-foreground">{m.id}</span>
+                          <div className="flex w-full items-center gap-2">
+                            <Icon className={cn('h-3.5 w-3.5 shrink-0', c.color)} />
+                            <div className="flex min-w-0 flex-1 flex-col">
+                              <span className="text-[11px] font-medium">{c.label}</span>
+                              <span className="text-[9px] leading-tight text-muted-foreground">
+                                {c.description}
+                              </span>
+                            </div>
+                            <span className={cn('shrink-0 text-[9px] font-medium', c.color)}>
+                              {c.badge}
+                            </span>
+                            {isActive && <Check className="h-3 w-3 shrink-0 text-accent" />}
                           </div>
                         </DropdownMenuItem>
-                      ))}
-                      {/* OpenRouter free-text input in its group */}
-                      {provider.id === 'openrouter' && (
+                      );
+                    })}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              );
+            })()}
+
+            {/* Delegation chain badge */}
+            {delegationChain.length > 0 && (
+              <span className="flex items-center gap-1 text-[10px] font-medium text-cyan-400">
+                <ArrowRight className="h-2.5 w-2.5" />
+                delegated
+              </span>
+            )}
+
+            {/* Model selector */}
+            <DropdownMenu>
+              <DropdownMenuTrigger className="flex h-7 cursor-pointer items-center gap-1 rounded-lg border border-foreground/[0.07] bg-transparent px-2 text-[11px] text-foreground/75 transition-colors hover:border-foreground/[0.14] hover:bg-foreground/[0.03] hover:text-foreground focus:outline-none">
+                <span className="max-w-[140px] truncate">{activeModelLabel}</span>
+                <ChevronDown className="h-2.5 w-2.5 shrink-0 opacity-50" />
+              </DropdownMenuTrigger>
+              <DropdownMenuContent side="top" className="max-h-72 min-w-[200px] overflow-auto">
+                {useAllProviders ? (
+                  /* Grouped: all providers */
+                  groupedModels.map(({ provider, models }, idx) => (
+                    <div key={provider.id}>
+                      {idx > 0 && <DropdownMenuSeparator />}
+                      <DropdownMenuGroup>
+                        <DropdownMenuLabel className="px-2 py-1 text-[9px] uppercase tracking-wider text-muted-foreground">
+                          {provider.name}
+                        </DropdownMenuLabel>
+                        {models.map((m) => (
+                          <DropdownMenuItem
+                            key={m.id}
+                            onClick={() => handleModelChangeWithProvider(provider.id, m.id)}
+                            className={cn(
+                              activeModelId === m.id &&
+                                activeProviderId === provider.id &&
+                                'bg-accent/10 text-accent',
+                            )}
+                          >
+                            <div className="flex flex-col">
+                              <span className="text-[11px]">{m.name}</span>
+                              <span className="text-[9px] text-muted-foreground">{m.id}</span>
+                            </div>
+                          </DropdownMenuItem>
+                        ))}
+                        {/* OpenRouter free-text input in its group */}
+                        {provider.id === 'openrouter' && (
+                          <div className="px-2 py-1.5">
+                            <input
+                              type="text"
+                              placeholder="Type model id…"
+                              className="h-6 w-full rounded bg-muted px-2 text-[10px] text-foreground outline-none placeholder:text-muted-foreground/50"
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') {
+                                  const val = (e.target as HTMLInputElement).value.trim();
+                                  if (val) handleModelChangeWithProvider('openrouter', val);
+                                }
+                                e.stopPropagation();
+                              }}
+                              onClick={(e) => e.stopPropagation()}
+                            />
+                          </div>
+                        )}
+                      </DropdownMenuGroup>
+                    </div>
+                  ))
+                ) : (
+                  /* Flat: active provider only */
+                  <>
+                    {availableModels.map((m) => (
+                      <DropdownMenuItem
+                        key={m.id}
+                        onClick={() => handleModelChange(m.id)}
+                        className={cn(activeModelId === m.id && 'bg-accent/10 text-accent')}
+                      >
+                        <div className="flex flex-col">
+                          <span className="text-[11px]">{m.name}</span>
+                          <span className="text-[9px] text-muted-foreground">{m.id}</span>
+                        </div>
+                      </DropdownMenuItem>
+                    ))}
+                    {activeProviderId === 'openrouter' && (
+                      <>
+                        <div className="my-1 border-t border-border" />
                         <div className="px-2 py-1.5">
                           <input
                             type="text"
@@ -578,262 +657,248 @@ export function AgentInput() {
                             onKeyDown={(e) => {
                               if (e.key === 'Enter') {
                                 const val = (e.target as HTMLInputElement).value.trim();
-                                if (val) handleModelChangeWithProvider('openrouter', val);
+                                if (val) handleModelChange(val);
                               }
                               e.stopPropagation();
                             }}
                             onClick={(e) => e.stopPropagation()}
                           />
                         </div>
-                      )}
-                    </DropdownMenuGroup>
-                  </div>
-                ))
-              ) : (
-                /* Flat: active provider only */
-                <>
-                  {availableModels.map((m) => (
-                    <DropdownMenuItem
-                      key={m.id}
-                      onClick={() => handleModelChange(m.id)}
-                      className={cn(activeModelId === m.id && 'bg-accent/10 text-accent')}
-                    >
-                      <div className="flex flex-col">
-                        <span className="text-[11px]">{m.name}</span>
-                        <span className="text-[9px] text-muted-foreground">{m.id}</span>
-                      </div>
-                    </DropdownMenuItem>
-                  ))}
-                  {activeProviderId === 'openrouter' && (
-                    <>
-                      <div className="border-t border-border my-1" />
-                      <div className="px-2 py-1.5">
-                        <input
-                          type="text"
-                          placeholder="Type model id…"
-                          className="h-6 w-full rounded bg-muted px-2 text-[10px] text-foreground outline-none placeholder:text-muted-foreground/50"
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter') {
-                              const val = (e.target as HTMLInputElement).value.trim();
-                              if (val) handleModelChange(val);
-                            }
-                            e.stopPropagation();
-                          }}
-                          onClick={(e) => e.stopPropagation()}
-                        />
-                      </div>
-                    </>
-                  )}
-                </>
-              )}
-            </DropdownMenuContent>
-          </DropdownMenu>
-
-          {/* Thinking control */}
-          {activeModelInfo?.supportsThinking && (
-            <DropdownMenu>
-              <DropdownMenuTrigger
-                className={cn(
-                  'flex cursor-pointer items-center gap-0.5 rounded-pill px-2 py-[3px] text-[10px] transition-colors focus:outline-none',
-                  currentThinking.enabled
-                    ? 'bg-amber-500/15 text-amber-400 hover:bg-amber-500/25'
-                    : 'bg-muted text-muted-foreground hover:text-foreground',
-                )}
-              >
-                <Brain className="h-2.5 w-2.5 shrink-0" />
-                <span className="ml-0.5">
-                  {currentThinking.enabled
-                    ? `Thinking: ${currentThinking.level ?? 'default'}`
-                    : 'Thinking off'}
-                </span>
-                <ChevronDown className="h-2.5 w-2.5 shrink-0 opacity-60" />
-              </DropdownMenuTrigger>
-              <DropdownMenuContent side="top" className="min-w-[180px]">
-                <div className="px-2 pb-1 pt-1.5 text-[9px] uppercase tracking-wider text-muted-foreground">
-                  Thinking Mode
-                </div>
-                <DropdownMenuSeparator />
-                {/* Toggle on/off */}
-                <DropdownMenuItem
-                  onClick={() => {
-                    if (!activeProviderId || !activeModelId) return;
-                    setThinkingConfig(activeProviderId, activeModelId, { enabled: !currentThinking.enabled });
-                  }}
-                  className={cn(!currentThinking.enabled && 'bg-accent/10')}
-                >
-                  <div className="flex w-full items-center justify-between">
-                    <span className="text-[11px]">{currentThinking.enabled ? 'Disable thinking' : 'Enable thinking'}</span>
-                    {!currentThinking.enabled && <Check className="h-3 w-3 shrink-0 text-accent" />}
-                  </div>
-                </DropdownMenuItem>
-                {/* Level selector (only when enabled) */}
-                {currentThinking.enabled && (
-                  <>
-                    <DropdownMenuSeparator />
-                    <div className="px-2 pb-1 pt-1 text-[9px] uppercase tracking-wider text-muted-foreground">
-                      Level
-                    </div>
-                    {(activeModelInfo.thinkingLevels ?? ['low', 'medium', 'high']).map((lvl) => (
-                      <DropdownMenuItem
-                        key={lvl}
-                        onClick={() => {
-                          if (!activeProviderId || !activeModelId) return;
-                          setThinkingConfig(activeProviderId, activeModelId, { enabled: true, level: lvl as import('@/stores/settings-store').ModelThinkingConfig['level'] });
-                        }}
-                        className={cn(currentThinking.level === lvl && 'bg-accent/10')}
-                      >
-                        <div className="flex w-full items-center justify-between">
-                          <span className="text-[11px] capitalize">{lvl}</span>
-                          {currentThinking.level === lvl && <Check className="h-3 w-3 shrink-0 text-accent" />}
-                        </div>
-                      </DropdownMenuItem>
-                    ))}
+                      </>
+                    )}
                   </>
                 )}
               </DropdownMenuContent>
             </DropdownMenu>
-          )}
 
-          {/* Approval mode selector */}
-          {(() => {
-            const cfg = APPROVAL_CONFIG[approvalMode];
-            const ApprovalIcon = cfg.icon;
-            return (
+            {/* Thinking control */}
+            {activeModelInfo?.supportsThinking && (
               <DropdownMenu>
-                <DropdownMenuTrigger className={cn(
-                  'flex cursor-pointer items-center gap-0.5 rounded-pill bg-muted px-2 py-[3px] text-[10px] transition-colors hover:text-foreground focus:outline-none',
-                  cfg.color,
-                )}>
-                  <ApprovalIcon className="h-2.5 w-2.5 shrink-0" />
-                  <span className="ml-0.5">{cfg.shortLabel}</span>
-                  <ChevronDown className="h-2.5 w-2.5 shrink-0 opacity-60" />
+                <DropdownMenuTrigger
+                  className={cn(
+                    'flex h-7 cursor-pointer items-center gap-1 rounded-lg border border-foreground/[0.07] bg-transparent px-2 text-[11px] transition-colors focus:outline-none',
+                    currentThinking.enabled
+                      ? 'border-amber-500/20 text-amber-400 hover:border-amber-500/35 hover:bg-amber-500/[0.04]'
+                      : 'text-foreground/75 hover:border-foreground/[0.14] hover:bg-foreground/[0.03] hover:text-foreground',
+                  )}
+                >
+                  <Brain className="h-3 w-3 shrink-0" />
+                  <span>
+                    {currentThinking.enabled
+                      ? `Thinking: ${currentThinking.level ?? 'default'}`
+                      : 'Thinking off'}
+                  </span>
+                  <ChevronDown className="h-2.5 w-2.5 shrink-0 opacity-50" />
                 </DropdownMenuTrigger>
-                <DropdownMenuContent side="top" className="min-w-[220px]">
+                <DropdownMenuContent side="top" className="min-w-[180px]">
                   <div className="px-2 pb-1 pt-1.5 text-[9px] uppercase tracking-wider text-muted-foreground">
-                    Approval Mode
+                    Thinking Mode
                   </div>
                   <DropdownMenuSeparator />
-                  {APPROVAL_MODES.map((m) => {
-                    const c = APPROVAL_CONFIG[m];
-                    const Icon = c.icon;
-                    const isActive = approvalMode === m;
-                    return (
-                      <DropdownMenuItem
-                        key={m}
-                        onClick={() => handleApprovalChange(m)}
-                        className={cn(isActive && 'bg-accent/10')}
-                      >
-                        <div className="flex w-full items-center gap-2">
-                          <Icon className={cn('h-3.5 w-3.5 shrink-0', c.color)} />
-                          <div className="flex min-w-0 flex-1 flex-col">
-                            <span className="text-[11px] font-medium">{c.label}</span>
-                            <span className="text-[9px] text-muted-foreground leading-tight">{c.description}</span>
-                          </div>
-                          <div className="flex shrink-0 items-center gap-1.5">
-                            {c.badge && (
-                              <span className={cn('rounded-full px-1.5 py-0.5 text-[8px] font-medium', c.color, 'bg-current/10')}>
-                                {c.badge}
-                              </span>
+                  {/* Toggle on/off */}
+                  <DropdownMenuItem
+                    onClick={() => {
+                      if (!activeProviderId || !activeModelId) return;
+                      setThinkingConfig(activeProviderId, activeModelId, {
+                        enabled: !currentThinking.enabled,
+                      });
+                    }}
+                    className={cn(!currentThinking.enabled && 'bg-accent/10')}
+                  >
+                    <div className="flex w-full items-center justify-between">
+                      <span className="text-[11px]">
+                        {currentThinking.enabled ? 'Disable thinking' : 'Enable thinking'}
+                      </span>
+                      {!currentThinking.enabled && (
+                        <Check className="h-3 w-3 shrink-0 text-accent" />
+                      )}
+                    </div>
+                  </DropdownMenuItem>
+                  {/* Level selector (only when enabled) */}
+                  {currentThinking.enabled && (
+                    <>
+                      <DropdownMenuSeparator />
+                      <div className="px-2 pb-1 pt-1 text-[9px] uppercase tracking-wider text-muted-foreground">
+                        Level
+                      </div>
+                      {(activeModelInfo.thinkingLevels ?? ['low', 'medium', 'high']).map((lvl) => (
+                        <DropdownMenuItem
+                          key={lvl}
+                          onClick={() => {
+                            if (!activeProviderId || !activeModelId) return;
+                            setThinkingConfig(activeProviderId, activeModelId, {
+                              enabled: true,
+                              level:
+                                lvl as import('@/stores/settings-store').ModelThinkingConfig['level'],
+                            });
+                          }}
+                          className={cn(currentThinking.level === lvl && 'bg-accent/10')}
+                        >
+                          <div className="flex w-full items-center justify-between">
+                            <span className="text-[11px] capitalize">{lvl}</span>
+                            {currentThinking.level === lvl && (
+                              <Check className="h-3 w-3 shrink-0 text-accent" />
                             )}
-                            {isActive && <Check className="h-3 w-3 shrink-0 text-accent" />}
                           </div>
-                        </div>
-                      </DropdownMenuItem>
-                    );
-                  })}
+                        </DropdownMenuItem>
+                      ))}
+                    </>
+                  )}
                 </DropdownMenuContent>
               </DropdownMenu>
-            );
-          })()}
-        </div>
+            )}
 
-        {/* Actions */}
-        <div className="flex shrink-0 items-center gap-1">
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <Button
-                  variant="ghost"
-                  size="icon-xs"
-                  onClick={openSettings}
-                  className="text-muted-foreground hover:text-foreground"
-                />
-              }
-            >
-              <Settings className="h-3.5 w-3.5" />
-            </TooltipTrigger>
-            <TooltipContent side="top">Settings</TooltipContent>
-          </Tooltip>
+            {/* Approval mode selector */}
+            {(() => {
+              const cfg = APPROVAL_CONFIG[approvalMode];
+              const ApprovalIcon = cfg.icon;
+              return (
+                <DropdownMenu>
+                  <DropdownMenuTrigger
+                    className={cn(
+                      'flex h-7 cursor-pointer items-center gap-1 rounded-lg border border-foreground/[0.07] bg-transparent px-2 text-[11px] transition-colors focus:outline-none',
+                      'text-foreground/75 hover:border-foreground/[0.14] hover:bg-foreground/[0.03] hover:text-foreground',
+                      cfg.color,
+                    )}
+                  >
+                    <ApprovalIcon className="h-3 w-3 shrink-0" />
+                    <span>{cfg.shortLabel}</span>
+                    <ChevronDown className="h-2.5 w-2.5 shrink-0 opacity-50" />
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent side="top" className="min-w-[220px]">
+                    <div className="px-2 pb-1 pt-1.5 text-[9px] uppercase tracking-wider text-muted-foreground">
+                      Approval Mode
+                    </div>
+                    <DropdownMenuSeparator />
+                    {APPROVAL_MODES.map((m) => {
+                      const c = APPROVAL_CONFIG[m];
+                      const Icon = c.icon;
+                      const isActive = approvalMode === m;
+                      return (
+                        <DropdownMenuItem
+                          key={m}
+                          onClick={() => handleApprovalChange(m)}
+                          className={cn(isActive && 'bg-accent/10')}
+                        >
+                          <div className="flex w-full items-center gap-2">
+                            <Icon className={cn('h-3.5 w-3.5 shrink-0', c.color)} />
+                            <div className="flex min-w-0 flex-1 flex-col">
+                              <span className="text-[11px] font-medium">{c.label}</span>
+                              <span className="text-[9px] leading-tight text-muted-foreground">
+                                {c.description}
+                              </span>
+                            </div>
+                            <div className="flex shrink-0 items-center gap-1.5">
+                              {c.badge && (
+                                <span
+                                  className={cn(
+                                    'rounded-full px-1.5 py-0.5 text-[8px] font-medium',
+                                    c.color,
+                                    'bg-current/10',
+                                  )}
+                                >
+                                  {c.badge}
+                                </span>
+                              )}
+                              {isActive && <Check className="h-3 w-3 shrink-0 text-accent" />}
+                            </div>
+                          </div>
+                        </DropdownMenuItem>
+                      );
+                    })}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              );
+            })()}
+          </div>
 
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <Button
-                  variant="ghost"
-                  size="icon-xs"
-                  className="text-muted-foreground hover:text-foreground"
-                  onClick={() => setMentionPickerOpen((v) => !v)}
-                />
-              }
-            >
-              <Plus className="h-3.5 w-3.5" />
-            </TooltipTrigger>
-            <TooltipContent side="top">Add context (@)</TooltipContent>
-          </Tooltip>
-
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <Button
-                  variant="ghost"
-                  size="icon-xs"
-                  className={cn(
-                    'text-muted-foreground hover:text-foreground',
-                    attachedImages.length > 0 && 'text-accent',
-                  )}
-                  onClick={() => fileInputRef.current?.click()}
-                />
-              }
-            >
-              <Paperclip className="h-3.5 w-3.5" />
-            </TooltipTrigger>
-            <TooltipContent side="top">Attach image</TooltipContent>
-          </Tooltip>
-
-          {isStreaming ? (
+          {/* Actions */}
+          <div className="flex shrink-0 items-center gap-0.5">
             <Tooltip>
               <TooltipTrigger
                 render={
                   <Button
+                    variant="ghost"
                     size="icon-xs"
-                    onClick={handleStop}
-                    className="bg-red-600 hover:bg-red-700"
+                    onClick={openSettings}
+                    className="h-7 w-7 text-muted-foreground/60 hover:bg-foreground/[0.04] hover:text-foreground"
                   />
                 }
               >
-                <Square className="h-3 w-3" />
+                <Settings className="h-3.5 w-3.5" />
               </TooltipTrigger>
-              <TooltipContent side="top">Stop (Esc)</TooltipContent>
+              <TooltipContent side="top">Settings</TooltipContent>
             </Tooltip>
-          ) : (
+
             <Tooltip>
               <TooltipTrigger
                 render={
                   <Button
+                    variant="ghost"
                     size="icon-xs"
-                    disabled={!input.trim() && attachedImages.length === 0}
-                    onClick={handleSend}
-                    className="disabled:opacity-30"
+                    className="h-7 w-7 text-muted-foreground/60 hover:bg-foreground/[0.04] hover:text-foreground"
+                    onClick={() => setMentionPickerOpen((v) => !v)}
                   />
                 }
               >
-                <Send />
+                <Plus className="h-3.5 w-3.5" />
               </TooltipTrigger>
-              <TooltipContent side="top">Send (Enter)</TooltipContent>
+              <TooltipContent side="top">Add context (@)</TooltipContent>
             </Tooltip>
-          )}
+
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    variant="ghost"
+                    size="icon-xs"
+                    className={cn(
+                      'h-7 w-7 text-muted-foreground/60 hover:bg-foreground/[0.04] hover:text-foreground',
+                      attachedImages.length > 0 && 'text-accent',
+                    )}
+                    onClick={() => fileInputRef.current?.click()}
+                  />
+                }
+              >
+                <Paperclip className="h-3.5 w-3.5" />
+              </TooltipTrigger>
+              <TooltipContent side="top">Attach image</TooltipContent>
+            </Tooltip>
+
+            {isStreaming ? (
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <Button
+                      size="icon-xs"
+                      onClick={handleStop}
+                      className="h-7 w-7 bg-destructive/90 text-destructive-foreground hover:bg-destructive"
+                    />
+                  }
+                >
+                  <Square className="h-3 w-3" />
+                </TooltipTrigger>
+                <TooltipContent side="top">Stop (Esc)</TooltipContent>
+              </Tooltip>
+            ) : (
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <Button
+                      size="icon-xs"
+                      disabled={!input.trim() && attachedImages.length === 0}
+                      onClick={handleSend}
+                      className="h-7 w-7 text-foreground/70 hover:bg-foreground/[0.04] hover:text-foreground disabled:opacity-30"
+                    />
+                  }
+                >
+                  <Send className="h-3.5 w-3.5" />
+                </TooltipTrigger>
+                <TooltipContent side="top">Send (Enter)</TooltipContent>
+              </Tooltip>
+            )}
+          </div>
         </div>
-      </div>
       </div>
     </div>
   );

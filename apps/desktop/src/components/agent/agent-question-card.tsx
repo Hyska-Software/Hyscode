@@ -63,18 +63,15 @@ export function AgentQuestionCard() {
   const hasAnyAnswer = questions.some((q) => answers[q.id] || freeformInputs[q.id]?.trim());
 
   return (
-    <div className="agent-fade-in my-2.5 overflow-hidden rounded-lg border border-violet-500/25 bg-violet-500/[0.04]">
-      {/* Accent bar */}
-      <div className="h-[2px] w-full bg-gradient-to-r from-violet-500/40 via-violet-400/60 to-violet-500/40" />
-
-      <div className="p-3.5">
+    <div className="agent-fade-in my-3 border-l-2 border-violet-500/30 pl-3">
+      <div className="py-0.5">
         {/* Header */}
         <div className="mb-3 flex items-center gap-2.5">
-          <div className="flex h-6 w-6 items-center justify-center rounded-md bg-violet-500/10">
-            <MessageCircleQuestion className="h-3.5 w-3.5 text-violet-400" />
+          <div className="flex h-5 w-5 items-center justify-center rounded-full bg-violet-500/10">
+            <MessageCircleQuestion className="h-3 w-3 text-violet-400" />
           </div>
           <div className="flex flex-col">
-            <span className="text-[11px] font-semibold text-violet-300">
+            <span className="text-[11px] font-medium text-violet-300/90">
               {pending.title || 'Agent has a question'}
             </span>
             {total > 1 && (
@@ -86,9 +83,7 @@ export function AgentQuestionCard() {
         </div>
 
         {/* Question text */}
-        <p className="mb-3 text-[12px] leading-relaxed text-foreground/85">
-          {current.question}
-        </p>
+        <p className="mb-3 text-[12.5px] leading-relaxed text-foreground/85">{current.question}</p>
 
         {/* Options */}
         {current.options && current.options.length > 0 && (
@@ -101,8 +96,8 @@ export function AgentQuestionCard() {
                   onClick={() => handleSelectOption(current.id, opt.label)}
                   className={`flex flex-col gap-0.5 rounded-md border px-3 py-2 text-left transition-all ${
                     isSelected
-                      ? 'border-violet-500/50 bg-violet-500/10 text-foreground'
-                      : 'border-border/20 bg-surface-raised/30 text-foreground/70 hover:border-border/40 hover:bg-surface-raised/60'
+                      ? 'border-violet-500/40 bg-violet-500/[0.06] text-foreground'
+                      : 'border-foreground/[0.08] bg-transparent text-foreground/75 hover:border-foreground/[0.14] hover:bg-foreground/[0.02]'
                   }`}
                 >
                   <span className="text-[11.5px] font-medium">{opt.label}</span>
@@ -116,7 +111,7 @@ export function AgentQuestionCard() {
         )}
 
         {/* Free-form input */}
-        {(current.allowFreeform !== false) && (
+        {current.allowFreeform !== false && (
           <div className="mb-3">
             <input
               type="text"
@@ -129,7 +124,7 @@ export function AgentQuestionCard() {
                   else setCurrentIdx((i) => i + 1);
                 }
               }}
-              className="w-full rounded-md border border-border/20 bg-surface-raised/40 px-3 py-2 text-[11.5px] text-foreground placeholder:text-muted-foreground/40 outline-none transition-colors focus:border-violet-500/40 focus:bg-surface-raised/60"
+              className="w-full rounded-md border border-foreground/[0.08] bg-transparent px-3 py-2 text-[12px] text-foreground placeholder:text-muted-foreground/40 outline-none transition-colors focus:border-violet-500/40 focus:bg-foreground/[0.02]"
             />
           </div>
         )}
@@ -139,7 +134,7 @@ export function AgentQuestionCard() {
           <div className="flex items-center gap-1.5">
             {/* Progress dots */}
             {total > 1 && (
-              <div className="flex items-center gap-1 mr-2">
+              <div className="mr-2 flex items-center gap-1">
                 {questions.map((q, i) => {
                   const hasAnswer = !!(answers[q.id] || freeformInputs[q.id]?.trim());
                   return (
@@ -151,7 +146,7 @@ export function AgentQuestionCard() {
                           ? 'w-4 bg-violet-400'
                           : hasAnswer
                             ? 'w-1.5 bg-violet-400/50'
-                            : 'w-1.5 bg-border/30'
+                            : 'w-1.5 bg-foreground/15'
                       }`}
                     />
                   );
@@ -163,7 +158,7 @@ export function AgentQuestionCard() {
                 size="sm"
                 variant="ghost"
                 onClick={() => setCurrentIdx((i) => i - 1)}
-                className="h-7 gap-1 rounded-md px-2 text-[10px] text-muted-foreground/60 hover:text-foreground transition-colors"
+                className="h-7 gap-1 rounded-md px-2 text-[10px] text-muted-foreground/60 hover:text-foreground"
               >
                 <ChevronLeft className="h-3 w-3" />
                 Back
@@ -174,7 +169,7 @@ export function AgentQuestionCard() {
                 size="sm"
                 variant="ghost"
                 onClick={() => setCurrentIdx((i) => i + 1)}
-                className="h-7 gap-1 rounded-md px-2 text-[10px] text-muted-foreground/60 hover:text-foreground transition-colors"
+                className="h-7 gap-1 rounded-md px-2 text-[10px] text-muted-foreground/60 hover:text-foreground"
               >
                 Next
                 <ChevronRight className="h-3 w-3" />
@@ -187,7 +182,7 @@ export function AgentQuestionCard() {
               size="sm"
               variant="ghost"
               onClick={handleSkip}
-              className="h-7 gap-1.5 rounded-md px-3 text-[11px] text-muted-foreground/50 hover:text-foreground transition-colors"
+              className="h-7 gap-1.5 rounded-md px-3 text-[11px] text-muted-foreground/50 hover:text-foreground"
             >
               <SkipForward className="h-3 w-3" />
               Skip
@@ -196,7 +191,7 @@ export function AgentQuestionCard() {
               size="sm"
               onClick={handleSubmit}
               disabled={!hasAnyAnswer && !currentAnswer}
-              className="h-7 gap-1.5 rounded-md bg-violet-600 px-3.5 text-[11px] font-medium shadow-sm shadow-violet-900/20 hover:bg-violet-500 disabled:opacity-40 disabled:hover:bg-violet-600 transition-colors"
+              className="h-7 gap-1.5 rounded-md bg-violet-600 px-3.5 text-[11px] font-medium hover:bg-violet-500 disabled:opacity-40"
             >
               <Send className="h-3 w-3" />
               {isLast || total === 1 ? 'Submit' : 'Submit All'}
