@@ -2,7 +2,14 @@
 // Singleton that owns the Harness instance and wires its events → Zustand stores.
 // Lives outside React to avoid re-renders during streaming.
 
-import { Harness, SkillLoader, RuleLoader, applyPolicyOverride, getModePolicy, MemoryManager } from '@hyscode/agent-harness';
+import {
+  Harness,
+  SkillLoader,
+  RuleLoader,
+  applyPolicyOverride,
+  getModePolicy,
+  MemoryManager,
+} from '@hyscode/agent-harness';
 import type {
   HarnessEvent,
   AgentType,
@@ -31,7 +38,13 @@ import { useRulesStore } from '@/stores/rules-store';
 import { useFileStore } from '@/stores/file-store';
 import { useEditorStore } from '@/stores/editor-store';
 import { useTerminalStore } from '@/stores/terminal-store';
-import type { ToolCallDisplay, PendingApproval, AgentEditSession, SubAgentState, AgentMode } from '@/stores/agent-store';
+import type {
+  ToolCallDisplay,
+  PendingApproval,
+  AgentEditSession,
+  SubAgentState,
+  AgentMode,
+} from '@/stores/agent-store';
 import { computeDiffHunks } from './compute-diff';
 import { SubAgentRunner } from './sub-agent-runner';
 
@@ -46,10 +59,7 @@ function parseProviderError(raw: string): string {
       const parsed = JSON.parse(jsonMatch[0]);
       // Anthropic error shape: { error: { message: string, type: string } }
       const msg: string | undefined =
-        parsed?.error?.message ??
-        parsed?.message ??
-        parsed?.error ??
-        undefined;
+        parsed?.error?.message ?? parsed?.message ?? parsed?.error ?? undefined;
       if (msg) return humanizeErrorMessage(msg, raw);
     } catch {
       // not JSON, fall through
@@ -64,7 +74,12 @@ function humanizeErrorMessage(msg: string, raw: string): string {
   if (lower.includes('credit') || lower.includes('billing') || lower.includes('balance')) {
     return 'Insufficient credits. Please top up your API account balance to continue.';
   }
-  if (lower.includes('invalid_api_key') || lower.includes('authentication') || lower.includes('unauthorized') || raw.includes('401')) {
+  if (
+    lower.includes('invalid_api_key') ||
+    lower.includes('authentication') ||
+    lower.includes('unauthorized') ||
+    raw.includes('401')
+  ) {
     return 'Invalid API key. Check your key in Settings → Providers.';
   }
   if (lower.includes('rate limit') || lower.includes('rate_limit') || raw.includes('429')) {
@@ -73,7 +88,10 @@ function humanizeErrorMessage(msg: string, raw: string): string {
   if (lower.includes('overloaded') || lower.includes('529')) {
     return 'The AI provider is temporarily overloaded. Please try again in a moment.';
   }
-  if (lower.includes('context') && (lower.includes('length') || lower.includes('window') || lower.includes('token'))) {
+  if (
+    lower.includes('context') &&
+    (lower.includes('length') || lower.includes('window') || lower.includes('token'))
+  ) {
     return 'The conversation is too long for this model. Try starting a new conversation.';
   }
   if (lower.includes('model') && lower.includes('not found')) {
@@ -82,7 +100,7 @@ function humanizeErrorMessage(msg: string, raw: string): string {
   if (lower.includes('timeout') || lower.includes('timed out')) {
     return 'The request timed out. Check your connection and try again.';
   }
-  if (lower.includes('no api key') || lower.includes('missing') && lower.includes('key')) {
+  if (lower.includes('no api key') || (lower.includes('missing') && lower.includes('key'))) {
     return 'No API key configured. Add your API key in Settings → Providers.';
   }
   if (lower.includes('failed to fetch') || lower.includes('network')) {
@@ -101,7 +119,8 @@ function humanizeErrorMessage(msg: string, raw: string): string {
 }
 
 function createSddDatabase(): SddDatabase {
-  const parseSession = (value: string): SddSession => ({ ...JSON.parse(value), tasks: [] }) as SddSession;
+  const parseSession = (value: string): SddSession =>
+    ({ ...JSON.parse(value), tasks: [] }) as SddSession;
   const parseTask = (value: string): SddTask => JSON.parse(value) as SddTask;
   const taskCache = new Map<string, SddTask>();
   return {
@@ -159,20 +178,31 @@ export class HarnessBridge {
   private _projectId: string = '';
   private approvalResolvers = new Map<string, (approved: boolean) => void>();
   private modeSwitchResolvers = new Map<string, (approved: boolean) => void>();
-  private userQuestionResolvers = new Map<string, (answers: import('@hyscode/agent-harness').AgentQuestionAnswer[]) => void>();
+  private userQuestionResolvers = new Map<
+    string,
+    (answers: import('@hyscode/agent-harness').AgentQuestionAnswer[]) => void
+  >();
   /** Active sub-agent runners keyed by their id (toolCallId of spawn_subagent). */
   private _subAgentRunners = new Map<string, SubAgentRunner>();
   /** Accumulated tool results for the current iteration (flushed between turns). */
   private pendingToolResults: Array<{ toolCallId: string; output: string; isError: boolean }> = [];
   /** Tool call IDs seen in the current iteration (for building assistant blocks). */
-  private currentIterationToolCalls: Array<{ id: string; name: string; input: Record<string, unknown> }> = [];
+  private currentIterationToolCalls: Array<{
+    id: string;
+    name: string;
+    input: Record<string, unknown>;
+  }> = [];
   private mutationSnapshots = new Map<string, MutationSnapshot>();
 
   // ─── Agent Terminal Integration ───────────────────────────────────
   /** Pool of terminal store session ids owned by the agent, keyed by conversationId */
   private _agentTerminalSessionIds: Map<string, string[]> = new Map();
   /** Last terminal command executed by the agent (persists across turns within a conversation) */
-  private _lastTerminalCommand: { command: string; output: string; exitCode: number | null } | null = null;
+  private _lastTerminalCommand: {
+    command: string;
+    output: string;
+    exitCode: number | null;
+  } | null = null;
 
   private constructor(workspacePath: string, projectId: string, homePath: string) {
     this._projectId = projectId;
@@ -195,7 +225,9 @@ export class HarnessBridge {
       readDir: async (path: string) => {
         try {
           // Use list_dir_all to include hidden entries and skill folders
-          return await tauriInvokeRaw<Array<{ name: string; is_dir: boolean }>>('list_dir_all', { path });
+          return await tauriInvokeRaw<Array<{ name: string; is_dir: boolean }>>('list_dir_all', {
+            path,
+          });
         } catch {
           return [];
         }
@@ -219,7 +251,9 @@ export class HarnessBridge {
       workspacePath,
       readDir: async (path: string) => {
         try {
-          return await tauriInvokeRaw<Array<{ name: string; is_dir: boolean }>>('list_dir_all', { path });
+          return await tauriInvokeRaw<Array<{ name: string; is_dir: boolean }>>('list_dir_all', {
+            path,
+          });
         } catch {
           return [];
         }
@@ -243,7 +277,8 @@ export class HarnessBridge {
       invoke: (command, args) => this.invokeForHarness(command, args),
       memoryManager,
       sddDb: createSddDatabase(),
-      hasDirtyBuffers: () => useEditorStore.getState().tabs.some((tab) => tab.type === 'file' && tab.isDirty),
+      hasDirtyBuffers: () =>
+        useEditorStore.getState().tabs.some((tab) => tab.type === 'file' && tab.isDirty),
       listen: async (event: string, handler: (payload: unknown) => void) => {
         const unlisten = await tauriListen(event, (e) => handler(e.payload));
         return unlisten;
@@ -252,7 +287,10 @@ export class HarnessBridge {
         const planDir = `${workspacePath}/.hyscode/plans`;
         const planPath = `${planDir}/PLAN-${sessionId}.md`;
         const taskList = tasks
-          .map((t, i) => `${i + 1}. **${t.title}**\n   - Files: ${t.files.join(', ') || 'N/A'}\n   - Description: ${t.description}`)
+          .map(
+            (t, i) =>
+              `${i + 1}. **${t.title}**\n   - Files: ${t.files.join(', ') || 'N/A'}\n   - Description: ${t.description}`,
+          )
           .join('\n\n');
         const content = `# Implementation Plan\n\n## Specification\n\n${spec}\n\n## Tasks\n\n${taskList}\n`;
         try {
@@ -275,12 +313,16 @@ export class HarnessBridge {
           ...(settings.approvalMode === 'custom' && {
             // Settings store uses: true = auto-approve. Harness uses: true = needs approval.
             categoryOverrides: Object.fromEntries(
-              Object.entries(settings.customApprovalRules.categoryRules)
-                .map(([k, autoApprove]) => [k, !autoApprove]),
+              Object.entries(settings.customApprovalRules.categoryRules).map(([k, autoApprove]) => [
+                k,
+                !autoApprove,
+              ]),
             ) as Record<string, boolean>,
             toolOverrides: Object.fromEntries(
-              Object.entries(settings.customApprovalRules.toolRules)
-                .map(([k, autoApprove]) => [k, !autoApprove]),
+              Object.entries(settings.customApprovalRules.toolRules).map(([k, autoApprove]) => [
+                k,
+                !autoApprove,
+              ]),
             ),
           }),
         },
@@ -289,7 +331,8 @@ export class HarnessBridge {
       onEvent: (event) => this.handleEvent(event),
       onApprovalRequest: (pending, signal) => this.handleApprovalRequest(pending, signal),
       onModeSwitchRequest: (request, signal) => this.handleModeSwitchRequest(request, signal),
-      onUserQuestionRequest: (id, questions, title, signal) => this.handleUserQuestionRequest(id, questions, title, signal),
+      onUserQuestionRequest: (id, questions, title, signal) =>
+        this.handleUserQuestionRequest(id, questions, title, signal),
       skillLoader,
       ruleLoader,
     });
@@ -317,7 +360,9 @@ export class HarnessBridge {
   /** Fallback home path when Tauri command is not available */
   private static getHomePathFallback(): string {
     const isWin = navigator.userAgent?.includes('Windows');
-    const username = (globalThis as Record<string, unknown>).__TAURI_USERNAME__ as string | undefined;
+    const username = (globalThis as Record<string, unknown>).__TAURI_USERNAME__ as
+      | string
+      | undefined;
     if (isWin) {
       return 'C:/Users/' + (username || 'user');
     }
@@ -361,7 +406,8 @@ export class HarnessBridge {
   }
 
   static get(): HarnessBridge {
-    if (!_instance) throw new Error('HarnessBridge not initialized. Call HarnessBridge.init() first.');
+    if (!_instance)
+      throw new Error('HarnessBridge not initialized. Call HarnessBridge.init() first.');
     return _instance;
   }
 
@@ -383,19 +429,24 @@ export class HarnessBridge {
 
     // Determine approval mode: use mode policy default, but respect user's custom rules
     const modePolicy = getModePolicy(store.mode as AgentType);
-    const approvalConfig = settings.approvalMode === 'custom'
-      ? {
-          mode: 'custom' as const,
-          categoryOverrides: Object.fromEntries(
-            Object.entries(settings.customApprovalRules.categoryRules)
-              .map(([k, autoApprove]) => [k, !autoApprove]),
-          ) as Record<string, boolean>,
-          toolOverrides: Object.fromEntries(
-            Object.entries(settings.customApprovalRules.toolRules)
-              .map(([k, autoApprove]) => [k, !autoApprove]),
-          ),
-        }
-      : { mode: modePolicy.approvalMode };
+    const approvalConfig =
+      settings.approvalMode === 'custom'
+        ? {
+            mode: 'custom' as const,
+            categoryOverrides: Object.fromEntries(
+              Object.entries(settings.customApprovalRules.categoryRules).map(([k, autoApprove]) => [
+                k,
+                !autoApprove,
+              ]),
+            ) as Record<string, boolean>,
+            toolOverrides: Object.fromEntries(
+              Object.entries(settings.customApprovalRules.toolRules).map(([k, autoApprove]) => [
+                k,
+                !autoApprove,
+              ]),
+            ),
+          }
+        : { mode: modePolicy.approvalMode };
 
     // Sync settings → harness config
     this.harness.setConfig({
@@ -469,17 +520,18 @@ export class HarnessBridge {
             priority: 'high',
             content: `<file path="${filePath}">\n${content}\n</file>`,
             tokenEstimate,
+            origin: 'explicit',
+            identity: `file:${filePath.replace(/\\/g, '/').toLowerCase()}`,
             metadata: { filePath, fileName },
           });
         } catch {
           // Might be a directory — list its tree instead
           try {
             const entries = await tauriInvokeRaw<Array<{ name: string; is_dir: boolean }>>(
-              'list_dir_all', { path: filePath },
+              'list_dir_all',
+              { path: filePath },
             );
-            const tree = entries
-              .map((e) => `${e.is_dir ? '📁' : '📄'} ${e.name}`)
-              .join('\n');
+            const tree = entries.map((e) => `${e.is_dir ? '📁' : '📄'} ${e.name}`).join('\n');
             const dirName = filePath.split(/[\\/]/).pop() ?? filePath;
             const tokenEstimate = Math.ceil(tree.length / 4);
             this.harness.addContextSource({
@@ -488,6 +540,8 @@ export class HarnessBridge {
               priority: 'high',
               content: `<directory path="${filePath}">\n${tree}\n</directory>`,
               tokenEstimate,
+              origin: 'explicit',
+              identity: `directory:${filePath.replace(/\\/g, '/').toLowerCase()}`,
               metadata: { filePath, fileName: dirName, isDirectory: true },
             });
           } catch (dirErr) {
@@ -574,7 +628,9 @@ export class HarnessBridge {
         imageContent.length > 0 ? imageContent : undefined,
       );
 
-      dbg(`Resposta recebida (${response.length} chars, ${turnRecord.iterations} iterações, ${turnRecord.toolCalls.length} tool calls)`);
+      dbg(
+        `Resposta recebida (${response.length} chars, ${turnRecord.iterations} iterações, ${turnRecord.toolCalls.length} tool calls)`,
+      );
 
       // Persist conversation to DB FIRST (turn record has FK on conversationId)
       await this.persistConversation(userMessage, response);
@@ -586,7 +642,8 @@ export class HarnessBridge {
       useAgentStore.getState().flushStreamingText();
 
       // Update the last assistant message with the final response
-      if (status === 'error') useAgentStore.getState().updateLastAssistantError(parseProviderError(response));
+      if (status === 'error')
+        useAgentStore.getState().updateLastAssistantError(parseProviderError(response));
       else useAgentStore.getState().updateLastAssistantContent(response);
     } catch (err) {
       const rawMsg = err instanceof Error ? err.message : 'Unknown error';
@@ -600,7 +657,10 @@ export class HarnessBridge {
         try {
           const { openTabs, activeTabId } = useAgentStore.getState();
           const tabTitle = openTabs.find((t) => t.id === activeTabId)?.title ?? 'Agent';
-          await tauriInvokeRaw('notify_agent_done', { title: tabTitle, body: 'Agent finished working' });
+          await tauriInvokeRaw('notify_agent_done', {
+            title: tabTitle,
+            body: 'Agent finished working',
+          });
         } catch {
           // Notification is best-effort — non-fatal
         }
@@ -630,7 +690,12 @@ export class HarnessBridge {
     try {
       const result = await this.harness.resumeSddPlan();
       if (!result.startsWith('SDD execution ')) {
-        store.addMessage({ id: crypto.randomUUID(), role: 'assistant', content: result, timestamp: Date.now() });
+        store.addMessage({
+          id: crypto.randomUUID(),
+          role: 'assistant',
+          content: result,
+          timestamp: Date.now(),
+        });
       }
       this.debug(result);
     } finally {
@@ -768,7 +833,8 @@ Investigate the error, fix the underlying issue in the affected files, and verif
   async promoteToSdd(): Promise<void> {
     const store = useAgentStore.getState();
     const lastUserMessage = [...store.messages].reverse().find((m) => m.role === 'user');
-    const description = lastUserMessage?.content || 'Continue implementation from current conversation';
+    const description =
+      lastUserMessage?.content || 'Continue implementation from current conversation';
 
     this.harness.setConfig({
       providerId: useSettingsStore.getState().activeProviderId ?? '',
@@ -890,7 +956,9 @@ Investigate the error, fix the underlying issue in the affected files, and verif
     if (!change || change.status !== 'pending') return;
 
     if (!accepted) {
-      await this.restoreMutationSnapshot(change.filePath, { originalContent: change.originalContent });
+      await this.restoreMutationSnapshot(change.filePath, {
+        originalContent: change.originalContent,
+      });
     } else this.acceptMutationSnapshot(change.filePath);
 
     store.resolvePendingFileChange(id, accepted);
@@ -903,7 +971,9 @@ Investigate the error, fix the underlying issue in the affected files, and verif
 
     if (!accepted) {
       for (const change of pending) {
-        await this.restoreMutationSnapshot(change.filePath, { originalContent: change.originalContent });
+        await this.restoreMutationSnapshot(change.filePath, {
+          originalContent: change.originalContent,
+        });
       }
     } else for (const change of pending) this.acceptMutationSnapshot(change.filePath);
 
@@ -958,7 +1028,9 @@ Investigate the error, fix the underlying issue in the affected files, and verif
     // Clear context sources so previous session's context doesn't bleed into the new one
     this.clearTabContext();
     this.restoreSddForConversation(conversationId).catch((error) => {
-      this.debug(`Failed to restore SDD session: ${error instanceof Error ? error.message : String(error)}`);
+      this.debug(
+        `Failed to restore SDD session: ${error instanceof Error ? error.message : String(error)}`,
+      );
     });
     // Refresh cumulative token usage for the restored session from the DB.
     useAgentStore.getState().setSessionTokenUsage(null);
@@ -967,10 +1039,14 @@ Investigate the error, fix the underlying issue in the affected files, and verif
   }
 
   private async restoreSddForConversation(conversationId: string): Promise<void> {
-    const rows = await tauriInvokeRaw<string[]>('db_sdd_list_sessions', { projectId: this._projectId });
+    const rows = await tauriInvokeRaw<string[]>('db_sdd_list_sessions', {
+      projectId: this._projectId,
+    });
     const sessions = rows.map((row) => JSON.parse(row) as SddSession);
-    const active = sessions.find((session) =>
-      session.conversationId === conversationId && !['completed', 'cancelled'].includes(session.status),
+    const active = sessions.find(
+      (session) =>
+        session.conversationId === conversationId &&
+        !['completed', 'cancelled'].includes(session.status),
     );
     if (!active) return;
     const taskRows = await tauriInvokeRaw<string[]>('db_sdd_get_tasks', { sessionId: active.id });
@@ -1013,7 +1089,9 @@ Investigate the error, fix the underlying issue in the affected files, and verif
       useAgentStore.getState().setSessionTokenUsage(null);
       void this.refreshSessionUsage();
     }
-    this.debug(`Harness synced to tab: ${state.activeTabId} (conv: ${state.conversationId ?? 'none'})`);
+    this.debug(
+      `Harness synced to tab: ${state.activeTabId} (conv: ${state.conversationId ?? 'none'})`,
+    );
   }
 
   async loadSkills(): Promise<Skill[]> {
@@ -1098,18 +1176,21 @@ Investigate the error, fix the underlying issue in the affected files, and verif
     const handler: ToolHandler = {
       definition: {
         name: 'spawn_subagent',
-        description: 'Delegate a focused subtask to a specialized sub-agent. The parent waits for the sub-agent to finish and then receives its result. Use this to apply a specialist agent (for example review or debug) to a self-contained subtask. Not available in chat mode.',
+        description:
+          'Delegate a focused subtask to a specialized sub-agent. The parent waits for the sub-agent to finish and then receives its result. Use this to apply a specialist agent (for example review or debug) to a self-contained subtask. Not available in chat mode.',
         inputSchema: {
           type: 'object',
           properties: {
             task: {
               type: 'string',
-              description: 'Clear, self-contained description of the subtask. Include all context needed for the sub-agent to work independently.',
+              description:
+                'Clear, self-contained description of the subtask. Include all context needed for the sub-agent to work independently.',
             },
             mode: {
               type: 'string',
               enum: ['build', 'review', 'debug', 'plan'],
-              description: 'The agent mode to use. build=implement code, review=analyze code quality, debug=investigate bugs, plan=create implementation plan.',
+              description:
+                'The agent mode to use. build=implement code, review=analyze code quality, debug=investigate bugs, plan=create implementation plan.',
             },
           },
           required: ['task'],
@@ -1117,11 +1198,18 @@ Investigate the error, fix the underlying issue in the affected files, and verif
       } satisfies ToolDefinition,
       category: 'meta' as ToolCategory,
       requiresApproval: false,
-      execute: async (input: Record<string, unknown>, ctx: ToolExecutionContext): Promise<ToolResult> => {
+      execute: async (
+        input: Record<string, unknown>,
+        ctx: ToolExecutionContext,
+      ): Promise<ToolResult> => {
         const settings = useSettingsStore.getState();
 
         if (!settings.subAgentEnabled) {
-          return { success: false, output: '', error: 'Sub-agents are disabled in Settings → Sub-agents.' };
+          return {
+            success: false,
+            output: '',
+            error: 'Sub-agents are disabled in Settings → Sub-agents.',
+          };
         }
 
         const { task, mode: inputMode } = input as { task: string; mode?: AgentMode };
@@ -1131,7 +1219,12 @@ Investigate the error, fix the underlying issue in the affected files, and verif
         // Prevent spawning a sub-agent in the same mode as the parent
         const parentMode = useAgentStore.getState().mode;
         if (mode === parentMode) {
-          const alternatives: Record<string, string> = { build: 'review', review: 'build', debug: 'build', plan: 'review' };
+          const alternatives: Record<string, string> = {
+            build: 'review',
+            review: 'build',
+            debug: 'build',
+            plan: 'review',
+          };
           const suggested = alternatives[mode] ?? 'review';
           return {
             success: false,
@@ -1202,17 +1295,28 @@ Investigate the error, fix the underlying issue in the affected files, and verif
           definition: {
             name: toolName,
             description: `[MCP: ${serverId}] ${tool.description ?? tool.name}`,
-            inputSchema: (tool.inputSchema as Record<string, unknown>) ?? { type: 'object', properties: {}, required: [] },
+            inputSchema: (tool.inputSchema as Record<string, unknown>) ?? {
+              type: 'object',
+              properties: {},
+              required: [],
+            },
           } satisfies ToolDefinition,
           category: 'mcp' as ToolCategory,
           requiresApproval: true,
-          execute: async (input: Record<string, unknown>, _ctx: ToolExecutionContext): Promise<ToolResult> => {
+          execute: async (
+            input: Record<string, unknown>,
+            _ctx: ToolExecutionContext,
+          ): Promise<ToolResult> => {
             try {
               const result = await mcpBridge.callTool(serverId, tool.name, input);
               const output = typeof result === 'string' ? result : JSON.stringify(result, null, 2);
               return { success: true, output };
             } catch (err) {
-              return { success: false, output: '', error: err instanceof Error ? err.message : String(err) };
+              return {
+                success: false,
+                output: '',
+                error: err instanceof Error ? err.message : String(err),
+              };
             }
           },
         };
@@ -1289,10 +1393,8 @@ Investigate the error, fix the underlying issue in the affected files, and verif
           const current = useAgentStore.getState().tokenUsage;
           const inputTokens = (current?.inputTokens ?? 0) + u.inputTokens;
           const outputTokens = (current?.outputTokens ?? 0) + u.outputTokens;
-          const cacheReadTokens =
-            (current?.cacheReadTokens ?? 0) + (u.cacheReadTokens ?? 0);
-          const cacheWriteTokens =
-            (current?.cacheWriteTokens ?? 0) + (u.cacheWriteTokens ?? 0);
+          const cacheReadTokens = (current?.cacheReadTokens ?? 0) + (u.cacheReadTokens ?? 0);
+          const cacheWriteTokens = (current?.cacheWriteTokens ?? 0) + (u.cacheWriteTokens ?? 0);
           const totalTokens =
             u.totalTokens > 0
               ? (current?.totalTokens ?? 0) + u.totalTokens
@@ -1329,7 +1431,9 @@ Investigate the error, fix the underlying issue in the affected files, and verif
 
       case 'tool_call_pending': {
         const pending = event.pending;
-        const existing = useAgentStore.getState().pendingToolCalls.some((call) => call.id === pending.id);
+        const existing = useAgentStore
+          .getState()
+          .pendingToolCalls.some((call) => call.id === pending.id);
         if (!existing) {
           store.addToolCall({
             id: pending.id,
@@ -1338,7 +1442,11 @@ Investigate the error, fix the underlying issue in the affected files, and verif
             status: 'pending',
             startedAt: Date.now(),
           });
-          this.currentIterationToolCalls.push({ id: pending.id, name: pending.toolName, input: pending.input });
+          this.currentIterationToolCalls.push({
+            id: pending.id,
+            name: pending.toolName,
+            input: pending.input,
+          });
         } else store.updateToolCall(pending.id, { status: 'pending' });
         break;
       }
@@ -1530,7 +1638,9 @@ Investigate the error, fix the underlying issue in the affected files, and verif
       }
 
       case 'context_gathered': {
-        this.debug(`📎 Gathered: ${event.filePath} (relevance: ${event.relevance.toFixed(2)}, ~${event.tokenEstimate} tokens)`);
+        this.debug(
+          `📎 Gathered: ${event.filePath} (relevance: ${event.relevance.toFixed(2)}, ~${event.tokenEstimate} tokens)`,
+        );
         store.addGatheredContextFile({
           path: event.filePath,
           relevance: event.relevance,
@@ -1560,7 +1670,10 @@ Investigate the error, fix the underlying issue in the affected files, and verif
         if (count > 0) {
           this.debug(`🧠 Extracted ${count} memory/memories`);
           // Reload from DB so sidebar reflects new memories
-          useMemoryStore.getState().loadMemories().catch(() => {});
+          useMemoryStore
+            .getState()
+            .loadMemories()
+            .catch(() => {});
         }
         break;
       }
@@ -1568,18 +1681,24 @@ Investigate the error, fix the underlying issue in the affected files, and verif
       case 'memory_created': {
         const mem = (event as { memory?: { title?: string } }).memory;
         this.debug(`🧠 Memory created: ${mem?.title ?? '(unknown)'}`);
-        useMemoryStore.getState().loadMemories().catch(() => {});
+        useMemoryStore
+          .getState()
+          .loadMemories()
+          .catch(() => {});
         break;
       }
     }
   }
 
-  private async handleApprovalRequest(pending: {
-    id: string;
-    toolName: string;
-    input: Record<string, unknown>;
-    description: string;
-  }, signal: AbortSignal): Promise<boolean> {
+  private async handleApprovalRequest(
+    pending: {
+      id: string;
+      toolName: string;
+      input: Record<string, unknown>;
+      description: string;
+    },
+    signal: AbortSignal,
+  ): Promise<boolean> {
     const settings = useSettingsStore.getState();
     const mode = settings.approvalMode;
 
@@ -1594,7 +1713,16 @@ Investigate the error, fix the underlying issue in the affected files, and verif
 
     // Smart: auto-approve safe tools, ask for moderate/destructive
     if (mode === 'smart') {
-      const safeTools = new Set(['read_file', 'list_directory', 'search_files', 'search_text', 'get_file_info', 'list_code_symbols', 'get_diagnostics', 'grep_search']);
+      const safeTools = new Set([
+        'read_file',
+        'list_directory',
+        'search_files',
+        'search_text',
+        'get_file_info',
+        'list_code_symbols',
+        'get_diagnostics',
+        'grep_search',
+      ]);
       if (safeTools.has(pending.toolName)) {
         this.debug(`✅ Smart auto-approved (safe): ${pending.toolName}`);
         return true;
@@ -1604,7 +1732,9 @@ Investigate the error, fix the underlying issue in the affected files, and verif
 
     // Session-trust: auto-approve if tool was previously trusted
     if (mode === 'session-trust') {
-      const trustedTools = this.harness.getToolRouter()?.getSessionTrustedTools?.() as Set<string> | undefined;
+      const trustedTools = this.harness.getToolRouter()?.getSessionTrustedTools?.() as
+        | Set<string>
+        | undefined;
       if (trustedTools?.has(pending.toolName)) {
         this.debug(`✅ Session-trust auto-approved: ${pending.toolName}`);
         return true;
@@ -1638,13 +1768,16 @@ Investigate the error, fix the underlying issue in the affected files, and verif
    * Handle a mode switch request from the harness.
    * Pauses the agent loop until the user approves/denies via the ModeSwitchDialog.
    */
-  private async handleModeSwitchRequest(request: {
-    id: string;
-    fromMode: string;
-    toMode: string;
-    reason: string;
-    contextSummary: string;
-  }, signal: AbortSignal): Promise<boolean> {
+  private async handleModeSwitchRequest(
+    request: {
+      id: string;
+      fromMode: string;
+      toMode: string;
+      reason: string;
+      contextSummary: string;
+    },
+    signal: AbortSignal,
+  ): Promise<boolean> {
     this.debug(`Delegação solicitada: ${request.fromMode} → ${request.toMode} (${request.reason})`);
 
     // Push to store so ModeSwitchDialog renders
@@ -1696,7 +1829,10 @@ Investigate the error, fix the underlying issue in the affected files, and verif
   }
 
   /** Called by UI when the user submits answers to agent questions */
-  resolveUserQuestion(id: string, answers: import('@hyscode/agent-harness').AgentQuestionAnswer[]): void {
+  resolveUserQuestion(
+    id: string,
+    answers: import('@hyscode/agent-harness').AgentQuestionAnswer[],
+  ): void {
     const resolver = this.userQuestionResolvers.get(id);
     if (resolver) {
       this.userQuestionResolvers.delete(id);
@@ -1710,7 +1846,10 @@ Investigate the error, fix the underlying issue in the affected files, and verif
   /**
    * Build thinking config for the active provider+model from settings.
    */
-  private buildThinkingConfig(providerId: string | null, modelId: string | null): import('@hyscode/ai-providers').ThinkingConfig | undefined {
+  private buildThinkingConfig(
+    providerId: string | null,
+    modelId: string | null,
+  ): import('@hyscode/ai-providers').ThinkingConfig | undefined {
     if (!providerId || !modelId) return undefined;
     const settings = useSettingsStore.getState();
     const key = `${providerId}::${modelId}`;
@@ -1798,12 +1937,16 @@ Investigate the error, fix the underlying issue in the affected files, and verif
         // must be 'tool' so that providers (OpenAI, OpenRouter, Ollama, GitHub
         // Copilot) format them correctly. Without this, tool_result blocks
         // stored as role='user' cause empty content in toOpenAIMessages → 400.
-        const hasToolResult = msg.blocks.some(b => b.type === 'tool_result');
+        const hasToolResult = msg.blocks.some((b) => b.type === 'tool_result');
         const role = hasToolResult ? 'tool' : (msg.role as 'user' | 'assistant' | 'tool');
         const blocks = [...msg.blocks];
         // Re-inject thinking block if it was stored separately but missing from blocks
         // (Kimi/MiMo require reasoning_content on every assistant message with tool_calls)
-        if (msg.role === 'assistant' && msg.thinking && !blocks.some(b => b.type === 'thinking')) {
+        if (
+          msg.role === 'assistant' &&
+          msg.thinking &&
+          !blocks.some((b) => b.type === 'thinking')
+        ) {
           blocks.unshift({ type: 'thinking', thinking: msg.thinking });
         }
         result.push({
@@ -1881,12 +2024,9 @@ Investigate the error, fix the underlying issue in the affected files, and verif
 
       const total = status.staged.length + status.unstaged.length + status.untracked.length;
       const summaryParts: string[] = [];
-      if (status.staged.length > 0)
-        summaryParts.push(`${status.staged.length} staged`);
-      if (status.unstaged.length > 0)
-        summaryParts.push(`${status.unstaged.length} modified`);
-      if (status.untracked.length > 0)
-        summaryParts.push(`${status.untracked.length} untracked`);
+      if (status.staged.length > 0) summaryParts.push(`${status.staged.length} staged`);
+      if (status.unstaged.length > 0) summaryParts.push(`${status.unstaged.length} modified`);
+      if (status.untracked.length > 0) summaryParts.push(`${status.untracked.length} untracked`);
 
       env.gitState = {
         branch,
@@ -1926,10 +2066,9 @@ Investigate the error, fix the underlying issue in the affected files, and verif
         // Skip URLs and short fragments
         if (candidate.includes('://') || candidate.length < 3) continue;
         try {
-          const stat = await tauriInvokeRaw<{ is_file: boolean }>(
-            'stat_path',
-            { path: `${workspacePath}/${candidate}` },
-          );
+          const stat = await tauriInvokeRaw<{ is_file: boolean }>('stat_path', {
+            path: `${workspacePath}/${candidate}`,
+          });
           if (stat.is_file) {
             hints.push(candidate);
           }
@@ -1944,18 +2083,49 @@ Investigate the error, fix the underlying issue in the affected files, and verif
         .toLowerCase()
         .replace(/[^\w\s-]/g, ' ')
         .split(/\s+/)
-        .filter(w => w.length > 3)
-        .filter(w => !['that', 'this', 'with', 'from', 'have', 'been', 'will', 'should', 'could', 'would', 'make', 'want', 'need', 'like', 'help', 'please', 'create', 'change', 'update', 'modify', 'edit', 'file', 'code'].includes(w));
+        .filter((w) => w.length > 3)
+        .filter(
+          (w) =>
+            ![
+              'that',
+              'this',
+              'with',
+              'from',
+              'have',
+              'been',
+              'will',
+              'should',
+              'could',
+              'would',
+              'make',
+              'want',
+              'need',
+              'like',
+              'help',
+              'please',
+              'create',
+              'change',
+              'update',
+              'modify',
+              'edit',
+              'file',
+              'code',
+            ].includes(w),
+        );
 
       // Search for files matching keywords (limited to avoid overhead)
       for (const keyword of keywords.slice(0, 3)) {
         try {
-          const results = await tauriInvokeRaw<string[]>(
-            'find_files',
-            { basePath: workspacePath, pattern: `**/*${keyword}*`, maxResults: 5 },
-          );
+          const results = await tauriInvokeRaw<string[]>('find_files', {
+            basePath: workspacePath,
+            pattern: `**/*${keyword}*`,
+            maxResults: 5,
+          });
           for (const r of results) {
-            const rel = r.replace(workspacePath, '').replace(/^[\\/]/, '').replace(/\\/g, '/');
+            const rel = r
+              .replace(workspacePath, '')
+              .replace(/^[\\/]/, '')
+              .replace(/\\/g, '/');
             if (!hints.includes(rel)) hints.push(rel);
           }
         } catch {
@@ -1971,10 +2141,15 @@ Investigate the error, fix the underlying issue in the affected files, and verif
           priority: 'low',
           content: `<context_hints>
 The following files may be relevant to the user's request. Consider using gather_context on the important ones:
-${hints.map(h => `- ${h}`).join('\n')}
+${hints.map((h) => `- ${h}`).join('\n')}
 </context_hints>`,
           tokenEstimate: Math.ceil(hints.join('\n').length / 4) + 50,
+          origin: 'automatic',
+          identity: 'automatic:context-hints',
+          expiresAfterTurn: this.harness.getContextTurnNumber(),
         });
+      } else {
+        this.harness.removeContextSource('__context_hints__');
       }
     } catch {
       // Context hints are best-effort — never block the agent turn
@@ -1989,18 +2164,20 @@ ${hints.map(h => `- ${h}`).join('\n')}
    */
   private async loadModePolicies(): Promise<void> {
     try {
-      const rows = await tauriInvokeRaw<Array<{
-        mode: string;
-        max_iterations: number;
-        max_input_tokens: number;
-        max_output_tokens: number;
-        turn_timeout_ms: number;
-        approval_mode: string;
-        verification_required: boolean;
-        allowed_tool_categories: string;
-        tool_overrides: string | null;
-        skill_triggers: string | null;
-      }>>('db_list_mode_policies', {});
+      const rows = await tauriInvokeRaw<
+        Array<{
+          mode: string;
+          max_iterations: number;
+          max_input_tokens: number;
+          max_output_tokens: number;
+          turn_timeout_ms: number;
+          approval_mode: string;
+          verification_required: boolean;
+          allowed_tool_categories: string;
+          tool_overrides: string | null;
+          skill_triggers: string | null;
+        }>
+      >('db_list_mode_policies', {});
 
       for (const row of rows) {
         applyPolicyOverride(row.mode as AgentType, {
@@ -2096,10 +2273,9 @@ ${hints.map(h => `- ${h}`).join('\n')}
     const conversationId = useAgentStore.getState().conversationId;
     if (!conversationId) return;
     try {
-      const usage = await tauriInvokeRaw<TokenUsage | null>(
-        'db_get_conversation_token_usage',
-        { conversationId },
-      );
+      const usage = await tauriInvokeRaw<TokenUsage | null>('db_get_conversation_token_usage', {
+        conversationId,
+      });
       if (usage) {
         useAgentStore.getState().setSessionTokenUsage(usage);
       }
@@ -2109,7 +2285,10 @@ ${hints.map(h => `- ${h}`).join('\n')}
   }
 
   /** Persist the current conversation turn to the database */
-  private async persistConversation(userMessage: string, _assistantResponse: string): Promise<void> {
+  private async persistConversation(
+    userMessage: string,
+    _assistantResponse: string,
+  ): Promise<void> {
     const store = useAgentStore.getState();
     const settings = useSettingsStore.getState();
     const conversationId = store.conversationId;
@@ -2188,13 +2367,16 @@ ${hints.map(h => `- ${h}`).join('\n')}
   private async invokeForHarness<T>(command: string, args?: Record<string, unknown>): Promise<T> {
     const path = typeof args?.path === 'string' ? args.path : null;
     if (command === 'read_file' && path) {
-      const tab = useEditorStore.getState().tabs.find((item) => item.filePath === path && item.type === 'file');
+      const tab = useEditorStore
+        .getState()
+        .tabs.find((item) => item.filePath === path && item.type === 'file');
       const buffered = useFileStore.getState().getFileContent(path);
       if (tab?.isDirty && buffered !== undefined) return buffered as T;
     }
 
     const mutationPaths: string[] = [];
-    if (path && ['write_file', 'create_file', 'delete_path'].includes(command)) mutationPaths.push(path);
+    if (path && ['write_file', 'create_file', 'delete_path'].includes(command))
+      mutationPaths.push(path);
     if (['rename_path', 'copy_path'].includes(command)) {
       if (typeof args?.from === 'string') mutationPaths.push(args.from);
       if (typeof args?.to === 'string') mutationPaths.push(args.to);
@@ -2211,7 +2393,9 @@ ${hints.map(h => `- ${h}`).join('\n')}
     } catch {
       // New file or directory.
     }
-    const tab = useEditorStore.getState().tabs.find((item) => item.filePath === path && item.type === 'file');
+    const tab = useEditorStore
+      .getState()
+      .tabs.find((item) => item.filePath === path && item.type === 'file');
     const bufferBefore = useFileStore.getState().getFileContent(path) ?? diskBefore;
     this.mutationSnapshots.set(path, {
       diskBefore,
@@ -2226,7 +2410,8 @@ ${hints.map(h => `- ${h}`).join('\n')}
     session?: Pick<AgentEditSession, 'diskOriginalContent' | 'originalContent' | 'wasDirty'>,
   ): Promise<void> {
     const captured = this.mutationSnapshots.get(path);
-    const diskBefore = captured?.diskBefore ?? session?.diskOriginalContent ?? session?.originalContent ?? null;
+    const diskBefore =
+      captured?.diskBefore ?? session?.diskOriginalContent ?? session?.originalContent ?? null;
     const bufferBefore = captured?.bufferBefore ?? session?.originalContent ?? diskBefore;
     try {
       if (diskBefore === null) await tauriFs.deletePath(path);
@@ -2237,21 +2422,26 @@ ${hints.map(h => `- ${h}`).join('\n')}
     if (bufferBefore !== null) {
       useFileStore.getState().setFileContent(path, bufferBefore);
       useAgentStore.setState((draft) => {
-        const edit = draft.agentEditSessions.find((item) =>
-          item.filePath === path && (item.phase === 'streaming' || item.phase === 'pending_review'),
+        const edit = draft.agentEditSessions.find(
+          (item) =>
+            item.filePath === path &&
+            (item.phase === 'streaming' || item.phase === 'pending_review'),
         );
         if (edit) edit.newContent = bufferBefore;
       });
       await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
     }
-    const tabId = captured?.tabId ?? useEditorStore.getState().tabs.find((tab) => tab.filePath === path)?.id;
-    if (tabId) useEditorStore.getState().markDirty(tabId, captured?.wasDirty ?? session?.wasDirty ?? false);
+    const tabId =
+      captured?.tabId ?? useEditorStore.getState().tabs.find((tab) => tab.filePath === path)?.id;
+    if (tabId)
+      useEditorStore.getState().markDirty(tabId, captured?.wasDirty ?? session?.wasDirty ?? false);
     this.mutationSnapshots.delete(path);
   }
 
   private acceptMutationSnapshot(path: string): void {
     const captured = this.mutationSnapshots.get(path);
-    const tabId = captured?.tabId ?? useEditorStore.getState().tabs.find((tab) => tab.filePath === path)?.id;
+    const tabId =
+      captured?.tabId ?? useEditorStore.getState().tabs.find((tab) => tab.filePath === path)?.id;
     if (tabId) useEditorStore.getState().markDirty(tabId, false);
     this.mutationSnapshots.delete(path);
   }
@@ -2317,27 +2507,29 @@ ${hints.map(h => `- ${h}`).join('\n')}
       }
 
       // Wire the command callback so we can track agent terminal commands
-      this.harness.setOnTerminalCommand((command: string, output: string, exitCode: number | null) => {
-        this._lastTerminalCommand = { command, output, exitCode };
+      this.harness.setOnTerminalCommand(
+        (command: string, output: string, exitCode: number | null) => {
+          this._lastTerminalCommand = { command, output, exitCode };
 
-        // Update history on every healthy agent session in the current tab's pool
-        const ts = useTerminalStore.getState();
-        const activeConv = useAgentStore.getState().conversationId ?? '_global';
-        const activePool = this._agentTerminalSessionIds.get(activeConv) ?? [];
-        for (const sid of activePool) {
-          const s = ts.sessions.find((sess) => sess.id === sid);
-          if (s && !s.isDead) {
-            ts.setLastCommand(sid, command, output.slice(0, 2000), exitCode);
-            ts.appendCommandHistory(sid, {
-              command,
-              output: output.slice(0, 2000),
-              exitCode,
-              timestamp: Date.now(),
-              source: 'agent',
-            });
+          // Update history on every healthy agent session in the current tab's pool
+          const ts = useTerminalStore.getState();
+          const activeConv = useAgentStore.getState().conversationId ?? '_global';
+          const activePool = this._agentTerminalSessionIds.get(activeConv) ?? [];
+          for (const sid of activePool) {
+            const s = ts.sessions.find((sess) => sess.id === sid);
+            if (s && !s.isDead) {
+              ts.setLastCommand(sid, command, output.slice(0, 2000), exitCode);
+              ts.appendCommandHistory(sid, {
+                command,
+                output: output.slice(0, 2000),
+                exitCode,
+                timestamp: Date.now(),
+                source: 'agent',
+              });
+            }
           }
-        }
-      });
+        },
+      );
     } catch (err) {
       // Agent terminal is best-effort — fall back to hidden PTY behavior
       console.warn('[HarnessBridge] Failed to ensure agent terminal:', err);
@@ -2357,7 +2549,9 @@ ${hints.map(h => `- ${h}`).join('\n')}
 
       // If we have a PTY, verify it still exists in the Rust backend
       if (currentPtyId) {
-        const alive = await tauriInvokeRaw<boolean>('pty_exists', { ptyId: currentPtyId }).catch(() => false);
+        const alive = await tauriInvokeRaw<boolean>('pty_exists', { ptyId: currentPtyId }).catch(
+          () => false,
+        );
         if (alive) return; // still good
 
         // PTY is dead — mark it in the store

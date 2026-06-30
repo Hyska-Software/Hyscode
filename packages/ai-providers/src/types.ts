@@ -33,7 +33,12 @@ export interface ThinkingContent {
   thinking: string;
 }
 
-export type MessageContent = TextContent | ImageContent | ToolCallContent | ToolResultContent | ThinkingContent;
+export type MessageContent =
+  | TextContent
+  | ImageContent
+  | ToolCallContent
+  | ToolResultContent
+  | ThinkingContent;
 
 export interface Message {
   role: MessageRole;
@@ -92,6 +97,8 @@ export interface ChatParams {
   messages: Message[];
   tools?: ToolDefinition[];
   systemPrompt?: string;
+  /** Allow providers with prompt-cache support to mark stable prompt prefixes. */
+  cachePrompt?: boolean;
   maxTokens?: number;
   temperature?: number;
   topP?: number;
@@ -133,7 +140,9 @@ export type ThinkingKind =
 export interface ThinkingVariants {
   kind: ThinkingKind;
   /** Levels accepted by the model — undefined for kimi/deepseek (binary enabled/disabled) */
-  levels?: ReadonlyArray<'low' | 'medium' | 'high' | 'enabled' | 'disabled' | 'none' | 'minimal' | 'xhigh' | 'max'>;
+  levels?: ReadonlyArray<
+    'low' | 'medium' | 'high' | 'enabled' | 'disabled' | 'none' | 'minimal' | 'xhigh' | 'max'
+  >;
   /** Default level when thinking is enabled without an explicit value */
   defaultLevel?: 'low' | 'medium' | 'high' | 'enabled';
   /** True for Anthropic models that accept the 'adaptive' type (opus 4.6+, sonnet 4.6, fable 5) */

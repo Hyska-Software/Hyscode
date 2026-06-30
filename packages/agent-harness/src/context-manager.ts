@@ -17,12 +17,15 @@ import type {
   Skill,
   AgentDefinition,
   Rule,
+  ContextTokenBreakdown,
+  ContextEntryDecision,
 } from './types';
 
 const PRIORITY_ORDER: ContextPriority[] = ['always', 'high', 'medium', 'low'];
 
 /** Max fraction of available tokens that gathered context can consume. */
-const GATHERED_CONTEXT_BUDGET_FRACTION = 0.3;
+const AUTOMATIC_CONTEXT_BUDGET_FRACTION = 0.2;
+const CONTEXT_WRAPPER_TOKEN_ALLOWANCE = 12;
 
 export class ContextManager {
   private sources: ContextSource[] = [];
@@ -34,6 +37,7 @@ export class ContextManager {
   private systemPromptOverride: string | null = null;
   private droppedMessages = 0;
   private droppedOrphanTools = 0;
+  private turnNumber = 0;
 
   // ─── Gathered Context (agent-managed) ─────────────────────────────
   // Files the agent autonomously decides are important to keep in context.
@@ -98,6 +102,18 @@ export class ContextManager {
     return this.droppedMessages;
   }
 
+  beginTurn(): void {
+    this.turnNumber++;
+    this.sources = this.sources.filter(
+      (source) =>
+        source.expiresAfterTurn === undefined || source.expiresAfterTurn >= this.turnNumber,
+    );
+  }
+
+  getTurnNumber(): number {
+    return this.turnNumber;
+  }
+
   getDroppedCategories(): Array<'history' | 'orphan_tool'> {
     const categories: Array<'history' | 'orphan_tool'> = [];
     if (this.droppedMessages > this.droppedOrphanTools) categories.push('history');
@@ -120,6 +136,8 @@ export class ContextManager {
       reason,
       tokenEstimate,
       gatheredAt: new Date().toISOString(),
+      version: hashContent(content),
+      renderStrategy: 'excerpt',
     });
     return tokenEstimate;
   }
@@ -131,8 +149,7 @@ export class ContextManager {
 
   /** Get all gathered files, sorted by relevance (highest first). */
   getGatheredFiles(): GatheredContextEntry[] {
-    return Array.from(this.gatheredFiles.values())
-      .sort((a, b) => b.relevance - a.relevance);
+    return Array.from(this.gatheredFiles.values()).sort((a, b) => b.relevance - a.relevance);
   }
 
   /** Clear all gathered files. */
@@ -191,10 +208,10 @@ export class ContextManager {
     };
 
     // Build messages within budget
-    const messages = this.buildMessages(budget.available);
+    const plan = this.buildMessages(budget.available);
+    const messages = plan.messages;
 
-    const totalTokens =
-      systemTokens + toolTokens + estimateMessageTokens(messages);
+    const totalTokens = systemTokens + toolTokens + estimateMessageTokens(messages);
 
     return {
       systemPrompt,
@@ -202,6 +219,13 @@ export class ContextManager {
       tools,
       totalTokens,
       budget,
+      tokenBreakdown: {
+        ...plan.breakdown,
+        system: systemTokens,
+        tools: toolTokens,
+        total: totalTokens,
+      },
+      entries: plan.entries,
     };
   }
 
@@ -220,7 +244,9 @@ export class ContextManager {
     // Active rules (injected before skills — higher precedence)
     if (this.activeRules.length > 0) {
       parts.push('\n<active_rules>');
-      parts.push('CRITICAL: Read and follow EVERY rule below before taking any action. Rules override default behavior.');
+      parts.push(
+        'CRITICAL: Read and follow EVERY rule below before taking any action. Rules override default behavior.',
+      );
       for (const rule of this.activeRules) {
         parts.push(`<rule name="${rule.name}" scope="${rule.scope}">\n${rule.content}\n</rule>`);
       }
@@ -250,9 +276,9 @@ export class ContextManager {
     // Instead of dumping full descriptions of every inactive skill (which causes
     // context rot), we use progressive disclosure: a one-liner list so the agent
     // knows what exists, and the `list_skills` tool for full details.
-    const inactiveSkills = this.allSkills.filter(s => !s.active);
+    const inactiveSkills = this.allSkills.filter((s) => !s.active);
     if (inactiveSkills.length > 0) {
-      const names = inactiveSkills.map(s => s.frontmatter.name).join(', ');
+      const names = inactiveSkills.map((s) => s.frontmatter.name).join(', ');
       parts.push(`\n<available_skills count="${inactiveSkills.length}">`);
       parts.push(`Available but inactive: ${names}`);
       parts.push('Use `list_skills` for details or `activate_skill` to enable one.');
@@ -264,99 +290,154 @@ export class ContextManager {
 
   // ─── Message Construction ───────────────────────────────────────────
 
-  private buildMessages(availableTokens: number): Message[] {
+  private buildMessages(availableTokens: number): {
+    messages: Message[];
+    breakdown: ContextTokenBreakdown;
+    entries: ContextEntryDecision[];
+  } {
     let remaining = availableTokens;
     this.droppedMessages = 0;
     this.droppedOrphanTools = 0;
 
-    // Step 2: Add context sources by priority (non-always)
-    const contextMessages: Message[] = [];
-    const nonAlwaysSources = this.sources
-      .filter((s) => s.priority !== 'always')
-      .sort((a, b) => PRIORITY_ORDER.indexOf(a.priority) - PRIORITY_ORDER.indexOf(b.priority));
+    const breakdown: ContextTokenBreakdown = emptyBreakdown();
+    const entries: ContextEntryDecision[] = [];
 
-    for (const source of nonAlwaysSources) {
-      if (source.tokenEstimate <= remaining) {
-        contextMessages.push({
-          role: 'user',
-          content: [
-            {
-              type: 'text',
-              text: `[Context: ${source.type}]\n${source.content}`,
-            },
-          ],
-        });
-        remaining -= source.tokenEstimate;
-      }
-    }
-
-    // Step 3: Add gathered files (agent-managed context) within sub-budget
-    const gatheredMessages: Message[] = [];
-    if (this.gatheredFiles.size > 0) {
-      const gatheredBudget = Math.floor(availableTokens * GATHERED_CONTEXT_BUDGET_FRACTION);
-      let gatheredUsed = 0;
-
-      // Sort by relevance (highest first) so most important files are kept
-      const sorted = this.getGatheredFiles();
-
-      const fileParts: string[] = [];
-      for (const entry of sorted) {
-        if (gatheredUsed + entry.tokenEstimate > gatheredBudget) continue;
-        if (entry.tokenEstimate > remaining) continue;
-        fileParts.push(
-          `<gathered_file path="${entry.path}" relevance="${entry.relevance.toFixed(2)}" reason="${entry.reason}">\n${entry.content}\n</gathered_file>`
-        );
-        gatheredUsed += entry.tokenEstimate;
-        remaining -= entry.tokenEstimate;
-      }
-
-      if (fileParts.length > 0) {
-        gatheredMessages.push({
-          role: 'user',
-          content: [
-            {
-              type: 'text',
-              text: `[Gathered Context: ${fileParts.length} file(s) in agent working memory]\n<gathered_context>\n${fileParts.join('\n')}\n</gathered_context>`,
-            },
-          ],
-        });
-      }
-    }
-
-    // Step 4: Include protocol frames atomically. An assistant tool-call message
+    // Reserve history first. The newest user frame is the current request and is
+    // mandatory; the frame before it is the active tool protocol frame when present.
     // and its following tool-result message must never be split by truncation.
     const frames = this.buildProtocolFrames(this.conversationHistory);
     const includedFrames: Message[][] = [];
+    let droppedFrames: Message[][] = [];
     for (let index = frames.length - 1; index >= 0; index--) {
       const frame = frames[index];
       const tokens = estimateMessageTokens(frame);
       if (tokens > remaining) {
-        this.droppedMessages += frames.slice(0, index + 1).reduce((sum, item) => sum + item.length, 0);
+        if (index === frames.length - 1) {
+          const compacted = this.truncateMessages(frame, remaining);
+          if (compacted.length > 0) includedFrames.unshift(compacted);
+          const used = estimateMessageTokens(compacted);
+          breakdown.currentTurn += used;
+          entries.push({
+            id: 'current-turn',
+            category: 'currentTurn',
+            tokens: used,
+            included: true,
+          });
+          remaining -= used;
+        } else {
+          droppedFrames = frames.slice(0, index + 1);
+          this.droppedMessages += droppedFrames.reduce((sum, item) => sum + item.length, 0);
+          breakdown.dropped += tokens;
+          entries.push({
+            id: `history-${index}`,
+            category: 'recentHistory',
+            tokens,
+            included: false,
+            reason: 'budget',
+          });
+        }
         break;
       }
       includedFrames.unshift(frame);
       remaining -= tokens;
+      const category =
+        index === frames.length - 1
+          ? 'currentTurn'
+          : frame.some((message) => message.role === 'tool')
+            ? 'activeToolFrame'
+            : 'recentHistory';
+      breakdown[category] += tokens;
+      entries.push({ id: `history-${index}`, category, tokens, included: true });
     }
 
-    let history = includedFrames.flat();
-    const firstUser = this.conversationHistory.find((message) => message.role === 'user');
-    if (history.length === 0 && frames.length > 0) {
-      const newest = frames[frames.length - 1];
-      history = this.truncateMessages(newest, remaining);
+    const history = includedFrames.flat();
+    const includedReadPaths = collectReadPaths(history);
+    const contextMessages: Message[] = [];
+    const seen = new Set<string>();
+    let automaticUsed = 0;
+    const automaticBudget = Math.floor(availableTokens * AUTOMATIC_CONTEXT_BUDGET_FRACTION);
+    if (droppedFrames.length > 0 && remaining > 80) {
+      const checkpoint = buildHistoryCheckpoint(droppedFrames, Math.min(remaining, 500));
+      const checkpointTokens = estimateMessageTokens([checkpoint]);
+      if (checkpointTokens <= remaining) {
+        contextMessages.push(checkpoint);
+        remaining -= checkpointTokens;
+        breakdown.recentHistory += checkpointTokens;
+        entries.push({
+          id: 'history-checkpoint',
+          category: 'recentHistory',
+          tokens: checkpointTokens,
+          included: true,
+        });
+      }
     }
-    if (history.length > 0 && history[0].role !== 'user' && firstUser && !history.includes(firstUser)) {
-      const tokens = estimateMessageTokens([firstUser]);
-      if (tokens <= remaining) history.unshift(firstUser);
+    const candidates = [
+      ...this.sources.filter((source) => source.priority !== 'always'),
+      ...this.getGatheredFiles().map((entry) => ({
+        id: `gathered:${entry.path}`,
+        type: 'gathered_file' as const,
+        priority: 'medium' as const,
+        content: `<gathered_file path="${entry.path}" version="${entry.version}">\n${entry.content}\n</gathered_file>`,
+        tokenEstimate: entry.tokenEstimate,
+        identity: `file:${normalizePath(entry.path)}`,
+        version: entry.version,
+        origin: 'automatic' as const,
+      })),
+    ].sort((a, b) => PRIORITY_ORDER.indexOf(a.priority) - PRIORITY_ORDER.indexOf(b.priority));
+
+    for (const source of candidates) {
+      const category =
+        source.origin === 'memory'
+          ? 'memory'
+          : source.origin === 'environment'
+            ? 'environment'
+            : source.origin === 'explicit' || source.type === 'context_chip'
+              ? 'explicit'
+              : 'automatic';
+      const identity = source.identity ?? source.id;
+      const tokens =
+        estimateMessageTokens([
+          {
+            role: 'user',
+            content: [{ type: 'text', text: `[Context: ${source.type}]\n${source.content}` }],
+          },
+        ]) + CONTEXT_WRAPPER_TOKEN_ALLOWANCE;
+      const isReadDuplicate =
+        source.type === 'gathered_file' && includedReadPaths.has(identity.replace(/^file:/, ''));
+      if (
+        seen.has(`${identity}:${source.version ?? hashContent(source.content)}`) ||
+        isReadDuplicate
+      ) {
+        breakdown.deduplicated += tokens;
+        entries.push({ id: source.id, category, tokens, included: false, reason: 'duplicate' });
+        continue;
+      }
+      const automatic = category !== 'explicit';
+      if (tokens > remaining || (automatic && automaticUsed + tokens > automaticBudget)) {
+        breakdown.dropped += tokens;
+        entries.push({ id: source.id, category, tokens, included: false, reason: 'budget' });
+        continue;
+      }
+      seen.add(`${identity}:${source.version ?? hashContent(source.content)}`);
+      contextMessages.push({
+        role: 'user',
+        content: [{ type: 'text', text: `[Context: ${source.type}]\n${source.content}` }],
+      });
+      remaining -= tokens;
+      if (automatic) automaticUsed += tokens;
+      breakdown[category] += tokens;
+      entries.push({ id: source.id, category, tokens, included: true });
     }
 
-    return [...gatheredMessages, ...contextMessages, ...history];
+    return { messages: [...contextMessages, ...history], breakdown, entries };
   }
 
   private buildProtocolFrames(messages: Message[]): Message[][] {
     const frames: Message[][] = [];
     for (let index = 0; index < messages.length; index++) {
       const message = messages[index];
-      const hasToolCalls = message.role === 'assistant' && message.content.some((item) => item.type === 'tool_call');
+      const hasToolCalls =
+        message.role === 'assistant' && message.content.some((item) => item.type === 'tool_call');
       if (hasToolCalls && messages[index + 1]?.role === 'tool') {
         frames.push([message, messages[index + 1]]);
         index++;
@@ -384,7 +465,7 @@ export class ContextManager {
       } else {
         // Truncate this message's text content
         const remainingTokens = maxTokens - used;
-        const charBudget = remainingTokens * 4; // rough estimate
+        const charBudget = Math.max(0, remainingTokens - 8) * 4; // leave room for framing + marker
         const truncated: Message = {
           ...msg,
           content: msg.content.map((c) => {
@@ -397,11 +478,74 @@ export class ContextManager {
             return c;
           }),
         };
-        result.push(truncated);
+        if (remainingTokens > 8) result.push(truncated);
         break;
       }
     }
 
     return result;
   }
+}
+
+function normalizePath(path: string): string {
+  return path.replace(/\\/g, '/').toLowerCase();
+}
+
+function hashContent(content: string): string {
+  let hash = 2166136261;
+  for (let i = 0; i < content.length; i++) hash = Math.imul(hash ^ content.charCodeAt(i), 16777619);
+  return (hash >>> 0).toString(36);
+}
+
+function collectReadPaths(messages: Message[]): Set<string> {
+  const paths = new Set<string>();
+  for (const message of messages) {
+    for (const content of message.content) {
+      if (
+        content.type === 'tool_call' &&
+        content.name === 'read_file' &&
+        typeof content.input.path === 'string'
+      ) {
+        paths.add(normalizePath(content.input.path));
+      }
+    }
+  }
+  return paths;
+}
+
+function buildHistoryCheckpoint(frames: Message[][], tokenBudget: number): Message {
+  const facts: string[] = [];
+  for (const frame of frames) {
+    for (const message of frame) {
+      for (const content of message.content) {
+        if (content.type === 'text' && content.text.trim()) {
+          facts.push(`${message.role}: ${content.text.replace(/\s+/g, ' ').slice(0, 240)}`);
+        } else if (content.type === 'tool_call') {
+          facts.push(`tool call: ${content.name}`);
+        } else if (content.type === 'tool_result' && content.isError) {
+          facts.push(`tool error: ${content.output.replace(/\s+/g, ' ').slice(0, 240)}`);
+        }
+      }
+    }
+  }
+  const charBudget = Math.max(120, tokenBudget * 4 - 80);
+  const text = `<history_checkpoint frames="${frames.length}">\n${facts.join('\n').slice(0, charBudget)}\n</history_checkpoint>`;
+  return { role: 'user', content: [{ type: 'text', text }] };
+}
+
+function emptyBreakdown(): ContextTokenBreakdown {
+  return {
+    system: 0,
+    tools: 0,
+    currentTurn: 0,
+    activeToolFrame: 0,
+    recentHistory: 0,
+    explicit: 0,
+    memory: 0,
+    environment: 0,
+    automatic: 0,
+    total: 0,
+    dropped: 0,
+    deduplicated: 0,
+  };
 }

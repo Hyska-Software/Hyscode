@@ -1,12 +1,26 @@
 // ─── Agent Harness Types ────────────────────────────────────────────────────
 // Core types for the agent harness orchestration engine.
 
-import type { Message, StreamChunk, ToolDefinition, ThinkingConfig, TokenUsage } from '@hyscode/ai-providers';
+import type {
+  Message,
+  StreamChunk,
+  ToolDefinition,
+  ThinkingConfig,
+  TokenUsage,
+} from '@hyscode/ai-providers';
 import type { MemoryManager } from './memory-manager';
 
 // ─── Tool System ────────────────────────────────────────────────────────────
 
-export type ToolCategory = 'filesystem' | 'terminal' | 'git' | 'code' | 'browser' | 'mcp' | 'meta' | 'docker';
+export type ToolCategory =
+  | 'filesystem'
+  | 'terminal'
+  | 'git'
+  | 'code'
+  | 'browser'
+  | 'mcp'
+  | 'meta'
+  | 'docker';
 
 export interface ToolResult {
   success: boolean;
@@ -82,12 +96,12 @@ export interface ToolCallRecord {
 // ─── Approval System ────────────────────────────────────────────────────────
 
 export type ApprovalMode =
-  | 'manual'         // Review every tool call
-  | 'yolo'           // Auto-approve everything
-  | 'smart'          // Auto-approve read-only, ask for destructive
-  | 'notify'         // Auto-approve all but show notifications
-  | 'session-trust'  // Approve once per tool type, then auto-approve
-  | 'custom';        // Per-category/tool overrides
+  | 'manual' // Review every tool call
+  | 'yolo' // Auto-approve everything
+  | 'smart' // Auto-approve read-only, ask for destructive
+  | 'notify' // Auto-approve all but show notifications
+  | 'session-trust' // Approve once per tool type, then auto-approve
+  | 'custom'; // Per-category/tool overrides
 
 export interface ApprovalConfig {
   mode: ApprovalMode;
@@ -150,13 +164,31 @@ export interface PendingToolCall {
 // ─── Context Manager ────────────────────────────────────────────────────────
 
 export type ContextPriority = 'always' | 'high' | 'medium' | 'low';
+export type ContextOrigin = 'explicit' | 'memory' | 'environment' | 'automatic';
+export type ContextRenderStrategy = 'full' | 'excerpt' | 'reference';
 
 export interface ContextSource {
   id: string;
-  type: 'active_file' | 'selection' | 'context_chip' | 'git_diff' | 'file_tree' | 'terminal' | 'search_results' | 'gathered_file';
+  type:
+    | 'active_file'
+    | 'selection'
+    | 'context_chip'
+    | 'git_diff'
+    | 'file_tree'
+    | 'terminal'
+    | 'search_results'
+    | 'gathered_file';
   priority: ContextPriority;
   content: string;
   tokenEstimate: number;
+  /** Stable identity used to deduplicate equivalent context. */
+  identity?: string;
+  /** Content revision/hash. Equal identity+version entries are interchangeable. */
+  version?: string;
+  origin?: ContextOrigin;
+  renderStrategy?: ContextRenderStrategy;
+  /** Expire after this turn number. Omitted sources live until explicitly removed. */
+  expiresAfterTurn?: number;
   /** Relevance score (0-1) for gathered files. Higher = more important to keep in context. */
   relevance?: number;
   metadata?: Record<string, unknown>;
@@ -176,6 +208,8 @@ export interface GatheredContextEntry {
   tokenEstimate: number;
   /** Timestamp when gathered */
   gatheredAt: string;
+  version: string;
+  renderStrategy: ContextRenderStrategy;
 }
 
 export interface TokenBudget {
@@ -195,6 +229,31 @@ export interface ContextSnapshot {
   tools: ToolDefinition[];
   totalTokens: number;
   budget: TokenBudget;
+  tokenBreakdown: ContextTokenBreakdown;
+  entries: ContextEntryDecision[];
+}
+
+export interface ContextTokenBreakdown {
+  system: number;
+  tools: number;
+  currentTurn: number;
+  activeToolFrame: number;
+  recentHistory: number;
+  explicit: number;
+  memory: number;
+  environment: number;
+  automatic: number;
+  total: number;
+  dropped: number;
+  deduplicated: number;
+}
+
+export interface ContextEntryDecision {
+  id: string;
+  category: keyof Omit<ContextTokenBreakdown, 'total' | 'dropped' | 'deduplicated'>;
+  tokens: number;
+  included: boolean;
+  reason?: 'budget' | 'duplicate' | 'expired';
 }
 
 // ─── Agent Definitions ──────────────────────────────────────────────────────
@@ -297,12 +356,7 @@ export interface HarnessConfig {
   thinking?: ThinkingConfig;
 }
 
-export type TurnStatus =
-  | 'complete'
-  | 'max_iterations'
-  | 'loop_detected'
-  | 'cancelled'
-  | 'error';
+export type TurnStatus = 'complete' | 'max_iterations' | 'loop_detected' | 'cancelled' | 'error';
 
 export type TurnRequest = {
   userMessage: string;
@@ -337,23 +391,53 @@ type HarnessEventPayload =
   | { type: 'turn_start'; conversationId: string; iteration: number }
   | { type: 'api_request_sent'; iteration: number; providerId: string; modelId: string }
   | { type: 'stream_chunk'; chunk: StreamChunk }
-  | { type: 'tool_call_start'; toolCallId: string; toolName: string; input: Record<string, unknown> }
+  | {
+      type: 'tool_call_start';
+      toolCallId: string;
+      toolName: string;
+      input: Record<string, unknown>;
+    }
   | { type: 'tool_call_pending'; pending: PendingToolCall }
   | { type: 'tool_call_notification'; toolCallId: string; toolName: string; description: string }
-  | { type: 'tool_call_result'; toolCallId: string; toolName: string; result: ToolResult; durationMs: number }
-  | { type: 'turn_end'; reason: 'complete' | 'max_iterations' | 'cancelled' | 'error'; error?: string; tokenUsage: TokenUsage }
-  | { type: 'context_overflow'; droppedMessages: number; droppedCategories: Array<'history' | 'orphan_tool'> }
+  | {
+      type: 'tool_call_result';
+      toolCallId: string;
+      toolName: string;
+      result: ToolResult;
+      durationMs: number;
+    }
+  | {
+      type: 'turn_end';
+      reason: 'complete' | 'max_iterations' | 'cancelled' | 'error';
+      error?: string;
+      tokenUsage: TokenUsage;
+    }
+  | {
+      type: 'context_overflow';
+      droppedMessages: number;
+      droppedCategories: Array<'history' | 'orphan_tool'>;
+    }
   | { type: 'sdd_phase_change'; phase: SddStatus }
   | { type: 'sdd_task_start'; task: SddTask }
   | { type: 'sdd_task_complete'; task: SddTask }
   | { type: 'file_change_pending'; change: FileChangePending }
   | { type: 'mode_switch_request'; request: ModeSwitchRequest }
   | { type: 'mode_switch_resolved'; request: ModeSwitchRequest; approved: boolean }
-  | { type: 'context_gathered'; filePath: string; relevance: number; reason: string; tokenEstimate: number }
+  | {
+      type: 'context_gathered';
+      filePath: string;
+      relevance: number;
+      reason: string;
+      tokenEstimate: number;
+    }
   | { type: 'context_dropped'; filePath: string }
   | { type: 'user_question_request'; id: string; title?: string; questions: AgentQuestion[] }
   | { type: 'user_question_answered'; id: string; answers: AgentQuestionAnswer[] }
-  | { type: 'memories_extracted'; count: number; memories: Array<{ title: string; type: MemoryType }> }
+  | {
+      type: 'memories_extracted';
+      count: number;
+      memories: Array<{ title: string; type: MemoryType }>;
+    }
   | { type: 'memory_recalled'; memoryId: string; title: string }
   | { type: 'memory_created'; memory: Pick<Memory, 'id' | 'title' | 'type' | 'summary'> };
 

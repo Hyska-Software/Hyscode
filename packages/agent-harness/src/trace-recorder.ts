@@ -7,6 +7,8 @@
 import type { TokenUsage } from '@hyscode/ai-providers';
 import type {
   AgentType,
+  ContextEntryDecision,
+  ContextTokenBreakdown,
   ToolCallRecord,
 } from './types';
 
@@ -33,6 +35,12 @@ export interface TraceIteration {
   middlewareInjections: string[];
   /** Stuck detection: was this a repeated identical call? */
   wasRepeatedCall: boolean;
+  /** Estimated input composition before the provider request. */
+  context?: {
+    tokenBreakdown: ContextTokenBreakdown;
+    entries: ContextEntryDecision[];
+    toolCount: number;
+  };
 }
 
 /** Complete trace of a single agent turn. */
@@ -118,12 +126,7 @@ export class TraceRecorder {
   private loopWarnings: Trace['loopWarnings'] = [];
 
   /** Begin recording a new turn trace. */
-  startTrace(
-    conversationId: string,
-    mode: AgentType,
-    provider: string,
-    model: string,
-  ): void {
+  startTrace(conversationId: string, mode: AgentType, provider: string, model: string): void {
     this.currentTrace = {
       id: crypto.randomUUID(),
       conversationId,
@@ -134,7 +137,13 @@ export class TraceRecorder {
       errors: [],
       loopWarnings: [],
       filesModified: [],
-      tokenUsage: { inputTokens: 0, outputTokens: 0, totalTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 },
+      tokenUsage: {
+        inputTokens: 0,
+        outputTokens: 0,
+        totalTokens: 0,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+      },
       timestamp: new Date().toISOString(),
     };
     this.errors = [];
@@ -148,6 +157,15 @@ export class TraceRecorder {
     this.currentTrace.systemPromptPreview = systemPrompt.slice(0, 500);
     this.currentTrace.systemPromptTokens = Math.ceil(systemPrompt.length / 4); // rough estimate
     this.currentTrace.toolCount = toolCount;
+  }
+
+  recordContextSnapshot(
+    tokenBreakdown: ContextTokenBreakdown,
+    entries: ContextEntryDecision[],
+    toolCount: number,
+  ): void {
+    if (!this.currentIteration) return;
+    this.currentIteration.context = { tokenBreakdown, entries, toolCount };
   }
 
   /** Begin a new iteration within the current trace. */
@@ -313,7 +331,10 @@ export function analyzeTraces(traces: Trace[]): TraceAnalysisSummary {
   };
 
   // Tool usage + failures
-  const toolStats = new Map<string, { count: number; totalDurationMs: number; failCount: number }>();
+  const toolStats = new Map<
+    string,
+    { count: number; totalDurationMs: number; failCount: number }
+  >();
   for (const trace of traces) {
     for (const iter of trace.iterations) {
       for (const tc of iter.toolCalls) {

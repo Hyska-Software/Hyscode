@@ -48,18 +48,38 @@ export interface PostToolHook {
 
 /** Terminal command substrings that indicate verification activity */
 const VERIFICATION_COMMAND_PATTERNS = [
-  'test', 'jest', 'vitest', 'mocha', 'pytest', 'cargo test',
-  'npm test', 'pnpm test', 'yarn test',
-  'tsc', 'eslint', 'prettier --check', 'rustfmt --check',
-  'check', 'lint', 'typecheck', 'compile',
-  'node --check', 'python -m py_compile',
+  'test',
+  'jest',
+  'vitest',
+  'mocha',
+  'pytest',
+  'cargo test',
+  'npm test',
+  'pnpm test',
+  'yarn test',
+  'tsc',
+  'eslint',
+  'prettier --check',
+  'rustfmt --check',
+  'check',
+  'lint',
+  'typecheck',
+  'compile',
+  'node --check',
+  'python -m py_compile',
 ];
 
 /** Agent modes that require verification before exit */
 const MODES_REQUIRING_VERIFICATION: Set<AgentType> = new Set(['build', 'debug', 'review']);
 const FILE_MUTATION_TOOLS = new Set([
-  'write_file', 'edit_file', 'create_file', 'replace_lines', 'insert_lines',
-  'delete_file', 'rename_file', 'copy_file',
+  'write_file',
+  'edit_file',
+  'create_file',
+  'replace_lines',
+  'insert_lines',
+  'delete_file',
+  'rename_file',
+  'copy_file',
 ]);
 
 function hasVerificationEvidence(toolCalls: ToolCallRecord[]): boolean {
@@ -119,9 +139,7 @@ export const verificationMiddleware: PreCompletionHook = {
     if (ctx.toolCallHistory.length === 0) return null;
 
     // Check if any file-modifying tool was used
-    const hasEdits = ctx.toolCallHistory.some((tc) =>
-      FILE_MUTATION_TOOLS.has(tc.toolName),
-    );
+    const hasEdits = ctx.toolCallHistory.some((tc) => FILE_MUTATION_TOOLS.has(tc.toolName));
     if (!hasEdits) return null;
 
     // Check if verification already happened
@@ -200,9 +218,10 @@ Consider:
 // output being available via re-read. This prevents context rot from noisy
 // tool results.
 
-const COMPACTION_THRESHOLD = 8000; // chars (~2000 tokens)
-const COMPACTION_HEAD = 2000;
-const COMPACTION_TAIL = 2000;
+const COMPACTION_THRESHOLD = 6000;
+const COMPACTION_HEAD = 1200;
+const COMPACTION_TAIL = 1200;
+const DIAGNOSTIC_LINE_LIMIT = 80;
 
 /**
  * Compact a tool output string if it exceeds the threshold.
@@ -211,12 +230,46 @@ const COMPACTION_TAIL = 2000;
 export function compactToolOutput(output: string, toolName: string): string {
   if (output.length <= COMPACTION_THRESHOLD) return output;
 
+  if (toolName === 'read_file') return compactFileOutput(output, toolName);
+  if (['search_code', 'find_files', 'get_diagnostics'].includes(toolName)) {
+    return compactMatchingLines(output, toolName, () => true);
+  }
+  if (toolName === 'git_diff' || toolName === 'git_status') {
+    return compactMatchingLines(output, toolName, (line) =>
+      /^diff |^@@|^[+-]{1}[^+-]|^\?\?|modified|staged/i.test(line),
+    );
+  }
+  if (toolName === 'run_terminal_command') {
+    return compactMatchingLines(output, toolName, (line) =>
+      /error|fail|fatal|warning|exit|\bnot ok\b/i.test(line),
+    );
+  }
+
   const head = output.slice(0, COMPACTION_HEAD);
   const tail = output.slice(-COMPACTION_TAIL);
   const omittedChars = output.length - COMPACTION_HEAD - COMPACTION_TAIL;
   const omittedLines = output.slice(COMPACTION_HEAD, -COMPACTION_TAIL).split('\n').length;
 
   return `${head}\n\n... [${omittedLines} lines / ${omittedChars} chars omitted from ${toolName} output — re-read the file or re-run the command for full output] ...\n\n${tail}`;
+}
+
+function compactFileOutput(output: string, toolName: string): string {
+  const lines = output.split('\n');
+  const kept = [...lines.slice(0, 60), ...lines.slice(-30)];
+  return `${kept.slice(0, 60).join('\n')}\n\n... [${Math.max(0, lines.length - 90)} lines omitted from ${toolName}; use line_start/line_end to read the needed range] ...\n\n${kept.slice(60).join('\n')}`;
+}
+
+function compactMatchingLines(
+  output: string,
+  toolName: string,
+  important: (line: string) => boolean,
+): string {
+  const lines = output.split('\n');
+  const diagnostics = lines.filter(important).slice(0, DIAGNOSTIC_LINE_LIMIT);
+  const head = lines.slice(0, 25);
+  const tail = lines.slice(-25);
+  const unique = Array.from(new Set([...head, ...diagnostics, ...tail]));
+  return `${unique.join('\n')}\n\n... [${Math.max(0, lines.length - unique.length)} lines omitted from ${toolName}; rerun with a narrower query for full detail] ...`;
 }
 // ─── Auto-Gather Middleware ─────────────────────────────────────────────────
 // In build/debug modes, automatically promotes read_file results to gathered
@@ -227,15 +280,14 @@ export function compactToolOutput(output: string, toolName: string): string {
 const AUTO_GATHER_MODES: Set<AgentType> = new Set(['build', 'debug']);
 
 /** Files with these extensions get auto-gathered at slightly higher relevance */
-const HIGH_VALUE_EXTENSIONS = new Set([
-  '.ts', '.tsx', '.rs', '.toml', '.json', '.md',
-]);
+const HIGH_VALUE_EXTENSIONS = new Set(['.ts', '.tsx', '.rs', '.toml', '.json', '.md']);
 
 export class AutoGatherMiddleware implements PostToolHook {
   name = 'auto_gather';
 
   private gatheredContext: {
     add(path: string, content: string, relevance: number, reason: string): number;
+    remove(path: string): boolean;
     has(path: string): boolean;
     getTokens(): number;
   } | null = null;
@@ -250,19 +302,26 @@ export class AutoGatherMiddleware implements PostToolHook {
     if (!AUTO_GATHER_MODES.has(ctx.mode)) return null;
     if (!this.gatheredContext) return null;
 
+    const filePath = String(record.input.path ?? record.input.filePath ?? '');
+    if (
+      ['write_file', 'edit_file', 'replace_lines', 'insert_lines', 'delete_file'].includes(toolName)
+    ) {
+      if (filePath) this.gatheredContext.remove(filePath);
+      return null;
+    }
+
     // Only track read_file calls
     if (toolName !== 'read_file') return null;
     if (!record.output.success) return null;
 
-    const filePath = String(record.input.path ?? '');
     if (!filePath) return null;
 
     // Don't re-gather if already in working memory
     if (this.gatheredContext.has(filePath)) return null;
 
-    // Skip if the output is too large (> 50k chars ~12.5k tokens)
-    const content = record.output.output;
-    if (content.length > 50_000) return null;
+    // Keep a bounded excerpt. The full result already exists in the protocol
+    // frame and is not duplicated while that frame remains in the window.
+    const content = compactFileOutput(record.output.output, toolName).slice(0, 6000);
 
     // Determine relevance based on file extension
     const ext = filePath.includes('.') ? filePath.slice(filePath.lastIndexOf('.')) : '';

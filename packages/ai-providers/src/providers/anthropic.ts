@@ -348,10 +348,19 @@ export class AnthropicProvider implements AIProvider {
     };
 
     if (params.systemPrompt) {
-      body.system = params.systemPrompt;
+      body.system = params.cachePrompt
+        ? [{ type: 'text', text: params.systemPrompt, cache_control: { type: 'ephemeral' } }]
+        : params.systemPrompt;
     }
     if (params.tools?.length) {
-      body.tools = toAnthropicTools(params.tools);
+      const tools = toAnthropicTools(params.tools);
+      if (params.cachePrompt && tools.length > 0) {
+        body.tools = tools.map((tool, index) =>
+          index === tools.length - 1 ? { ...tool, cache_control: { type: 'ephemeral' } } : tool,
+        );
+      } else {
+        body.tools = tools;
+      }
     }
     if (params.temperature !== undefined) {
       body.temperature = params.temperature;
@@ -372,8 +381,7 @@ export class AnthropicProvider implements AIProvider {
         // low/medium are also accepted by the API. "max" maps to effort "high"
         // (the strongest adaptive effort) since adaptive has no discrete "max".
         thinkingConfig.type = 'adaptive';
-        const effort =
-          params.thinking.level === 'max' ? 'high' : (params.thinking.level ?? 'high');
+        const effort = params.thinking.level === 'max' ? 'high' : (params.thinking.level ?? 'high');
         thinkingConfig.effort = effort;
       } else {
         // Budget models accept thinking.type = 'enabled' + budget_tokens.

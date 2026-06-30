@@ -34,6 +34,9 @@ export function estimateMessageTokens(messages: Message[]): number {
           // Images typically cost ~1000-2000 tokens depending on size
           total += 1500;
           break;
+        case 'thinking':
+          total += estimateTokens(content.thinking);
+          break;
       }
     }
   }

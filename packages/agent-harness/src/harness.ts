@@ -44,6 +44,7 @@ import type { MemoryManager } from './memory-manager';
 import { MemoryExtractor } from './memory-extractor';
 import { MemoryContextProvider } from './memory-context-provider';
 import { TurnController } from './turn-controller';
+import { selectToolDefinitions } from './tool-selection';
 
 export interface HarnessOptions {
   config?: Partial<HarnessConfig>;
@@ -56,15 +57,36 @@ export interface HarnessOptions {
   /** Event handler for UI updates */
   onEvent?: HarnessEventHandler;
   /** Approval callback */
-  onApprovalRequest?: (pending: { id: string; toolName: string; input: Record<string, unknown>; description: string }, signal: AbortSignal) => Promise<boolean>;
+  onApprovalRequest?: (
+    pending: { id: string; toolName: string; input: Record<string, unknown>; description: string },
+    signal: AbortSignal,
+  ) => Promise<boolean>;
   /** Mode switch callback — returns true if approved, false if denied */
-  onModeSwitchRequest?: (request: { id: string; fromMode: string; toMode: string; reason: string; contextSummary: string }, signal: AbortSignal) => Promise<boolean>;
+  onModeSwitchRequest?: (
+    request: {
+      id: string;
+      fromMode: string;
+      toMode: string;
+      reason: string;
+      contextSummary: string;
+    },
+    signal: AbortSignal,
+  ) => Promise<boolean>;
   /** User question callback — pauses agent loop, returns user answers */
-  onUserQuestionRequest?: (id: string, questions: AgentQuestion[], title: string | undefined, signal: AbortSignal) => Promise<AgentQuestionAnswer[]>;
+  onUserQuestionRequest?: (
+    id: string,
+    questions: AgentQuestion[],
+    title: string | undefined,
+    signal: AbortSignal,
+  ) => Promise<AgentQuestionAnswer[]>;
   /** SDD database interface */
   sddDb?: SddDatabase;
   /** Optional callback to save an approved SDD plan to disk */
-  savePlanFile?: (sessionId: string, spec: string, tasks: import('./types').SddTask[]) => Promise<void>;
+  savePlanFile?: (
+    sessionId: string,
+    spec: string,
+    tasks: import('./types').SddTask[],
+  ) => Promise<void>;
   /** Skill loader config */
   skillLoader?: SkillLoader;
   /** Rule loader config */
@@ -88,7 +110,9 @@ export class Harness {
   private sddEngine: SddEngine | null = null;
   private eventHandler: HarnessEventHandler | null;
   private invoke: <T>(cmd: string, args?: Record<string, unknown>) => Promise<T>;
-  private listen: ((event: string, handler: (payload: unknown) => void) => Promise<() => void>) | undefined;
+  private listen:
+    | ((event: string, handler: (payload: unknown) => void) => Promise<() => void>)
+    | undefined;
   private workspacePath: string;
   private projectId: string;
   private conversationId = '';
@@ -105,7 +129,9 @@ export class Harness {
 
   // ─── Agent Terminal Integration ───────────────────────────────────
   private agentTerminalPtyId: string | undefined;
-  private onTerminalCommand: ((command: string, output: string, exitCode: number | null) => void) | undefined;
+  private onTerminalCommand:
+    | ((command: string, output: string, exitCode: number | null) => void)
+    | undefined;
 
   // ─── Middleware ────────────────────────────────────────────────────
   private preCompletionHooks: PreCompletionHook[] = [verificationMiddleware];
@@ -154,12 +180,15 @@ export class Harness {
       this.toolRouter.setApprovalCallback(async (pending, signal) => {
         this.turnController.transition('awaiting_interaction');
         try {
-          return await options.onApprovalRequest!({
-            id: pending.id,
-            toolName: pending.toolName,
-            input: pending.input,
-            description: pending.description,
-          }, signal);
+          return await options.onApprovalRequest!(
+            {
+              id: pending.id,
+              toolName: pending.toolName,
+              input: pending.input,
+              description: pending.description,
+            },
+            signal,
+          );
         } finally {
           this.turnController.transition('executing_tools');
         }
@@ -194,7 +223,10 @@ export class Harness {
     // Initialize memory system if manager provided
     if (options.memoryManager) {
       this.memoryManager = options.memoryManager;
-      this.memoryContextProvider = new MemoryContextProvider(options.memoryManager, options.projectId);
+      this.memoryContextProvider = new MemoryContextProvider(
+        options.memoryManager,
+        options.projectId,
+      );
     }
   }
 
@@ -222,7 +254,21 @@ export class Harness {
     if (this.sddSessionId && this.sddEngine) void this.sddEngine.cancel(this.sddSessionId);
   }
 
-  setConfig(patch: Partial<Pick<HarnessConfig, 'providerId' | 'modelId' | 'maxIterations' | 'maxInputTokens' | 'maxOutputTokens' | 'turnTimeoutMs' | 'approval' | 'thinking'>>): void {
+  setConfig(
+    patch: Partial<
+      Pick<
+        HarnessConfig,
+        | 'providerId'
+        | 'modelId'
+        | 'maxIterations'
+        | 'maxInputTokens'
+        | 'maxOutputTokens'
+        | 'turnTimeoutMs'
+        | 'approval'
+        | 'thinking'
+      >
+    >,
+  ): void {
     if (patch.providerId !== undefined) {
       this.config.providerId = patch.providerId;
       this._effectivePolicy = null;
@@ -238,7 +284,11 @@ export class Harness {
     if (patch.maxInputTokens !== undefined) this.config.maxInputTokens = patch.maxInputTokens;
     if (patch.maxOutputTokens !== undefined) this.config.maxOutputTokens = patch.maxOutputTokens;
     if (patch.turnTimeoutMs !== undefined) this.config.turnTimeoutMs = patch.turnTimeoutMs;
-    if (patch.maxInputTokens !== undefined || patch.maxOutputTokens !== undefined || patch.turnTimeoutMs !== undefined) {
+    if (
+      patch.maxInputTokens !== undefined ||
+      patch.maxOutputTokens !== undefined ||
+      patch.turnTimeoutMs !== undefined
+    ) {
       this._effectivePolicy = null;
     }
     if (patch.approval !== undefined) {
@@ -261,7 +311,9 @@ export class Harness {
   }
 
   /** Update the terminal command callback (called by the bridge at init). */
-  setOnTerminalCommand(cb: ((command: string, output: string, exitCode: number | null) => void) | undefined): void {
+  setOnTerminalCommand(
+    cb: ((command: string, output: string, exitCode: number | null) => void) | undefined,
+  ): void {
     this.onTerminalCommand = cb;
   }
 
@@ -381,6 +433,10 @@ export class Harness {
     this.contextManager.removeSource(id);
   }
 
+  getContextTurnNumber(): number {
+    return this.contextManager.getTurnNumber();
+  }
+
   /** Get the skill loader (for external callers to list skills) */
   getSkillLoader(): SkillLoader | null {
     return this.skillLoader;
@@ -408,13 +464,18 @@ export class Harness {
    * Returns the final assistant text response.
    */
   async run(request: TurnRequest): Promise<TurnOutcome>;
-  async run(userMessage: string, history: Message[], imageContent?: Array<{ base64: string; mediaType: string }>): Promise<TurnOutcome>;
+  async run(
+    userMessage: string,
+    history: Message[],
+    imageContent?: Array<{ base64: string; mediaType: string }>,
+  ): Promise<TurnOutcome>;
   async run(
     requestOrMessage: string | TurnRequest,
     history: Message[] = [],
     imageContent?: Array<{ base64: string; mediaType: string }>,
   ): Promise<TurnOutcome> {
-    const userMessage = typeof requestOrMessage === 'string' ? requestOrMessage : requestOrMessage.userMessage;
+    const userMessage =
+      typeof requestOrMessage === 'string' ? requestOrMessage : requestOrMessage.userMessage;
     if (typeof requestOrMessage !== 'string') {
       history = requestOrMessage.history;
       imageContent = requestOrMessage.images;
@@ -424,6 +485,7 @@ export class Harness {
     this.toolCallHistory = [];
     this.loopDetection.resetCounts();
     this.contextManager.clearGatheredFiles();
+    this.contextManager.beginTurn();
     const turnStart = Date.now();
 
     // Resolve effective policy for this mode + model
@@ -454,7 +516,10 @@ export class Harness {
     if (this.memoryContextProvider) {
       try {
         const policy = this.getEffectivePolicy();
-        const memBlock = await this.memoryContextProvider.getContextBlock(userMessage, policy.maxInputTokens);
+        const memBlock = await this.memoryContextProvider.getContextBlock(
+          userMessage,
+          policy.maxInputTokens,
+        );
         if (memBlock) {
           this.contextManager.addSource({
             id: 'memory-context',
@@ -462,6 +527,9 @@ export class Harness {
             priority: 'high',
             content: memBlock,
             tokenEstimate: Math.ceil(memBlock.length / 4),
+            origin: 'memory',
+            identity: `memory:${this.projectId}`,
+            expiresAfterTurn: this.contextManager.getTurnNumber(),
           });
         } else this.contextManager.removeSource('memory-context');
       } catch {
@@ -523,14 +591,24 @@ export class Harness {
       this.injectDelegationChain();
 
       // Build context snapshot (use policy-based limits)
-      const tools = this.toolRouter.getToolDefinitionsFiltered(
+      const availableTools = this.toolRouter.getToolDefinitionsFiltered(
         policy.allowedToolCategories,
         agentDef.toolOverrides,
+      );
+      const tools = selectToolDefinitions(
+        availableTools,
+        userMessage,
+        new Set(this.toolCallHistory.map((call) => call.toolName)),
       );
       const snapshot = this.contextManager.buildSnapshot(
         tools,
         policy.maxInputTokens,
         policy.maxOutputTokens,
+      );
+      this.traceRecorder.recordContextSnapshot(
+        snapshot.tokenBreakdown,
+        snapshot.entries,
+        tools.length,
       );
       const droppedMessages = this.contextManager.getDroppedMessageCount();
       if (droppedMessages > 0) {
@@ -573,11 +651,17 @@ export class Harness {
         maxTokens: policy.maxOutputTokens,
         signal: abortController.signal,
         thinking: this.config.thinking,
+        cachePrompt: true,
       };
 
       let assistantText = '';
       let thinkingText = '';
-      let toolCalls: Array<{ id: string; name: string; input: Record<string, unknown>; _rawInput?: string }> = [];
+      let toolCalls: Array<{
+        id: string;
+        name: string;
+        input: Record<string, unknown>;
+        _rawInput?: string;
+      }> = [];
 
       const timeoutPromise = new Promise<never>((_, reject) => {
         timeoutId = setTimeout(() => {
@@ -593,65 +677,69 @@ export class Harness {
               ...chatParams,
               providerId: this.config.providerId || undefined,
             })) {
-          this.emit({ type: 'stream_chunk', chunk });
+              this.emit({ type: 'stream_chunk', chunk });
 
-          switch (chunk.type) {
-            case 'text_delta':
-              assistantText += chunk.text;
-              break;
-            case 'thinking_delta':
-              // Accumulate for history round-trip (Kimi/MiMo require reasoning_content back)
-              thinkingText += chunk.text;
-              break;
-            case 'tool_call_start':
-              toolCalls.push({
-                id: chunk.id,
-                name: chunk.name,
-                input: {},
-              });
-              break;
-            case 'tool_call_delta': {
-              const tc = toolCalls.find(t => t.id === chunk.id);
-              if (tc) {
-                // Accumulate incremental JSON input
-                tc._rawInput = (tc._rawInput || '') + chunk.input;
+              switch (chunk.type) {
+                case 'text_delta':
+                  assistantText += chunk.text;
+                  break;
+                case 'thinking_delta':
+                  // Accumulate for history round-trip (Kimi/MiMo require reasoning_content back)
+                  thinkingText += chunk.text;
+                  break;
+                case 'tool_call_start':
+                  toolCalls.push({
+                    id: chunk.id,
+                    name: chunk.name,
+                    input: {},
+                  });
+                  break;
+                case 'tool_call_delta': {
+                  const tc = toolCalls.find((t) => t.id === chunk.id);
+                  if (tc) {
+                    // Accumulate incremental JSON input
+                    tc._rawInput = (tc._rawInput || '') + chunk.input;
+                  }
+                  break;
+                }
+                case 'tool_call_end': {
+                  const tc = toolCalls.find((t) => t.id === chunk.id);
+                  if (tc && tc._rawInput) {
+                    try {
+                      tc.input = JSON.parse(tc._rawInput);
+                    } catch {
+                      /* keep empty */
+                    }
+                  }
+                  break;
+                }
+                case 'done':
+                  // stopReason is tracked by the provider but the loop
+                  // relies solely on toolCalls.length to decide continuation.
+                  break;
+                case 'usage':
+                  // Each provider emits one consolidated usage chunk per API request.
+                  // Sum across iterations of a multi-iteration turn.
+                  tokenUsage.inputTokens += chunk.usage.inputTokens;
+                  tokenUsage.outputTokens += chunk.usage.outputTokens;
+                  if (chunk.usage.cacheReadTokens !== undefined) {
+                    tokenUsage.cacheReadTokens =
+                      (tokenUsage.cacheReadTokens ?? 0) + chunk.usage.cacheReadTokens;
+                  }
+                  if (chunk.usage.cacheWriteTokens !== undefined) {
+                    tokenUsage.cacheWriteTokens =
+                      (tokenUsage.cacheWriteTokens ?? 0) + chunk.usage.cacheWriteTokens;
+                  }
+                  if (chunk.usage.totalTokens > 0) {
+                    tokenUsage.totalTokens += chunk.usage.totalTokens;
+                  } else {
+                    tokenUsage.totalTokens = tokenUsage.inputTokens + tokenUsage.outputTokens;
+                  }
+                  break;
+                case 'error':
+                  throw new Error(chunk.error);
               }
-              break;
             }
-            case 'tool_call_end': {
-              const tc = toolCalls.find(t => t.id === chunk.id);
-              if (tc && tc._rawInput) {
-                try { tc.input = JSON.parse(tc._rawInput); } catch { /* keep empty */ }
-              }
-              break;
-            }
-            case 'done':
-              // stopReason is tracked by the provider but the loop
-              // relies solely on toolCalls.length to decide continuation.
-              break;
-            case 'usage':
-              // Each provider emits one consolidated usage chunk per API request.
-              // Sum across iterations of a multi-iteration turn.
-              tokenUsage.inputTokens += chunk.usage.inputTokens;
-              tokenUsage.outputTokens += chunk.usage.outputTokens;
-              if (chunk.usage.cacheReadTokens !== undefined) {
-                tokenUsage.cacheReadTokens =
-                  (tokenUsage.cacheReadTokens ?? 0) + chunk.usage.cacheReadTokens;
-              }
-              if (chunk.usage.cacheWriteTokens !== undefined) {
-                tokenUsage.cacheWriteTokens =
-                  (tokenUsage.cacheWriteTokens ?? 0) + chunk.usage.cacheWriteTokens;
-              }
-              if (chunk.usage.totalTokens > 0) {
-                tokenUsage.totalTokens += chunk.usage.totalTokens;
-              } else {
-                tokenUsage.totalTokens = tokenUsage.inputTokens + tokenUsage.outputTokens;
-              }
-              break;
-            case 'error':
-              throw new Error(chunk.error);
-          }
-        }
           })(),
           timeoutPromise,
         ]);
@@ -703,7 +791,9 @@ export class Harness {
         // rather than silently ending the turn with an empty response.
         if (!assistantText.trim() && thinkingText.trim() && !verificationForced) {
           this.traceRecorder.recordLoopWarning('empty_content_nudge', iteration);
-          middlewareInjections.push('[Please provide your response. Your reasoning is complete — now write the answer.]');
+          middlewareInjections.push(
+            '[Please provide your response. Your reasoning is complete — now write the answer.]',
+          );
           verificationForced = true;
           this.traceRecorder.endIteration();
           continue;
@@ -743,12 +833,15 @@ export class Harness {
       this.turnController.transition('executing_tools');
 
       // Stuck detection: same tool call 3 times in a row
-      const callSignature = toolCalls.map((tc) => `${tc.name}:${JSON.stringify(tc.input)}`).join('|');
+      const callSignature = toolCalls
+        .map((tc) => `${tc.name}:${JSON.stringify(tc.input)}`)
+        .join('|');
       if (callSignature === lastToolCallSignature) {
         consecutiveIdenticalCalls++;
         this.traceRecorder.recordRepeatedCall();
         if (consecutiveIdenticalCalls >= 3) {
-          finalResponse = assistantText + '\n\n[Agent loop detected repeated identical tool calls. Stopping.]';
+          finalResponse =
+            assistantText + '\n\n[Agent loop detected repeated identical tool calls. Stopping.]';
           terminalStatus = 'loop_detected';
           this.traceRecorder.recordLoopWarning('repeated_tool_calls', consecutiveIdenticalCalls);
           this.traceRecorder.endIteration();
@@ -784,7 +877,13 @@ export class Harness {
         gatheredContext: {
           add: (path, content, relevance, reason) => {
             const tokens = this.contextManager.addGatheredFile(path, content, relevance, reason);
-            this.emit({ type: 'context_gathered', filePath: path, relevance, reason, tokenEstimate: tokens });
+            this.emit({
+              type: 'context_gathered',
+              filePath: path,
+              relevance,
+              reason,
+              tokenEstimate: tokens,
+            });
             return tokens;
           },
           remove: (path) => {
@@ -803,7 +902,12 @@ export class Harness {
               this.emit({ type: 'user_question_request', id, title, questions });
               this.turnController.transition('awaiting_interaction');
               try {
-                const answers = await this.onUserQuestionRequest!(id, questions, title, activeTurn.signal);
+                const answers = await this.onUserQuestionRequest!(
+                  id,
+                  questions,
+                  title,
+                  activeTurn.signal,
+                );
                 this.emit({ type: 'user_question_answered', id, answers });
                 return answers;
               } finally {
@@ -820,12 +924,7 @@ export class Harness {
         // Set the per-call toolCallId before execution
         executionContext.toolCallId = tc.id;
 
-        const record = await this.toolRouter.execute(
-          tc.name,
-          tc.id,
-          tc.input,
-          executionContext,
-        );
+        const record = await this.toolRouter.execute(tc.name, tc.id, tc.input, executionContext);
         this.toolCallHistory.push(record);
 
         // Record tool call in trace
@@ -846,7 +945,11 @@ export class Harness {
               this.contextManager.setAllSkills(this.skillLoader.getAll());
             }
             record.output.output = `Skill "${skillName}" activation requested. The skill store will be updated.`;
-            record.output.metadata = { ...record.output.metadata, action: 'activate_skill', skillName };
+            record.output.metadata = {
+              ...record.output.metadata,
+              action: 'activate_skill',
+              skillName,
+            };
           } else {
             record.output.output = `Skill "${skillName}" not found. Use list_skills to see available skills.`;
             record.output.success = false;
@@ -855,24 +958,29 @@ export class Harness {
 
         if (record.output.metadata?.action === 'list_skills' && this.skillLoader) {
           const allSkills = this.skillLoader.getAll();
-          const skillList = allSkills.map(s => ({
+          const skillList = allSkills.map((s) => ({
             name: s.frontmatter.name,
             description: s.frontmatter.description,
             active: s.active,
             activation: s.frontmatter.activation,
             scope: s.frontmatter.scope,
           }));
-          record.output.output = skillList.length > 0
-            ? `Available skills (only ENABLED skills are injected into context):\n${skillList.map(s => `- **${s.name}** [${s.active ? 'ENABLED' : 'DISABLED'}] (${s.scope}): ${s.description}`).join('\n')}\n\nTo use a disabled skill, call activate_skill first.`
-            : 'No skills are currently loaded.';
+          record.output.output =
+            skillList.length > 0
+              ? `Available skills (only ENABLED skills are injected into context):\n${skillList.map((s) => `- **${s.name}** [${s.active ? 'ENABLED' : 'DISABLED'}] (${s.scope}): ${s.description}`).join('\n')}\n\nTo use a disabled skill, call activate_skill first.`
+              : 'No skills are currently loaded.';
         }
 
         if (record.output.metadata?.action === 'create_skill') {
-          const { skillName, skillContent, skillScope } = record.output.metadata as Record<string, string>;
+          const { skillName, skillContent, skillScope } = record.output.metadata as Record<
+            string,
+            string
+          >;
           try {
-            const basePath = skillScope === 'global'
-              ? `${this.skillLoader?.['config']?.globalPath ?? ''}`
-              : `${this.workspacePath}/.agents/skills`;
+            const basePath =
+              skillScope === 'global'
+                ? `${this.skillLoader?.['config']?.globalPath ?? ''}`
+                : `${this.workspacePath}/.agents/skills`;
             const filePath = `${basePath}/${skillName}.md`;
             // Write skill file via Tauri invoke
             await executionContext.invoke('create_directory', { path: basePath });
@@ -902,17 +1010,24 @@ export class Harness {
           // Wait for user approval/denial (like tool approvals)
           if (this.onModeSwitchRequest) {
             this.turnController.transition('awaiting_interaction');
-            const approved = await this.onModeSwitchRequest({
-              id: switchRequest.id,
-              fromMode: switchRequest.fromMode,
-              toMode: switchRequest.toMode,
-              reason: switchRequest.reason,
-              contextSummary: switchRequest.contextSummary,
-            }, activeTurn.signal).finally(() => this.turnController.transition('executing_tools'));
+            const approved = await this.onModeSwitchRequest(
+              {
+                id: switchRequest.id,
+                fromMode: switchRequest.fromMode,
+                toMode: switchRequest.toMode,
+                reason: switchRequest.reason,
+                contextSummary: switchRequest.contextSummary,
+              },
+              activeTurn.signal,
+            ).finally(() => this.turnController.transition('executing_tools'));
             this.emit({ type: 'mode_switch_resolved', request: switchRequest, approved });
             // Override the tool output so the agent knows the user's decision
             if (approved) {
-              this.delegationChain.push({ fromMode: switchRequest.fromMode, toMode: targetMode, reason });
+              this.delegationChain.push({
+                fromMode: switchRequest.fromMode,
+                toMode: targetMode,
+                reason,
+              });
               this.setAgentType(targetMode as AgentType);
               agentDef = getAgentDefinition(this.agentType);
               policy = this.getEffectivePolicy();
@@ -964,12 +1079,15 @@ export class Harness {
 
     this.turnController.transition('completing');
     if (this.cancelled || activeTurn.signal.aborted) terminalStatus = 'cancelled';
-    else if (terminalStatus !== 'loop_detected' && iteration >= maxIter) terminalStatus = 'max_iterations';
-    const stopReason: TurnRecord['stopReason'] = terminalStatus === 'loop_detected' ? 'error' : terminalStatus;
+    else if (terminalStatus !== 'loop_detected' && iteration >= maxIter)
+      terminalStatus = 'max_iterations';
+    const stopReason: TurnRecord['stopReason'] =
+      terminalStatus === 'loop_detected' ? 'error' : terminalStatus;
     if (!finalResponse.trim() && terminalStatus === 'max_iterations') {
       finalResponse = `The agent reached the ${maxIter}-iteration limit before producing a final response. Review the completed tool calls before continuing.`;
     }
-    if (!finalResponse.trim() && terminalStatus === 'cancelled') finalResponse = 'Request cancelled.';
+    if (!finalResponse.trim() && terminalStatus === 'cancelled')
+      finalResponse = 'Request cancelled.';
     this.finishTurn(
       terminalStatus,
       tokenUsage,
@@ -987,32 +1105,36 @@ export class Harness {
     // ── Post-turn memory extraction (async, non-blocking) ──
     // Run after the turn so it never delays the response to the user.
     if (this.memoryManager && finalResponse && userMessage) {
-      const toolNames = this.toolCallHistory.map(tc => tc.toolName);
-      this.memoryExtractor.extractAndPersist(
-        this.memoryManager,
-        userMessage,
-        finalResponse,
-        toolNames,
-        this.projectId,
-        this.conversationId,
-      ).then((count) => {
-        if (count > 0) {
-          const extractedMems: Array<{ title: string; type: import('./types').MemoryType }> = [];
-          this.emit({ type: 'memories_extracted', count, memories: extractedMems });
-        }
-      }).catch(() => {
-        // Non-critical — never surface memory failures
-      });
+      const toolNames = this.toolCallHistory.map((tc) => tc.toolName);
+      this.memoryExtractor
+        .extractAndPersist(
+          this.memoryManager,
+          userMessage,
+          finalResponse,
+          toolNames,
+          this.projectId,
+          this.conversationId,
+        )
+        .then((count) => {
+          if (count > 0) {
+            const extractedMems: Array<{ title: string; type: import('./types').MemoryType }> = [];
+            this.emit({ type: 'memories_extracted', count, memories: extractedMems });
+          }
+        })
+        .catch(() => {
+          // Non-critical — never surface memory failures
+        });
     }
 
     // Finalize trace and attach to turn record
-    turnRecord.trace = this.traceRecorder.finalizeTrace(
-      stopReason,
-      turnRecord.tokenUsage,
-      turnRecord.filesModified,
-      turnRecord.verificationPerformed,
-      verificationForced,
-    ) ?? undefined;
+    turnRecord.trace =
+      this.traceRecorder.finalizeTrace(
+        stopReason,
+        turnRecord.tokenUsage,
+        turnRecord.filesModified,
+        turnRecord.verificationPerformed,
+        verificationForced,
+      ) ?? undefined;
 
     return {
       turnId: activeTurn.turnId,
@@ -1052,7 +1174,11 @@ export class Harness {
       throw new Error('SDD Engine not initialized (no database provided)');
     }
 
-    const session = await this.sddEngine.startSession(this.projectId, this.conversationId, description);
+    const session = await this.sddEngine.startSession(
+      this.projectId,
+      this.conversationId,
+      description,
+    );
     this.sddSessionId = session.id;
 
     const spec = await this.sddEngine.generateSpec(session.id);
@@ -1123,7 +1249,11 @@ export class Harness {
     if (!this.sddEngine) {
       throw new Error('SDD Engine not initialized (no database provided)');
     }
-    const session = await this.sddEngine.startSession(this.projectId, this.conversationId, description);
+    const session = await this.sddEngine.startSession(
+      this.projectId,
+      this.conversationId,
+      description,
+    );
     this.sddSessionId = session.id;
     const spec = await this.sddEngine.generateSpec(session.id);
     return { sessionId: session.id, spec };
@@ -1203,8 +1333,23 @@ export class Harness {
     const filesModified = [
       ...new Set(
         this.toolCallHistory
-          .filter((tc) => ['write_file', 'edit_file', 'create_file', 'replace_lines', 'insert_lines', 'delete_file', 'rename_file', 'copy_file'].includes(tc.toolName))
-          .flatMap((tc) => [String(tc.input.path ?? tc.input.from ?? ''), String(tc.input.to ?? '')].filter(Boolean)),
+          .filter((tc) =>
+            [
+              'write_file',
+              'edit_file',
+              'create_file',
+              'replace_lines',
+              'insert_lines',
+              'delete_file',
+              'rename_file',
+              'copy_file',
+            ].includes(tc.toolName),
+          )
+          .flatMap((tc) =>
+            [String(tc.input.path ?? tc.input.from ?? ''), String(tc.input.to ?? '')].filter(
+              Boolean,
+            ),
+          ),
       ),
     ];
 
@@ -1212,7 +1357,9 @@ export class Harness {
       if (tc.toolName === 'git_diff' || tc.toolName === 'git_status') return true;
       if (tc.toolName === 'run_terminal_command') {
         const cmd = String(tc.input.command ?? '').toLowerCase();
-        return ['test', 'lint', 'check', 'tsc', 'eslint', 'pytest', 'cargo test'].some((p) => cmd.includes(p));
+        return ['test', 'lint', 'check', 'tsc', 'eslint', 'pytest', 'cargo test'].some((p) =>
+          cmd.includes(p),
+        );
       }
       return false;
     });
@@ -1252,14 +1399,19 @@ export class Harness {
     parts.push(`<workspace_root>${env.workspacePath}</workspace_root>`);
 
     if (env.activeFile) {
-      const preview = env.activeFile.content.length > 2000
-        ? env.activeFile.content.slice(0, 2000) + '\n... [truncated]'
-        : env.activeFile.content;
-      parts.push(`<active_file path="${env.activeFile.path}" language="${env.activeFile.language}">\n${preview}\n</active_file>`);
+      const preview =
+        env.activeFile.content.length > 2000
+          ? env.activeFile.content.slice(0, 2000) + '\n... [truncated]'
+          : env.activeFile.content;
+      parts.push(
+        `<active_file path="${env.activeFile.path}" language="${env.activeFile.language}">\n${preview}\n</active_file>`,
+      );
     }
 
     if (env.selection) {
-      parts.push(`<selection file="${env.selection.filePath}" lines="${env.selection.startLine}-${env.selection.endLine}">\n${env.selection.text}\n</selection>`);
+      parts.push(
+        `<selection file="${env.selection.filePath}" lines="${env.selection.startLine}-${env.selection.endLine}">\n${env.selection.text}\n</selection>`,
+      );
     }
 
     if (env.directoryTree) {
@@ -1267,14 +1419,19 @@ export class Harness {
     }
 
     if (env.gitState) {
-      parts.push(`<git branch="${env.gitState.branch}" uncommitted="${env.gitState.uncommittedFiles}">\n${env.gitState.summary}\n</git>`);
+      parts.push(
+        `<git branch="${env.gitState.branch}" uncommitted="${env.gitState.uncommittedFiles}">\n${env.gitState.summary}\n</git>`,
+      );
     }
 
     if (env.lastTerminalCommand) {
-      const cmdOutput = env.lastTerminalCommand.output.length > 1000
-        ? env.lastTerminalCommand.output.slice(-1000)
-        : env.lastTerminalCommand.output;
-      parts.push(`<last_terminal_command exit="${env.lastTerminalCommand.exitCode}">\n$ ${env.lastTerminalCommand.command}\n${cmdOutput}\n</last_terminal_command>`);
+      const cmdOutput =
+        env.lastTerminalCommand.output.length > 1000
+          ? env.lastTerminalCommand.output.slice(-1000)
+          : env.lastTerminalCommand.output;
+      parts.push(
+        `<last_terminal_command exit="${env.lastTerminalCommand.exitCode}">\n$ ${env.lastTerminalCommand.command}\n${cmdOutput}\n</last_terminal_command>`,
+      );
     }
 
     parts.push(`</environment>`);
@@ -1285,6 +1442,9 @@ export class Harness {
       priority: 'high',
       content: parts.join('\n'),
       tokenEstimate: Math.ceil(parts.join('\n').length / 4),
+      origin: 'environment',
+      identity: 'environment:workspace',
+      expiresAfterTurn: this.contextManager.getTurnNumber(),
     });
   }
 }
