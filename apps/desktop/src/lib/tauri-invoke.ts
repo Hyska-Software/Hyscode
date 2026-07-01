@@ -227,6 +227,7 @@ interface TauriCommands {
       content: string;
       tool_calls: string | null;
       blocks: string | null;
+      turn_summary: string | null;
       token_input: number;
       token_output: number;
       created_at: string;

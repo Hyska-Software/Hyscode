@@ -34,6 +34,7 @@ pub fn open_database(app_dir: &std::path::Path) -> Connection {
         .expect("failed to run migration 009");
     apply_migration_010(&conn);
     apply_migration_011(&conn);
+    apply_migration_012(&conn);
     conn
 }
 
@@ -104,6 +105,20 @@ fn apply_migration_011(conn: &Connection) {
     }
 }
 
+fn apply_migration_012(conn: &Connection) {
+    let exists: bool = conn
+        .query_row(
+            "SELECT COUNT(*) > 0 FROM pragma_table_info('messages') WHERE name = 'turn_summary'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap_or(false);
+    if !exists {
+        conn.execute_batch("ALTER TABLE messages ADD COLUMN turn_summary TEXT")
+            .unwrap_or_else(|error| panic!("failed to add messages.turn_summary: {error}"));
+    }
+}
+
 // ─── Row types ──────────────────────────────────────────────────────────────
 
 #[derive(Serialize)]
@@ -136,6 +151,7 @@ pub struct MessageRow {
     pub content: String,
     pub tool_calls: Option<String>,
     pub blocks: Option<String>,
+    pub turn_summary: Option<String>,
     pub token_input: i64,
     pub token_output: i64,
     pub created_at: String,
@@ -289,7 +305,7 @@ pub fn db_list_messages(
     let conn = state.0.lock().map_err(|e| e.to_string())?;
     let mut stmt = conn
         .prepare(
-            "SELECT id, role, content, tool_calls, blocks, token_input, token_output, created_at
+            "SELECT id, role, content, tool_calls, blocks, turn_summary, token_input, token_output, created_at
              FROM messages
              WHERE conversation_id = ?1
              ORDER BY created_at ASC",
@@ -303,9 +319,10 @@ pub fn db_list_messages(
                 content: row.get(2)?,
                 tool_calls: row.get(3)?,
                 blocks: row.get(4)?,
-                token_input: row.get(5)?,
-                token_output: row.get(6)?,
-                created_at: row.get(7)?,
+                turn_summary: row.get(5)?,
+                token_input: row.get(6)?,
+                token_output: row.get(7)?,
+                created_at: row.get(8)?,
             })
         })
         .map_err(|e| e.to_string())?
@@ -405,6 +422,7 @@ pub struct TurnCommitMessage {
     content: String,
     tool_calls: Option<String>,
     blocks: Option<String>,
+    turn_summary: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -481,8 +499,8 @@ pub fn db_commit_agent_turn(
         transaction
             .execute(
                 "INSERT OR IGNORE INTO messages
-                 (id, conversation_id, role, content, tool_calls, blocks, token_input, token_output)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0, 0)",
+                 (id, conversation_id, role, content, tool_calls, blocks, turn_summary, token_input, token_output)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 0, 0)",
                 params![
                     message.id,
                     conversation_id,
@@ -490,6 +508,7 @@ pub fn db_commit_agent_turn(
                     message.content,
                     message.tool_calls,
                     message.blocks,
+                    message.turn_summary,
                 ],
             )
             .map_err(|error| error.to_string())?;

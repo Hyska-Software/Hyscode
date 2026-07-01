@@ -47,6 +47,7 @@ import type {
   AgentMode,
 } from '@/stores/agent-store';
 import { computeDiffHunks } from './compute-diff';
+import { buildTurnSummary } from './turn-summary';
 import { SubAgentRunner } from './sub-agent-runner';
 import { eventBelongsToOwner } from './turn-event-ownership';
 import { configureProviderResilience } from './init-providers';
@@ -676,10 +677,6 @@ export class HarnessBridge {
         `Resposta recebida (${response.length} chars, ${turnRecord.iterations} iterações, ${turnRecord.toolCalls.length} tool calls)`,
       );
 
-      await this.commitTurn(userMessage, turnRecord);
-      await this.persistTurnRecord(turnRecord, true);
-      await this.refreshSessionUsage();
-
       // Flush any remaining streaming text
       useAgentStore.getState().flushStreamingText();
 
@@ -688,6 +685,12 @@ export class HarnessBridge {
         useAgentStore.getState().updateLastAssistantError(parseProviderError(response));
       else if (status !== 'recoverable_error')
         useAgentStore.getState().updateLastAssistantContent(response);
+
+      const summary = buildTurnSummary(turnRecord, useAgentStore.getState().agentEditSessions);
+      useAgentStore.getState().setTurnSummary(turnRecord.id, summary);
+      await this.commitTurn(userMessage, turnRecord);
+      await this.persistTurnRecord(turnRecord, true);
+      await this.refreshSessionUsage();
     } catch (err) {
       const rawMsg = err instanceof Error ? err.message : 'Unknown error';
       const friendlyMsg = parseProviderError(rawMsg);
@@ -1099,6 +1102,29 @@ Investigate the error, fix the underlying issue in the affected files, and verif
 
     store.resolveAllEditSessions(accepted);
     store.resolveAllPendingFileChanges(accepted);
+  }
+
+  async resolveTurnEditSessions(turnId: string, accepted: boolean): Promise<void> {
+    const store = useAgentStore.getState();
+    const active = store.agentEditSessions.filter(
+      (session) =>
+        session.turnId === turnId &&
+        (session.phase === 'streaming' || session.phase === 'pending_review'),
+    );
+    if (!accepted) {
+      for (const session of active) {
+        await this.restoreMutationSnapshot(session.filePath, session);
+      }
+    } else {
+      for (const session of active) this.acceptMutationSnapshot(session.filePath);
+    }
+    store.resolveTurnEditSessions(turnId, accepted);
+    for (const session of active) {
+      const legacy = store.pendingFileChanges.find(
+        (change) => change.toolCallId === session.toolCallId && change.status === 'pending',
+      );
+      if (legacy) store.resolvePendingFileChange(legacy.id, accepted);
+    }
   }
 
   /** Sync conversation ID when restoring a previous session */
@@ -1731,6 +1757,7 @@ Investigate the error, fix the underlying issue in the affected files, and verif
         const initialPhase = settings.approvalMode === 'yolo' ? 'streaming' : 'streaming';
         const session: AgentEditSession = {
           id: crypto.randomUUID(),
+          turnId: this.activeTurnId ?? event.turnId ?? crypto.randomUUID(),
           filePath: c.filePath,
           toolName: c.toolName,
           toolCallId: c.toolCallId,
@@ -2404,6 +2431,7 @@ ${hints.map((h) => `- ${h}`).join('\n')}
           content: message.content,
           toolCalls: message.toolCalls ? JSON.stringify(message.toolCalls) : null,
           blocks: message.blocks ? JSON.stringify(message.blocks) : null,
+          turnSummary: message.turnSummary ? JSON.stringify(message.turnSummary) : null,
         })),
       ),
       turnJson: JSON.stringify({

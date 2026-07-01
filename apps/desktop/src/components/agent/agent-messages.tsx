@@ -17,6 +17,7 @@ import { ApprovalDialog } from './approval-dialog';
 import { ModeSwitchDialog } from './mode-switch-dialog';
 import { cn } from '@/lib/utils';
 import type { ChatMessage } from '@/stores/agent-store';
+import { TurnSummaryCard } from './turn-summary-card';
 import { MarkdownContent } from './markdown-renderer';
 import { HarnessBridge } from '@/lib/harness-bridge';
 import { useSettingsStore } from '@/stores/settings-store';
@@ -294,6 +295,7 @@ const MessageItem = memo(function MessageItem({
                 ) : isActivelyStreaming ? (
                   <StreamingIndicator />
                 ) : null}
+                {msg.turnSummary && <TurnSummaryCard summary={msg.turnSummary} />}
               </div>
             </div>
             {showSeparator && <div className="agent-spacer" />}

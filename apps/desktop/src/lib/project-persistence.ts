@@ -172,14 +172,17 @@ async function restoreAgentState(snapshot: AgentSnapshot): Promise<void> {
 
       for (const m of dbMessages) {
         if (m.role === 'system') continue;
-        store.addMessage({
+        const message = {
           id: m.id,
           role: m.role as 'user' | 'assistant',
           content: m.content,
           toolCalls: m.tool_calls ? JSON.parse(m.tool_calls) : undefined,
           blocks: m.blocks ? JSON.parse(m.blocks) : undefined,
+          turnSummary: m.turn_summary ? JSON.parse(m.turn_summary) : undefined,
           timestamp: new Date(m.created_at).getTime(),
-        });
+        };
+        store.addMessage(message);
+        if (message.turnSummary) store.hydrateTurnSummary(message.turnSummary);
       }
 
       // Sync harness bridge if available

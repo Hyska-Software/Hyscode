@@ -18,7 +18,7 @@ export function AgentLayout() {
       {/* Center: Agent Chat */}
       <Panel defaultSize={45} minSize={30}>
         <div className="h-full rounded-lg bg-surface overflow-hidden">
-          <AgentPanel hideChangedFiles />
+          <AgentPanel />
         </div>
       </Panel>
 
