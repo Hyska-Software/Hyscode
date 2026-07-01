@@ -127,8 +127,16 @@ function* parseGeminiResponse(data: string): Iterable<StreamChunk> {
   let parsed: Record<string, unknown>;
   try {
     parsed = JSON.parse(data);
-  } catch {
-    return;
+  } catch (error) {
+    throw new ProviderError(
+      `Malformed Gemini SSE event: ${error instanceof Error ? error.message : String(error)}`,
+      'gemini',
+      undefined,
+      false,
+      undefined,
+      'invalid_response',
+      'parsing',
+    );
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

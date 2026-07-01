@@ -115,8 +115,16 @@ function parseAnthropicEvent(
   let event: AnthropicSSEEvent;
   try {
     event = JSON.parse(data);
-  } catch {
-    return null;
+  } catch (error) {
+    throw new ProviderError(
+      `Malformed Anthropic SSE event: ${error instanceof Error ? error.message : String(error)}`,
+      'anthropic',
+      undefined,
+      false,
+      undefined,
+      'invalid_response',
+      'parsing',
+    );
   }
 
   switch (event.type) {

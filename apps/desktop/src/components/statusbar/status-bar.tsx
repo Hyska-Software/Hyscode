@@ -5,6 +5,7 @@ import { useLspStore } from '../../stores/lsp-store';
 import { useDeviceStore } from '../../stores/device-store';
 import { detectLanguage } from '../../lib/lsp-bridge';
 import { BranchPicker } from '../git/branch-picker';
+import { useAgentStore } from '../../stores/agent-store';
 
 export function StatusBar() {
   const isGitRepo = useGitStore((s) => s.isGitRepo);
@@ -28,6 +29,8 @@ export function StatusBar() {
   const devices = useDeviceStore((s) => s.devices);
   const selectedDeviceId = useDeviceStore((s) => s.selectedDeviceId);
   const selectedDevice = devices.find((d) => d.id === selectedDeviceId);
+  const connectionState = useAgentStore((state) => state.connectionState);
+  const connectionMessage = useAgentStore((state) => state.connectionMessage);
 
   const [branchPickerOpen, setBranchPickerOpen] = useState(false);
   const branchRef = useRef<HTMLButtonElement>(null);
@@ -48,9 +51,7 @@ export function StatusBar() {
               <span>{currentBranch || 'HEAD'}</span>
               {ahead > 0 && <span className="text-green-400">↑{ahead}</span>}
               {behind > 0 && <span className="text-yellow-400">↓{behind}</span>}
-              {totalChanges > 0 && (
-                <span className="text-accent">{totalChanges}⨉</span>
-              )}
+              {totalChanges > 0 && <span className="text-accent">{totalChanges}⨉</span>}
             </button>
           ) : (
             <span className="flex items-center gap-1.5 text-muted-foreground">
@@ -58,14 +59,24 @@ export function StatusBar() {
               <span>No repo</span>
             </span>
           )}
-          <div className="flex items-center gap-1.5 text-muted-foreground">
-            <Circle className="h-1.5 w-1.5 fill-success text-success" />
-            <span>Ready</span>
+          <div
+            className={`flex items-center gap-1.5 ${connectionState === 'degraded' || connectionState === 'offline' || connectionState === 'retry_wait' ? 'text-yellow-400' : 'text-muted-foreground'}`}
+            title={connectionMessage ?? `Agent connection: ${connectionState}`}
+          >
+            <Circle
+              className={`h-1.5 w-1.5 ${connectionState === 'degraded' || connectionState === 'offline' || connectionState === 'retry_wait' ? 'fill-yellow-400 text-yellow-400' : 'fill-success text-success'}`}
+            />
+            <span>
+              {connectionState === 'idle' ? 'Ready' : (connectionMessage ?? connectionState)}
+            </span>
           </div>
         </div>
         <div className="flex items-center gap-3 text-muted-foreground">
           {extensionCount > 0 && (
-            <span className="flex items-center gap-1" title={`${extensionCount} extension(s) active`}>
+            <span
+              className="flex items-center gap-1"
+              title={`${extensionCount} extension(s) active`}
+            >
               <Blocks className="h-2.5 w-2.5" />
               <span>{extensionCount}</span>
             </span>

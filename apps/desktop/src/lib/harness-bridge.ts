@@ -49,6 +49,7 @@ import type {
 import { computeDiffHunks } from './compute-diff';
 import { SubAgentRunner } from './sub-agent-runner';
 import { eventBelongsToOwner } from './turn-event-ownership';
+import { configureProviderResilience } from './init-providers';
 
 // ─── Error Parser ────────────────────────────────────────────────────────────
 // Converts raw technical error messages into friendly user-facing text.
@@ -204,6 +205,20 @@ export class HarnessBridge {
   private constructor(workspacePath: string, projectId: string, homePath: string) {
     this._projectId = projectId;
     const settings = useSettingsStore.getState();
+    window.addEventListener('offline', () => {
+      if (useAgentStore.getState().isStreaming) {
+        useAgentStore
+          .getState()
+          .setConnectionState('offline', 'No internet — waiting for connection');
+      }
+    });
+    window.addEventListener('online', () => {
+      if (useAgentStore.getState().isStreaming) {
+        useAgentStore
+          .getState()
+          .setConnectionState('connecting', 'Connection restored — reconnecting');
+      }
+    });
 
     // Instantiate MemoryManager (bridges to Tauri SQLite memory commands)
     const memoryManager = new MemoryManager(tauriInvokeRaw);
@@ -417,7 +432,10 @@ export class HarnessBridge {
 
   // ─── Public API ─────────────────────────────────────────────────────
 
-  async sendMessage(userMessage: string): Promise<void> {
+  async sendMessage(
+    userMessage: string,
+    options: { hidden?: boolean; excludeLastAssistantFromHistory?: boolean } = {},
+  ): Promise<void> {
     const store = useAgentStore.getState();
     const settings = useSettingsStore.getState();
 
@@ -566,15 +584,16 @@ export class HarnessBridge {
       imageContent.push({ base64: img.base64, mediaType: img.mediaType });
     }
 
-    // Add user message to store (with blocks for faithful history)
-    const userMsgId = crypto.randomUUID();
-    useAgentStore.getState().addMessage({
-      id: userMsgId,
-      role: 'user',
-      content: userMessage,
-      blocks: userBlocks.length > 1 ? userBlocks : undefined,
-      timestamp: Date.now(),
-    });
+    if (!options.hidden) {
+      const userMsgId = crypto.randomUUID();
+      useAgentStore.getState().addMessage({
+        id: userMsgId,
+        role: 'user',
+        content: userMessage,
+        blocks: userBlocks.length > 1 ? userBlocks : undefined,
+        timestamp: Date.now(),
+      });
+    }
 
     // Auto-title the tab from first user message if still untitled
     {
@@ -589,6 +608,14 @@ export class HarnessBridge {
     // Start streaming
     useAgentStore.getState().setStreaming(true);
     useAgentStore.getState().setTerminalStatus(null);
+    useAgentStore.getState().setRecoverableError(null);
+    configureProviderResilience({
+      maxRetries: settings.agentMaxRetries,
+      baseDelayMs: settings.agentRetryBaseDelayMs,
+      maxDelayMs: settings.agentRetryMaxDelayMs,
+      requestTimeoutMs: settings.agentRequestTimeoutMs,
+      streamIdleTimeoutMs: settings.agentStreamIdleTimeoutMs,
+    });
     this.activeTurnTabId = useAgentStore.getState().activeTabId;
     this.activeTurnConversationId = useAgentStore.getState().conversationId;
     this.activeTurnId = null;
@@ -602,10 +629,19 @@ export class HarnessBridge {
       timestamp: Date.now(),
     });
 
+    let notificationOutcome: 'success' | 'cancelled' | 'error' = 'error';
     try {
       // Build history from store messages (use fresh state after addMessage calls)
       // Exclude the last 2 messages (user + placeholder assistant for this turn)
-      const history = this.buildHistory(useAgentStore.getState().messages.slice(0, -2));
+      const storedMessages = useAgentStore.getState().messages;
+      const historyMessages = storedMessages.slice(0, options.hidden ? -1 : -2);
+      if (
+        options.excludeLastAssistantFromHistory &&
+        historyMessages[historyMessages.length - 1]?.role === 'assistant'
+      ) {
+        historyMessages.pop();
+      }
+      const history = this.buildHistory(historyMessages);
 
       // Reset iteration tracking for the new turn
       // ── Ensure agent terminal is available ──
@@ -628,6 +664,12 @@ export class HarnessBridge {
         history,
         imageContent.length > 0 ? imageContent : undefined,
       );
+      notificationOutcome =
+        status === 'complete'
+          ? 'success'
+          : status === 'cancelled' || status === 'cancelled_partial'
+            ? 'cancelled'
+            : 'error';
 
       dbg(
         `Resposta recebida (${response.length} chars, ${turnRecord.iterations} iterações, ${turnRecord.toolCalls.length} tool calls)`,
@@ -643,7 +685,8 @@ export class HarnessBridge {
       // Update the last assistant message with the final response
       if (status === 'error')
         useAgentStore.getState().updateLastAssistantError(parseProviderError(response));
-      else useAgentStore.getState().updateLastAssistantContent(response);
+      else if (status !== 'recoverable_error')
+        useAgentStore.getState().updateLastAssistantContent(response);
     } catch (err) {
       const rawMsg = err instanceof Error ? err.message : 'Unknown error';
       const friendlyMsg = parseProviderError(rawMsg);
@@ -651,6 +694,9 @@ export class HarnessBridge {
       useAgentStore.getState().updateLastAssistantError(friendlyMsg);
     } finally {
       useAgentStore.getState().setStreaming(false);
+      if (useAgentStore.getState().connectionState !== 'degraded') {
+        useAgentStore.getState().setConnectionState('idle');
+      }
       this.activeTurnTabId = null;
       this.activeTurnConversationId = null;
       this.activeTurnId = null;
@@ -661,13 +707,43 @@ export class HarnessBridge {
           const tabTitle = openTabs.find((t) => t.id === activeTabId)?.title ?? 'Agent';
           await tauriInvokeRaw('notify_agent_done', {
             title: tabTitle,
-            body: 'Agent finished working',
+            body:
+              notificationOutcome === 'success'
+                ? 'Agent finished working'
+                : notificationOutcome === 'cancelled'
+                  ? 'Agent run was cancelled'
+                  : 'Agent needs your attention',
           });
         } catch {
           // Notification is best-effort — non-fatal
         }
       }
     }
+  }
+
+  async retryTurn(): Promise<void> {
+    const state = useAgentStore.getState();
+    if (state.isStreaming || !state.recoverableError) return;
+    const lastUserMessage = [...state.messages]
+      .reverse()
+      .find((message) => message.role === 'user');
+    if (!lastUserMessage) return;
+    state.setRecoverableError(null);
+    await this.sendMessage(lastUserMessage.content, {
+      hidden: true,
+      excludeLastAssistantFromHistory: true,
+    });
+  }
+
+  async continuePartialTurn(): Promise<void> {
+    const state = useAgentStore.getState();
+    const recovery = state.recoverableError;
+    if (state.isStreaming || !recovery || recovery.action !== 'continue') return;
+    state.setRecoverableError(null);
+    await this.sendMessage(
+      `Continue the interrupted response from exactly where it stopped. Do not repeat completed content. The preserved partial response was:\n\n${recovery.partialText}`,
+      { hidden: true },
+    );
   }
 
   cancel(): void {
@@ -1395,6 +1471,39 @@ Investigate the error, fix the underlying issue in the affected files, and verif
         break;
       }
 
+      case 'connection_state_changed': {
+        store.setConnectionState(event.state, event.message ?? null);
+        break;
+      }
+
+      case 'retry_scheduled': {
+        const seconds = Math.max(1, Math.ceil(event.delayMs / 1000));
+        store.setConnectionState(
+          'retry_wait',
+          `Reconnecting in ${seconds}s (attempt ${event.attempt})`,
+        );
+        this.debug(
+          `Retry ${event.attempt} scheduled in ${event.delayMs}ms: ${event.error.technicalMessage}`,
+        );
+        break;
+      }
+
+      case 'retry_started': {
+        store.setConnectionState('connecting', `Reconnecting (attempt ${event.attempt})`);
+        break;
+      }
+
+      case 'turn_recoverable_error': {
+        store.setRecoverableError({
+          error: event.recovery.error,
+          action: event.recovery.action,
+          partialText: event.recovery.partialText,
+          retryCount: event.recovery.retryCount,
+          possibleDuplicateCharge: event.recovery.possibleDuplicateCharge,
+        });
+        break;
+      }
+
       case 'stream_chunk': {
         const chunk = event.chunk;
         if (chunk.type === 'text_delta') {
@@ -1538,6 +1647,22 @@ Investigate the error, fix the underlying issue in the affected files, and verif
       case 'turn_end': {
         if (event.reason === 'error' && event.error) {
           this.debug(`ERRO na iteração: ${event.error}`);
+          if (!useAgentStore.getState().recoverableError) {
+            store.setRecoverableError({
+              error: {
+                kind: 'unknown',
+                phase: 'connecting',
+                provider: useSettingsStore.getState().activeProviderId ?? 'unknown',
+                retryable: true,
+                technicalMessage: event.error,
+                userMessage: parseProviderError(event.error),
+              },
+              action: 'retry',
+              partialText: '',
+              retryCount: event.tokenUsage.retryCount ?? 0,
+              possibleDuplicateCharge: Boolean(event.tokenUsage.possibleDuplicateCharge),
+            });
+          }
         } else {
           this.debug(`Turno encerrado: ${event.reason}`);
         }

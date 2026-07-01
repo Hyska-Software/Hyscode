@@ -350,3 +350,9 @@ Workspace-relative paths are normalized and checked by segment containment. Exte
 | Tool timeout               | Kill execution, return timeout error to agent                   |
 | Context overflow           | Truncate oldest messages, warn user via status bar              |
 | Agent loop stuck           | Detect repeated identical tool calls (3x), break loop, ask user |
+
+Provider connectivity is represented as structured harness events (`connection_state_changed`,
+`retry_scheduled`, `retry_started`, and `turn_recoverable_error`). The desktop UI may automatically
+retry only before semantic output. If a stream fails after output begins, the harness preserves text
+and thinking, discards incomplete tool calls, and requires the user to continue or retry explicitly.
+Cancellation propagates to the native Tauri request and aborts the active `reqwest` task.

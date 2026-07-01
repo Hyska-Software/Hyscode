@@ -4,6 +4,7 @@
 import type {
   Message,
   StreamChunk,
+  ProviderErrorDetails,
   ToolDefinition,
   ThinkingConfig,
   TokenUsage,
@@ -364,7 +365,20 @@ export type TurnTerminalStatus =
   | 'loop_detected'
   | 'cancelled'
   | 'cancelled_partial'
+  | 'recoverable_error'
   | 'error';
+
+export type ConnectionState = 'connecting' | 'connected' | 'retry_wait' | 'offline' | 'degraded';
+export type TurnRecoveryAction = 'continue' | 'retry';
+
+export type RecoverableTurnError = {
+  error: ProviderErrorDetails;
+  action: TurnRecoveryAction;
+  partialText: string;
+  partialThinking: string;
+  retryCount: number;
+  possibleDuplicateCharge: boolean;
+};
 export type TurnStatus = TurnTerminalStatus;
 
 export type TurnIdentity = {
@@ -420,6 +434,10 @@ export const DEFAULT_HARNESS_CONFIG: HarnessConfig = {
 type HarnessEventPayload =
   | { type: 'turn_start'; conversationId: string; iteration: number }
   | { type: 'api_request_sent'; iteration: number; providerId: string; modelId: string }
+  | { type: 'connection_state_changed'; state: ConnectionState; message?: string }
+  | { type: 'retry_scheduled'; attempt: number; delayMs: number; error: ProviderErrorDetails }
+  | { type: 'retry_started'; attempt: number }
+  | { type: 'turn_recoverable_error'; recovery: RecoverableTurnError }
   | { type: 'stream_chunk'; chunk: StreamChunk }
   | { type: 'transcript_message'; role: 'assistant' | 'tool'; blocks: Message['content'] }
   | {

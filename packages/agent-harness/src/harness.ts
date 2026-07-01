@@ -2,7 +2,13 @@
 // The main orchestration engine that powers agentic behavior.
 // Implements the observe → think → plan → act → update loop.
 
-import { type Message, type TokenUsage, getProviderRegistry } from '@hyscode/ai-providers';
+import {
+  type Message,
+  type TokenUsage,
+  getProviderRegistry,
+  normalizeProviderError,
+  ProviderError,
+} from '@hyscode/ai-providers';
 import {
   type HarnessConfig,
   type HarnessEvent,
@@ -703,6 +709,10 @@ export class Harness {
         _rawInput?: string;
       }> = [];
       let providerStopReason: import('@hyscode/ai-providers').StopReason | null = null;
+      let semanticContentReceived = false;
+      let invalidToolCall: string | null = null;
+      let retryCountThisIteration = 0;
+      let iterationFailureStatus: 'error' | 'recoverable_error' | null = null;
 
       const timeoutPromise = new Promise<never>((_, reject) => {
         timeoutId = setTimeout(() => {
@@ -712,13 +722,42 @@ export class Harness {
       });
 
       try {
+        this.emit({ type: 'connection_state_changed', state: 'connecting' });
         await Promise.race([
           (async () => {
             for await (const chunk of registry.chat({
               ...chatParams,
               providerId: this.config.providerId || undefined,
+              onRetry: ({ attempt, delayMs = 0, error }) => {
+                retryCountThisIteration = attempt;
+                this.emit({
+                  type: 'connection_state_changed',
+                  state: 'retry_wait',
+                  message: error.userMessage,
+                });
+                this.emit({
+                  type: 'retry_scheduled',
+                  attempt,
+                  delayMs,
+                  error: error.toDetails(),
+                });
+              },
+              onRetryStart: (attempt) => {
+                this.emit({ type: 'retry_started', attempt });
+                this.emit({ type: 'connection_state_changed', state: 'connecting' });
+              },
             })) {
               this.emit({ type: 'stream_chunk', chunk });
+
+              if (
+                !semanticContentReceived &&
+                (chunk.type === 'text_delta' ||
+                  chunk.type === 'thinking_delta' ||
+                  chunk.type === 'tool_call_start')
+              ) {
+                semanticContentReceived = true;
+                this.emit({ type: 'connection_state_changed', state: 'connected' });
+              }
 
               switch (chunk.type) {
                 case 'text_delta':
@@ -749,7 +788,7 @@ export class Harness {
                     try {
                       tc.input = JSON.parse(tc._rawInput);
                     } catch {
-                      /* keep empty */
+                      invalidToolCall = tc.name;
                     }
                   }
                   break;
@@ -794,8 +833,23 @@ export class Harness {
                   }
                   break;
                 case 'error':
-                  throw new Error(chunk.error);
+                  throw chunk.details
+                    ? new ProviderError(
+                        chunk.details.technicalMessage,
+                        chunk.details.provider,
+                        chunk.details.statusCode,
+                        chunk.details.retryable,
+                        chunk.details.retryAfterMs,
+                        chunk.details.kind,
+                        chunk.details.phase,
+                        chunk.details.userMessage,
+                        chunk.details.requestId,
+                      )
+                    : new Error(chunk.error);
               }
+            }
+            if (invalidToolCall) {
+              throw new Error(`Invalid JSON arguments received for tool "${invalidToolCall}"`);
             }
           })(),
           timeoutPromise,
@@ -809,13 +863,40 @@ export class Harness {
           finalResponse = 'Request cancelled.';
           break;
         }
-        terminalStatus = 'error';
-        finalResponse = err instanceof Error ? err.message : String(err);
-        break;
+        const providerError = normalizeProviderError(
+          err,
+          this.config.providerId,
+          semanticContentReceived ? 'streaming' : 'connecting',
+        );
+        if (semanticContentReceived) {
+          iterationFailureStatus = 'recoverable_error';
+          finalResponse = assistantText || providerError.userMessage;
+          tokenUsage.possibleDuplicateCharge = toolCalls.length > 0;
+          this.emit({
+            type: 'connection_state_changed',
+            state: 'degraded',
+            message: providerError.userMessage,
+          });
+          this.emit({
+            type: 'turn_recoverable_error',
+            recovery: {
+              error: providerError.toDetails(),
+              action: toolCalls.length > 0 ? 'retry' : 'continue',
+              partialText: assistantText,
+              partialThinking: thinkingText,
+              retryCount: retryCountThisIteration,
+              possibleDuplicateCharge: toolCalls.length > 0,
+            },
+          });
+        } else {
+          iterationFailureStatus = 'error';
+          finalResponse = providerError.userMessage;
+        }
       } finally {
         if (timeoutId) clearTimeout(timeoutId);
         activeTurn.signal.removeEventListener('abort', abortFromTurn);
       }
+      if (iterationFailureStatus) terminalStatus = iterationFailureStatus;
 
       // Add assistant response to history
       const assistantMsg: Message = {
@@ -824,7 +905,7 @@ export class Harness {
           // Thinking must come first so the provider can round-trip it in the next turn
           ...(thinkingText ? [{ type: 'thinking' as const, thinking: thinkingText }] : []),
           ...(assistantText ? [{ type: 'text' as const, text: assistantText }] : []),
-          ...toolCalls.map((tc) => ({
+          ...(iterationFailureStatus === 'recoverable_error' ? [] : toolCalls).map((tc) => ({
             type: 'tool_call' as const,
             id: tc.id,
             name: tc.name,
@@ -834,6 +915,10 @@ export class Harness {
       };
       this.contextManager.addMessage(assistantMsg);
       this.emit({ type: 'transcript_message', role: 'assistant', blocks: assistantMsg.content });
+
+      if (iterationFailureStatus) {
+        break;
+      }
 
       // If no tool calls, we're done — the LLM gave a final text response.
       // IMPORTANT: Do NOT check stopReason here. Some providers (Ollama, Gemini)
@@ -1158,7 +1243,7 @@ export class Harness {
     );
     if (cancellationWasPartial) terminalStatus = 'cancelled_partial';
     else if (this.cancelled || activeTurn.signal.aborted) terminalStatus = 'cancelled';
-    else if (terminalStatus !== 'loop_detected' && iteration >= maxIter)
+    else if (terminalStatus === 'complete' && iteration >= maxIter)
       terminalStatus = 'max_iterations';
     const stopReason: TurnRecord['stopReason'] = terminalStatus;
     if (!finalResponse.trim() && terminalStatus === 'max_iterations') {
@@ -1169,12 +1254,13 @@ export class Harness {
     if (!finalResponse.trim() && terminalStatus === 'cancelled_partial')
       finalResponse =
         'Cancellation was requested, but one native operation completed before stopping.';
+    const terminalError = ['error', 'recoverable_error'].includes(terminalStatus as string);
     this.finishTurn(
       terminalStatus,
       tokenUsage,
       terminalStatus === 'loop_detected'
         ? 'Stuck in loop: repeated identical tool calls'
-        : terminalStatus === 'error'
+        : terminalError
           ? finalResponse
           : undefined,
     );

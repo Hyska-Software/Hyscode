@@ -23,8 +23,17 @@ export type {
   ProviderCapabilities,
   PromptCacheMode,
   ReasoningReplayMode,
+  ProviderErrorKind,
+  ProviderErrorPhase,
+  ProviderErrorDetails,
+  ResilienceConfig,
 } from './types';
-export { ProviderError } from './types';
+export {
+  ProviderError,
+  DEFAULT_RESILIENCE_CONFIG,
+  classifyProviderErrorKind,
+  providerErrorUserMessage,
+} from './types';
 
 // ─── Providers ──────────────────────────────────────────────────────────────
 export { AnthropicProvider } from './providers/anthropic';
@@ -43,7 +52,7 @@ export { ProviderRegistry, getProviderRegistry } from './registry';
 export type { KeyStore } from './registry';
 
 // ─── Utilities ──────────────────────────────────────────────────────────────
-export { withRetry, parseSSEStream, parseNDJSONStream } from './retry';
+export { withRetry, parseSSEStream, parseNDJSONStream, normalizeProviderError } from './retry';
 export {
   estimateTokens,
   estimateMessageTokens,

@@ -29,4 +29,24 @@ describe('agent tab turn ownership', () => {
     expect(useAgentStore.getState().activeTabId).toBe('other');
     expect(useAgentStore.getState().openTabs).toHaveLength(1);
   });
+
+  it('tracks degraded connection and recoverable error state per tab', () => {
+    useAgentStore.getState().setConnectionState('degraded', 'Stream interrupted');
+    useAgentStore.getState().setRecoverableError({
+      error: {
+        kind: 'stream_interrupted',
+        phase: 'streaming',
+        provider: 'test',
+        retryable: false,
+        technicalMessage: 'connection reset',
+        userMessage: 'The response connection was interrupted.',
+      },
+      action: 'continue',
+      partialText: 'partial',
+      retryCount: 0,
+      possibleDuplicateCharge: false,
+    });
+    expect(useAgentStore.getState().connectionState).toBe('degraded');
+    expect(useAgentStore.getState().recoverableError?.action).toBe('continue');
+  });
 });

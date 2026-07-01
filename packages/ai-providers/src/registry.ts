@@ -10,7 +10,7 @@ import type { ClaudeAgentInvoke } from './providers/claude-agent';
 import { GitHubCopilotProvider } from './providers/github-copilot';
 import { OpenCodeZenProvider } from './providers/opencode-zen';
 import { OpenCodeGoProvider } from './providers/opencode-go';
-import { withRetry } from './retry';
+import { normalizeProviderError, withRetry } from './retry';
 
 // ─── Key Store Interface ────────────────────────────────────────────────────
 // Abstraction over the actual key storage (Tauri stronghold, env vars, etc.)
@@ -106,8 +106,14 @@ export class ProviderRegistry {
   }
 
   /** Chat with retry, using the specified or default provider */
-  async *chat(params: ChatParams & { providerId?: string }): AsyncIterable<StreamChunk> {
-    const { providerId, ...chatParams } = params;
+  async *chat(
+    params: ChatParams & {
+      providerId?: string;
+      onRetry?: (event: { attempt: number; delayMs?: number; error: ProviderError }) => void;
+      onRetryStart?: (attempt: number) => void;
+    },
+  ): AsyncIterable<StreamChunk> {
+    const { providerId, onRetry, onRetryStart, ...chatParams } = params;
 
     let provider: AIProvider;
     let model = chatParams.model;
@@ -123,7 +129,10 @@ export class ProviderRegistry {
     }
 
     if (!provider.isConfigured()) {
-      throw new ProviderError(`Provider "${provider.id}" is not configured (missing API key?)`, provider.id);
+      throw new ProviderError(
+        `Provider "${provider.id}" is not configured (missing API key?)`,
+        provider.id,
+      );
     }
 
     // For streaming, we wrap the initial connection in retry but stream without retry
@@ -134,10 +143,30 @@ export class ProviderRegistry {
         const iter = provider.chat({ ...chatParams, model });
         // Get the iterator and try the first read to verify connection works
         const asyncIter = iter[Symbol.asyncIterator]();
-        const first = await asyncIter.next();
+        let first: IteratorResult<StreamChunk>;
+        try {
+          first = await asyncIter.next();
+        } catch (error) {
+          throw normalizeProviderError(error, provider.id, 'connecting');
+        }
+        if (!first.done && first.value.type === 'error' && first.value.retryable) {
+          throw new ProviderError(first.value.error, provider.id, undefined, true);
+        }
         return { asyncIter, first };
       },
-      { ...this.retryConfig, onRetry: () => { retryCount++; } },
+      {
+        ...this.retryConfig,
+        signal: chatParams.signal,
+        onRetry: (attempt, error, delayMs) => {
+          retryCount++;
+          onRetry?.({
+            attempt,
+            delayMs,
+            error: normalizeProviderError(error, provider.id, 'connecting'),
+          });
+        },
+        onRetryStart,
+      },
     );
 
     if (!stream.first.done) {
@@ -145,7 +174,12 @@ export class ProviderRegistry {
     }
 
     while (true) {
-      const result = await stream.asyncIter.next();
+      let result: IteratorResult<StreamChunk>;
+      try {
+        result = await stream.asyncIter.next();
+      } catch (error) {
+        throw normalizeProviderError(error, provider.id, 'streaming');
+      }
       if (result.done) break;
       yield withRetryUsage(result.value, retryCount);
     }

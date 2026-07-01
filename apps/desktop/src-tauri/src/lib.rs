@@ -4,6 +4,7 @@ use tauri::Manager;
 
 mod commands;
 
+use commands::ai::AiRequestState;
 use commands::db::DbState;
 use commands::docker::DockerWatchState;
 use commands::fs::FsWatcherState;
@@ -24,6 +25,7 @@ pub fn run() {
         .manage(LspState(Mutex::new(HashMap::new())))
         .manage(FsWatcherState(Mutex::new(HashMap::new())))
         .manage(DockerWatchState(Mutex::new(HashMap::new())))
+        .manage(AiRequestState::default())
         .manage(KeychainState(Arc::new(Mutex::new(
             commands::keychain::load_keychain(),
         ))))

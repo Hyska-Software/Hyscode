@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use tauri::async_runtime::JoinHandle;
 use tauri::{Emitter, State, Window};
 
 use super::github_oauth::ensure_copilot_token;
@@ -27,6 +28,48 @@ pub struct AiStreamChunk {
     pub done: bool,
     pub error: Option<String>,
     pub status_code: Option<u16>,
+    pub retry_after_ms: Option<u64>,
+    pub error_kind: Option<String>,
+    pub error_phase: Option<String>,
+}
+
+#[derive(Default)]
+pub struct AiRequestState(
+    pub std::sync::Arc<std::sync::Mutex<std::collections::HashMap<String, JoinHandle<()>>>>,
+);
+
+struct ActiveRequestCleanup {
+    requests: std::sync::Arc<std::sync::Mutex<std::collections::HashMap<String, JoinHandle<()>>>>,
+    request_id: String,
+}
+
+impl Drop for ActiveRequestCleanup {
+    fn drop(&mut self) {
+        if let Ok(mut active) = self.requests.lock() {
+            active.remove(&self.request_id);
+        }
+    }
+}
+
+fn classify_transport_error(error: &reqwest::Error) -> &'static str {
+    if error.is_timeout() {
+        "timeout"
+    } else if error.is_connect() {
+        "connection"
+    } else if error.is_body() || error.is_decode() {
+        "stream_interrupted"
+    } else {
+        "connection"
+    }
+}
+
+fn retry_after_ms(response: &reqwest::Response) -> Option<u64> {
+    response
+        .headers()
+        .get(reqwest::header::RETRY_AFTER)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.parse::<f64>().ok())
+        .map(|seconds| (seconds * 1000.0) as u64)
 }
 
 /// Get the keychain key name for a provider's API key
@@ -55,6 +98,7 @@ fn get_auth_header(provider: &str, api_key: &str) -> (String, String) {
 pub async fn ai_stream_request(
     window: Window,
     keychain: State<'_, KeychainState>,
+    active_requests: State<'_, AiRequestState>,
     request: AiStreamRequest,
 ) -> Result<(), String> {
     let request_id = request.request_id.clone();
@@ -104,6 +148,9 @@ pub async fn ai_stream_request(
                         request.provider
                     )),
                     status_code: None,
+                    retry_after_ms: None,
+                    error_kind: Some("authentication".to_string()),
+                    error_phase: Some("configuration".to_string()),
                 },
             );
             return Ok(());
@@ -115,8 +162,17 @@ pub async fn ai_stream_request(
     let window_clone = window.clone();
     let req_id = request_id.clone();
     let keychain_arc = keychain.0.clone();
+    let requests = active_requests.0.clone();
+    let cleanup_requests = requests.clone();
+    let cleanup_id = request_id.clone();
+    let (start_tx, start_rx) = tokio::sync::oneshot::channel::<()>();
 
-    tauri::async_runtime::spawn(async move {
+    let task = tauri::async_runtime::spawn(async move {
+        let _ = start_rx.await;
+        let _cleanup = ActiveRequestCleanup {
+            requests: cleanup_requests,
+            request_id: cleanup_id,
+        };
         let client = reqwest::Client::new();
         let timeout = std::time::Duration::from_millis(request.timeout_ms.unwrap_or(120_000));
 
@@ -149,6 +205,9 @@ pub async fn ai_stream_request(
                         done: true,
                         error: Some(format!("HTTP request failed: {}", e)),
                         status_code: None,
+                        retry_after_ms: None,
+                        error_kind: Some(classify_transport_error(&e).to_string()),
+                        error_phase: Some("connecting".to_string()),
                     },
                 );
                 return;
@@ -185,6 +244,7 @@ pub async fn ai_stream_request(
         }
 
         if status >= 400 {
+            let retry_after = retry_after_ms(&response);
             let error_body = response.text().await.unwrap_or_default();
             let _ = window_clone.emit(
                 "ai:chunk",
@@ -194,6 +254,18 @@ pub async fn ai_stream_request(
                     done: true,
                     error: Some(format!("HTTP {}", status)),
                     status_code: Some(status),
+                    retry_after_ms: retry_after,
+                    error_kind: Some(
+                        match status {
+                            401 | 403 => "authentication",
+                            429 => "rate_limit",
+                            408 => "timeout",
+                            500..=599 => "unavailable",
+                            _ => "unknown",
+                        }
+                        .to_string(),
+                    ),
+                    error_phase: Some("connecting".to_string()),
                 },
             );
             return;
@@ -215,6 +287,9 @@ pub async fn ai_stream_request(
                             done: false,
                             error: None,
                             status_code: Some(status),
+                            retry_after_ms: None,
+                            error_kind: None,
+                            error_phase: None,
                         },
                     );
                 }
@@ -227,6 +302,9 @@ pub async fn ai_stream_request(
                             done: true,
                             error: Some(format!("Stream read error: {}", e)),
                             status_code: Some(status),
+                            retry_after_ms: None,
+                            error_kind: Some(classify_transport_error(&e).to_string()),
+                            error_phase: Some("streaming".to_string()),
                         },
                     );
                     return;
@@ -243,9 +321,18 @@ pub async fn ai_stream_request(
                 done: true,
                 error: None,
                 status_code: Some(status),
+                retry_after_ms: None,
+                error_kind: None,
+                error_phase: None,
             },
         );
     });
+
+    {
+        let mut active = requests.lock().map_err(|error| error.to_string())?;
+        active.insert(request_id, task);
+    }
+    let _ = start_tx.send(());
 
     Ok(())
 }
@@ -253,8 +340,19 @@ pub async fn ai_stream_request(
 /// Cancel an in-progress streaming request.
 /// Currently this just signals — actual cancellation depends on the reqwest client.
 #[tauri::command]
-pub async fn ai_stream_cancel(window: Window, request_id: String) -> Result<(), String> {
-    // Emit a cancel event that the frontend can use to stop processing chunks
+pub async fn ai_stream_cancel(
+    window: Window,
+    active_requests: State<'_, AiRequestState>,
+    request_id: String,
+) -> Result<(), String> {
+    let task = active_requests
+        .0
+        .lock()
+        .map_err(|error| error.to_string())?
+        .remove(&request_id);
+    if let Some(task) = task {
+        task.abort();
+    }
     let _ = window.emit(
         "ai:chunk",
         AiStreamChunk {
@@ -263,6 +361,9 @@ pub async fn ai_stream_cancel(window: Window, request_id: String) -> Result<(), 
             done: true,
             error: Some("Cancelled by user".to_string()),
             status_code: None,
+            retry_after_ms: None,
+            error_kind: Some("cancelled".to_string()),
+            error_phase: Some("streaming".to_string()),
         },
     );
     Ok(())

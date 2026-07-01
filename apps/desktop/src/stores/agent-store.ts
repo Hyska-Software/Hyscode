@@ -9,8 +9,24 @@ import type {
   TurnTerminalStatus,
 } from '@hyscode/agent-harness';
 import type { MessageContent, TokenUsage } from '@hyscode/ai-providers';
+import type { ProviderErrorDetails } from '@hyscode/ai-providers';
 
 export type { TokenUsage };
+
+export type AgentConnectionState =
+  | 'idle'
+  | 'connecting'
+  | 'connected'
+  | 'retry_wait'
+  | 'offline'
+  | 'degraded';
+export type AgentTurnError = {
+  error: ProviderErrorDetails;
+  action: 'continue' | 'retry';
+  partialText: string;
+  retryCount: number;
+  possibleDuplicateCharge: boolean;
+};
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -59,6 +75,9 @@ export interface PerTabState {
   /** Active and completed sub-agent tasks spawned during this conversation. */
   subAgents: SubAgentState[];
   terminalStatus: TurnTerminalStatus | null;
+  connectionState: AgentConnectionState;
+  connectionMessage: string | null;
+  recoverableError: AgentTurnError | null;
 }
 
 export interface TabMeta {
@@ -95,6 +114,9 @@ export function defaultPerTabState(mode: AgentMode = 'chat'): PerTabState {
     pendingUserQuestion: null,
     subAgents: [],
     terminalStatus: null,
+    connectionState: 'idle',
+    connectionMessage: null,
+    recoverableError: null,
   };
 }
 export type MessageRole = 'user' | 'assistant' | 'tool';
@@ -257,6 +279,9 @@ interface AgentState {
   // User questions (ask_user tool)
   pendingUserQuestion: PendingUserQuestion | null;
   terminalStatus: TurnTerminalStatus | null;
+  connectionState: AgentConnectionState;
+  connectionMessage: string | null;
+  recoverableError: AgentTurnError | null;
 
   // ─── Multi-tab management ─────────────────────────────────────────────
   /** Ordered list of open tabs (visible in the switcher). */
@@ -369,6 +394,8 @@ interface AgentState {
   // User questions (ask_user tool)
   setPendingUserQuestion: (question: PendingUserQuestion | null) => void;
   setTerminalStatus: (status: TurnTerminalStatus | null) => void;
+  setConnectionState: (state: AgentConnectionState, message?: string | null) => void;
+  setRecoverableError: (error: AgentTurnError | null) => void;
 
   // Sub-agents
   subAgents: SubAgentState[];
@@ -414,6 +441,9 @@ export const useAgentStore = create<AgentState>()(
     pendingUserQuestion: null,
     subAgents: [],
     terminalStatus: null,
+    connectionState: 'idle',
+    connectionMessage: null,
+    recoverableError: null,
     sessions: [],
     sessionsLoading: false,
     historyOpen: false,
@@ -802,6 +832,17 @@ export const useAgentStore = create<AgentState>()(
         state.terminalStatus = status;
       }),
 
+    setConnectionState: (connectionState, connectionMessage = null) =>
+      set((state) => {
+        state.connectionState = connectionState;
+        state.connectionMessage = connectionMessage;
+      }),
+
+    setRecoverableError: (recoverableError) =>
+      set((state) => {
+        state.recoverableError = recoverableError;
+      }),
+
     // ─── Sub-Agent Actions ────────────────────────────────────────────
 
     addSubAgent: (agent) =>
@@ -974,6 +1015,9 @@ function _extractTab(s: any): PerTabState {
     pendingUserQuestion: s.pendingUserQuestion,
     subAgents: s.subAgents ?? [],
     terminalStatus: s.terminalStatus ?? null,
+    connectionState: s.connectionState ?? 'idle',
+    connectionMessage: s.connectionMessage ?? null,
+    recoverableError: s.recoverableError ?? null,
   };
 }
 
@@ -1007,4 +1051,7 @@ function _applyTab(s: any, ps: PerTabState): void {
   s.pendingUserQuestion = ps.pendingUserQuestion;
   s.subAgents = ps.subAgents ?? [];
   s.terminalStatus = ps.terminalStatus ?? null;
+  s.connectionState = ps.connectionState ?? 'idle';
+  s.connectionMessage = ps.connectionMessage ?? null;
+  s.recoverableError = ps.recoverableError ?? null;
 }

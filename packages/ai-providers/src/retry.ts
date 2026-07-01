@@ -1,4 +1,4 @@
-import { type RetryConfig, ProviderError } from './types';
+import { type RetryConfig, ProviderError, classifyProviderErrorKind } from './types';
 
 const DEFAULT_RETRY_CONFIG: RetryConfig = {
   maxRetries: 3,
@@ -30,7 +30,10 @@ export async function withRetry<T>(
       lastError = err;
 
       // Never retry aborted requests — the caller explicitly cancelled.
-      if (err instanceof Error && (err.name === 'AbortError' || err.message === 'Request aborted')) {
+      if (
+        err instanceof Error &&
+        (err.name === 'AbortError' || err.message === 'Request aborted')
+      ) {
         throw err;
       }
 
@@ -51,16 +54,52 @@ export async function withRetry<T>(
       }
 
       if (attempt < cfg.maxRetries) {
-        cfg.onRetry?.(attempt + 1, err);
-        const delay = err instanceof ProviderError && err.retryAfterMs != null
-          ? err.retryAfterMs
-          : getDelay(attempt, cfg);
-        await new Promise((resolve) => setTimeout(resolve, delay));
+        const delay =
+          err instanceof ProviderError && err.retryAfterMs != null
+            ? err.retryAfterMs
+            : getDelay(attempt, cfg);
+        cfg.onRetry?.(attempt + 1, err, delay);
+        await abortableDelay(delay, cfg.signal);
+        cfg.onRetryStart?.(attempt + 1);
       }
     }
   }
 
   throw lastError;
+}
+
+function abortableDelay(delayMs: number, signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted)
+    return Promise.reject(signal.reason ?? new DOMException('Request aborted', 'AbortError'));
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(resolve, delayMs);
+    signal?.addEventListener(
+      'abort',
+      () => {
+        clearTimeout(timeout);
+        reject(signal.reason ?? new DOMException('Request aborted', 'AbortError'));
+      },
+      { once: true },
+    );
+  });
+}
+
+export function normalizeProviderError(
+  error: unknown,
+  provider: string,
+  phase: 'connecting' | 'streaming' | 'parsing',
+): ProviderError {
+  if (error instanceof ProviderError) return error;
+  const message = error instanceof Error ? error.message : String(error);
+  const classifiedKind = classifyProviderErrorKind(message);
+  const kind =
+    phase === 'connecting' && classifiedKind === 'stream_interrupted'
+      ? 'connection'
+      : classifiedKind;
+  const cancelled = kind === 'cancelled';
+  const retryable =
+    phase === 'connecting' && !cancelled && ['connection', 'offline', 'timeout'].includes(kind);
+  return new ProviderError(message, provider, undefined, retryable, undefined, kind, phase);
 }
 
 /**
@@ -173,8 +212,16 @@ export async function* parseNDJSONStream(
         if (!trimmed) continue;
         try {
           yield JSON.parse(trimmed);
-        } catch {
-          // Skip malformed JSON lines
+        } catch (error) {
+          throw new ProviderError(
+            `Malformed NDJSON response: ${error instanceof Error ? error.message : String(error)}`,
+            'ollama',
+            undefined,
+            false,
+            undefined,
+            'invalid_response',
+            'parsing',
+          );
         }
       }
     }
@@ -182,8 +229,16 @@ export async function* parseNDJSONStream(
     if (buffer.trim()) {
       try {
         yield JSON.parse(buffer.trim());
-      } catch {
-        // Skip malformed final line
+      } catch (error) {
+        throw new ProviderError(
+          `Malformed final NDJSON response: ${error instanceof Error ? error.message : String(error)}`,
+          'ollama',
+          undefined,
+          false,
+          undefined,
+          'invalid_response',
+          'parsing',
+        );
       }
     }
   } finally {

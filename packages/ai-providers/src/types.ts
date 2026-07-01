@@ -87,7 +87,7 @@ export type StreamChunk =
   | { type: 'tool_call_end'; id: string }
   | { type: 'usage'; usage: TokenUsage }
   | { type: 'done'; stopReason: StopReason }
-  | { type: 'error'; error: string; retryable?: boolean };
+  | { type: 'error'; error: string; retryable?: boolean; details?: ProviderErrorDetails };
 
 export type StopReason = 'end_turn' | 'tool_use' | 'max_tokens' | 'stop_sequence' | 'error';
 
@@ -197,10 +197,55 @@ export interface RetryConfig {
   baseDelayMs: number;
   maxDelayMs: number;
   retryableStatuses: number[];
-  onRetry?: (attempt: number, error: unknown) => void;
+  onRetry?: (attempt: number, error: unknown, delayMs: number) => void;
+  onRetryStart?: (attempt: number) => void;
+  signal?: AbortSignal;
 }
 
 // ─── Provider Error ─────────────────────────────────────────────────────────
+
+export type ProviderErrorKind =
+  | 'authentication'
+  | 'rate_limit'
+  | 'unavailable'
+  | 'timeout'
+  | 'offline'
+  | 'connection'
+  | 'stream_interrupted'
+  | 'invalid_response'
+  | 'context_overflow'
+  | 'cancelled'
+  | 'unknown';
+
+export type ProviderErrorPhase = 'configuration' | 'connecting' | 'streaming' | 'parsing';
+
+export type ProviderErrorDetails = {
+  kind: ProviderErrorKind;
+  phase: ProviderErrorPhase;
+  provider: string;
+  statusCode?: number;
+  retryable: boolean;
+  retryAfterMs?: number;
+  technicalMessage: string;
+  userMessage: string;
+  requestId?: string;
+};
+
+export type ResilienceConfig = {
+  maxRetries: number;
+  baseDelayMs: number;
+  maxDelayMs: number;
+  requestTimeoutMs: number;
+  streamIdleTimeoutMs: number;
+};
+
+export const DEFAULT_RESILIENCE_CONFIG: ResilienceConfig = {
+  maxRetries: 3,
+  baseDelayMs: 1_000,
+  maxDelayMs: 30_000,
+  requestTimeoutMs: 120_000,
+  streamIdleTimeoutMs: 90_000,
+};
 
 export class ProviderError extends Error {
   constructor(
@@ -209,9 +254,77 @@ export class ProviderError extends Error {
     public readonly statusCode?: number,
     public readonly retryable: boolean = false,
     public readonly retryAfterMs?: number,
+    public readonly kind: ProviderErrorKind = classifyProviderErrorKind(message, statusCode),
+    public readonly phase: ProviderErrorPhase = 'connecting',
+    public readonly userMessage: string = providerErrorUserMessage(kind),
+    public readonly requestId?: string,
   ) {
     super(message);
     this.name = 'ProviderError';
+  }
+
+  toDetails(): ProviderErrorDetails {
+    return {
+      kind: this.kind,
+      phase: this.phase,
+      provider: this.provider,
+      statusCode: this.statusCode,
+      retryable: this.retryable,
+      retryAfterMs: this.retryAfterMs,
+      technicalMessage: this.message,
+      userMessage: this.userMessage,
+      requestId: this.requestId,
+    };
+  }
+}
+
+export function classifyProviderErrorKind(message: string, statusCode?: number): ProviderErrorKind {
+  const value = message.toLowerCase();
+  if (statusCode === 401 || statusCode === 403 || /api.?key|auth|unauthor/.test(value))
+    return 'authentication';
+  if (statusCode === 429 || /rate.?limit|quota/.test(value)) return 'rate_limit';
+  if (statusCode === 408 || /timed?\s*out|timeout/.test(value)) return 'timeout';
+  if (/abort|cancel/.test(value)) return 'cancelled';
+  if (/offline|internet.*unavailable/.test(value)) return 'offline';
+  if (/context.*(length|window|token)|too many tokens/.test(value)) return 'context_overflow';
+  if (
+    statusCode === 502 ||
+    statusCode === 503 ||
+    statusCode === 529 ||
+    /overload|unavailable/.test(value)
+  )
+    return 'unavailable';
+  if (/stream|body.*read|connection.*(closed|reset)|unexpected eof/.test(value))
+    return 'stream_interrupted';
+  if (/json|protocol|malformed|invalid response|parse/.test(value)) return 'invalid_response';
+  if (/network|fetch|connect|dns|http request failed/.test(value)) return 'connection';
+  return 'unknown';
+}
+
+export function providerErrorUserMessage(kind: ProviderErrorKind): string {
+  switch (kind) {
+    case 'authentication':
+      return 'Authentication failed. Check the provider credentials in Settings.';
+    case 'rate_limit':
+      return 'The provider rate limit was reached. HysCode will retry when allowed.';
+    case 'unavailable':
+      return 'The AI provider is temporarily unavailable.';
+    case 'timeout':
+      return 'The provider took too long to respond.';
+    case 'offline':
+      return 'No internet connection. HysCode is waiting for the connection to return.';
+    case 'connection':
+      return 'The connection to the AI provider failed.';
+    case 'stream_interrupted':
+      return 'The response connection was interrupted.';
+    case 'invalid_response':
+      return 'The provider returned an invalid response.';
+    case 'context_overflow':
+      return "The conversation exceeds this model's context window.";
+    case 'cancelled':
+      return 'Request cancelled.';
+    default:
+      return 'The agent could not complete the request.';
   }
 }
 

@@ -899,8 +899,16 @@ export class OpenCodeZenProvider extends OpenAIProvider {
     let parsed: Record<string, unknown>;
     try {
       parsed = JSON.parse(data);
-    } catch {
-      return [];
+    } catch (error) {
+      throw new ProviderError(
+        `Malformed OpenCode SSE event: ${error instanceof Error ? error.message : String(error)}`,
+        'opencode-zen',
+        undefined,
+        false,
+        undefined,
+        'invalid_response',
+        'parsing',
+      );
     }
 
     const eventType = parsed.type as string;

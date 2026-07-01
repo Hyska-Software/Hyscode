@@ -7,6 +7,12 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import type { FetchImpl } from '@hyscode/ai-providers';
+import {
+  DEFAULT_RESILIENCE_CONFIG,
+  type ProviderErrorKind,
+  type ProviderErrorPhase,
+  type ResilienceConfig,
+} from '@hyscode/ai-providers';
 // FetchImpl is re-exported from ai-providers types
 
 // ─── Types matching the Rust AiStreamChunk struct ─────────────────────────
@@ -17,6 +23,9 @@ interface AiStreamChunk {
   done: boolean;
   error?: string | null;
   status_code?: number | null;
+  retry_after_ms?: number | null;
+  error_kind?: ProviderErrorKind | null;
+  error_phase?: ProviderErrorPhase | null;
 }
 
 // ─── Provider detection ───────────────────────────────────────────────────
@@ -62,11 +71,15 @@ function nextRequestId(): string {
  * Returns a `fetch`-compatible function that routes requests through the Tauri
  * `ai_stream_request` command instead of making direct browser HTTP calls.
  */
-export function createTauriFetch(): FetchImpl {
+let activeResilienceConfig: ResilienceConfig = DEFAULT_RESILIENCE_CONFIG;
+
+export function createTauriFetch(resilience: Partial<ResilienceConfig> = {}): FetchImpl {
+  activeResilienceConfig = { ...DEFAULT_RESILIENCE_CONFIG, ...resilience };
   return async function tauriFetch(
     input: string | URL | Request,
     init?: RequestInit,
   ): Promise<Response> {
+    const config = activeResilienceConfig;
     const url =
       typeof input === 'string'
         ? input
@@ -100,6 +113,35 @@ export function createTauriFetch(): FetchImpl {
     });
 
     let statusResolved = false;
+    let retryAfterMs: number | null = null;
+    let transportErrorKind: ProviderErrorKind | null = null;
+    let transportErrorPhase: ProviderErrorPhase | null = null;
+    let disposed = false;
+    let idleTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const cancelNativeRequest = (): void => {
+      void invoke('ai_stream_cancel', { requestId }).catch(() => undefined);
+    };
+
+    const clearIdleTimer = (): void => {
+      if (idleTimer) clearTimeout(idleTimer);
+      idleTimer = null;
+    };
+
+    const dispose = (): void => {
+      if (disposed) return;
+      disposed = true;
+      clearIdleTimer();
+      unlisten();
+    };
+
+    const resetIdleTimer = (): void => {
+      clearIdleTimer();
+      idleTimer = setTimeout(() => {
+        cancelNativeRequest();
+        enqueue(new Error(`Stream idle timeout after ${config.streamIdleTimeoutMs}ms`));
+      }, config.streamIdleTimeoutMs);
+    };
 
     function enqueue(item: string | null | Error): void {
       chunkQueue.push(item);
@@ -111,11 +153,21 @@ export function createTauriFetch(): FetchImpl {
     }
 
     function onChunk(chunk: AiStreamChunk): void {
+      if (disposed) return;
+      resetIdleTimer();
       if (!statusResolved) {
         statusResolved = true;
+        retryAfterMs = chunk.retry_after_ms ?? null;
+        transportErrorKind = chunk.error_kind ?? null;
+        transportErrorPhase = chunk.error_phase ?? null;
         const code = chunk.status_code ?? 200;
 
         if (chunk.error && chunk.done) {
+          if (chunk.status_code == null) {
+            rejectStatus(new Error(chunk.error));
+            dispose();
+            return;
+          }
           // HTTP-level error (4xx/5xx) — put the error body in the queue and close.
           resolveStatus(code);
           if (chunk.data) enqueue(chunk.data);
@@ -150,6 +202,14 @@ export function createTauriFetch(): FetchImpl {
       }
     });
 
+    // Going offline is not a retry attempt: wait until connectivity returns.
+    try {
+      await waitUntilOnline(init?.signal ?? undefined);
+    } catch (error) {
+      dispose();
+      throw error;
+    }
+
     // Start the streaming request in Rust.
     try {
       await invoke<void>('ai_stream_request', {
@@ -159,11 +219,11 @@ export function createTauriFetch(): FetchImpl {
           url,
           headers,
           body,
-          timeout_ms: 120_000,
+          timeout_ms: config.requestTimeoutMs,
         },
       });
     } catch (err) {
-      unlisten();
+      dispose();
       rejectStatus(err instanceof Error ? err : new Error(String(err)));
       throw err;
     }
@@ -171,15 +231,20 @@ export function createTauriFetch(): FetchImpl {
     // If the AbortSignal fires before the first chunk, reject the status promise.
     const signal = init?.signal;
     if (signal) {
-      signal.addEventListener('abort', () => {
-        unlisten();
-        if (!statusResolved) {
-          statusResolved = true;
-          rejectStatus(new Error('Request aborted'));
-        } else {
-          enqueue(new Error('Request aborted'));
-        }
-      }, { once: true });
+      signal.addEventListener(
+        'abort',
+        () => {
+          cancelNativeRequest();
+          dispose();
+          if (!statusResolved) {
+            statusResolved = true;
+            rejectStatus(new Error('Request aborted'));
+          } else {
+            enqueue(new Error('Request aborted'));
+          }
+        },
+        { once: true },
+      );
     }
 
     // Await first chunk to determine HTTP status code.
@@ -191,7 +256,7 @@ export function createTauriFetch(): FetchImpl {
         // Wait until a chunk is available.
         while (chunkQueue.length === 0) {
           if (signal?.aborted) {
-            unlisten();
+            dispose();
             controller.close();
             return;
           }
@@ -202,23 +267,48 @@ export function createTauriFetch(): FetchImpl {
 
         const item = chunkQueue.shift()!;
         if (item === null) {
-          unlisten();
+          dispose();
           controller.close();
         } else if (item instanceof Error) {
-          unlisten();
+          dispose();
           controller.error(item);
         } else {
           controller.enqueue(encoder.encode(item));
         }
       },
       cancel() {
-        unlisten();
+        cancelNativeRequest();
+        dispose();
       },
     });
 
+    const responseHeaders: Record<string, string> = { 'content-type': 'text/event-stream' };
+    if (retryAfterMs != null) responseHeaders['retry-after'] = String(retryAfterMs / 1000);
+    if (transportErrorKind) responseHeaders['x-hyscode-error-kind'] = transportErrorKind;
+    if (transportErrorPhase) responseHeaders['x-hyscode-error-phase'] = transportErrorPhase;
     return new Response(stream, {
       status: statusCode,
-      headers: { 'content-type': 'text/event-stream' },
+      headers: responseHeaders,
     });
   };
+}
+
+function waitUntilOnline(signal?: AbortSignal): Promise<void> {
+  if (typeof navigator === 'undefined' || navigator.onLine) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    const cleanup = (): void => {
+      window.removeEventListener('online', handleOnline);
+      signal?.removeEventListener('abort', handleAbort);
+    };
+    const handleOnline = (): void => {
+      cleanup();
+      resolve();
+    };
+    const handleAbort = (): void => {
+      cleanup();
+      reject(signal?.reason ?? new DOMException('Request aborted', 'AbortError'));
+    };
+    window.addEventListener('online', handleOnline, { once: true });
+    signal?.addEventListener('abort', handleAbort, { once: true });
+  });
 }

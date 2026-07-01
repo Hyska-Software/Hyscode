@@ -7,6 +7,7 @@ import { tauriKeyStore } from './tauri-key-store';
 import { createTauriFetch } from './tauri-ai-transport';
 import { createClaudeAgentInvoke } from './tauri-claude-agent-transport';
 import { tauriInvoke } from './tauri-invoke';
+import type { ResilienceConfig } from '@hyscode/ai-providers';
 
 let _initialized = false;
 let _tauriFetch: ReturnType<typeof createTauriFetch> | null = null;
@@ -17,6 +18,23 @@ function getTauriFetch() {
     _tauriFetch = createTauriFetch();
   }
   return _tauriFetch;
+}
+
+export function configureProviderResilience(config: ResilienceConfig): void {
+  const normalized: ResilienceConfig = {
+    maxRetries: Math.min(10, Math.max(0, Math.trunc(config.maxRetries))),
+    baseDelayMs: Math.min(30_000, Math.max(100, config.baseDelayMs)),
+    maxDelayMs: Math.min(120_000, Math.max(1_000, config.maxDelayMs)),
+    requestTimeoutMs: Math.min(600_000, Math.max(10_000, config.requestTimeoutMs)),
+    streamIdleTimeoutMs: Math.min(600_000, Math.max(10_000, config.streamIdleTimeoutMs)),
+  };
+  normalized.baseDelayMs = Math.min(normalized.baseDelayMs, normalized.maxDelayMs);
+  getProviderRegistry().setRetryConfig({
+    maxRetries: normalized.maxRetries,
+    baseDelayMs: normalized.baseDelayMs,
+    maxDelayMs: normalized.maxDelayMs,
+  });
+  _tauriFetch = createTauriFetch(normalized);
 }
 
 function getClaudeAgentInvoke() {
@@ -53,5 +71,11 @@ export async function initProviders(): Promise<void> {
 
 export async function reinitProvider(providerId: string): Promise<void> {
   const registry = getProviderRegistry();
-  await registry.reinitializeProvider(providerId, tauriKeyStore, undefined, getTauriFetch(), getClaudeAgentInvoke());
+  await registry.reinitializeProvider(
+    providerId,
+    tauriKeyStore,
+    undefined,
+    getTauriFetch(),
+    getClaudeAgentInvoke(),
+  );
 }

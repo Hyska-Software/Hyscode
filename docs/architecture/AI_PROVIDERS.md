@@ -10,8 +10,8 @@ The AI Provider layer provides a **unified interface** for communicating with mu
 
 ```typescript
 interface AIProvider {
-  readonly id: string;                    // "anthropic" | "openai" | "gemini" | "ollama" | "openrouter"
-  readonly name: string;                  // Human-readable name
+  readonly id: string; // "anthropic" | "openai" | "gemini" | "ollama" | "openrouter"
+  readonly name: string; // Human-readable name
   readonly supportsStreaming: boolean;
   readonly supportsTools: boolean;
   readonly supportsVision: boolean;
@@ -28,14 +28,14 @@ interface AIProvider {
 }
 
 interface AIModel {
-  id: string;                             // "claude-sonnet-4-20250514"
-  name: string;                           // "Claude Sonnet 4"
+  id: string; // "claude-sonnet-4-20250514"
+  name: string; // "Claude Sonnet 4"
   provider: string;
   maxInputTokens: number;
   maxOutputTokens: number;
   supportsTools: boolean;
   supportsVision: boolean;
-  costPer1kInput?: number;               // USD
+  costPer1kInput?: number; // USD
   costPer1kOutput?: number;
 }
 ```
@@ -48,8 +48,8 @@ interface AIModel {
 interface Message {
   role: 'system' | 'user' | 'assistant' | 'tool';
   content: MessageContent[];
-  toolCalls?: ToolCall[];                 // assistant messages with tool use
-  toolCallId?: string;                    // tool result messages
+  toolCalls?: ToolCall[]; // assistant messages with tool use
+  toolCallId?: string; // tool result messages
 }
 
 type MessageContent =
@@ -85,7 +85,7 @@ All providers normalize to a unified streaming protocol:
 type StreamChunk =
   | { type: 'text_delta'; text: string }
   | { type: 'tool_call_start'; id: string; name: string }
-  | { type: 'tool_call_delta'; id: string; input: string }   // partial JSON
+  | { type: 'tool_call_delta'; id: string; input: string } // partial JSON
   | { type: 'tool_call_end'; id: string }
   | { type: 'message_start'; model: string; usage?: TokenUsage }
   | { type: 'message_end'; stopReason: string; usage: TokenUsage }
@@ -243,19 +243,24 @@ class ProviderRegistry {
 
 ```typescript
 interface RetryConfig {
-  maxRetries: number;           // default: 3
-  baseDelayMs: number;          // default: 1000
-  maxDelayMs: number;           // default: 30000
-  retryableStatuses: number[];  // [429, 500, 502, 503, 529]
+  maxRetries: number; // default: 3
+  baseDelayMs: number; // default: 1000
+  maxDelayMs: number; // default: 30000
+  retryableStatuses: number[]; // [429, 500, 502, 503, 529]
 }
 ```
 
 **Strategy:**
+
 1. Rate limit (429): exponential backoff with jitter, respect `Retry-After` header
 2. Server error (5xx): retry up to 3x
 3. Auth error (401/403): surface immediately (invalid/expired key)
-4. Network error: retry up to 3x, then surface
-5. Timeout: configurable per-request timeout (default: 120s), surface on timeout
+4. Network/timeout before semantic output: retry up to 3x; waiting for the OS to report the connection online does not consume an attempt
+5. Stream interruption after text, thinking, or a tool-call start: preserve the partial response and require explicit user continuation; never retry silently
+6. Request timeout defaults to 120s and stream inactivity timeout defaults to 90s; both are configurable in Advanced resilience
+7. Malformed SSE/NDJSON is surfaced as a protocol error rather than silently discarded
+
+Retries are intentionally limited to the pre-output phase. This avoids silently duplicating provider charges or replaying partially generated tool calls.
 
 ---
 

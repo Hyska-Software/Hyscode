@@ -77,6 +77,11 @@ export const SETTINGS_DEFAULTS = {
   temperature: 0.0,
   maxTokens: 8192,
   topP: null,
+  agentMaxRetries: 3,
+  agentRetryBaseDelayMs: 1_000,
+  agentRetryMaxDelayMs: 30_000,
+  agentRequestTimeoutMs: 120_000,
+  agentStreamIdleTimeoutMs: 90_000,
 
   // ─ Inline Completion ─
   inlineCompletionEnabled: true,

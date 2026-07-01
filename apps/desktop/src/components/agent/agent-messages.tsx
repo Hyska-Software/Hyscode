@@ -1,4 +1,13 @@
-import { Sparkles, ChevronDown, ChevronRight, Brain, AlertCircle, CircleStop } from 'lucide-react';
+import {
+  Sparkles,
+  ChevronDown,
+  ChevronRight,
+  Brain,
+  AlertCircle,
+  CircleStop,
+  Copy,
+  RotateCw,
+} from 'lucide-react';
 import { useRef, useEffect, useState, memo } from 'react';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { useAgentStore } from '@/stores/agent-store';
@@ -9,6 +18,8 @@ import { ModeSwitchDialog } from './mode-switch-dialog';
 import { cn } from '@/lib/utils';
 import type { ChatMessage } from '@/stores/agent-store';
 import { MarkdownContent } from './markdown-renderer';
+import { HarnessBridge } from '@/lib/harness-bridge';
+import { useSettingsStore } from '@/stores/settings-store';
 
 // ─── Thinking Block (collapsible, minimal) ────────────────────────────────────
 
@@ -110,6 +121,59 @@ const ErrorMessage = memo(function ErrorMessage({ message }: { message: string }
     </div>
   );
 });
+
+function RecoveryCard() {
+  const recovery = useAgentStore((state) => state.recoverableError);
+  if (!recovery) return null;
+  const handleAction = (): void => {
+    if (recovery.action === 'continue') void HarnessBridge.get().continuePartialTurn();
+    else void HarnessBridge.get().retryTurn();
+  };
+  return (
+    <div className="mt-3 rounded-md border border-destructive/30 bg-destructive/5 p-3 text-[11px]">
+      <div className="flex items-start gap-2">
+        <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-destructive" />
+        <div className="min-w-0 flex-1">
+          <div className="font-medium text-foreground">{recovery.error.userMessage}</div>
+          <div className="mt-1 text-muted-foreground">
+            {recovery.action === 'continue'
+              ? 'The partial response was preserved and can be continued safely.'
+              : 'Retry the request when ready.'}
+            {recovery.possibleDuplicateCharge && ' The provider may charge for both requests.'}
+          </div>
+          <details className="mt-2 text-[10px] text-muted-foreground">
+            <summary className="cursor-pointer">Technical details</summary>
+            <pre className="mt-1 max-h-28 overflow-auto whitespace-pre-wrap rounded bg-background/60 p-2">
+              {recovery.error.technicalMessage}
+            </pre>
+          </details>
+          <div className="mt-2 flex flex-wrap gap-2">
+            <button
+              className="flex items-center gap-1 rounded bg-accent px-2 py-1 text-accent-foreground"
+              onClick={handleAction}
+            >
+              <RotateCw className="h-3 w-3" />
+              {recovery.action === 'continue' ? 'Continue' : 'Try again'}
+            </button>
+            <button
+              className="flex items-center gap-1 rounded border border-border px-2 py-1"
+              onClick={() => void navigator.clipboard.writeText(recovery.error.technicalMessage)}
+            >
+              <Copy className="h-3 w-3" />
+              Copy details
+            </button>
+            <button
+              className="rounded border border-border px-2 py-1"
+              onClick={() => useSettingsStore.getState().openSettingsOnTab('ai')}
+            >
+              {recovery.error.kind === 'authentication' ? 'Open providers' : 'Change model'}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 // ─── Memoized Message Item ────────────────────────────────────────────────────
 
@@ -248,6 +312,8 @@ export function AgentMessages() {
   const isStreaming = useAgentStore((s) => s.isStreaming);
   const pendingApprovals = useAgentStore((s) => s.pendingApprovals);
   const terminalStatus = useAgentStore((s) => s.terminalStatus);
+  const connectionState = useAgentStore((s) => s.connectionState);
+  const connectionMessage = useAgentStore((s) => s.connectionMessage);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   // Auto-scroll on new messages (throttled to avoid jank during fast streaming)
@@ -314,21 +380,34 @@ export function AgentMessages() {
           {/* Pending mode switch delegation */}
           <ModeSwitchDialog />
 
-          {!isStreaming && terminalStatus && terminalStatus !== 'complete' && (
-            <div className="mt-2 flex items-center gap-2 rounded-md border border-border/50 bg-muted/20 px-3 py-2 text-[10px] text-muted-foreground">
-              <CircleStop className="h-3 w-3" />
-              <span>
-                {terminalStatus === 'max_iterations' &&
-                  'Stopped after reaching the iteration limit.'}
-                {terminalStatus === 'loop_detected' &&
-                  'Stopped because a repeated tool loop was detected.'}
-                {terminalStatus === 'cancelled' && 'Turn cancelled.'}
-                {terminalStatus === 'cancelled_partial' &&
-                  'Cancellation requested; one native operation completed before stopping.'}
-                {terminalStatus === 'error' && 'Turn ended with an error.'}
-              </span>
+          {isStreaming && connectionState !== 'connected' && connectionState !== 'idle' && (
+            <div className="mt-2 rounded-md border border-yellow-500/25 bg-yellow-500/5 px-3 py-2 text-[10px] text-yellow-300">
+              {connectionMessage ??
+                (connectionState === 'connecting'
+                  ? 'Connecting to provider…'
+                  : 'Connection degraded')}
             </div>
           )}
+
+          <RecoveryCard />
+
+          {!isStreaming &&
+            terminalStatus &&
+            !['complete', 'error', 'recoverable_error'].includes(terminalStatus) && (
+              <div className="mt-2 flex items-center gap-2 rounded-md border border-border/50 bg-muted/20 px-3 py-2 text-[10px] text-muted-foreground">
+                <CircleStop className="h-3 w-3" />
+                <span>
+                  {terminalStatus === 'max_iterations' &&
+                    'Stopped after reaching the iteration limit.'}
+                  {terminalStatus === 'loop_detected' &&
+                    'Stopped because a repeated tool loop was detected.'}
+                  {terminalStatus === 'cancelled' && 'Turn cancelled.'}
+                  {terminalStatus === 'cancelled_partial' &&
+                    'Cancellation requested; one native operation completed before stopping.'}
+                  {terminalStatus === 'error' && 'Turn ended with an error.'}
+                </span>
+              </div>
+            )}
 
           {/* Scroll anchor */}
           <div ref={bottomRef} />

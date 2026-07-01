@@ -149,6 +149,11 @@ interface SettingsState {
   temperature: number;
   maxTokens: number;
   topP: number | null;
+  agentMaxRetries: number;
+  agentRetryBaseDelayMs: number;
+  agentRetryMaxDelayMs: number;
+  agentRequestTimeoutMs: number;
+  agentStreamIdleTimeoutMs: number;
 
   // ─ Inline Completion (AI-powered autocomplete) ─
   inlineCompletionEnabled: boolean;
@@ -241,7 +246,11 @@ interface SettingsState {
   /** Get thinking config for a specific provider+model */
   getThinkingConfig: (providerId: string, modelId: string) => ModelThinkingConfig;
   /** Set thinking config for a specific provider+model */
-  setThinkingConfig: (providerId: string, modelId: string, config: Partial<ModelThinkingConfig>) => void;
+  setThinkingConfig: (
+    providerId: string,
+    modelId: string,
+    config: Partial<ModelThinkingConfig>,
+  ) => void;
   /** Set a custom binary path override for a language server */
   setLspCustomBinaryPath: (serverId: string, path: string) => void;
   /** Remove the custom binary path override for a language server */
@@ -255,14 +264,32 @@ interface SettingsState {
 export const useSettingsStore = create<SettingsState>()(
   persist(
     immer((set) => ({
-      ...(SETTINGS_DEFAULTS as unknown as Omit<SettingsState,
-        | 'set' | 'setThemeId' | 'setIconThemeId' | 'setActiveProvider' | 'openSettings'
-        | 'openSettingsOnTab' | 'closeSettings' | 'addMcpServer' | 'removeMcpServer'
-        | 'updateMcpServer' | 'toggleModel' | 'setEnabledModels' | 'addCustomModel'
-        | 'removeCustomModel' | 'setCustomCategoryRule' | 'setCustomToolRule'
-        | 'getThinkingConfig' | 'setThinkingConfig' | 'setLspCustomBinaryPath'
-        | 'clearLspCustomBinaryPath' | 'setTreeExpandedGroups'
-        | 'settingsOpen' | 'settingsInitialTab' | 'treeExpandedGroups'
+      ...(SETTINGS_DEFAULTS as unknown as Omit<
+        SettingsState,
+        | 'set'
+        | 'setThemeId'
+        | 'setIconThemeId'
+        | 'setActiveProvider'
+        | 'openSettings'
+        | 'openSettingsOnTab'
+        | 'closeSettings'
+        | 'addMcpServer'
+        | 'removeMcpServer'
+        | 'updateMcpServer'
+        | 'toggleModel'
+        | 'setEnabledModels'
+        | 'addCustomModel'
+        | 'removeCustomModel'
+        | 'setCustomCategoryRule'
+        | 'setCustomToolRule'
+        | 'getThinkingConfig'
+        | 'setThinkingConfig'
+        | 'setLspCustomBinaryPath'
+        | 'clearLspCustomBinaryPath'
+        | 'setTreeExpandedGroups'
+        | 'settingsOpen'
+        | 'settingsInitialTab'
+        | 'treeExpandedGroups'
       >),
       // Settings modal (transient)
       settingsOpen: false,
@@ -350,7 +377,11 @@ export const useSettingsStore = create<SettingsState>()(
       addCustomModel: (model) =>
         set((state) => {
           // Avoid duplicates
-          if (!state.customModels.some((m) => m.providerId === model.providerId && m.modelId === model.modelId)) {
+          if (
+            !state.customModels.some(
+              (m) => m.providerId === model.providerId && m.modelId === model.modelId,
+            )
+          ) {
             state.customModels.push(model);
             // Auto-enable the custom model
             if (!state.enabledModels[model.providerId]) {
@@ -397,7 +428,11 @@ export const useSettingsStore = create<SettingsState>()(
         return stored ?? { enabled: false };
       },
 
-      setThinkingConfig: (providerId: string, modelId: string, config: Partial<ModelThinkingConfig>) =>
+      setThinkingConfig: (
+        providerId: string,
+        modelId: string,
+        config: Partial<ModelThinkingConfig>,
+      ) =>
         set((state) => {
           const key = `${providerId}::${modelId}`;
           const current = state.thinkingSettings[key] ?? { enabled: false };

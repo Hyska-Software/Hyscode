@@ -1,7 +1,19 @@
 import { useState, useEffect } from 'react';
 import {
-  Key, Plus, Trash2, Eye, EyeOff, ToggleLeft, ToggleRight, X, HelpCircle,
-  Shield, Brain, Zap, SlidersHorizontal, Check,
+  Key,
+  Plus,
+  Trash2,
+  Eye,
+  EyeOff,
+  ToggleLeft,
+  ToggleRight,
+  X,
+  HelpCircle,
+  Shield,
+  Brain,
+  Zap,
+  SlidersHorizontal,
+  Check,
 } from 'lucide-react';
 import { useSettingsStore } from '@/stores/settings-store';
 import type { McpServerConfig } from '@/stores/settings-store';
@@ -64,7 +76,10 @@ export function AiTab() {
       {/* ─── Active Provider & Model ────────────────────────────────── */}
       <Section title="Active Provider & Model">
         {/* Use all providers toggle */}
-        <Row label="Use all providers" description="Show models from every provider in the selector">
+        <Row
+          label="Use all providers"
+          description="Show models from every provider in the selector"
+        >
           <button
             onClick={() => store.set('useAllProviders', !store.useAllProviders)}
             className="shrink-0"
@@ -176,13 +191,12 @@ export function AiTab() {
                     const enabled = isModelEnabled(store.enabledModels, provider.id, model.id);
 
                     return (
-                      <div
-                        key={model.id}
-                        className="flex items-center justify-between gap-2 py-1"
-                      >
+                      <div key={model.id} className="flex items-center justify-between gap-2 py-1">
                         <div className="min-w-0 flex-1">
                           <span className="text-[11px] text-foreground">{model.name}</span>
-                          <span className="ml-1.5 text-[9px] text-muted-foreground">{model.id}</span>
+                          <span className="ml-1.5 text-[9px] text-muted-foreground">
+                            {model.id}
+                          </span>
                         </div>
                         <div className="flex items-center gap-1">
                           {isCustom && (
@@ -330,15 +344,80 @@ export function AiTab() {
             value={store.approvalMode}
             onChange={(v) => store.set('approvalMode', v)}
             options={[
-              { value: 'manual',        label: 'Manual' },
-              { value: 'smart',         label: 'Smart' },
+              { value: 'manual', label: 'Manual' },
+              { value: 'smart', label: 'Smart' },
               { value: 'session-trust', label: 'Session Trust' },
-              { value: 'notify',        label: 'Notify Only' },
-              { value: 'yolo',          label: 'Auto-approve' },
-              { value: 'custom',        label: 'Custom Rules' },
+              { value: 'notify', label: 'Notify Only' },
+              { value: 'yolo', label: 'Auto-approve' },
+              { value: 'custom', label: 'Custom Rules' },
             ]}
           />
         </Row>
+      </Section>
+
+      <Section title="Advanced resilience">
+        <Row
+          label="Automatic retries"
+          description="Only applies before the provider returns useful content."
+        >
+          <NumberInput
+            value={store.agentMaxRetries}
+            onChange={(v) => store.set('agentMaxRetries', v)}
+            min={0}
+            max={10}
+          />
+        </Row>
+        <Row label="Initial retry delay (ms)">
+          <NumberInput
+            value={store.agentRetryBaseDelayMs}
+            onChange={(v) => store.set('agentRetryBaseDelayMs', v)}
+            min={100}
+            max={30000}
+            step={100}
+          />
+        </Row>
+        <Row label="Maximum retry delay (ms)">
+          <NumberInput
+            value={store.agentRetryMaxDelayMs}
+            onChange={(v) => store.set('agentRetryMaxDelayMs', v)}
+            min={1000}
+            max={120000}
+            step={1000}
+          />
+        </Row>
+        <Row label="Request timeout (ms)">
+          <NumberInput
+            value={store.agentRequestTimeoutMs}
+            onChange={(v) => store.set('agentRequestTimeoutMs', v)}
+            min={10000}
+            max={600000}
+            step={5000}
+          />
+        </Row>
+        <Row label="Stream inactivity timeout (ms)">
+          <NumberInput
+            value={store.agentStreamIdleTimeoutMs}
+            onChange={(v) => store.set('agentStreamIdleTimeoutMs', v)}
+            min={10000}
+            max={600000}
+            step={5000}
+          />
+        </Row>
+        <div className="flex justify-end">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              store.set('agentMaxRetries', 3);
+              store.set('agentRetryBaseDelayMs', 1000);
+              store.set('agentRetryMaxDelayMs', 30000);
+              store.set('agentRequestTimeoutMs', 120000);
+              store.set('agentStreamIdleTimeoutMs', 90000);
+            }}
+          >
+            Restore defaults
+          </Button>
+        </div>
       </Section>
 
       {/* ─── Thinking / Reasoning ─────────────────────────────────── */}
@@ -356,7 +435,11 @@ export function AiTab() {
             >
               <Toggle
                 checked={thinkingConfig.enabled}
-                onChange={(v) => store.setThinkingConfig(store.activeProviderId!, store.activeModelId!, { enabled: v })}
+                onChange={(v) =>
+                  store.setThinkingConfig(store.activeProviderId!, store.activeModelId!, {
+                    enabled: v,
+                  })
+                }
               />
             </Row>
             {thinkingConfig.enabled && (
@@ -364,15 +447,29 @@ export function AiTab() {
                 <Row label="Thinking level" description="Control how deeply the model reasons">
                   <SelectInput
                     value={thinkingConfig.level ?? levels[0]}
-                    onChange={(v) => store.setThinkingConfig(store.activeProviderId!, store.activeModelId!, { level: v as import('@/stores/settings-store').ModelThinkingConfig['level'] })}
-                    options={levels.map((lvl) => ({ value: lvl, label: lvl.charAt(0).toUpperCase() + lvl.slice(1) }))}
+                    onChange={(v) =>
+                      store.setThinkingConfig(store.activeProviderId!, store.activeModelId!, {
+                        level: v as import('@/stores/settings-store').ModelThinkingConfig['level'],
+                      })
+                    }
+                    options={levels.map((lvl) => ({
+                      value: lvl,
+                      label: lvl.charAt(0).toUpperCase() + lvl.slice(1),
+                    }))}
                   />
                 </Row>
                 {activeModel.thinkingType === 'anthropic' && (
-                  <Row label="Budget tokens" description="Max tokens for reasoning (leave empty for default)">
+                  <Row
+                    label="Budget tokens"
+                    description="Max tokens for reasoning (leave empty for default)"
+                  >
                     <NumberInput
                       value={thinkingConfig.budgetTokens ?? 0}
-                      onChange={(v) => store.setThinkingConfig(store.activeProviderId!, store.activeModelId!, { budgetTokens: v > 0 ? v : undefined })}
+                      onChange={(v) =>
+                        store.setThinkingConfig(store.activeProviderId!, store.activeModelId!, {
+                          budgetTokens: v > 0 ? v : undefined,
+                        })
+                      }
                       min={0}
                       max={32000}
                       step={1024}
@@ -383,7 +480,11 @@ export function AiTab() {
                   <Row label="Display mode" description="How thinking content is shown">
                     <SelectInput
                       value={thinkingConfig.display ?? 'summarized'}
-                      onChange={(v) => store.setThinkingConfig(store.activeProviderId!, store.activeModelId!, { display: v as 'summarized' | 'omitted' })}
+                      onChange={(v) =>
+                        store.setThinkingConfig(store.activeProviderId!, store.activeModelId!, {
+                          display: v as 'summarized' | 'omitted',
+                        })
+                      }
                       options={[
                         { value: 'summarized', label: 'Summarized' },
                         { value: 'omitted', label: 'Omitted' },
@@ -414,7 +515,9 @@ export function AiTab() {
             <Row label="Provider" description="Leave on Active to use the provider selected above">
               <SelectInput
                 value={store.inlineCompletionProviderId ?? '__active__'}
-                onChange={(v) => store.set('inlineCompletionProviderId', v === '__active__' ? null : v)}
+                onChange={(v) =>
+                  store.set('inlineCompletionProviderId', v === '__active__' ? null : v)
+                }
                 options={[
                   { value: '__active__', label: 'Active provider' },
                   ...PROVIDERS.map((p) => ({ value: p.id, label: p.name })),
@@ -436,7 +539,9 @@ export function AiTab() {
               ) : (
                 <SelectInput
                   value={store.inlineCompletionModelId ?? '__active__'}
-                  onChange={(v) => store.set('inlineCompletionModelId', v === '__active__' ? null : v)}
+                  onChange={(v) =>
+                    store.set('inlineCompletionModelId', v === '__active__' ? null : v)
+                  }
                   options={[
                     { value: '__active__', label: 'Active model' },
                     ...(store.inlineCompletionProviderId
@@ -496,9 +601,7 @@ export function AiTab() {
       </Section>
 
       {/* ─── Custom Approval Rules ─────────────────────────────────── */}
-      {store.approvalMode === 'custom' && (
-        <CustomApprovalRulesSection />
-      )}
+      {store.approvalMode === 'custom' && <CustomApprovalRulesSection />}
 
       {/* ─── MCP Servers ───────────────────────────────────────────────── */}
       <Section title="MCP Servers">
@@ -562,14 +665,24 @@ export function AiTab() {
 
 // ─── Custom Approval Rules ──────────────────────────────────────────────────
 
-const TOOL_CATEGORIES: { id: ToolCategory; label: string; description: string; icon: typeof Shield }[] = [
-  { id: 'filesystem', label: 'File System',  description: 'Read & write files, directories',   icon: Shield },
-  { id: 'terminal',   label: 'Terminal',     description: 'Run shell commands and scripts',     icon: Zap },
-  { id: 'git',        label: 'Git',          description: 'Commits, pushes, branch operations', icon: Shield },
-  { id: 'code',       label: 'Code',         description: 'Edit, refactor, create code files',  icon: Brain },
-  { id: 'browser',    label: 'Browser',      description: 'Open URLs, web scraping',            icon: Shield },
-  { id: 'mcp',        label: 'MCP',          description: 'External MCP server tools',          icon: SlidersHorizontal },
-  { id: 'meta',       label: 'Meta',         description: 'Agent orchestration & delegation',   icon: Brain },
+const TOOL_CATEGORIES: {
+  id: ToolCategory;
+  label: string;
+  description: string;
+  icon: typeof Shield;
+}[] = [
+  {
+    id: 'filesystem',
+    label: 'File System',
+    description: 'Read & write files, directories',
+    icon: Shield,
+  },
+  { id: 'terminal', label: 'Terminal', description: 'Run shell commands and scripts', icon: Zap },
+  { id: 'git', label: 'Git', description: 'Commits, pushes, branch operations', icon: Shield },
+  { id: 'code', label: 'Code', description: 'Edit, refactor, create code files', icon: Brain },
+  { id: 'browser', label: 'Browser', description: 'Open URLs, web scraping', icon: Shield },
+  { id: 'mcp', label: 'MCP', description: 'External MCP server tools', icon: SlidersHorizontal },
+  { id: 'meta', label: 'Meta', description: 'Agent orchestration & delegation', icon: Brain },
 ];
 
 type ToolRuleState = 'auto' | 'ask';
@@ -657,7 +770,9 @@ function CustomApprovalRulesSection() {
               <div key={toolName} className="flex items-center justify-between gap-4 px-3 py-2">
                 <span className="font-mono text-[11px] text-foreground">{toolName}</span>
                 <div className="flex shrink-0 items-center gap-2">
-                  <span className={`text-[10px] font-medium ${autoApprove ? 'text-accent' : 'text-muted-foreground'}`}>
+                  <span
+                    className={`text-[10px] font-medium ${autoApprove ? 'text-accent' : 'text-muted-foreground'}`}
+                  >
                     {autoApprove ? 'Auto' : 'Ask'}
                   </span>
                   <button
@@ -690,7 +805,9 @@ function CustomApprovalRulesSection() {
             type="text"
             value={newToolName}
             onChange={(e) => setNewToolName(e.target.value)}
-            onKeyDown={(e) => { if (e.key === 'Enter') handleAddToolRule(); }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') handleAddToolRule();
+            }}
             placeholder="e.g. run_terminal_command"
             className="h-7 flex-1 rounded-md bg-muted px-2 font-mono text-[11px] text-foreground outline-none placeholder:font-sans placeholder:text-muted-foreground/50"
           />
@@ -701,7 +818,13 @@ function CustomApprovalRulesSection() {
             }`}
             title="Toggle auto/ask for new rule"
           >
-            {newToolAuto ? <><Check className="h-3 w-3" /> Auto</> : 'Ask'}
+            {newToolAuto ? (
+              <>
+                <Check className="h-3 w-3" /> Auto
+              </>
+            ) : (
+              'Ask'
+            )}
           </button>
           <Button
             size="sm"
@@ -757,16 +880,17 @@ function ApiKeyRow({ providerId, providerName }: { providerId: string; providerN
       <div className="flex items-center gap-2">
         <Key className="h-3.5 w-3.5 text-muted-foreground" />
         <span className="text-[12px] text-foreground">{providerName}</span>
-        {hasExisting && !saved && (
-          <span className="text-[9px] text-accent">● configured</span>
-        )}
+        {hasExisting && !saved && <span className="text-[9px] text-accent">● configured</span>}
       </div>
       <div className="flex items-center gap-1.5">
         <div className="relative">
           <input
             type={visible ? 'text' : 'password'}
             value={value}
-            onChange={(e) => { setValue(e.target.value); setHasExisting(false); }}
+            onChange={(e) => {
+              setValue(e.target.value);
+              setHasExisting(false);
+            }}
             placeholder="sk-..."
             className="h-7 w-44 rounded-md bg-muted px-2 pr-7 text-[11px] text-foreground outline-none placeholder:text-muted-foreground/50"
           />
@@ -816,9 +940,7 @@ function Row({
     <div className="flex items-center justify-between gap-4 rounded-lg bg-surface-raised px-3 py-2.5">
       <div className="flex flex-col">
         <span className="text-[12px] text-foreground">{label}</span>
-        {description && (
-          <span className="text-[10px] text-muted-foreground">{description}</span>
-        )}
+        {description && <span className="text-[10px] text-muted-foreground">{description}</span>}
       </div>
       {children}
     </div>
@@ -871,9 +993,7 @@ function SelectInput<T extends string>({
       onChange={(e) => onChange(e.target.value as T)}
       className="h-7 rounded-md bg-muted px-2 text-[12px] text-foreground outline-none"
     >
-      {options.length === 0 && (
-        <option value="">Select...</option>
-      )}
+      {options.length === 0 && <option value="">Select...</option>}
       {options.map((opt) => (
         <option key={opt.value} value={opt.value}>
           {opt.label}
@@ -883,13 +1003,7 @@ function SelectInput<T extends string>({
   );
 }
 
-function Toggle({
-  checked,
-  onChange,
-}: {
-  checked: boolean;
-  onChange: (v: boolean) => void;
-}) {
+function Toggle({ checked, onChange }: { checked: boolean; onChange: (v: boolean) => void }) {
   return (
     <button
       onClick={() => onChange(!checked)}
