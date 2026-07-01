@@ -3,7 +3,15 @@
 // Each tool maps to Tauri backend commands via invoke().
 
 import type { ToolDefinition } from '@hyscode/ai-providers';
-import type { ToolHandler, ToolResult, ToolExecutionContext, ToolCategory, AgentQuestion, MemoryType } from './types';
+import type {
+  ToolHandler,
+  ToolResult,
+  ToolExecutionContext,
+  ToolCategory,
+  AgentQuestion,
+  MemoryType,
+} from './types';
+import { resolveWorkspacePath } from './path-policy';
 
 // ─── Helper ─────────────────────────────────────────────────────────────────
 
@@ -24,47 +32,8 @@ function defineTool(
   return { definition, category, requiresApproval, execute };
 }
 
-function normalizePath(path: string): string {
-  // Normalize Windows backslashes to forward slashes for consistency
-  return path.replace(/\\/g, '/');
-}
-
 function resolvePath(path: string, workspacePath: string): string {
-  const normalizedPath = normalizePath(path);
-  const normalizedWorkspace = normalizePath(workspacePath);
-
-  // If already absolute, return normalized as-is
-  if (normalizedPath.startsWith('/') || /^[a-zA-Z]:\//.test(normalizedPath)) {
-    return normalizedPath;
-  }
-
-  // Prevent path traversal: resolve .. segments and ensure result stays within workspace
-  const combined = `${normalizedWorkspace}/${normalizedPath}`;
-  const segments = combined.split('/');
-  const resolved: string[] = [];
-  let drivePrefix = '';
-
-  for (let i = 0; i < segments.length; i++) {
-    const seg = segments[i];
-    if (i === 0 && /^[a-zA-Z]:$/.test(seg)) {
-      drivePrefix = seg + '/';
-      continue;
-    }
-    if (seg === '..') {
-      resolved.pop();
-    } else if (seg !== '.' && seg !== '') {
-      resolved.push(seg);
-    }
-  }
-
-  // Ensure resolved path does not escape workspace root
-  const workspaceSegments = normalizedWorkspace.split('/').filter((s) => s !== '' && s !== '.');
-  if (resolved.length < workspaceSegments.length) {
-    // Path traversal attempted — clamp to workspace root
-    return drivePrefix + workspaceSegments.join('/');
-  }
-
-  return drivePrefix + resolved.join('/');
+  return resolveWorkspacePath(path, workspacePath);
 }
 
 /** SSRF protection: check if a hostname resolves to a private/internal address. */
@@ -104,9 +73,19 @@ export const readFileTool = defineTool(
   'Read the contents of a file. You can specify a line range to read only part of the file, or a max line limit. Line numbers are 1-indexed. Use limit to cap total lines when exploring large files.',
   {
     path: { type: 'string', description: 'Absolute or workspace-relative path to the file' },
-    start_line: { type: 'integer', description: 'Starting line number (1-indexed, inclusive). Omit to read from beginning.' },
-    end_line: { type: 'integer', description: 'Ending line number (1-indexed, inclusive). Omit to read to end.' },
-    limit: { type: 'integer', description: 'Maximum number of lines to return. Overrides end_line if both are set. Useful for large files.' },
+    start_line: {
+      type: 'integer',
+      description: 'Starting line number (1-indexed, inclusive). Omit to read from beginning.',
+    },
+    end_line: {
+      type: 'integer',
+      description: 'Ending line number (1-indexed, inclusive). Omit to read to end.',
+    },
+    limit: {
+      type: 'integer',
+      description:
+        'Maximum number of lines to return. Overrides end_line if both are set. Useful for large files.',
+    },
   },
   ['path'],
   'filesystem',
@@ -128,9 +107,10 @@ export const readFileTool = defineTool(
       }
       const sliced = lines.slice(start, end);
       const totalLines = lines.length;
-      const header = totalLines > sliced.length
-        ? `--- Showing lines ${start + 1}-${end} of ${totalLines} ---\n`
-        : '';
+      const header =
+        totalLines > sliced.length
+          ? `--- Showing lines ${start + 1}-${end} of ${totalLines} ---\n`
+          : '';
       const numbered = sliced.map((line, i) => `${start + i + 1} | ${line}`).join('\n');
       return { success: true, output: header + numbered };
     } catch (err) {
@@ -141,7 +121,7 @@ export const readFileTool = defineTool(
 
 export const writeFileTool = defineTool(
   'write_file',
-  'Write content to a file. If the file exists, it will be overwritten. If parent directories don\'t exist, they will be created.',
+  "Write content to a file. If the file exists, it will be overwritten. If parent directories don't exist, they will be created.",
   {
     path: { type: 'string', description: 'Absolute or workspace-relative path to the file' },
     content: { type: 'string', description: 'The full content to write to the file' },
@@ -158,7 +138,9 @@ export const writeFileTool = defineTool(
       let originalContent: string | null = null;
       try {
         originalContent = await ctx.invoke<string>('read_file', { path: filePath });
-      } catch { /* file doesn't exist yet */ }
+      } catch {
+        /* file doesn't exist yet */
+      }
 
       await ctx.invoke('write_file', { path: filePath, content: newContent });
 
@@ -183,9 +165,16 @@ export const editFileTool = defineTool(
   'Make a targeted edit to a file by replacing an exact string with a new string. The old_string must match exactly (including whitespace and indentation). Include enough context lines to uniquely identify the location. Set replace_all=true to replace every occurrence.',
   {
     path: { type: 'string', description: 'Absolute or workspace-relative path to the file' },
-    old_string: { type: 'string', description: 'The exact text to find and replace. Must match exactly one location in the file (unless replace_all is true).' },
+    old_string: {
+      type: 'string',
+      description:
+        'The exact text to find and replace. Must match exactly one location in the file (unless replace_all is true).',
+    },
     new_string: { type: 'string', description: 'The text to replace old_string with' },
-    replace_all: { type: 'boolean', description: 'If true, replace every occurrence of old_string in the file. Default: false.' },
+    replace_all: {
+      type: 'boolean',
+      description: 'If true, replace every occurrence of old_string in the file. Default: false.',
+    },
   },
   ['path', 'old_string', 'new_string'],
   'filesystem',
@@ -258,9 +247,19 @@ export const replaceLinesTool = defineTool(
   'Replace a specific range of lines in a file with new content. Line numbers are 1-indexed and inclusive. Use this when you need to edit a specific block of lines without matching by string content.',
   {
     path: { type: 'string', description: 'Absolute or workspace-relative path to the file' },
-    start_line: { type: 'integer', description: 'Starting line number to replace (1-indexed, inclusive)' },
-    end_line: { type: 'integer', description: 'Ending line number to replace (1-indexed, inclusive). Omit to replace only start_line.' },
-    new_content: { type: 'string', description: 'The new content to insert in place of the specified lines' },
+    start_line: {
+      type: 'integer',
+      description: 'Starting line number to replace (1-indexed, inclusive)',
+    },
+    end_line: {
+      type: 'integer',
+      description:
+        'Ending line number to replace (1-indexed, inclusive). Omit to replace only start_line.',
+    },
+    new_content: {
+      type: 'string',
+      description: 'The new content to insert in place of the specified lines',
+    },
   },
   ['path', 'start_line', 'new_content'],
   'filesystem',
@@ -290,7 +289,9 @@ export const replaceLinesTool = defineTool(
         };
       }
 
-      const newContentLines = ((input.new_content as string) ?? '').replace(/\r\n/g, '\n').split('\n');
+      const newContentLines = ((input.new_content as string) ?? '')
+        .replace(/\r\n/g, '\n')
+        .split('\n');
 
       const before = lines.slice(0, startLine);
       const after = lines.slice(endLine + 1);
@@ -321,7 +322,11 @@ export const insertLinesTool = defineTool(
   'Insert new content at a specific line position in a file. Line numbers are 1-indexed. Content is inserted AFTER the specified line. Use line=0 to insert at the beginning of the file.',
   {
     path: { type: 'string', description: 'Absolute or workspace-relative path to the file' },
-    line: { type: 'integer', description: 'Line number after which to insert (1-indexed). Use 0 to insert at the top of the file.' },
+    line: {
+      type: 'integer',
+      description:
+        'Line number after which to insert (1-indexed). Use 0 to insert at the top of the file.',
+    },
     content: { type: 'string', description: 'The content to insert (can be multiple lines)' },
   },
   ['path', 'line', 'content'],
@@ -406,10 +411,19 @@ export const listDirectoryTool = defineTool(
   'List the contents of a directory. Returns file and folder names. Folders end with /. Supports recursive listing with file sizes when include_stats is true.',
   {
     path: { type: 'string', description: 'Absolute or workspace-relative path to the directory' },
-    recursive: { type: 'boolean', description: 'If true, list all files recursively (default: false)' },
+    recursive: {
+      type: 'boolean',
+      description: 'If true, list all files recursively (default: false)',
+    },
     max_depth: { type: 'integer', description: 'Maximum depth for recursive listing (default: 3)' },
-    include_stats: { type: 'boolean', description: 'Include file sizes and modification times (default: false)' },
-    show_hidden: { type: 'boolean', description: 'Include hidden files and directories (default: false)' },
+    include_stats: {
+      type: 'boolean',
+      description: 'Include file sizes and modification times (default: false)',
+    },
+    show_hidden: {
+      type: 'boolean',
+      description: 'Include hidden files and directories (default: false)',
+    },
   },
   ['path'],
   'filesystem',
@@ -422,7 +436,9 @@ export const listDirectoryTool = defineTool(
       const includeStats = (input.include_stats as boolean) ?? false;
       const showHidden = (input.show_hidden as boolean) ?? false;
 
-      async function getEntries(path: string): Promise<Array<{ name: string; is_dir: boolean; size?: number; modified?: number }>> {
+      async function getEntries(
+        path: string,
+      ): Promise<Array<{ name: string; is_dir: boolean; size?: number; modified?: number }>> {
         if (includeStats) {
           return ctx.invoke('list_dir_with_stats', { path, show_hidden: showHidden });
         }
@@ -474,13 +490,28 @@ export const searchCodeTool = defineTool(
   'Search for text or regex patterns across files in the workspace. Returns matching lines with file paths, line numbers, and optional context lines around each match. Use context_lines to see surrounding code.',
   {
     pattern: { type: 'string', description: 'Text or regex pattern to search for' },
-    include_pattern: { type: 'string', description: "Glob pattern to filter files (e.g., '**/*.ts')" },
-    exclude_pattern: { type: 'string', description: "Glob pattern to exclude files (e.g., '**/node_modules/**')" },
+    include_pattern: {
+      type: 'string',
+      description: "Glob pattern to filter files (e.g., '**/*.ts')",
+    },
+    exclude_pattern: {
+      type: 'string',
+      description: "Glob pattern to exclude files (e.g., '**/node_modules/**')",
+    },
     is_regex: { type: 'boolean', description: 'Whether pattern is a regex (default: false)' },
     case_sensitive: { type: 'boolean', description: 'Case-sensitive search (default: false)' },
-    max_results: { type: 'integer', description: 'Maximum number of matches to return (default: 50, max: 200)' },
-    context_lines: { type: 'integer', description: 'Number of lines of context to show around each match (default: 0)' },
-    show_hidden: { type: 'boolean', description: 'Include hidden files and directories in search (default: false)' },
+    max_results: {
+      type: 'integer',
+      description: 'Maximum number of matches to return (default: 50, max: 200)',
+    },
+    context_lines: {
+      type: 'integer',
+      description: 'Number of lines of context to show around each match (default: 0)',
+    },
+    show_hidden: {
+      type: 'boolean',
+      description: 'Include hidden files and directories in search (default: false)',
+    },
   },
   ['pattern'],
   'filesystem',
@@ -491,26 +522,25 @@ export const searchCodeTool = defineTool(
       const contextLines = Math.min(Math.max(0, (input.context_lines as number) || 0), 5);
       const showHidden = (input.show_hidden as boolean) ?? false;
 
-      const results = await ctx.invoke<Array<{
-        path: string;
-        line_number: number;
-        line_content: string;
-        context_before?: string[];
-        context_after?: string[];
-      }>>(
-        'search_files',
-        {
-          root: ctx.workspacePath,
-          query: input.pattern as string,
-          includePattern: (input.include_pattern as string) ?? undefined,
-          excludePattern: (input.exclude_pattern as string) ?? undefined,
-          isRegex: (input.is_regex as boolean) ?? false,
-          caseSensitive: (input.case_sensitive as boolean) ?? false,
-          maxResults,
-          contextLines,
-          show_hidden: showHidden,
-        },
-      );
+      const results = await ctx.invoke<
+        Array<{
+          path: string;
+          line_number: number;
+          line_content: string;
+          context_before?: string[];
+          context_after?: string[];
+        }>
+      >('search_files', {
+        root: ctx.workspacePath,
+        query: input.pattern as string,
+        includePattern: (input.include_pattern as string) ?? undefined,
+        excludePattern: (input.exclude_pattern as string) ?? undefined,
+        isRegex: (input.is_regex as boolean) ?? false,
+        caseSensitive: (input.case_sensitive as boolean) ?? false,
+        maxResults,
+        contextLines,
+        show_hidden: showHidden,
+      });
       if (!results.length) {
         return { success: true, output: 'No matches found.' };
       }
@@ -524,7 +554,9 @@ export const searchCodeTool = defineTool(
       }
 
       const lines: string[] = [];
-      lines.push(`Found ${results.length} match${results.length > 1 ? 'es' : ''} in ${byFile.size} file${byFile.size > 1 ? 's' : ''}\n`);
+      lines.push(
+        `Found ${results.length} match${results.length > 1 ? 'es' : ''} in ${byFile.size} file${byFile.size > 1 ? 's' : ''}\n`,
+      );
 
       for (const [path, matches] of byFile) {
         lines.push(`--- ${path} ---`);
@@ -560,8 +592,15 @@ export const runTerminalCommandTool = defineTool(
     command: { type: 'string', description: 'The command to execute' },
     cwd: { type: 'string', description: 'Working directory (default: workspace root)' },
     timeout_ms: { type: 'integer', description: 'Timeout in milliseconds (default: 30000)' },
-    new_terminal: { type: 'boolean', description: 'If true, forces creation of a new terminal session instead of reusing the existing Agent Terminal.' },
-    session_name: { type: 'string', description: 'Optional name for the terminal session (used when new_terminal is true).' },
+    new_terminal: {
+      type: 'boolean',
+      description:
+        'If true, forces creation of a new terminal session instead of reusing the existing Agent Terminal.',
+    },
+    session_name: {
+      type: 'string',
+      description: 'Optional name for the terminal session (used when new_terminal is true).',
+    },
   },
   ['command'],
   'terminal',
@@ -580,7 +619,8 @@ export const runTerminalCommandTool = defineTool(
         return {
           success: false,
           output: '',
-          error: 'Terminal execution requires event listener support. The listen callback is not available.',
+          error:
+            'Terminal execution requires event listener support. The listen callback is not available.',
         };
       }
 
@@ -591,7 +631,9 @@ export const runTerminalCommandTool = defineTool(
       // Decide whether to use the shared agent terminal or spawn a disposable one
       if (!forceNewTerminal && ctx.agentTerminalPtyId) {
         // Health-check the shared PTY before committing to it
-        const alive = await ctx.invoke<boolean>('pty_exists', { ptyId: ctx.agentTerminalPtyId }).catch(() => false);
+        const alive = await ctx
+          .invoke<boolean>('pty_exists', { ptyId: ctx.agentTerminalPtyId })
+          .catch(() => false);
         if (alive) {
           ptyId = ctx.agentTerminalPtyId;
           useSharedPty = true;
@@ -708,7 +750,10 @@ export const runTerminalCommandTool = defineTool(
       const lines = output.split('\n');
       const cmdIdx = lines.findIndex((l) => l.includes(command.slice(0, 40)));
       if (cmdIdx >= 0 && cmdIdx < 3) {
-        output = lines.slice(cmdIdx + 1).join('\n').trim();
+        output = lines
+          .slice(cmdIdx + 1)
+          .join('\n')
+          .trim();
       }
 
       const timedOut = !markerFound && !exited && Date.now() - startTime >= timeoutMs;
@@ -753,10 +798,7 @@ export const gitStatusTool = defineTool(
         unstaged: Array<{ path: string; status: string }>;
         untracked: Array<{ path: string; status: string }>;
         conflicts: Array<{ path: string; status: string }>;
-      }>(
-        'git_status',
-        { repoPath: ctx.workspacePath },
-      );
+      }>('git_status', { repoPath: ctx.workspacePath });
 
       const lines: string[] = [];
       for (const f of result.staged) lines.push(`staged    ${f.status} ${f.path}`);
@@ -778,7 +820,10 @@ export const gitDiffTool = defineTool(
   'git_diff',
   'Get the git diff of uncommitted changes.',
   {
-    staged: { type: 'boolean', description: 'If true, show diff of staged changes only (default: false)' },
+    staged: {
+      type: 'boolean',
+      description: 'If true, show diff of staged changes only (default: false)',
+    },
     path: { type: 'string', description: 'Optional: diff only this file' },
   },
   [],
@@ -804,10 +849,7 @@ export const gitDiffTool = defineTool(
       const result = await ctx.invoke<{
         staged: Array<{ path: string }>;
         unstaged: Array<{ path: string }>;
-      }>(
-        'git_status',
-        { repoPath: ctx.workspacePath },
-      );
+      }>('git_status', { repoPath: ctx.workspacePath });
 
       const filesToDiff = staged ? result.staged : result.unstaged;
       const diffs: string[] = [];
@@ -926,21 +968,23 @@ export const gitLogTool = defineTool(
       const file = input.file ? resolvePath(input.file as string, ctx.workspacePath) : undefined;
 
       if (file) {
-        const commits = await ctx.invoke<Array<{ short_hash: string; message: string; author: string; timestamp: number }>>(
-          'git_log_file',
-          { repoPath: ctx.workspacePath, filePath: file, limit },
-        );
+        const commits = await ctx.invoke<
+          Array<{ short_hash: string; message: string; author: string; timestamp: number }>
+        >('git_log_file', { repoPath: ctx.workspacePath, filePath: file, limit });
         if (!commits.length) return { success: true, output: 'No commits found.' };
-        const formatted = commits.map(c => `${c.short_hash} ${c.message.split('\n')[0]} (${c.author})`).join('\n');
+        const formatted = commits
+          .map((c) => `${c.short_hash} ${c.message.split('\n')[0]} (${c.author})`)
+          .join('\n');
         return { success: true, output: formatted };
       }
 
-      const commits = await ctx.invoke<Array<{ short_hash: string; message: string; author: string; timestamp: number }>>(
-        'git_log',
-        { repoPath: ctx.workspacePath, limit },
-      );
+      const commits = await ctx.invoke<
+        Array<{ short_hash: string; message: string; author: string; timestamp: number }>
+      >('git_log', { repoPath: ctx.workspacePath, limit });
       if (!commits.length) return { success: true, output: 'No commits found.' };
-      const formatted = commits.map(c => `${c.short_hash} ${c.message.split('\n')[0]} (${c.author})`).join('\n');
+      const formatted = commits
+        .map((c) => `${c.short_hash} ${c.message.split('\n')[0]} (${c.author})`)
+        .join('\n');
       return { success: true, output: formatted };
     } catch (err) {
       return { success: false, output: '', error: String(err) };
@@ -1003,22 +1047,30 @@ export const getDiagnosticsTool = defineTool(
   async (input, ctx) => {
     try {
       const file = input.file ? resolvePath(input.file as string, ctx.workspacePath) : undefined;
-      const diagnostics = await ctx.invoke<Array<{
-        file: string;
-        line: number;
-        col: number;
-        severity: string;
-        message: string;
-        source?: string;
-      }>>('get_diagnostics', { path: file });
+      const diagnostics = await ctx.invoke<
+        Array<{
+          file: string;
+          line: number;
+          col: number;
+          severity: string;
+          message: string;
+          source?: string;
+        }>
+      >('get_diagnostics', { path: file });
 
       if (!diagnostics || diagnostics.length === 0) {
-        return { success: true, output: file ? 'No diagnostics for this file.' : 'No diagnostics in workspace.' };
+        return {
+          success: true,
+          output: file ? 'No diagnostics for this file.' : 'No diagnostics in workspace.',
+        };
       }
 
-      const formatted = diagnostics.map(
-        (d) => `${d.file}:${d.line}:${d.col} [${d.severity}] ${d.message}${d.source ? ` (${d.source})` : ''}`,
-      ).join('\n');
+      const formatted = diagnostics
+        .map(
+          (d) =>
+            `${d.file}:${d.line}:${d.col} [${d.severity}] ${d.message}${d.source ? ` (${d.source})` : ''}`,
+        )
+        .join('\n');
 
       return {
         success: true,
@@ -1037,7 +1089,10 @@ export const webFetchTool = defineTool(
   'web_fetch',
   'Fetch and read the full content of any web page or API endpoint. Extracts clean readable text (removes ads, scripts, nav). Returns title, URL, HTTP status, and the page text. Use this to read documentation, blog posts, GitHub source code, Stack Overflow answers, or any web content. Call this tool directly — it works.',
   {
-    url: { type: 'string', description: 'The full URL to fetch (e.g. https://docs.python.org/3/library/os.html).' },
+    url: {
+      type: 'string',
+      description: 'The full URL to fetch (e.g. https://docs.python.org/3/library/os.html).',
+    },
     max_length: {
       type: 'number',
       description: 'Maximum characters to return (default: 10000). Increase if the page is long.',
@@ -1066,7 +1121,11 @@ export const webFetchTool = defineTool(
       // Block internal/private IPs (SSRF protection)
       const hostname = parsed.hostname;
       if (isPrivateHost(hostname)) {
-        return { success: false, output: '', error: 'Fetching internal/private addresses is not allowed.' };
+        return {
+          success: false,
+          output: '',
+          error: 'Fetching internal/private addresses is not allowed.',
+        };
       }
 
       const result = await ctx.invoke<{
@@ -1084,7 +1143,9 @@ export const webFetchTool = defineTool(
       }
       lines.push(`URL: ${result.url}`);
       if (result.metadata) {
-        lines.push(`Status: ${result.metadata.status}${result.metadata.content_type ? ` | ${result.metadata.content_type}` : ''}`);
+        lines.push(
+          `Status: ${result.metadata.status}${result.metadata.content_type ? ` | ${result.metadata.content_type}` : ''}`,
+        );
       }
       lines.push('---');
       lines.push(result.text);
@@ -1159,7 +1220,10 @@ export const activateSkillTool = defineTool(
   'activate_skill',
   'Activate a skill to enhance your capabilities for the current conversation. Skills provide domain-specific instructions and best practices. Use this BEFORE performing specialized tasks like testing, security review, performance optimization, documentation, or git workflows.',
   {
-    skill_name: { type: 'string', description: 'Name of the skill to activate (use list_skills to discover available names)' },
+    skill_name: {
+      type: 'string',
+      description: 'Name of the skill to activate (use list_skills to discover available names)',
+    },
   },
   ['skill_name'],
   'meta',
@@ -1196,8 +1260,16 @@ export const createSkillTool = defineTool(
   {
     name: { type: 'string', description: 'Skill name (kebab-case, e.g. "react-patterns")' },
     description: { type: 'string', description: 'One-line description of the skill' },
-    content: { type: 'string', description: 'Full markdown content including YAML frontmatter (---\\nname: ...\\n---) and instructions' },
-    scope: { type: 'string', description: 'Where to save: "workspace" (project .agents/skills/) or "global" (~/.agents/skills/). Default: workspace' },
+    content: {
+      type: 'string',
+      description:
+        'Full markdown content including YAML frontmatter (---\\nname: ...\\n---) and instructions',
+    },
+    scope: {
+      type: 'string',
+      description:
+        'Where to save: "workspace" (project .agents/skills/) or "global" (~/.agents/skills/). Default: workspace',
+    },
   },
   ['name', 'content'],
   'meta',
@@ -1281,7 +1353,8 @@ The target agent will receive your context summary to continue the work seamless
     },
     context_summary: {
       type: 'string',
-      description: 'Summary of relevant context, findings, and instructions for the target agent. Be detailed — this is the handoff document.',
+      description:
+        'Summary of relevant context, findings, and instructions for the target agent. Be detailed — this is the handoff document.',
     },
   },
   ['target_mode', 'reason', 'context_summary'],
@@ -1323,10 +1396,14 @@ Use this to keep important reference files in context without re-reading them ea
 Gathered files survive across iterations within the same turn.
 Assign relevance: 0.8-1.0 = files you will modify, 0.5-0.7 = important references, 0.2-0.4 = background context.`,
   {
-    path: { type: 'string', description: 'Absolute or workspace-relative path to the file to gather' },
+    path: {
+      type: 'string',
+      description: 'Absolute or workspace-relative path to the file to gather',
+    },
     relevance: {
       type: 'number',
-      description: 'Relevance score 0-1. 0.8-1.0 = will modify, 0.5-0.7 = reference, 0.2-0.4 = background',
+      description:
+        'Relevance score 0-1. 0.8-1.0 = will modify, 0.5-0.7 = reference, 0.2-0.4 = background',
     },
     reason: { type: 'string', description: 'Why this file is important for the current task' },
   },
@@ -1336,7 +1413,11 @@ Assign relevance: 0.8-1.0 = files you will modify, 0.5-0.7 = important reference
   async (input, ctx) => {
     try {
       if (!ctx.gatheredContext) {
-        return { success: false, output: '', error: 'Gathered context is not available in this execution context.' };
+        return {
+          success: false,
+          output: '',
+          error: 'Gathered context is not available in this execution context.',
+        };
       }
       const filePath = resolvePath(input.path as string, ctx.workspacePath);
       const relevance = Math.max(0, Math.min(1, Number(input.relevance) || 0.5));
@@ -1354,7 +1435,11 @@ Assign relevance: 0.8-1.0 = files you will modify, 0.5-0.7 = important reference
         output: `Gathered "${filePath}" (relevance: ${relevance.toFixed(2)}, ~${tokenEstimate} tokens). Working memory: ${totalFiles} file(s), ~${totalTokens} tokens total.`,
       };
     } catch (err) {
-      return { success: false, output: '', error: `Failed to gather file: ${err instanceof Error ? err.message : String(err)}` };
+      return {
+        success: false,
+        output: '',
+        error: `Failed to gather file: ${err instanceof Error ? err.message : String(err)}`,
+      };
     }
   },
 );
@@ -1363,14 +1448,21 @@ export const dropContextTool = defineTool(
   'drop_context',
   `Remove a file from the agent's working memory. Use this to free up context budget when a file is no longer needed.`,
   {
-    path: { type: 'string', description: 'Absolute or workspace-relative path of the file to remove from working memory' },
+    path: {
+      type: 'string',
+      description: 'Absolute or workspace-relative path of the file to remove from working memory',
+    },
   },
   ['path'],
   'filesystem',
   false,
   async (input, ctx) => {
     if (!ctx.gatheredContext) {
-      return { success: false, output: '', error: 'Gathered context is not available in this execution context.' };
+      return {
+        success: false,
+        output: '',
+        error: 'Gathered context is not available in this execution context.',
+      };
     }
     const filePath = resolvePath(input.path as string, ctx.workspacePath);
     const removed = ctx.gatheredContext.remove(filePath);
@@ -1399,7 +1491,11 @@ export const listContextTool = defineTool(
   false,
   async (_input, ctx) => {
     if (!ctx.gatheredContext) {
-      return { success: false, output: '', error: 'Gathered context is not available in this execution context.' };
+      return {
+        success: false,
+        output: '',
+        error: 'Gathered context is not available in this execution context.',
+      };
     }
     const files = ctx.gatheredContext.getAll();
     if (files.length === 0) {
@@ -1407,7 +1503,8 @@ export const listContextTool = defineTool(
     }
     const totalTokens = ctx.gatheredContext.getTokens();
     const lines = files.map(
-      (f, i) => `${i + 1}. ${f.path} (relevance: ${f.relevance.toFixed(2)}, ~${f.tokenEstimate} tokens) — ${f.reason}`
+      (f, i) =>
+        `${i + 1}. ${f.path} (relevance: ${f.relevance.toFixed(2)}, ~${f.tokenEstimate} tokens) — ${f.reason}`,
     );
     return {
       success: true,
@@ -1422,9 +1519,18 @@ export const findFilesTool = defineTool(
 Useful for discovering files before deciding which ones to gather or read.
 Use simple glob patterns: "*.tsx", "**/*.test.ts", "src/**/index.ts".`,
   {
-    pattern: { type: 'string', description: 'Glob pattern to match file names/paths (e.g. "*.tsx", "**/*.test.ts")' },
-    base_path: { type: 'string', description: 'Directory to search in. Defaults to workspace root.' },
-    max_results: { type: 'integer', description: 'Maximum number of results to return. Default: 50.' },
+    pattern: {
+      type: 'string',
+      description: 'Glob pattern to match file names/paths (e.g. "*.tsx", "**/*.test.ts")',
+    },
+    base_path: {
+      type: 'string',
+      description: 'Directory to search in. Defaults to workspace root.',
+    },
+    max_results: {
+      type: 'integer',
+      description: 'Maximum number of results to return. Default: 50.',
+    },
   },
   ['pattern'],
   'filesystem',
@@ -1453,7 +1559,11 @@ Use simple glob patterns: "*.tsx", "**/*.test.ts", "src/**/index.ts".`,
         output: `Found ${results.length} file(s) matching "${pattern}":${truncated}\n${results.join('\n')}`,
       };
     } catch (err) {
-      return { success: false, output: '', error: `Failed to find files: ${err instanceof Error ? err.message : String(err)}` };
+      return {
+        success: false,
+        output: '',
+        error: `Failed to find files: ${err instanceof Error ? err.message : String(err)}`,
+      };
     }
   },
 );
@@ -1467,7 +1577,8 @@ Each question can have predefined options (numbered choices) and/or allow free-f
   {
     title: {
       type: 'string',
-      description: 'Short heading for the question card (e.g. "Let me ask a few questions to shape the layout")',
+      description:
+        'Short heading for the question card (e.g. "Let me ask a few questions to shape the layout")',
     },
     questions: {
       type: 'array',
@@ -1475,7 +1586,10 @@ Each question can have predefined options (numbered choices) and/or allow free-f
       items: {
         type: 'object',
         properties: {
-          id: { type: 'string', description: 'Unique identifier for this question (e.g. "q1", "layout")' },
+          id: {
+            type: 'string',
+            description: 'Unique identifier for this question (e.g. "q1", "layout")',
+          },
           question: { type: 'string', description: 'The question text to display' },
           options: {
             type: 'array',
@@ -1484,7 +1598,10 @@ Each question can have predefined options (numbered choices) and/or allow free-f
               type: 'object',
               properties: {
                 label: { type: 'string', description: 'Display label for the option' },
-                description: { type: 'string', description: 'Optional description shown below the label' },
+                description: {
+                  type: 'string',
+                  description: 'Optional description shown below the label',
+                },
               },
               required: ['label'],
             },
@@ -1506,7 +1623,8 @@ Each question can have predefined options (numbered choices) and/or allow free-f
       return {
         success: false,
         output: '',
-        error: 'ask_user is not available in this environment. Proceed with your best judgment instead.',
+        error:
+          'ask_user is not available in this environment. Proceed with your best judgment instead.',
       };
     }
 
@@ -1536,7 +1654,8 @@ Each question can have predefined options (numbered choices) and/or allow free-f
       if (answers.length === 0) {
         return {
           success: true,
-          output: 'The user skipped the questions without answering. Proceed with your best judgment based on available context.',
+          output:
+            'The user skipped the questions without answering. Proceed with your best judgment based on available context.',
         };
       }
 
@@ -1576,7 +1695,11 @@ export const dockerListContainersTool = defineTool(
       });
       return { success: true, output: JSON.stringify(containers, null, 2) };
     } catch (err) {
-      return { success: false, output: '', error: `Failed to list containers: ${err instanceof Error ? err.message : String(err)}` };
+      return {
+        success: false,
+        output: '',
+        error: `Failed to list containers: ${err instanceof Error ? err.message : String(err)}`,
+      };
     }
   },
 );
@@ -1593,7 +1716,11 @@ export const dockerListImagesTool = defineTool(
       const images = await ctx.invoke<unknown[]>('docker_list_images', {});
       return { success: true, output: JSON.stringify(images, null, 2) };
     } catch (err) {
-      return { success: false, output: '', error: `Failed to list images: ${err instanceof Error ? err.message : String(err)}` };
+      return {
+        success: false,
+        output: '',
+        error: `Failed to list images: ${err instanceof Error ? err.message : String(err)}`,
+      };
     }
   },
 );
@@ -1616,7 +1743,11 @@ export const dockerContainerLogsTool = defineTool(
       });
       return { success: true, output: logs };
     } catch (err) {
-      return { success: false, output: '', error: `Failed to fetch logs: ${err instanceof Error ? err.message : String(err)}` };
+      return {
+        success: false,
+        output: '',
+        error: `Failed to fetch logs: ${err instanceof Error ? err.message : String(err)}`,
+      };
     }
   },
 );
@@ -1625,7 +1756,10 @@ export const dockerRunTool = defineTool(
   'docker_run',
   'Pull and start a Docker image. This will pull the image if not present locally, then the user can start a container from it via the UI.',
   {
-    image: { type: 'string', description: 'Docker image to pull (e.g., "nginx:latest", "postgres:16")' },
+    image: {
+      type: 'string',
+      description: 'Docker image to pull (e.g., "nginx:latest", "postgres:16")',
+    },
   },
   ['image'],
   'docker',
@@ -1637,7 +1771,11 @@ export const dockerRunTool = defineTool(
       });
       return { success: true, output: `Image pulled successfully.\n${result}` };
     } catch (err) {
-      return { success: false, output: '', error: `Failed to pull image: ${err instanceof Error ? err.message : String(err)}` };
+      return {
+        success: false,
+        output: '',
+        error: `Failed to pull image: ${err instanceof Error ? err.message : String(err)}`,
+      };
     }
   },
 );
@@ -1657,14 +1795,28 @@ export const deleteFileTool = defineTool(
     try {
       const filePath = resolvePath(input.path as string, ctx.workspacePath);
       let originalContent: string | null = null;
-      try { originalContent = await ctx.invoke<string>('read_file', { path: filePath }); } catch { /* directory */ }
+      try {
+        originalContent = await ctx.invoke<string>('read_file', { path: filePath });
+      } catch {
+        /* directory */
+      }
       await ctx.invoke('delete_path', { path: filePath });
       if (originalContent !== null) {
-        ctx.onFileChange?.({ toolCallId: ctx.toolCallId, toolName: 'delete_file', filePath, originalContent, newContent: '' });
+        ctx.onFileChange?.({
+          toolCallId: ctx.toolCallId,
+          toolName: 'delete_file',
+          filePath,
+          originalContent,
+          newContent: '',
+        });
       }
       return { success: true, output: `Deleted: ${input.path}` };
     } catch (err) {
-      return { success: false, output: '', error: `Failed to delete: ${err instanceof Error ? err.message : String(err)}` };
+      return {
+        success: false,
+        output: '',
+        error: `Failed to delete: ${err instanceof Error ? err.message : String(err)}`,
+      };
     }
   },
 );
@@ -1684,15 +1836,35 @@ export const renameFileTool = defineTool(
       const fromPath = resolvePath(input.from as string, ctx.workspacePath);
       const toPath = resolvePath(input.to as string, ctx.workspacePath);
       let originalContent: string | null = null;
-      try { originalContent = await ctx.invoke<string>('read_file', { path: fromPath }); } catch { /* directory */ }
+      try {
+        originalContent = await ctx.invoke<string>('read_file', { path: fromPath });
+      } catch {
+        /* directory */
+      }
       await ctx.invoke('rename_path', { from: fromPath, to: toPath });
       if (originalContent !== null) {
-        ctx.onFileChange?.({ toolCallId: ctx.toolCallId, toolName: 'rename_file', filePath: fromPath, originalContent, newContent: '' });
-        ctx.onFileChange?.({ toolCallId: ctx.toolCallId, toolName: 'rename_file', filePath: toPath, originalContent: null, newContent: originalContent });
+        ctx.onFileChange?.({
+          toolCallId: ctx.toolCallId,
+          toolName: 'rename_file',
+          filePath: fromPath,
+          originalContent,
+          newContent: '',
+        });
+        ctx.onFileChange?.({
+          toolCallId: ctx.toolCallId,
+          toolName: 'rename_file',
+          filePath: toPath,
+          originalContent: null,
+          newContent: originalContent,
+        });
       }
       return { success: true, output: `Renamed: ${input.from} → ${input.to}` };
     } catch (err) {
-      return { success: false, output: '', error: `Failed to rename: ${err instanceof Error ? err.message : String(err)}` };
+      return {
+        success: false,
+        output: '',
+        error: `Failed to rename: ${err instanceof Error ? err.message : String(err)}`,
+      };
     }
   },
 );
@@ -1713,15 +1885,33 @@ export const copyFileTool = defineTool(
       const toPath = resolvePath(input.to as string, ctx.workspacePath);
       let sourceContent: string | null = null;
       let targetContent: string | null = null;
-      try { sourceContent = await ctx.invoke<string>('read_file', { path: fromPath }); } catch { /* directory */ }
-      try { targetContent = await ctx.invoke<string>('read_file', { path: toPath }); } catch { /* new target */ }
+      try {
+        sourceContent = await ctx.invoke<string>('read_file', { path: fromPath });
+      } catch {
+        /* directory */
+      }
+      try {
+        targetContent = await ctx.invoke<string>('read_file', { path: toPath });
+      } catch {
+        /* new target */
+      }
       await ctx.invoke('copy_path', { from: fromPath, to: toPath });
       if (sourceContent !== null) {
-        ctx.onFileChange?.({ toolCallId: ctx.toolCallId, toolName: 'copy_file', filePath: toPath, originalContent: targetContent, newContent: sourceContent });
+        ctx.onFileChange?.({
+          toolCallId: ctx.toolCallId,
+          toolName: 'copy_file',
+          filePath: toPath,
+          originalContent: targetContent,
+          newContent: sourceContent,
+        });
       }
       return { success: true, output: `Copied: ${input.from} → ${input.to}` };
     } catch (err) {
-      return { success: false, output: '', error: `Failed to copy: ${err instanceof Error ? err.message : String(err)}` };
+      return {
+        success: false,
+        output: '',
+        error: `Failed to copy: ${err instanceof Error ? err.message : String(err)}`,
+      };
     }
   },
 );
@@ -1738,20 +1928,25 @@ export const getFileInfoTool = defineTool(
   async (input, ctx) => {
     try {
       const filePath = resolvePath(input.path as string, ctx.workspacePath);
-      const info = await ctx.invoke<{ path: string; is_dir: boolean; is_file: boolean; size: number; modified?: number }>(
-        'stat_path',
-        { path: filePath },
-      );
-      const modified = info.modified
-        ? new Date(info.modified * 1000).toISOString()
-        : 'unknown';
+      const info = await ctx.invoke<{
+        path: string;
+        is_dir: boolean;
+        is_file: boolean;
+        size: number;
+        modified?: number;
+      }>('stat_path', { path: filePath });
+      const modified = info.modified ? new Date(info.modified * 1000).toISOString() : 'unknown';
       return {
         success: true,
         output: `${info.path}\nType: ${info.is_dir ? 'directory' : info.is_file ? 'file' : 'other'}\nSize: ${info.size} bytes\nModified: ${modified}`,
         metadata: info,
       };
     } catch (err) {
-      return { success: false, output: '', error: `Failed to stat: ${err instanceof Error ? err.message : String(err)}` };
+      return {
+        success: false,
+        output: '',
+        error: `Failed to stat: ${err instanceof Error ? err.message : String(err)}`,
+      };
     }
   },
 );
@@ -1777,7 +1972,11 @@ export const gitPushTool = defineTool(
       });
       return { success: true, output: result || 'Push completed.' };
     } catch (err) {
-      return { success: false, output: '', error: `Push failed: ${err instanceof Error ? err.message : String(err)}` };
+      return {
+        success: false,
+        output: '',
+        error: `Push failed: ${err instanceof Error ? err.message : String(err)}`,
+      };
     }
   },
 );
@@ -1799,7 +1998,11 @@ export const gitPullTool = defineTool(
       });
       return { success: true, output: result || 'Pull completed.' };
     } catch (err) {
-      return { success: false, output: '', error: `Pull failed: ${err instanceof Error ? err.message : String(err)}` };
+      return {
+        success: false,
+        output: '',
+        error: `Pull failed: ${err instanceof Error ? err.message : String(err)}`,
+      };
     }
   },
 );
@@ -1821,7 +2024,11 @@ export const gitFetchTool = defineTool(
       });
       return { success: true, output: result || 'Fetch completed.' };
     } catch (err) {
-      return { success: false, output: '', error: `Fetch failed: ${err instanceof Error ? err.message : String(err)}` };
+      return {
+        success: false,
+        output: '',
+        error: `Fetch failed: ${err instanceof Error ? err.message : String(err)}`,
+      };
     }
   },
 );
@@ -1831,7 +2038,10 @@ export const gitStashTool = defineTool(
   'Stash current changes.',
   {
     message: { type: 'string', description: 'Optional stash message' },
-    pop: { type: 'boolean', description: 'If true, pop the most recent stash instead of creating one' },
+    pop: {
+      type: 'boolean',
+      description: 'If true, pop the most recent stash instead of creating one',
+    },
     index: { type: 'integer', description: 'Stash index to pop (default: 0, most recent)' },
   },
   [],
@@ -1848,9 +2058,16 @@ export const gitStashTool = defineTool(
         repoPath: ctx.workspacePath,
         message: (input.message as string) || undefined,
       });
-      return { success: true, output: `Changes stashed.${input.message ? ` Message: ${input.message}` : ''}` };
+      return {
+        success: true,
+        output: `Changes stashed.${input.message ? ` Message: ${input.message}` : ''}`,
+      };
     } catch (err) {
-      return { success: false, output: '', error: `Stash failed: ${err instanceof Error ? err.message : String(err)}` };
+      return {
+        success: false,
+        output: '',
+        error: `Stash failed: ${err instanceof Error ? err.message : String(err)}`,
+      };
     }
   },
 );
@@ -1872,7 +2089,11 @@ export const gitMergeTool = defineTool(
       });
       return { success: true, output: result || `Merged branch: ${input.branch}` };
     } catch (err) {
-      return { success: false, output: '', error: `Merge failed: ${err instanceof Error ? err.message : String(err)}` };
+      return {
+        success: false,
+        output: '',
+        error: `Merge failed: ${err instanceof Error ? err.message : String(err)}`,
+      };
     }
   },
 );
@@ -1882,7 +2103,10 @@ export const gitResetTool = defineTool(
   'Reset current HEAD to a specific state. This is destructive — use with caution.',
   {
     mode: { type: 'string', description: 'Reset mode: soft, mixed, hard (default: mixed)' },
-    target: { type: 'string', description: 'Commit hash, branch, or HEAD~N to reset to (default: HEAD)' },
+    target: {
+      type: 'string',
+      description: 'Commit hash, branch, or HEAD~N to reset to (default: HEAD)',
+    },
   },
   [],
   'git',
@@ -1898,7 +2122,11 @@ export const gitResetTool = defineTool(
       });
       return { success: true, output: result || `Reset completed: ${mode} → ${target}` };
     } catch (err) {
-      return { success: false, output: '', error: `Reset failed: ${err instanceof Error ? err.message : String(err)}` };
+      return {
+        success: false,
+        output: '',
+        error: `Reset failed: ${err instanceof Error ? err.message : String(err)}`,
+      };
     }
   },
 );
@@ -1923,7 +2151,11 @@ export const gitBlameTool = defineTool(
       });
       return { success: true, output: result };
     } catch (err) {
-      return { success: false, output: '', error: `Blame failed: ${err instanceof Error ? err.message : String(err)}` };
+      return {
+        success: false,
+        output: '',
+        error: `Blame failed: ${err instanceof Error ? err.message : String(err)}`,
+      };
     }
   },
 );
@@ -1960,7 +2192,11 @@ export const gitShowTool = defineTool(
       ];
       return { success: true, output: lines.join('\n'), metadata: detail };
     } catch (err) {
-      return { success: false, output: '', error: `git show failed: ${err instanceof Error ? err.message : String(err)}` };
+      return {
+        success: false,
+        output: '',
+        error: `git show failed: ${err instanceof Error ? err.message : String(err)}`,
+      };
     }
   },
 );
@@ -1976,7 +2212,9 @@ export const detectProjectTypeTool = defineTool(
   false,
   async (_input, ctx) => {
     try {
-      const files = await ctx.invoke<Array<{ name: string; is_dir: boolean }>>('list_dir', { path: ctx.workspacePath });
+      const files = await ctx.invoke<Array<{ name: string; is_dir: boolean }>>('list_dir', {
+        path: ctx.workspacePath,
+      });
       const names = new Set(files.map((f) => f.name));
 
       let type = 'unknown';
@@ -1985,7 +2223,9 @@ export const detectProjectTypeTool = defineTool(
       if (names.has('package.json')) {
         type = 'node';
         try {
-          const content = await ctx.invoke<string>('read_file', { path: `${ctx.workspacePath}/package.json` });
+          const content = await ctx.invoke<string>('read_file', {
+            path: `${ctx.workspacePath}/package.json`,
+          });
           const pkg = JSON.parse(content);
           scripts = Object.keys(pkg.scripts || {});
         } catch {
@@ -1993,7 +2233,11 @@ export const detectProjectTypeTool = defineTool(
         }
       } else if (names.has('Cargo.toml')) {
         type = 'rust';
-      } else if (names.has('pyproject.toml') || names.has('requirements.txt') || names.has('setup.py')) {
+      } else if (
+        names.has('pyproject.toml') ||
+        names.has('requirements.txt') ||
+        names.has('setup.py')
+      ) {
         type = 'python';
       } else if (names.has('go.mod')) {
         type = 'go';
@@ -2009,7 +2253,11 @@ export const detectProjectTypeTool = defineTool(
         metadata: { type, scripts },
       };
     } catch (err) {
-      return { success: false, output: '', error: `Detection failed: ${err instanceof Error ? err.message : String(err)}` };
+      return {
+        success: false,
+        output: '',
+        error: `Detection failed: ${err instanceof Error ? err.message : String(err)}`,
+      };
     }
   },
 );
@@ -2045,7 +2293,9 @@ export const readMultipleFilesTool = defineTool(
           const truncated = lines.length > maxLines;
           const shown = truncated ? lines.slice(0, maxLines) : lines;
           const numbered = shown.map((line, i) => `${i + 1} | ${line}`).join('\n');
-          outputs.push(`--- ${p} ---\n${numbered}${truncated ? `\n... (${lines.length - maxLines} more lines)` : ''}`);
+          outputs.push(
+            `--- ${p} ---\n${numbered}${truncated ? `\n... (${lines.length - maxLines} more lines)` : ''}`,
+          );
         } catch (err) {
           outputs.push(`--- ${p} ---\nError: ${String(err)}`);
         }
@@ -2082,12 +2332,15 @@ export const runCodeTool = defineTool(
       const code = input.code as string;
       const timeout = Math.min((input.timeout_ms as number) || 10_000, 30_000);
 
-      const result = await ctx.invoke<{ stdout: string; stderr: string; exit_code: number }>('run_code', {
-        language,
-        code,
-        timeout,
-        cwd: ctx.workspacePath,
-      });
+      const result = await ctx.invoke<{ stdout: string; stderr: string; exit_code: number }>(
+        'run_code',
+        {
+          language,
+          code,
+          timeout,
+          cwd: ctx.workspacePath,
+        },
+      );
 
       const lines: string[] = [];
       if (result.stdout) lines.push(result.stdout);
@@ -2134,10 +2387,24 @@ The summary field (≤200 chars) is injected into every conversation — keep it
   {
     title: { type: 'string', description: 'Short descriptive title (max 10 words)' },
     content: { type: 'string', description: 'Full content to remember — be specific and complete' },
-    summary: { type: 'string', description: 'One-sentence summary (≤200 chars) for context injection. If omitted, auto-generated from content.' },
+    summary: {
+      type: 'string',
+      description:
+        'One-sentence summary (≤200 chars) for context injection. If omitted, auto-generated from content.',
+    },
     type: {
       type: 'string',
-      enum: ['fact', 'decision', 'preference', 'pattern', 'workflow', 'error_solution', 'convention', 'user_preference', 'architecture_knowledge'],
+      enum: [
+        'fact',
+        'decision',
+        'preference',
+        'pattern',
+        'workflow',
+        'error_solution',
+        'convention',
+        'user_preference',
+        'architecture_knowledge',
+      ],
       description: 'Memory type — pick the most specific one that fits',
     },
     tags: {
@@ -2170,10 +2437,22 @@ The summary field (≤200 chars) is injected into every conversation — keep it
       return {
         success: true,
         output: `Stored memory: "${memory.title}" [${memory.type}] (id: ${memory.id})\nSummary: ${memory.summary || '(auto-generated)'}`,
-        metadata: { action: 'memory_created', memory: { id: memory.id, title: memory.title, type: memory.type, summary: memory.summary } },
+        metadata: {
+          action: 'memory_created',
+          memory: {
+            id: memory.id,
+            title: memory.title,
+            type: memory.type,
+            summary: memory.summary,
+          },
+        },
       };
     } catch (err) {
-      return { success: false, output: '', error: `Failed to store memory: ${err instanceof Error ? err.message : String(err)}` };
+      return {
+        success: false,
+        output: '',
+        error: `Failed to store memory: ${err instanceof Error ? err.message : String(err)}`,
+      };
     }
   },
 );
@@ -2195,7 +2474,17 @@ Search with natural language — the search uses full-text matching.`,
     limit: { type: 'integer', description: 'Max results (default: 5)' },
     type: {
       type: 'string',
-      enum: ['fact', 'decision', 'preference', 'pattern', 'workflow', 'error_solution', 'convention', 'user_preference', 'architecture_knowledge'],
+      enum: [
+        'fact',
+        'decision',
+        'preference',
+        'pattern',
+        'workflow',
+        'error_solution',
+        'convention',
+        'user_preference',
+        'architecture_knowledge',
+      ],
       description: 'Filter by memory type (optional)',
     },
   },
@@ -2217,16 +2506,23 @@ Search with natural language — the search uses full-text matching.`,
       if (memories.length === 0) {
         return { success: true, output: 'No relevant memories found.' };
       }
-      const formatted = memories.map((m, i) =>
-        `${i + 1}. [${m.type}] ${m.title} (id: ${m.id})\n   ${(m.summary || m.content).slice(0, 200)}${m.tags.length ? `\n   tags: ${m.tags.join(', ')}` : ''}`
-      ).join('\n\n');
+      const formatted = memories
+        .map(
+          (m, i) =>
+            `${i + 1}. [${m.type}] ${m.title} (id: ${m.id})\n   ${(m.summary || m.content).slice(0, 200)}${m.tags.length ? `\n   tags: ${m.tags.join(', ')}` : ''}`,
+        )
+        .join('\n\n');
       return {
         success: true,
         output: `Found ${memories.length} memor${memories.length === 1 ? 'y' : 'ies'}:\n\n${formatted}`,
         metadata: { action: 'memory_recalled', count: memories.length },
       };
     } catch (err) {
-      return { success: false, output: '', error: `Failed to recall memories: ${err instanceof Error ? err.message : String(err)}` };
+      return {
+        success: false,
+        output: '',
+        error: `Failed to recall memories: ${err instanceof Error ? err.message : String(err)}`,
+      };
     }
   },
 );
@@ -2235,7 +2531,10 @@ export const forgetTool = defineTool(
   'forget',
   'Archive a memory to remove it from active context. Use this to discard incorrect or outdated knowledge.',
   {
-    id: { type: 'string', description: 'Memory ID to forget (use recall or list_memories to find IDs)' },
+    id: {
+      type: 'string',
+      description: 'Memory ID to forget (use recall or list_memories to find IDs)',
+    },
     reason: { type: 'string', description: 'Why this memory should be forgotten' },
   },
   ['id'],
@@ -2252,7 +2551,11 @@ export const forgetTool = defineTool(
         output: `Memory ${input.id} archived.${input.reason ? ` Reason: ${input.reason}` : ''}`,
       };
     } catch (err) {
-      return { success: false, output: '', error: `Failed to forget memory: ${err instanceof Error ? err.message : String(err)}` };
+      return {
+        success: false,
+        output: '',
+        error: `Failed to forget memory: ${err instanceof Error ? err.message : String(err)}`,
+      };
     }
   },
 );
@@ -2263,7 +2566,17 @@ export const listMemoriesTool = defineTool(
   {
     type: {
       type: 'string',
-      enum: ['fact', 'decision', 'preference', 'pattern', 'workflow', 'error_solution', 'convention', 'user_preference', 'architecture_knowledge'],
+      enum: [
+        'fact',
+        'decision',
+        'preference',
+        'pattern',
+        'workflow',
+        'error_solution',
+        'convention',
+        'user_preference',
+        'architecture_knowledge',
+      ],
       description: 'Filter by memory type (optional)',
     },
     limit: { type: 'integer', description: 'Max results to return (default: 20)' },
@@ -2300,7 +2613,11 @@ export const listMemoriesTool = defineTool(
       }
       return { success: true, output: lines.join('\n') };
     } catch (err) {
-      return { success: false, output: '', error: `Failed to list memories: ${err instanceof Error ? err.message : String(err)}` };
+      return {
+        success: false,
+        output: '',
+        error: `Failed to list memories: ${err instanceof Error ? err.message : String(err)}`,
+      };
     }
   },
 );

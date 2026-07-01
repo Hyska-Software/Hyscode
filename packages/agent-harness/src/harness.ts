@@ -142,6 +142,7 @@ export class Harness {
 
   // ─── Session Context ──────────────────────────────────────────────
   private delegationChain: Array<{ fromMode: string; toMode: string; reason: string }> = [];
+  private currentIteration = 0;
 
   // ─── Tracing & Policies ───────────────────────────────────────────
   private traceRecorder = new TraceRecorder();
@@ -583,6 +584,7 @@ export class Harness {
       this.turnController.transition('streaming');
       iteration++;
       this.traceRecorder.startIteration(iteration);
+      this.currentIteration = iteration;
       this.emit({ type: 'turn_start', conversationId: this.conversationId, iteration });
 
       // Inject any middleware-generated context from the previous iteration
@@ -831,6 +833,7 @@ export class Harness {
         ],
       };
       this.contextManager.addMessage(assistantMsg);
+      this.emit({ type: 'transcript_message', role: 'assistant', blocks: assistantMsg.content });
 
       // If no tool calls, we're done — the LLM gave a final text response.
       // IMPORTANT: Do NOT check stopReason here. Some providers (Ollama, Gemini)
@@ -1146,19 +1149,26 @@ export class Harness {
 
       // Add tool results to history
       this.contextManager.addMessage(toolResults);
+      this.emit({ type: 'transcript_message', role: 'tool', blocks: toolResults.content });
     }
 
     this.turnController.transition('completing');
-    if (this.cancelled || activeTurn.signal.aborted) terminalStatus = 'cancelled';
+    const cancellationWasPartial = this.toolCallHistory.some(
+      (call) => call.output.metadata?.cancellationPartial === true,
+    );
+    if (cancellationWasPartial) terminalStatus = 'cancelled_partial';
+    else if (this.cancelled || activeTurn.signal.aborted) terminalStatus = 'cancelled';
     else if (terminalStatus !== 'loop_detected' && iteration >= maxIter)
       terminalStatus = 'max_iterations';
-    const stopReason: TurnRecord['stopReason'] =
-      terminalStatus === 'loop_detected' ? 'error' : terminalStatus;
+    const stopReason: TurnRecord['stopReason'] = terminalStatus;
     if (!finalResponse.trim() && terminalStatus === 'max_iterations') {
       finalResponse = `The agent reached the ${maxIter}-iteration limit before producing a final response. Review the completed tool calls before continuing.`;
     }
     if (!finalResponse.trim() && terminalStatus === 'cancelled')
       finalResponse = 'Request cancelled.';
+    if (!finalResponse.trim() && terminalStatus === 'cancelled_partial')
+      finalResponse =
+        'Cancellation was requested, but one native operation completed before stopping.';
     this.finishTurn(
       terminalStatus,
       tokenUsage,
@@ -1381,10 +1391,17 @@ export class Harness {
   }
 
   private emit(event: HarnessEvent): void {
+    const iteration = event.iteration ?? (this.currentIteration || undefined);
     this.eventHandler?.({
       ...event,
       turnId: event.turnId ?? this.turnController.id,
       conversationId: event.conversationId ?? this.conversationId,
+      ...(iteration !== undefined ? { iteration } : {}),
+      ...(event.iterationId
+        ? { iterationId: event.iterationId }
+        : this.turnController.id && iteration
+          ? { iterationId: `${this.turnController.id}:${iteration}` }
+          : {}),
     });
   }
 
@@ -1466,8 +1483,7 @@ export class Harness {
 
   private finishTurn(status: TurnStatus, tokenUsage: TokenUsage, error?: string): void {
     if (!this.turnController.finish(status)) return;
-    const reason = status === 'loop_detected' ? 'error' : status;
-    this.emit({ type: 'turn_end', reason, error, tokenUsage });
+    this.emit({ type: 'turn_end', reason: status, error, tokenUsage });
   }
 
   // ─── Turn Record Builder ────────────────────────────────────────────

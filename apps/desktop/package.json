@@ -12,7 +12,8 @@
     "tauri:build": "tauri build",
     "tauri:build:debug": "tauri build --debug",
     "lint": "eslint src/",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
   },
   "dependencies": {
     "@base-ui/react": "^1.4.0",

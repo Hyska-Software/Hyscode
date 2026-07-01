@@ -21,7 +21,9 @@ export class ToolRouter {
   private handlers = new Map<string, ToolHandler>();
   private approvalConfig: ApprovalConfig = { mode: 'manual' };
   private eventHandler: HarnessEventHandler | null = null;
-  private approvalCallback: ((pending: PendingToolCall, signal: AbortSignal) => Promise<boolean>) | null = null;
+  private approvalCallback:
+    | ((pending: PendingToolCall, signal: AbortSignal) => Promise<boolean>)
+    | null = null;
 
   // ─── Registration ───────────────────────────────────────────────────
 
@@ -161,7 +163,11 @@ export class ToolRouter {
     }
 
     const dirtyUnsafeGitTools = new Set([
-      'git_checkout', 'git_pull', 'git_stash', 'git_merge', 'git_reset',
+      'git_checkout',
+      'git_pull',
+      'git_stash',
+      'git_merge',
+      'git_reset',
     ]);
     if (dirtyUnsafeGitTools.has(toolName) && context.hasDirtyBuffers?.()) {
       const record: ToolCallRecord = {
@@ -171,7 +177,8 @@ export class ToolRouter {
         output: {
           success: false,
           output: '',
-          error: 'Git operation blocked because the editor has unsaved buffers. Save or revert them first.',
+          error:
+            'Git operation blocked because the editor has unsaved buffers. Save or revert them first.',
         },
         durationMs: Date.now() - startTime,
         approved: false,
@@ -341,7 +348,9 @@ export class ToolRouter {
     }
 
     const handler = this.handlers.get(toolName);
-    const riskLevel = handler ? this.getToolRiskLevel(toolName, handler) : 'moderate' as ToolRiskLevel;
+    const riskLevel = handler
+      ? this.getToolRiskLevel(toolName, handler)
+      : ('moderate' as ToolRiskLevel);
 
     return new Promise<boolean>((resolve) => {
       let resolved = false;
@@ -370,9 +379,11 @@ export class ToolRouter {
         pending,
       });
 
-      this.approvalCallback!(pending, signal).then(settle).finally(() => {
-        signal.removeEventListener('abort', onAbort);
-      });
+      this.approvalCallback!(pending, signal)
+        .then(settle)
+        .finally(() => {
+          signal.removeEventListener('abort', onAbort);
+        });
     });
   }
 
@@ -439,41 +450,60 @@ export class ToolRouter {
   }
 }
 
-function validateInput(schema: Record<string, unknown>, input: Record<string, unknown>): string | null {
-  if (!input || typeof input !== 'object' || Array.isArray(input)) return 'Tool input must be an object.';
-  const required = Array.isArray(schema.required) ? schema.required as string[] : [];
+function validateInput(
+  schema: Record<string, unknown>,
+  input: Record<string, unknown>,
+): string | null {
+  if (!input || typeof input !== 'object' || Array.isArray(input))
+    return 'Tool input must be an object.';
+  const required = Array.isArray(schema.required) ? (schema.required as string[]) : [];
   for (const key of required) {
     if (!(key in input) || input[key] === undefined || input[key] === null) {
       return `Invalid tool input: missing required field "${key}".`;
     }
   }
-  const properties = (schema.properties ?? {}) as Record<string, { type?: string; enum?: unknown[] }>;
+  const properties = (schema.properties ?? {}) as Record<
+    string,
+    { type?: string; enum?: unknown[] }
+  >;
   for (const [key, value] of Object.entries(input)) {
     const property = properties[key];
     if (!property) continue;
-    if (property.enum && !property.enum.includes(value)) return `Invalid tool input: "${key}" is not an allowed value.`;
-    if (property.type === 'array' && !Array.isArray(value)) return `Invalid tool input: "${key}" must be an array.`;
-    if (property.type === 'integer' && (!Number.isInteger(value))) return `Invalid tool input: "${key}" must be an integer.`;
-    if (property.type === 'number' && typeof value !== 'number') return `Invalid tool input: "${key}" must be a number.`;
-    if (property.type === 'boolean' && typeof value !== 'boolean') return `Invalid tool input: "${key}" must be a boolean.`;
-    if (property.type === 'string' && typeof value !== 'string') return `Invalid tool input: "${key}" must be a string.`;
-    if (property.type === 'object' && (typeof value !== 'object' || value === null || Array.isArray(value))) {
+    if (property.enum && !property.enum.includes(value))
+      return `Invalid tool input: "${key}" is not an allowed value.`;
+    if (property.type === 'array' && !Array.isArray(value))
+      return `Invalid tool input: "${key}" must be an array.`;
+    if (property.type === 'integer' && !Number.isInteger(value))
+      return `Invalid tool input: "${key}" must be an integer.`;
+    if (property.type === 'number' && typeof value !== 'number')
+      return `Invalid tool input: "${key}" must be a number.`;
+    if (property.type === 'boolean' && typeof value !== 'boolean')
+      return `Invalid tool input: "${key}" must be a boolean.`;
+    if (property.type === 'string' && typeof value !== 'string')
+      return `Invalid tool input: "${key}" must be a string.`;
+    if (
+      property.type === 'object' &&
+      (typeof value !== 'object' || value === null || Array.isArray(value))
+    ) {
       return `Invalid tool input: "${key}" must be an object.`;
     }
   }
   return null;
 }
 
-async function executeWithAbort(execution: Promise<ToolResult>, signal: AbortSignal): Promise<ToolResult> {
+async function executeWithAbort(
+  execution: Promise<ToolResult>,
+  signal: AbortSignal,
+): Promise<ToolResult> {
   if (signal.aborted) return { success: false, output: '', error: 'Tool call cancelled.' };
-  let onAbort: (() => void) | undefined;
-  const cancellation = new Promise<ToolResult>((resolve) => {
-    onAbort = () => resolve({ success: false, output: '', error: 'Tool call cancelled.' });
-    signal.addEventListener('abort', onAbort, { once: true });
-  });
-  try {
-    return await Promise.race([execution, cancellation]);
-  } finally {
-    if (onAbort) signal.removeEventListener('abort', onAbort);
-  }
+  // Do not race an uncancellable native mutation. Returning early would tell the
+  // UI that cancellation completed while the operation could still mutate disk.
+  const result = await execution;
+  if (!signal.aborted || result.error?.toLowerCase().includes('cancel')) return result;
+  return {
+    success: false,
+    output: result.output,
+    error: 'Cancellation was requested, but the native operation completed before it could stop.',
+    metadata: { ...result.metadata, cancellationPartial: true, operationCompleted: true },
+  };
 }

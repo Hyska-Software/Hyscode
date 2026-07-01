@@ -10,6 +10,7 @@ import type {
   ContextEntryDecision,
   ContextTokenBreakdown,
   ToolCallRecord,
+  TurnTerminalStatus,
 } from './types';
 import type { RequestCostBreakdown } from './request-preparation';
 import type { ToolSelectionDecision } from './tool-selection';
@@ -75,7 +76,7 @@ export interface Trace {
   /** Aggregated token usage (includes prompt cache fields when provider reports them) */
   tokenUsage: TokenUsage;
   /** Stop reason */
-  stopReason: 'complete' | 'max_iterations' | 'cancelled' | 'error';
+  stopReason: TurnTerminalStatus;
   /** Verification flags */
   verificationPerformed: boolean;
   verificationForced: boolean;
@@ -265,7 +266,7 @@ export class TraceRecorder {
 
   /** Finalize the trace with summary data. */
   finalizeTrace(
-    stopReason: 'complete' | 'max_iterations' | 'cancelled' | 'error',
+    stopReason: TurnTerminalStatus,
     tokenUsage: TokenUsage,
     filesModified: string[],
     verificationPerformed?: boolean,

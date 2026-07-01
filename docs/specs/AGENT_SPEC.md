@@ -2,7 +2,7 @@
 
 ## Overview
 
-The Agent Panel is the primary interface for AI interaction in HysCode. It supports three modes (Chat, Build, Review), displays streaming responses with tool call visualization, and provides an approval workflow for destructive operations.
+The Agent Panel is the primary interface for AI interaction in HysCode. It supports five modes (Chat, Build, Review, Debug, Plan), displays streaming responses with tool call visualization, and provides an approval workflow for destructive operations.
 
 ---
 
@@ -54,6 +54,12 @@ The Agent Panel is the primary interface for AI interaction in HysCode. It suppo
 
 ## Conversation Modes
 
+The five runtime modes are Chat, Build, Review, Debug, and Plan. Debug can inspect, execute, and modify code and requires verification before completion. Plan inspects the workspace and denies development mutations except writing an explicit plan artifact.
+
+The effective policy is resolved once per turn from mode, provider/model limits, and user preferences. Explicit user approval settings take precedence over mode defaults; custom tool rules take precedence over custom category rules.
+
+Every runtime event is correlated with `turnId`, `conversationId`, `iteration`, and `iterationId`. The UI ignores stale events and prevents closing the tab that owns an active turn.
+
 ### Chat Mode (default)
 
 Standard conversational interaction with the AI. Chat mode is intentionally non-mutating.
@@ -86,6 +92,7 @@ Structured Spec-Driven Development workflow. Guides user through spec → plan �
 ```
 
 After spec generation:
+
 ```
 ┌─────────────────────────────────────────────┐
 │  Phase: ✓ Describe  ● Spec  ○ Plan  ○ Exec │
@@ -107,6 +114,7 @@ After spec generation:
 ```
 
 After plan approval:
+
 ```
 ┌─────────────────────────────────────────────┐
 │  Phase: ✓ Describe  ✓ Spec  ✓ Plan  ● Exec │
@@ -148,24 +156,20 @@ Agent reviews existing code changes (git diff) and provides feedback.
 ## Message Types
 
 ```typescript
-type ChatMessage =
-  | UserMessage
-  | AssistantMessage
-  | ToolCallMessage
-  | SystemMessage;
+type ChatMessage = UserMessage | AssistantMessage | ToolCallMessage | SystemMessage;
 
 interface UserMessage {
   id: string;
   role: 'user';
   content: string;
-  attachments: ContextAttachment[];       // files/symbols added via chips
+  attachments: ContextAttachment[]; // files/symbols added via chips
   timestamp: Date;
 }
 
 interface AssistantMessage {
   id: string;
   role: 'assistant';
-  content: string;                        // may be streamed (partial)
+  content: string; // may be streamed (partial)
   toolCalls: ToolCallDisplay[];
   isStreaming: boolean;
   model: string;
@@ -212,6 +216,7 @@ interface ToolCallDisplay {
 ```
 
 ### Status Icons
+
 - `⏳` Pending approval (blue pulse)
 - `●` Running (animated spinner)
 - `✓` Completed (green)
@@ -231,6 +236,7 @@ Context: [auth.ts ✕] [routes.ts ✕] [LoginForm ✕] [+2 more] [+ Add]
 ```
 
 ### Adding Context
+
 1. **Drag from file tree**: drag file onto agent panel
 2. **@ mention**: type `@filename` in input to autocomplete
 3. **# symbol**: type `#symbolName` to reference a function/class
@@ -238,6 +244,7 @@ Context: [auth.ts ✕] [routes.ts ✕] [LoginForm ✕] [+2 more] [+ Add]
 5. **Automatic**: agent's tool calls add files to context
 
 ### Context Budget Display
+
 ```
 Context: 4 files · 3.2k tokens (of 180k available)
 ```
@@ -255,6 +262,7 @@ interface AgentInputProps {
 ```
 
 ### Features
+
 - **Multi-line input**: auto-expanding textarea (Shift+Enter for newline, Enter to send)
 - **@ autocomplete**: file picker dropdown when typing `@`
 - **# autocomplete**: symbol picker when typing `#`

@@ -43,6 +43,10 @@ export type {
   TurnRequest,
   TurnOutcome,
   TurnStatus,
+  TurnTerminalStatus,
+  TurnIdentity,
+  TranscriptBlock,
+  TurnTranscript,
   EnvironmentContext,
   // Memory system
   Memory,
@@ -77,6 +81,8 @@ export { getAgentDefinition, getAllAgentDefinitions, getAgentTypes } from './age
 
 // ─── Tools ──────────────────────────────────────────────────────────────────
 export { getAllBuiltinTools } from './tools';
+export { resolveWorkspacePath } from './path-policy';
+export type { WorkspacePathOptions } from './path-policy';
 
 // ─── Memory System ──────────────────────────────────────────────────────────
 export { MemoryManager } from './memory-manager';
@@ -104,3 +110,5 @@ export {
   isPerRequestCostModel,
 } from './mode-policies';
 export type { ModePolicy, ModelProfile } from './mode-policies';
+export { resolveEffectiveAgentPolicy, effectivePolicyConfig } from './effective-policy';
+export type { EffectiveAgentPolicy, EffectivePolicyPreferences } from './effective-policy';

@@ -6,7 +6,13 @@
 
 import { useEditorStore, type Tab } from '@/stores/editor-store';
 import { useAgentStore, type AgentMode } from '@/stores/agent-store';
-import { useReviewStore, type ReviewComment, type ReviewFileEntry, type ReviewSummary, type ReviewSource } from '@/stores/review-store';
+import {
+  useReviewStore,
+  type ReviewComment,
+  type ReviewFileEntry,
+  type ReviewSummary,
+  type ReviewSource,
+} from '@/stores/review-store';
 import { useLayoutStore, type WorkspaceMode } from '@/stores/layout-store';
 import { tauriInvoke } from './tauri-invoke';
 
@@ -171,6 +177,7 @@ async function restoreAgentState(snapshot: AgentSnapshot): Promise<void> {
           role: m.role as 'user' | 'assistant',
           content: m.content,
           toolCalls: m.tool_calls ? JSON.parse(m.tool_calls) : undefined,
+          blocks: m.blocks ? JSON.parse(m.blocks) : undefined,
           timestamp: new Date(m.created_at).getTime(),
         });
       }

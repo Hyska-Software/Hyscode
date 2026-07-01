@@ -7,7 +7,8 @@ import {
   SkillLoader,
   RuleLoader,
   applyPolicyOverride,
-  getModePolicy,
+  resolveEffectiveAgentPolicy,
+  effectivePolicyConfig,
   MemoryManager,
 } from '@hyscode/agent-harness';
 import type {
@@ -47,6 +48,7 @@ import type {
 } from '@/stores/agent-store';
 import { computeDiffHunks } from './compute-diff';
 import { SubAgentRunner } from './sub-agent-runner';
+import { eventBelongsToOwner } from './turn-event-ownership';
 
 // ─── Error Parser ────────────────────────────────────────────────────────────
 // Converts raw technical error messages into friendly user-facing text.
@@ -184,15 +186,10 @@ export class HarnessBridge {
   >();
   /** Active sub-agent runners keyed by their id (toolCallId of spawn_subagent). */
   private _subAgentRunners = new Map<string, SubAgentRunner>();
-  /** Accumulated tool results for the current iteration (flushed between turns). */
-  private pendingToolResults: Array<{ toolCallId: string; output: string; isError: boolean }> = [];
-  /** Tool call IDs seen in the current iteration (for building assistant blocks). */
-  private currentIterationToolCalls: Array<{
-    id: string;
-    name: string;
-    input: Record<string, unknown>;
-  }> = [];
   private mutationSnapshots = new Map<string, MutationSnapshot>();
+  private activeTurnTabId: string | null = null;
+  private activeTurnConversationId: string | null = null;
+  private activeTurnId: string | null = null;
 
   // ─── Agent Terminal Integration ───────────────────────────────────
   /** Pool of terminal store session ids owned by the agent, keyed by conversationId */
@@ -427,34 +424,37 @@ export class HarnessBridge {
     const providerId = settings.activeProviderId ?? '';
     const modelId = settings.activeModelId ?? '';
 
-    // Determine approval mode: use mode policy default, but respect user's custom rules
-    const modePolicy = getModePolicy(store.mode as AgentType);
-    const approvalConfig =
-      settings.approvalMode === 'custom'
-        ? {
-            mode: 'custom' as const,
-            categoryOverrides: Object.fromEntries(
-              Object.entries(settings.customApprovalRules.categoryRules).map(([k, autoApprove]) => [
-                k,
-                !autoApprove,
-              ]),
-            ) as Record<string, boolean>,
-            toolOverrides: Object.fromEntries(
-              Object.entries(settings.customApprovalRules.toolRules).map(([k, autoApprove]) => [
-                k,
-                !autoApprove,
-              ]),
-            ),
-          }
-        : { mode: modePolicy.approvalMode };
+    const customApproval = {
+      categoryOverrides: Object.fromEntries(
+        Object.entries(settings.customApprovalRules.categoryRules).map(([key, autoApprove]) => [
+          key,
+          !autoApprove,
+        ]),
+      ) as Record<ToolCategory, boolean>,
+      toolOverrides: Object.fromEntries(
+        Object.entries(settings.customApprovalRules.toolRules).map(([key, autoApprove]) => [
+          key,
+          !autoApprove,
+        ]),
+      ),
+    };
+    const effectivePolicy = resolveEffectiveAgentPolicy(
+      store.mode as AgentType,
+      modelId,
+      providerId,
+      {
+        approvalMode: settings.approvalMode,
+        customApproval,
+        maxIterations: settings.maxIterations,
+        maxOutputTokens: settings.maxTokens,
+      },
+    );
 
     // Sync settings → harness config
     this.harness.setConfig({
       providerId,
       modelId,
-      maxIterations: settings.maxIterations,
-      maxOutputTokens: settings.maxTokens,
-      approval: approvalConfig,
+      ...effectivePolicyConfig(effectivePolicy),
       thinking: this.buildThinkingConfig(providerId, modelId),
     });
     // mode IS the agent type — single source of truth
@@ -588,6 +588,10 @@ export class HarnessBridge {
 
     // Start streaming
     useAgentStore.getState().setStreaming(true);
+    useAgentStore.getState().setTerminalStatus(null);
+    this.activeTurnTabId = useAgentStore.getState().activeTabId;
+    this.activeTurnConversationId = useAgentStore.getState().conversationId;
+    this.activeTurnId = null;
 
     // Create placeholder assistant message
     const assistantMsgId = crypto.randomUUID();
@@ -604,9 +608,6 @@ export class HarnessBridge {
       const history = this.buildHistory(useAgentStore.getState().messages.slice(0, -2));
 
       // Reset iteration tracking for the new turn
-      this.currentIterationToolCalls = [];
-      this.pendingToolResults = [];
-
       // ── Ensure agent terminal is available ──
       // Creates or finds the shared agent terminal session so the agent's
       // run_terminal_command tool uses the visible terminal tab instead of hidden PTYs.
@@ -632,11 +633,9 @@ export class HarnessBridge {
         `Resposta recebida (${response.length} chars, ${turnRecord.iterations} iterações, ${turnRecord.toolCalls.length} tool calls)`,
       );
 
-      // Persist conversation to DB FIRST (turn record has FK on conversationId)
-      await this.persistConversation(userMessage, response);
-
-      // Persist the structured turn record (requires conversation to exist)
-      await this.persistTurnRecord(turnRecord);
+      await this.commitTurn(userMessage, turnRecord);
+      await this.persistTurnRecord(turnRecord, true);
+      await this.refreshSessionUsage();
 
       // Flush any remaining streaming text
       useAgentStore.getState().flushStreamingText();
@@ -652,6 +651,9 @@ export class HarnessBridge {
       useAgentStore.getState().updateLastAssistantError(friendlyMsg);
     } finally {
       useAgentStore.getState().setStreaming(false);
+      this.activeTurnTabId = null;
+      this.activeTurnConversationId = null;
+      this.activeTurnId = null;
       // OS notification when the app is in the background
       if (document.hidden) {
         try {
@@ -669,6 +671,13 @@ export class HarnessBridge {
   }
 
   cancel(): void {
+    useAgentStore.setState((draft) => {
+      for (const toolCall of draft.pendingToolCalls) {
+        if (toolCall.status === 'running' || toolCall.status === 'approved') {
+          toolCall.status = 'cancelling';
+        }
+      }
+    });
     // Cancel all active sub-agent runners first
     for (const runner of this._subAgentRunners.values()) {
       runner.cancel();
@@ -1344,21 +1353,31 @@ Investigate the error, fix the underlying issue in the affected files, and verif
   private handleEvent(event: HarnessEvent): void {
     const store = useAgentStore.getState();
 
+    if (event.type === 'turn_start' && !this.activeTurnId) {
+      this.activeTurnId = event.turnId ?? null;
+    }
+    const owner =
+      this.activeTurnTabId && this.activeTurnConversationId
+        ? {
+            tabId: this.activeTurnTabId,
+            conversationId: this.activeTurnConversationId,
+            turnId: this.activeTurnId,
+          }
+        : null;
+    const belongsToActiveTurn = eventBelongsToOwner(event, owner, store.activeTabId);
+    if (!belongsToActiveTurn) {
+      this.debug(`Ignored stale event ${event.type} for turn ${event.turnId ?? 'unknown'}`);
+      return;
+    }
+
     switch (event.type) {
       case 'turn_start': {
         this.debug(`Iteração ${event.iteration} — aguardando LLM...`);
 
-        // On subsequent turns, commit the previous iteration's streamed text,
-        // finalize its structured blocks, and create a fresh empty assistant.
-        // ORDER MATTERS: flushStreamingText() must run BEFORE
-        // finalizeIterationBlocks(). Between iterations, `streamingText` is
-        // never cleared, so if finalize() runs first it appends a `role: 'tool'`
-        // message and flush() then sees `last.role !== 'assistant'` and pushes a
-        // duplicate assistant with the previous iteration's text. This mirrors
-        // the ordering in the `turn_end` handler (see comment above that case).
+        // Each iteration gets its own assistant row. Structured blocks arrive
+        // directly from the harness through transcript_message.
         if (event.iteration > 1) {
           store.flushStreamingText();
-          this.finalizeIterationBlocks();
           store.addMessage({
             id: crypto.randomUUID(),
             role: 'assistant',
@@ -1410,6 +1429,29 @@ Investigate the error, fix the underlying issue in the affected files, and verif
         break;
       }
 
+      case 'transcript_message': {
+        if (event.role === 'assistant') {
+          const messages = useAgentStore.getState().messages;
+          for (let index = messages.length - 1; index >= 0; index--) {
+            if (messages[index].role !== 'assistant') continue;
+            useAgentStore.setState((draft) => {
+              const target = draft.messages[index];
+              if (target) target.blocks = [...event.blocks];
+            });
+            break;
+          }
+        } else if (event.blocks.length > 0) {
+          store.addMessage({
+            id: crypto.randomUUID(),
+            role: 'tool',
+            content: '',
+            blocks: [...event.blocks],
+            timestamp: Date.now(),
+          });
+        }
+        break;
+      }
+
       case 'tool_call_start': {
         this.debug(`Ferramenta: ${event.toolName}`);
         const tc: ToolCallDisplay = {
@@ -1420,12 +1462,6 @@ Investigate the error, fix the underlying issue in the affected files, and verif
           startedAt: Date.now(),
         };
         store.addToolCall(tc);
-        // Track for structured block construction
-        this.currentIterationToolCalls.push({
-          id: event.toolCallId,
-          name: event.toolName,
-          input: event.input,
-        });
         break;
       }
 
@@ -1441,11 +1477,6 @@ Investigate the error, fix the underlying issue in the affected files, and verif
             input: pending.input,
             status: 'pending',
             startedAt: Date.now(),
-          });
-          this.currentIterationToolCalls.push({
-            id: pending.id,
-            name: pending.toolName,
-            input: pending.input,
           });
         } else store.updateToolCall(pending.id, { status: 'pending' });
         break;
@@ -1465,15 +1496,6 @@ Investigate the error, fix the underlying issue in the affected files, and verif
           output: event.result.output,
           error: event.result.error,
           completedAt: Date.now(),
-        });
-
-        // Accumulate for structured tool_result blocks
-        this.pendingToolResults.push({
-          toolCallId: event.toolCallId,
-          output: event.result.success
-            ? event.result.output
-            : `Error: ${event.result.error ?? event.result.output}`,
-          isError: !event.result.success,
         });
 
         // Handle metadata actions from tools
@@ -1525,15 +1547,9 @@ Investigate the error, fix the underlying issue in the affected files, and verif
         if (event.tokenUsage) {
           useAgentStore.getState().setTokenUsage(event.tokenUsage);
         }
-        // Flush streaming text FIRST so it commits to the last assistant message
-        // before finalizeIterationBlocks() inserts a user tool_result message.
-        // If flushed after, the last message would be 'user' and flushStreamingText
-        // would create a duplicate assistant message with the same content.
+        store.setTerminalStatus(event.reason);
+        // Commit the final streamed text; structured blocks are already canonical.
         useAgentStore.getState().flushStreamingText();
-        this.finalizeIterationBlocks();
-        // Refresh cumulative session usage from the DB (fire-and-forget; the
-        // turn record is persisted right after this event in runTurn).
-        void this.refreshSessionUsage();
         break;
       }
 
@@ -1864,67 +1880,6 @@ Investigate the error, fix the underlying issue in the affected files, and verif
   }
 
   /**
-   * Finalize the current iteration's structured blocks.
-   * Stamps the last assistant message with proper content blocks (text + tool_calls)
-   * and inserts a tool_result message if tools were executed.
-   */
-  private finalizeIterationBlocks(): void {
-    if (this.currentIterationToolCalls.length === 0 && this.pendingToolResults.length === 0) {
-      return;
-    }
-
-    const store = useAgentStore.getState();
-
-    // 1. Build structured blocks for the last assistant message
-    if (this.currentIterationToolCalls.length > 0) {
-      const messages = store.messages;
-      // Walk backwards to find the assistant message that owns these tool calls
-      for (let i = messages.length - 1; i >= 0; i--) {
-        const msg = messages[i];
-        if (msg.role === 'assistant') {
-          const blocks: MessageContent[] = [];
-          // Preserve thinking block so Kimi/MiMo models get reasoning_content round-tripped
-          if (msg.thinking) {
-            blocks.push({ type: 'thinking', thinking: msg.thinking });
-          }
-          if (msg.content) {
-            blocks.push({ type: 'text', text: msg.content });
-          }
-          for (const tc of this.currentIterationToolCalls) {
-            blocks.push({ type: 'tool_call', id: tc.id, name: tc.name, input: tc.input });
-          }
-          useAgentStore.setState((draft) => {
-            const target = draft.messages[i];
-            if (target) target.blocks = blocks;
-          });
-          break;
-        }
-      }
-    }
-
-    // 2. Insert a tool_result message with structured blocks
-    if (this.pendingToolResults.length > 0) {
-      const resultBlocks: MessageContent[] = this.pendingToolResults.map((r) => ({
-        type: 'tool_result' as const,
-        toolCallId: r.toolCallId,
-        output: r.output,
-        isError: r.isError,
-      }));
-      store.addMessage({
-        id: crypto.randomUUID(),
-        role: 'tool',
-        content: '', // UI won't render this; blocks carry the real data
-        blocks: resultBlocks,
-        timestamp: Date.now(),
-      });
-    }
-
-    // Reset iteration tracking
-    this.currentIterationToolCalls = [];
-    this.pendingToolResults = [];
-  }
-
-  /**
    * Build LLM-compatible history from store messages.
    * Uses `blocks` when available for faithful tool_call/tool_result reconstruction;
    * falls back to text-only for messages that predate the structured format.
@@ -2202,30 +2157,35 @@ ${hints.map((h) => `- ${h}`).join('\n')}
   /**
    * Persist a structured turn record to the database for observability/tracing.
    */
-  private async persistTurnRecord(record: TurnRecord): Promise<void> {
+  private async persistTurnRecord(
+    record: TurnRecord,
+    recordAlreadyCommitted = false,
+  ): Promise<void> {
     const store = useAgentStore.getState();
     const conversationId = store.conversationId;
     if (!conversationId) return;
 
     try {
-      await tauriInvokeRaw('db_create_turn_record', {
-        id: record.id,
-        conversationId,
-        mode: record.mode,
-        iterations: record.iterations,
-        toolCalls: JSON.stringify(record.toolCalls),
-        tokenInput: record.tokenUsage?.inputTokens ?? 0,
-        tokenOutput: record.tokenUsage?.outputTokens ?? 0,
-        tokenTotal: record.tokenUsage?.totalTokens ?? 0,
-        tokenCacheRead: record.tokenUsage?.cacheReadTokens ?? 0,
-        tokenCacheWrite: record.tokenUsage?.cacheWriteTokens ?? 0,
-        stopReason: record.stopReason,
-        verificationPerformed: record.verificationPerformed,
-        verificationForced: record.verificationForced,
-        filesModified: JSON.stringify(record.filesModified),
-        durationMs: record.durationMs,
-        timestamp: record.timestamp,
-      });
+      if (!recordAlreadyCommitted) {
+        await tauriInvokeRaw('db_create_turn_record', {
+          id: record.id,
+          conversationId,
+          mode: record.mode,
+          iterations: record.iterations,
+          toolCalls: JSON.stringify(record.toolCalls),
+          tokenInput: record.tokenUsage?.inputTokens ?? 0,
+          tokenOutput: record.tokenUsage?.outputTokens ?? 0,
+          tokenTotal: record.tokenUsage?.totalTokens ?? 0,
+          tokenCacheRead: record.tokenUsage?.cacheReadTokens ?? 0,
+          tokenCacheWrite: record.tokenUsage?.cacheWriteTokens ?? 0,
+          stopReason: record.stopReason,
+          verificationPerformed: record.verificationPerformed,
+          verificationForced: record.verificationForced,
+          filesModified: JSON.stringify(record.filesModified),
+          durationMs: record.durationMs,
+          timestamp: record.timestamp,
+        });
+      }
 
       // Persist the structured trace (if attached by the harness)
       if (record.trace) {
@@ -2284,65 +2244,45 @@ ${hints.map((h) => `- ${h}`).join('\n')}
     }
   }
 
-  /** Persist the current conversation turn to the database */
-  private async persistConversation(
-    userMessage: string,
-    _assistantResponse: string,
-  ): Promise<void> {
+  private async commitTurn(titleSource: string, record: TurnRecord): Promise<void> {
     const store = useAgentStore.getState();
     const settings = useSettingsStore.getState();
     const conversationId = store.conversationId;
-    if (!conversationId) return;
-
-    try {
-      const title = userMessage.slice(0, 80) + (userMessage.length > 80 ? '…' : '');
-
-      const projectId = this.harness['projectId'] as string;
-
-      // Ensure the project row exists before inserting the conversation (FK requirement)
-      await tauriInvokeRaw('db_ensure_project', { id: projectId, path: projectId });
-
-      // Try to create the conversation; if it already exists (duplicate PK), update it
-      try {
-        await tauriInvokeRaw('db_create_conversation', {
-          id: conversationId,
-          projectId,
-          title,
-          mode: store.mode,
-          modelId: settings.activeModelId ?? null,
-          providerId: settings.activeProviderId ?? null,
-        });
-      } catch {
-        // Conversation already exists — update title and timestamp
-        await tauriInvokeRaw('db_update_conversation', {
-          conversationId,
-          title,
-        });
-      }
-
-      // Persist individual messages (all messages from this turn, not just last 2)
-      // We track which messages have been persisted via their ID; db_create_message
-      // silently ignores duplicate IDs.
-      for (const msg of store.messages) {
-        try {
-          await tauriInvokeRaw('db_create_message', {
-            id: msg.id,
-            conversationId,
-            role: msg.role,
-            content: msg.content,
-            toolCalls: msg.toolCalls ? JSON.stringify(msg.toolCalls) : null,
-            blocks: msg.blocks ? JSON.stringify(msg.blocks) : null,
-            tokenInput: 0,
-            tokenOutput: 0,
-          });
-        } catch {
-          // Message may already exist (duplicate insert) — ignore
-        }
-      }
-    } catch (err) {
-      // DB persistence is best-effort; don't break the chat flow
-      console.warn('[HarnessBridge] Failed to persist conversation:', err);
-    }
+    if (!conversationId) throw new Error('Cannot persist a turn without a conversation ID.');
+    await tauriInvokeRaw('db_commit_agent_turn', {
+      projectId: this._projectId,
+      projectPath: this.harness.getWorkspacePath(),
+      conversationId,
+      title: titleSource.slice(0, 80) + (titleSource.length > 80 ? '…' : ''),
+      mode: store.mode,
+      modelId: settings.activeModelId ?? null,
+      providerId: settings.activeProviderId ?? null,
+      messagesJson: JSON.stringify(
+        store.messages.map((message) => ({
+          id: message.id,
+          role: message.role,
+          content: message.content,
+          toolCalls: message.toolCalls ? JSON.stringify(message.toolCalls) : null,
+          blocks: message.blocks ? JSON.stringify(message.blocks) : null,
+        })),
+      ),
+      turnJson: JSON.stringify({
+        id: record.id,
+        mode: record.mode,
+        iterations: record.iterations,
+        toolCalls: JSON.stringify(record.toolCalls),
+        tokenInput: record.tokenUsage.inputTokens,
+        tokenOutput: record.tokenUsage.outputTokens,
+        tokenTotal: record.tokenUsage.totalTokens,
+        tokenCacheRead: record.tokenUsage.cacheReadTokens ?? 0,
+        tokenCacheWrite: record.tokenUsage.cacheWriteTokens ?? 0,
+        stopReason: record.stopReason,
+        verificationPerformed: record.verificationPerformed,
+        verificationForced: record.verificationForced,
+        filesModified: JSON.stringify(record.filesModified),
+        durationMs: record.durationMs,
+      }),
+    });
   }
 
   private async ensureConversationExists(titleSource: string): Promise<void> {

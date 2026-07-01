@@ -1,6 +1,13 @@
 import { create } from 'zustand';
 import { immer } from 'zustand/middleware/immer';
-import type { AgentType, SddStatus, SddTask, ModeSwitchRequest, AgentQuestion } from '@hyscode/agent-harness';
+import type {
+  AgentType,
+  SddStatus,
+  SddTask,
+  ModeSwitchRequest,
+  AgentQuestion,
+  TurnTerminalStatus,
+} from '@hyscode/agent-harness';
 import type { MessageContent, TokenUsage } from '@hyscode/ai-providers';
 
 export type { TokenUsage };
@@ -51,6 +58,7 @@ export interface PerTabState {
   pendingUserQuestion: PendingUserQuestion | null;
   /** Active and completed sub-agent tasks spawned during this conversation. */
   subAgents: SubAgentState[];
+  terminalStatus: TurnTerminalStatus | null;
 }
 
 export interface TabMeta {
@@ -86,6 +94,7 @@ export function defaultPerTabState(mode: AgentMode = 'chat'): PerTabState {
     delegationChain: [],
     pendingUserQuestion: null,
     subAgents: [],
+    terminalStatus: null,
   };
 }
 export type MessageRole = 'user' | 'assistant' | 'tool';
@@ -94,7 +103,7 @@ export interface ToolCallDisplay {
   id: string;
   name: string;
   input: Record<string, unknown>;
-  status: 'pending' | 'approved' | 'running' | 'success' | 'error';
+  status: 'pending' | 'approved' | 'running' | 'cancelling' | 'success' | 'error';
   output?: string;
   error?: string;
   startedAt?: number;
@@ -107,7 +116,7 @@ export interface ChatMessage {
   content: string;
   thinking?: string;
   toolCalls?: ToolCallDisplay[];
-   /** When true, `content` is a user-facing error message to render in the error UI. */
+  /** When true, `content` is a user-facing error message to render in the error UI. */
   isError?: boolean;
   /** Structured LLM content blocks for faithful history reconstruction.
    *  When present, buildHistory() uses these instead of `content` string. */
@@ -247,6 +256,7 @@ interface AgentState {
 
   // User questions (ask_user tool)
   pendingUserQuestion: PendingUserQuestion | null;
+  terminalStatus: TurnTerminalStatus | null;
 
   // ─── Multi-tab management ─────────────────────────────────────────────
   /** Ordered list of open tabs (visible in the switcher). */
@@ -264,7 +274,15 @@ interface AgentState {
   /** Update a tab's display title. */
   updateTabTitle: (id: string, title: string) => void;
   /** Load previously saved tabs into the store (called on app init). */
-  loadSavedTabs: (tabs: Array<{ id: string; title: string; conversationId: string | null; mode: AgentMode; messages: ChatMessage[] }>) => void;
+  loadSavedTabs: (
+    tabs: Array<{
+      id: string;
+      title: string;
+      conversationId: string | null;
+      mode: AgentMode;
+      messages: ChatMessage[];
+    }>,
+  ) => void;
 
   // Session history
   sessions: SessionSummary[];
@@ -296,8 +314,14 @@ interface AgentState {
   addAttachedImage: (img: AttachedImage) => void;
   removeAttachedImage: (id: string) => void;
   clearAttachedImages: () => void;
-  setGatheredContext: (entries: Array<{ path: string; relevance: number; tokenEstimate: number }>) => void;
-  addGatheredContextFile: (entry: { path: string; relevance: number; tokenEstimate: number }) => void;
+  setGatheredContext: (
+    entries: Array<{ path: string; relevance: number; tokenEstimate: number }>,
+  ) => void;
+  addGatheredContextFile: (entry: {
+    path: string;
+    relevance: number;
+    tokenEstimate: number;
+  }) => void;
   removeGatheredContextFile: (path: string) => void;
   clearConversation: () => void;
 
@@ -344,6 +368,7 @@ interface AgentState {
 
   // User questions (ask_user tool)
   setPendingUserQuestion: (question: PendingUserQuestion | null) => void;
+  setTerminalStatus: (status: TurnTerminalStatus | null) => void;
 
   // Sub-agents
   subAgents: SubAgentState[];
@@ -388,6 +413,7 @@ export const useAgentStore = create<AgentState>()(
     delegationChain: [],
     pendingUserQuestion: null,
     subAgents: [],
+    terminalStatus: null,
     sessions: [],
     sessionsLoading: false,
     historyOpen: false,
@@ -692,7 +718,9 @@ export const useAgentStore = create<AgentState>()(
         // Recalculate progress
         const total = state.sddTasks.length;
         if (total > 0) {
-          const done = state.sddTasks.filter((t) => t.status === 'completed' || t.status === 'skipped').length;
+          const done = state.sddTasks.filter(
+            (t) => t.status === 'completed' || t.status === 'skipped',
+          ).length;
           state.sddProgress = Math.round((done / total) * 100);
         }
       }),
@@ -769,6 +797,11 @@ export const useAgentStore = create<AgentState>()(
         state.pendingUserQuestion = question;
       }),
 
+    setTerminalStatus: (status) =>
+      set((state) => {
+        state.terminalStatus = status;
+      }),
+
     // ─── Sub-Agent Actions ────────────────────────────────────────────
 
     addSubAgent: (agent) =>
@@ -840,6 +873,8 @@ export const useAgentStore = create<AgentState>()(
       set((state) => {
         // Can't close last tab
         if (state.openTabs.length <= 1) return;
+        // The active turn owns the flat state until its terminal event arrives.
+        if (state.activeTabId === id && state.isStreaming) return;
         const idx = state.openTabs.findIndex((t) => t.id === id);
         if (idx === -1) return;
         state.openTabs.splice(idx, 1);
@@ -938,6 +973,7 @@ function _extractTab(s: any): PerTabState {
     delegationChain: s.delegationChain,
     pendingUserQuestion: s.pendingUserQuestion,
     subAgents: s.subAgents ?? [],
+    terminalStatus: s.terminalStatus ?? null,
   };
 }
 
@@ -970,4 +1006,5 @@ function _applyTab(s: any, ps: PerTabState): void {
   s.delegationChain = ps.delegationChain;
   s.pendingUserQuestion = ps.pendingUserQuestion;
   s.subAgents = ps.subAgents ?? [];
+  s.terminalStatus = ps.terminalStatus ?? null;
 }

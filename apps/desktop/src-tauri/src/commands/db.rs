@@ -33,6 +33,7 @@ pub fn open_database(app_dir: &std::path::Path) -> Connection {
     conn.execute_batch(include_str!("../../migrations/009_agent_sdd.sql"))
         .expect("failed to run migration 009");
     apply_migration_010(&conn);
+    apply_migration_011(&conn);
     conn
 }
 
@@ -42,12 +43,36 @@ pub fn open_database(app_dir: &std::path::Path) -> Connection {
 /// full schema.
 fn apply_migration_010(conn: &Connection) {
     let additions: &[(&str, &str, &str)] = &[
-        ("turn_records", "token_total", "ALTER TABLE turn_records ADD COLUMN token_total INTEGER NOT NULL DEFAULT 0"),
-        ("turn_records", "token_cache_read", "ALTER TABLE turn_records ADD COLUMN token_cache_read INTEGER NOT NULL DEFAULT 0"),
-        ("turn_records", "token_cache_write", "ALTER TABLE turn_records ADD COLUMN token_cache_write INTEGER NOT NULL DEFAULT 0"),
-        ("traces", "token_total", "ALTER TABLE traces ADD COLUMN token_total INTEGER NOT NULL DEFAULT 0"),
-        ("traces", "token_cache_read", "ALTER TABLE traces ADD COLUMN token_cache_read INTEGER NOT NULL DEFAULT 0"),
-        ("traces", "token_cache_write", "ALTER TABLE traces ADD COLUMN token_cache_write INTEGER NOT NULL DEFAULT 0"),
+        (
+            "turn_records",
+            "token_total",
+            "ALTER TABLE turn_records ADD COLUMN token_total INTEGER NOT NULL DEFAULT 0",
+        ),
+        (
+            "turn_records",
+            "token_cache_read",
+            "ALTER TABLE turn_records ADD COLUMN token_cache_read INTEGER NOT NULL DEFAULT 0",
+        ),
+        (
+            "turn_records",
+            "token_cache_write",
+            "ALTER TABLE turn_records ADD COLUMN token_cache_write INTEGER NOT NULL DEFAULT 0",
+        ),
+        (
+            "traces",
+            "token_total",
+            "ALTER TABLE traces ADD COLUMN token_total INTEGER NOT NULL DEFAULT 0",
+        ),
+        (
+            "traces",
+            "token_cache_read",
+            "ALTER TABLE traces ADD COLUMN token_cache_read INTEGER NOT NULL DEFAULT 0",
+        ),
+        (
+            "traces",
+            "token_cache_write",
+            "ALTER TABLE traces ADD COLUMN token_cache_write INTEGER NOT NULL DEFAULT 0",
+        ),
     ];
     for (table, column, ddl) in additions {
         let exists: bool = conn
@@ -61,6 +86,21 @@ fn apply_migration_010(conn: &Connection) {
             conn.execute_batch(ddl)
                 .unwrap_or_else(|e| panic!("failed to add column {table}.{column}: {e}"));
         }
+    }
+}
+
+/// Migration 011: preserve provider-native transcript blocks for exact replay.
+fn apply_migration_011(conn: &Connection) {
+    let exists: bool = conn
+        .query_row(
+            "SELECT COUNT(*) > 0 FROM pragma_table_info('messages') WHERE name = 'blocks'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap_or(false);
+    if !exists {
+        conn.execute_batch("ALTER TABLE messages ADD COLUMN blocks TEXT")
+            .unwrap_or_else(|error| panic!("failed to add messages.blocks: {error}"));
     }
 }
 
@@ -95,6 +135,7 @@ pub struct MessageRow {
     pub role: String,
     pub content: String,
     pub tool_calls: Option<String>,
+    pub blocks: Option<String>,
     pub token_input: i64,
     pub token_output: i64,
     pub created_at: String,
@@ -248,7 +289,7 @@ pub fn db_list_messages(
     let conn = state.0.lock().map_err(|e| e.to_string())?;
     let mut stmt = conn
         .prepare(
-            "SELECT id, role, content, tool_calls, token_input, token_output, created_at
+            "SELECT id, role, content, tool_calls, blocks, token_input, token_output, created_at
              FROM messages
              WHERE conversation_id = ?1
              ORDER BY created_at ASC",
@@ -261,9 +302,10 @@ pub fn db_list_messages(
                 role: row.get(1)?,
                 content: row.get(2)?,
                 tool_calls: row.get(3)?,
-                token_input: row.get(4)?,
-                token_output: row.get(5)?,
-                created_at: row.get(6)?,
+                blocks: row.get(4)?,
+                token_input: row.get(5)?,
+                token_output: row.get(6)?,
+                created_at: row.get(7)?,
             })
         })
         .map_err(|e| e.to_string())?
@@ -280,19 +322,21 @@ pub fn db_create_message(
     role: String,
     content: String,
     tool_calls: Option<String>,
+    blocks: Option<String>,
     token_input: Option<i64>,
     token_output: Option<i64>,
 ) -> Result<(), String> {
     let conn = state.0.lock().map_err(|e| e.to_string())?;
     conn.execute(
-        "INSERT INTO messages (id, conversation_id, role, content, tool_calls, token_input, token_output)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        "INSERT INTO messages (id, conversation_id, role, content, tool_calls, blocks, token_input, token_output)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
         params![
             id,
             conversation_id,
             role,
             content,
             tool_calls,
+            blocks,
             token_input.unwrap_or(0),
             token_output.unwrap_or(0)
         ],
@@ -351,6 +395,133 @@ pub fn db_create_turn_record(
     )
     .map_err(|e| e.to_string())?;
     Ok(())
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TurnCommitMessage {
+    id: String,
+    role: String,
+    content: String,
+    tool_calls: Option<String>,
+    blocks: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TurnCommitRecord {
+    id: String,
+    mode: String,
+    iterations: i64,
+    tool_calls: String,
+    token_input: i64,
+    token_output: i64,
+    token_total: i64,
+    token_cache_read: i64,
+    token_cache_write: i64,
+    stop_reason: String,
+    verification_performed: bool,
+    verification_forced: bool,
+    files_modified: String,
+    duration_ms: i64,
+}
+
+/// Atomically commits the conversation transcript and its turn record.
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+pub fn db_commit_agent_turn(
+    state: State<'_, DbState>,
+    project_id: String,
+    project_path: String,
+    conversation_id: String,
+    title: String,
+    mode: String,
+    model_id: Option<String>,
+    provider_id: Option<String>,
+    messages_json: String,
+    turn_json: String,
+) -> Result<(), String> {
+    let messages: Vec<TurnCommitMessage> =
+        serde_json::from_str(&messages_json).map_err(|error| error.to_string())?;
+    let turn: TurnCommitRecord =
+        serde_json::from_str(&turn_json).map_err(|error| error.to_string())?;
+    let mut conn = state.0.lock().map_err(|error| error.to_string())?;
+    let transaction = conn.transaction().map_err(|error| error.to_string())?;
+    let project_name = project_path
+        .trim_end_matches(['/', '\\'])
+        .rsplit(['/', '\\'])
+        .next()
+        .unwrap_or(&project_path);
+
+    transaction
+        .execute(
+            "INSERT OR IGNORE INTO projects (id, name, path) VALUES (?1, ?2, ?3)",
+            params![project_id, project_name, project_path],
+        )
+        .map_err(|error| error.to_string())?;
+    transaction
+        .execute(
+            "INSERT INTO conversations (id, project_id, title, mode, model_id, provider_id)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+             ON CONFLICT(id) DO UPDATE SET title=excluded.title, mode=excluded.mode,
+               model_id=excluded.model_id, provider_id=excluded.provider_id,
+               updated_at=datetime('now')",
+            params![
+                conversation_id,
+                project_id,
+                title,
+                mode,
+                model_id,
+                provider_id
+            ],
+        )
+        .map_err(|error| error.to_string())?;
+
+    for message in messages {
+        transaction
+            .execute(
+                "INSERT OR IGNORE INTO messages
+                 (id, conversation_id, role, content, tool_calls, blocks, token_input, token_output)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0, 0)",
+                params![
+                    message.id,
+                    conversation_id,
+                    message.role,
+                    message.content,
+                    message.tool_calls,
+                    message.blocks,
+                ],
+            )
+            .map_err(|error| error.to_string())?;
+    }
+
+    transaction
+        .execute(
+            "INSERT OR REPLACE INTO turn_records
+             (id, conversation_id, mode, iterations, tool_calls, token_input, token_output,
+              token_total, token_cache_read, token_cache_write, stop_reason,
+              verification_performed, verification_forced, files_modified, duration_ms)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
+            params![
+                turn.id,
+                conversation_id,
+                turn.mode,
+                turn.iterations,
+                turn.tool_calls,
+                turn.token_input,
+                turn.token_output,
+                turn.token_total,
+                turn.token_cache_read,
+                turn.token_cache_write,
+                turn.stop_reason,
+                turn.verification_performed as i64,
+                turn.verification_forced as i64,
+                turn.files_modified,
+                turn.duration_ms,
+            ],
+        )
+        .map_err(|error| error.to_string())?;
+    transaction.commit().map_err(|error| error.to_string())
 }
 
 #[derive(Serialize)]

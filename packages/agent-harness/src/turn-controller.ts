@@ -42,7 +42,12 @@ export class TurnController {
   finish(status: TurnStatus): boolean {
     if (this.terminalStatus) return false;
     this.terminalStatus = status;
-    this.phase = status === 'cancelled' ? 'cancelled' : status === 'error' ? 'failed' : 'completed';
+    this.phase =
+      status === 'cancelled' || status === 'cancelled_partial'
+        ? 'cancelled'
+        : status === 'error'
+          ? 'failed'
+          : 'completed';
     return true;
   }
 

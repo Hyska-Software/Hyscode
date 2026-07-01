@@ -33,7 +33,12 @@ describe('ToolRouter', () => {
     router.register(handler);
     const events: string[] = [];
     router.setEventHandler((event) => events.push(event.type));
-    const record = await router.execute('write_value', 'call', {}, context(new AbortController().signal));
+    const record = await router.execute(
+      'write_value',
+      'call',
+      {},
+      context(new AbortController().signal),
+    );
     expect(record.output.success).toBe(false);
     expect(record.output.error).toContain('missing required field');
     expect(handler.execute).not.toHaveBeenCalled();
@@ -55,17 +60,30 @@ describe('ToolRouter', () => {
     expect(handler.execute).not.toHaveBeenCalled();
   });
 
-  it('returns cancellation without waiting for a running tool to settle', async () => {
+  it('waits for an uncancellable native operation and reports partial cancellation', async () => {
     const router = new ToolRouter();
+    let settle: ((result: { success: boolean; output: string }) => void) | undefined;
     router.register({
       ...handler,
-      execute: () => new Promise(() => undefined),
+      execute: () =>
+        new Promise((resolve) => {
+          settle = resolve;
+        }),
     });
     const controller = new AbortController();
-    const execution = router.execute('write_value', 'running-call', { value: 'x' }, context(controller.signal));
+    const execution = router.execute(
+      'write_value',
+      'running-call',
+      { value: 'x' },
+      context(controller.signal),
+    );
     controller.abort();
+    settle?.({ success: true, output: 'written' });
     await expect(execution).resolves.toMatchObject({
-      output: { success: false, error: 'Tool call cancelled.' },
+      output: {
+        success: false,
+        metadata: { cancellationPartial: true, operationCompleted: true },
+      },
     });
   });
 });

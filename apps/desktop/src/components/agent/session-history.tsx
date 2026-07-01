@@ -195,6 +195,7 @@ async function restoreSession(conversationId: string): Promise<void> {
       role: r.role as 'user' | 'assistant',
       content: r.content,
       toolCalls: r.tool_calls ? JSON.parse(r.tool_calls) : undefined,
+      blocks: r.blocks ? JSON.parse(r.blocks) : undefined,
       timestamp: new Date(r.created_at).getTime(),
     }));
 

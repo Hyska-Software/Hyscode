@@ -1,4 +1,4 @@
-import { Sparkles, ChevronDown, ChevronRight, Brain, AlertCircle } from 'lucide-react';
+import { Sparkles, ChevronDown, ChevronRight, Brain, AlertCircle, CircleStop } from 'lucide-react';
 import { useRef, useEffect, useState, memo } from 'react';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { useAgentStore } from '@/stores/agent-store';
@@ -247,6 +247,7 @@ export function AgentMessages() {
   const messages = useAgentStore((s) => s.messages);
   const isStreaming = useAgentStore((s) => s.isStreaming);
   const pendingApprovals = useAgentStore((s) => s.pendingApprovals);
+  const terminalStatus = useAgentStore((s) => s.terminalStatus);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   // Auto-scroll on new messages (throttled to avoid jank during fast streaming)
@@ -312,6 +313,22 @@ export function AgentMessages() {
 
           {/* Pending mode switch delegation */}
           <ModeSwitchDialog />
+
+          {!isStreaming && terminalStatus && terminalStatus !== 'complete' && (
+            <div className="mt-2 flex items-center gap-2 rounded-md border border-border/50 bg-muted/20 px-3 py-2 text-[10px] text-muted-foreground">
+              <CircleStop className="h-3 w-3" />
+              <span>
+                {terminalStatus === 'max_iterations' &&
+                  'Stopped after reaching the iteration limit.'}
+                {terminalStatus === 'loop_detected' &&
+                  'Stopped because a repeated tool loop was detected.'}
+                {terminalStatus === 'cancelled' && 'Turn cancelled.'}
+                {terminalStatus === 'cancelled_partial' &&
+                  'Cancellation requested; one native operation completed before stopping.'}
+                {terminalStatus === 'error' && 'Turn ended with an error.'}
+              </span>
+            </div>
+          )}
 
           {/* Scroll anchor */}
           <div ref={bottomRef} />

@@ -358,7 +358,34 @@ export interface HarnessConfig {
   costOptimization: boolean;
 }
 
-export type TurnStatus = 'complete' | 'max_iterations' | 'loop_detected' | 'cancelled' | 'error';
+export type TurnTerminalStatus =
+  | 'complete'
+  | 'max_iterations'
+  | 'loop_detected'
+  | 'cancelled'
+  | 'cancelled_partial'
+  | 'error';
+export type TurnStatus = TurnTerminalStatus;
+
+export type TurnIdentity = {
+  turnId: string;
+  conversationId: string;
+  iterationId: string;
+  iteration: number;
+};
+
+export type TranscriptBlock =
+  | { type: 'text'; text: string }
+  | { type: 'thinking'; text: string }
+  | { type: 'tool_call'; id: string; name: string; input: Record<string, unknown> }
+  | { type: 'tool_result'; toolCallId: string; output: string; isError: boolean };
+
+export type TurnTranscript = {
+  turnId: string;
+  conversationId: string;
+  blocks: TranscriptBlock[];
+  status: TurnTerminalStatus | null;
+};
 
 export type TurnRequest = {
   userMessage: string;
@@ -394,6 +421,7 @@ type HarnessEventPayload =
   | { type: 'turn_start'; conversationId: string; iteration: number }
   | { type: 'api_request_sent'; iteration: number; providerId: string; modelId: string }
   | { type: 'stream_chunk'; chunk: StreamChunk }
+  | { type: 'transcript_message'; role: 'assistant' | 'tool'; blocks: Message['content'] }
   | {
       type: 'tool_call_start';
       toolCallId: string;
@@ -411,7 +439,7 @@ type HarnessEventPayload =
     }
   | {
       type: 'turn_end';
-      reason: 'complete' | 'max_iterations' | 'cancelled' | 'error';
+      reason: TurnTerminalStatus;
       error?: string;
       tokenUsage: TokenUsage;
     }
@@ -448,6 +476,8 @@ type HarnessEventPayload =
 export type HarnessEvent = HarnessEventPayload & {
   turnId?: string;
   conversationId?: string;
+  iterationId?: string;
+  iteration?: number;
 };
 
 export type HarnessEventHandler = (event: HarnessEvent) => void;
@@ -560,7 +590,7 @@ export interface TurnRecord {
   /** Token usage for this turn (includes prompt cache fields when provider reports them) */
   tokenUsage: TokenUsage;
   /** Why the turn ended */
-  stopReason: 'complete' | 'max_iterations' | 'cancelled' | 'error';
+  stopReason: TurnTerminalStatus;
   /** Whether the agent performed verification (test/lint/diff) */
   verificationPerformed: boolean;
   /** Whether verification was forced by middleware */

@@ -22,11 +22,7 @@ import {
   Bell,
   SlidersHorizontal,
 } from 'lucide-react';
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from '../../../components/ui/tooltip';
+import { Tooltip, TooltipContent, TooltipTrigger } from '../../../components/ui/tooltip';
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useAgentStore } from '../../../stores';
 import { useSettingsStore } from '../../../stores/settings-store';
@@ -58,13 +54,18 @@ const MODE_COLORS: Record<AgentMode, string> = {
   plan: 'text-amber-400',
 };
 
-const APPROVAL_OPTIONS: { value: ApprovalMode; label: string; icon: typeof Shield; color?: string }[] = [
-  { value: 'manual',        label: 'Manual',     icon: Shield,           color: 'text-blue-400' },
-  { value: 'smart',         label: 'Smart',      icon: Brain,            color: 'text-cyan-400' },
-  { value: 'session-trust', label: 'Trust',      icon: ShieldCheck,      color: 'text-emerald-400' },
-  { value: 'notify',        label: 'Notify',     icon: Bell,             color: 'text-violet-400' },
-  { value: 'yolo',          label: 'Auto',       icon: ShieldOff,        color: 'text-amber-400' },
-  { value: 'custom',        label: 'Custom',     icon: SlidersHorizontal, color: 'text-purple-400' },
+const APPROVAL_OPTIONS: {
+  value: ApprovalMode;
+  label: string;
+  icon: typeof Shield;
+  color?: string;
+}[] = [
+  { value: 'manual', label: 'Manual', icon: Shield, color: 'text-blue-400' },
+  { value: 'smart', label: 'Smart', icon: Brain, color: 'text-cyan-400' },
+  { value: 'session-trust', label: 'Trust', icon: ShieldCheck, color: 'text-emerald-400' },
+  { value: 'notify', label: 'Notify', icon: Bell, color: 'text-violet-400' },
+  { value: 'yolo', label: 'Auto', icon: ShieldOff, color: 'text-amber-400' },
+  { value: 'custom', label: 'Custom', icon: SlidersHorizontal, color: 'text-purple-400' },
 ];
 
 const AGENT_DEFS = getAllAgentDefinitions();
@@ -115,15 +116,22 @@ async function restoreSession(conversationId: string): Promise<void> {
       role: r.role as 'user' | 'assistant',
       content: r.content,
       toolCalls: r.tool_calls ? JSON.parse(r.tool_calls) : undefined,
+      blocks: r.blocks ? JSON.parse(r.blocks) : undefined,
       timestamp: new Date(r.created_at).getTime(),
     }));
     const store = useAgentStore.getState();
     store.clearConversation();
     store.setConversationId(conversationId);
     for (const msg of messages) store.addMessage(msg);
-    try { HarnessBridge.get().restoreSession(conversationId); } catch { /* bridge not ready */ }
+    try {
+      HarnessBridge.get().restoreSession(conversationId);
+    } catch {
+      /* bridge not ready */
+    }
     store.setHistoryOpen(false);
-  } catch { /* failed to load */ }
+  } catch {
+    /* failed to load */
+  }
 }
 
 async function deleteSession(conversationId: string): Promise<void> {
@@ -133,7 +141,9 @@ async function deleteSession(conversationId: string): Promise<void> {
     if (useAgentStore.getState().conversationId === conversationId) {
       useAgentStore.getState().clearConversation();
     }
-  } catch { /* silently fail */ }
+  } catch {
+    /* silently fail */
+  }
 }
 
 function startNewSession(): void {
@@ -141,7 +151,11 @@ function startNewSession(): void {
   store.clearConversation();
   const newId = crypto.randomUUID();
   store.setConversationId(newId);
-  try { HarnessBridge.get().restoreSession(newId); } catch { /* bridge not ready */ }
+  try {
+    HarnessBridge.get().restoreSession(newId);
+  } catch {
+    /* bridge not ready */
+  }
   store.setHistoryOpen(false);
 }
 
@@ -165,10 +179,16 @@ function Section({
         onClick={() => setOpen((v) => !v)}
         className="flex w-full items-center gap-1 px-2 py-1.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground hover:text-foreground transition-colors"
       >
-        {open ? <ChevronDown className="h-3 w-3 shrink-0" /> : <ChevronRight className="h-3 w-3 shrink-0" />}
+        {open ? (
+          <ChevronDown className="h-3 w-3 shrink-0" />
+        ) : (
+          <ChevronRight className="h-3 w-3 shrink-0" />
+        )}
         <span>{title}</span>
         {count !== undefined && (
-          <span className="ml-auto rounded-full bg-muted px-1.5 text-[9px] tabular-nums">{count}</span>
+          <span className="ml-auto rounded-full bg-muted px-1.5 text-[9px] tabular-nums">
+            {count}
+          </span>
         )}
       </button>
       {open && <div className="px-2 pb-2">{children}</div>}
@@ -272,7 +292,9 @@ function SessionsSection() {
           {sessionTokenUsage && sessionTokenUsage.totalTokens > 0 && (
             <>
               <span>·</span>
-              <span className="tabular-nums">{(sessionTokenUsage.totalTokens / 1000).toFixed(1)}k tok</span>
+              <span className="tabular-nums">
+                {(sessionTokenUsage.totalTokens / 1000).toFixed(1)}k tok
+              </span>
             </>
           )}
           {activeModelId && (
@@ -306,7 +328,9 @@ function SessionsSection() {
               >
                 <Icon className="mt-0.5 h-3 w-3 shrink-0" />
                 <div className="flex min-w-0 flex-1 flex-col">
-                  <span className="truncate text-[10px] font-medium leading-tight">{session.title}</span>
+                  <span className="truncate text-[10px] font-medium leading-tight">
+                    {session.title}
+                  </span>
                   <div className="flex items-center gap-1.5 text-[8px] text-muted-foreground">
                     <span>{session.messageCount} msgs</span>
                     <span>·</span>
@@ -324,7 +348,10 @@ function SessionsSection() {
                     </button>
                   )}
                   <button
-                    onClick={(e) => { e.stopPropagation(); deleteSession(session.id); }}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      deleteSession(session.id);
+                    }}
                     title="Delete"
                     className="rounded p-0.5 hover:bg-muted hover:text-red-400"
                   >
@@ -406,15 +433,13 @@ function QuickSettingsSection() {
       <div className="mb-2">
         <div className="flex items-center justify-between">
           <span className="text-[9px] text-muted-foreground">Provider / Model</span>
-          <button
-            onClick={openSettings}
-            className="text-[9px] text-accent hover:underline"
-          >
+          <button onClick={openSettings} className="text-[9px] text-accent hover:underline">
             Change
           </button>
         </div>
         <span className="block truncate text-[10px] text-foreground mt-0.5">
-          {activeProviderId ?? 'None'}{activeModelId ? ` · ${activeModelId}` : ''}
+          {activeProviderId ?? 'None'}
+          {activeModelId ? ` · ${activeModelId}` : ''}
         </span>
       </div>
 
@@ -446,14 +471,21 @@ function QuickSettingsSection() {
           <div className="flex items-center gap-1">
             <span className="text-[9px] text-muted-foreground">Temperature</span>
             <Tooltip>
-              <TooltipTrigger render={<button className="text-muted-foreground/50 hover:text-muted-foreground transition-colors" />}>
+              <TooltipTrigger
+                render={
+                  <button className="text-muted-foreground/50 hover:text-muted-foreground transition-colors" />
+                }
+              >
                 <HelpCircle className="h-2.5 w-2.5" />
               </TooltipTrigger>
               <TooltipContent side="right" className="max-w-[180px]">
                 <p className="text-[10px] leading-relaxed">
                   Controls how creative or predictable the AI responses are.
-                  <br /><br />
-                  <span className="text-muted-foreground">0.0</span> = deterministic · <span className="text-muted-foreground">1.0</span> = balanced · <span className="text-muted-foreground">2.0</span> = very creative
+                  <br />
+                  <br />
+                  <span className="text-muted-foreground">0.0</span> = deterministic ·{' '}
+                  <span className="text-muted-foreground">1.0</span> = balanced ·{' '}
+                  <span className="text-muted-foreground">2.0</span> = very creative
                 </p>
               </TooltipContent>
             </Tooltip>
@@ -482,7 +514,9 @@ function QuickSettingsSection() {
             >
               −
             </button>
-            <span className="min-w-[20px] text-center text-[10px] tabular-nums text-foreground">{maxIterations}</span>
+            <span className="min-w-[20px] text-center text-[10px] tabular-nums text-foreground">
+              {maxIterations}
+            </span>
             <button
               onClick={() => setSetting('maxIterations', Math.min(500, maxIterations + 5))}
               className="rounded bg-muted px-1.5 py-px text-[9px] text-muted-foreground hover:text-foreground transition-colors"
@@ -520,10 +554,7 @@ function McpStatusSection() {
         <div className="flex flex-col items-center gap-1 py-2">
           <Server className="h-4 w-4 text-muted-foreground/30" />
           <p className="text-[9px] text-muted-foreground opacity-50">No servers configured</p>
-          <button
-            onClick={openSettings}
-            className="text-[9px] text-accent hover:underline"
-          >
+          <button onClick={openSettings} className="text-[9px] text-accent hover:underline">
             Configure in Settings
           </button>
         </div>
@@ -574,7 +605,8 @@ export function AgentSidebarView() {
         <span
           className={cn(
             'ml-1 flex items-center gap-1 rounded px-1.5 py-0.5 text-[9px] font-medium',
-            modeColor, 'bg-current/10',
+            modeColor,
+            'bg-current/10',
           )}
           style={{ backgroundColor: 'color-mix(in srgb, currentColor 10%, transparent)' }}
         >

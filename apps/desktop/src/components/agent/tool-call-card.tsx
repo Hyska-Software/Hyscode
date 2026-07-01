@@ -233,7 +233,7 @@ function FileEditCard({ toolCall }: { toolCall: ToolCallDisplay }) {
     '') as string;
   const oldContent = (toolCall.input.old_string as string) ?? '';
   const lang = detectLang(path);
-  const isRunning = toolCall.status === 'running';
+  const isRunning = toolCall.status === 'running' || toolCall.status === 'cancelling';
   const isDone = toolCall.status === 'success';
   const isError = toolCall.status === 'error';
   const duration = formatDuration(toolCall.startedAt, toolCall.completedAt);
@@ -312,7 +312,7 @@ function FileEditCard({ toolCall }: { toolCall: ToolCallDisplay }) {
 
 function FileReferenceRow({ toolCall }: { toolCall: ToolCallDisplay }) {
   const path = (toolCall.input.path as string) ?? (toolCall.input.query as string) ?? '';
-  const isRunning = toolCall.status === 'running';
+  const isRunning = toolCall.status === 'running' || toolCall.status === 'cancelling';
   const isDone = toolCall.status === 'success';
   const isError = toolCall.status === 'error';
   const [showOutput, setShowOutput] = useState(false);
@@ -388,7 +388,7 @@ function FileReferenceRow({ toolCall }: { toolCall: ToolCallDisplay }) {
 
 function TerminalCard({ toolCall }: { toolCall: ToolCallDisplay }) {
   const command = (toolCall.input.command as string) ?? '';
-  const isRunning = toolCall.status === 'running';
+  const isRunning = toolCall.status === 'running' || toolCall.status === 'cancelling';
   const isDone = toolCall.status === 'success';
   const isError = toolCall.status === 'error';
   const duration = formatDuration(toolCall.startedAt, toolCall.completedAt);
@@ -454,7 +454,7 @@ function TerminalCard({ toolCall }: { toolCall: ToolCallDisplay }) {
 
 function RunCodeCard({ toolCall }: { toolCall: ToolCallDisplay }) {
   const language = (toolCall.input.language as string) ?? '';
-  const isRunning = toolCall.status === 'running';
+  const isRunning = toolCall.status === 'running' || toolCall.status === 'cancelling';
   const isDone = toolCall.status === 'success';
   const isError = toolCall.status === 'error';
   const duration = formatDuration(toolCall.startedAt, toolCall.completedAt);
@@ -518,7 +518,7 @@ function RunCodeCard({ toolCall }: { toolCall: ToolCallDisplay }) {
 // ─── Browser Card (web_search / web_fetch) ────────────────────────────────────
 
 function BrowserCard({ toolCall }: { toolCall: ToolCallDisplay }) {
-  const isRunning = toolCall.status === 'running';
+  const isRunning = toolCall.status === 'running' || toolCall.status === 'cancelling';
   const isDone = toolCall.status === 'success';
   const isError = toolCall.status === 'error';
   const duration = formatDuration(toolCall.startedAt, toolCall.completedAt);
@@ -637,7 +637,7 @@ function getGenericSummary(toolCall: ToolCallDisplay): string {
 
 function GenericToolRow({ toolCall }: { toolCall: ToolCallDisplay }) {
   const ToolIcon = GENERIC_ICONS[toolCall.name] ?? Wrench;
-  const isRunning = toolCall.status === 'running';
+  const isRunning = toolCall.status === 'running' || toolCall.status === 'cancelling';
   const isDone = toolCall.status === 'success';
   const isError = toolCall.status === 'error';
   const summary = getGenericSummary(toolCall);
@@ -770,7 +770,7 @@ const TOOL_ICON_MAP: Record<string, LucideIcon> = {
 
 export function CompactToolCallRow({ toolCall }: { toolCall: ToolCallDisplay }) {
   const [expanded, setExpanded] = useState(false);
-  const isRunning = toolCall.status === 'running';
+  const isRunning = toolCall.status === 'running' || toolCall.status === 'cancelling';
   const isDone = toolCall.status === 'success';
   const isError = toolCall.status === 'error';
 

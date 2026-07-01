@@ -8,7 +8,13 @@ import { CommandPalette, openCommandPalette } from './components/editor/command-
 import { TooltipProvider } from './components/ui/tooltip';
 import { DialogProvider } from './components/ui/dialogs';
 import { EditorLayout, AgentLayout, ReviewLayout } from './components/layouts';
-import { useProjectStore, useFileStore, useSettingsStore, useEditorStore, useAgentStore } from './stores';
+import {
+  useProjectStore,
+  useFileStore,
+  useSettingsStore,
+  useEditorStore,
+  useAgentStore,
+} from './stores';
 import { useLayoutStore } from './stores/layout-store';
 import { useSkillsStore } from './stores/skills-store';
 import { useRulesStore } from './stores/rules-store';
@@ -47,12 +53,15 @@ async function restoreOpenTabs(projectId: string): Promise<void> {
         let messages: ChatMessage[] = [];
         if (row.conversation_id) {
           try {
-            const msgRows = await tauriInvoke('db_list_messages', { conversationId: row.conversation_id });
+            const msgRows = await tauriInvoke('db_list_messages', {
+              conversationId: row.conversation_id,
+            });
             messages = msgRows.map((m) => ({
               id: m.id,
               role: m.role as 'user' | 'assistant',
               content: m.content,
               toolCalls: m.tool_calls ? JSON.parse(m.tool_calls) : undefined,
+              blocks: m.blocks ? JSON.parse(m.blocks) : undefined,
               timestamp: new Date(m.created_at).getTime(),
             }));
           } catch {
@@ -264,12 +273,15 @@ export function App() {
   const hasCompletedOnboarding = useOnboardingStore((s) => s.hasCompletedOnboarding);
 
   // Project lifecycle: open a new project with state save/restore
-  const handleOpenProject = useCallback(async (path: string) => {
-    const currentPath = useProjectStore.getState().rootPath;
-    await switchProject(currentPath, path);
-    openProject(path);
-    await openFolder(path);
-  }, [openProject, openFolder]);
+  const handleOpenProject = useCallback(
+    async (path: string) => {
+      const currentPath = useProjectStore.getState().rootPath;
+      await switchProject(currentPath, path);
+      openProject(path);
+      await openFolder(path);
+    },
+    [openProject, openFolder],
+  );
 
   // Project lifecycle: close current project with state save
   const handleCloseProject = useCallback(() => {
@@ -285,7 +297,6 @@ export function App() {
   useEffect(() => {
     initProviders().catch(console.error);
   }, []);
-
 
   // Check for updates silently after a short delay (non-blocking)
   useEffect(() => {
@@ -314,277 +325,546 @@ export function App() {
       handler: () => void | Promise<void>,
       opts?: { category?: string; key?: string },
     ) {
-      disposers.push(cmdStore.registerCommand(id, handler, { title, category: opts?.category ?? 'General' }));
+      disposers.push(
+        cmdStore.registerCommand(id, handler, { title, category: opts?.category ?? 'General' }),
+      );
       if (opts?.key) {
         disposers.push(kbStore.register({ command: id, key: opts.key }));
       }
     }
 
-    builtin('workbench.action.showCommands', 'Show Command Palette', () => {
-      openCommandPalette();
-    }, { key: 'ctrl+shift+p' });
+    builtin(
+      'workbench.action.showCommands',
+      'Show Command Palette',
+      () => {
+        openCommandPalette();
+      },
+      { key: 'ctrl+shift+p' },
+    );
 
-    builtin('workbench.action.openFolder', 'Open Folder...', async () => {
-      const path = await pickFolder();
-      if (path) await handleOpenProject(path);
-    }, { category: 'File', key: 'ctrl+k ctrl+o' });
+    builtin(
+      'workbench.action.openFolder',
+      'Open Folder...',
+      async () => {
+        const path = await pickFolder();
+        if (path) await handleOpenProject(path);
+      },
+      { category: 'File', key: 'ctrl+k ctrl+o' },
+    );
 
-    builtin('workbench.action.closeFolder', 'Close Folder', () => {
-      handleCloseProject();
-    }, { category: 'File' });
+    builtin(
+      'workbench.action.closeFolder',
+      'Close Folder',
+      () => {
+        handleCloseProject();
+      },
+      { category: 'File' },
+    );
 
-    builtin('workbench.action.newUntitledFile', 'New File', () => {
-      openUntitled();
-    }, { category: 'File', key: 'ctrl+n' });
+    builtin(
+      'workbench.action.newUntitledFile',
+      'New File',
+      () => {
+        openUntitled();
+      },
+      { category: 'File', key: 'ctrl+n' },
+    );
 
-    builtin('workbench.action.openFile', 'Open File...', async () => {
-      const path = await pickFile();
-      if (path) {
-        const sep = path.includes('/') ? '/' : '\\';
-        const fileName = path.split(sep).pop() ?? 'file';
-        const ext = fileName.split('.').pop()?.toLowerCase() ?? '';
-        openTab({
-          id: path,
-          filePath: path,
-          fileName,
-          language: ext || 'plaintext',
-          viewerType: getViewerType(fileName),
-        });
-      }
-    }, { category: 'File', key: 'ctrl+o' });
+    builtin(
+      'workbench.action.openFile',
+      'Open File...',
+      async () => {
+        const path = await pickFile();
+        if (path) {
+          const sep = path.includes('/') ? '/' : '\\';
+          const fileName = path.split(sep).pop() ?? 'file';
+          const ext = fileName.split('.').pop()?.toLowerCase() ?? '';
+          openTab({
+            id: path,
+            filePath: path,
+            fileName,
+            language: ext || 'plaintext',
+            viewerType: getViewerType(fileName),
+          });
+        }
+      },
+      { category: 'File', key: 'ctrl+o' },
+    );
 
-    builtin('workbench.action.closeActiveEditor', 'Close Editor', () => {
-      const activeId = useEditorStore.getState().activeTabId;
-      if (activeId) closeTab(activeId);
-    }, { category: 'View', key: 'ctrl+f4' });
+    builtin(
+      'workbench.action.closeActiveEditor',
+      'Close Editor',
+      () => {
+        const activeId = useEditorStore.getState().activeTabId;
+        if (activeId) closeTab(activeId);
+      },
+      { category: 'View', key: 'ctrl+f4' },
+    );
 
-    builtin('workbench.action.toggleTerminal', 'Toggle Terminal', () => {
-      useLayoutStore.getState().toggleTerminal();
-    }, { category: 'View', key: 'ctrl+`' });
+    builtin(
+      'workbench.action.toggleTerminal',
+      'Toggle Terminal',
+      () => {
+        useLayoutStore.getState().toggleTerminal();
+      },
+      { category: 'View', key: 'ctrl+`' },
+    );
 
-    builtin('workbench.action.toggleSidebar', 'Toggle Sidebar', () => {
-      useLayoutStore.getState().toggleSidebar();
-    }, { category: 'View', key: 'ctrl+b' });
+    builtin(
+      'workbench.action.toggleSidebar',
+      'Toggle Sidebar',
+      () => {
+        useLayoutStore.getState().toggleSidebar();
+      },
+      { category: 'View', key: 'ctrl+b' },
+    );
 
-    builtin('workbench.action.focusExplorer', 'Focus Explorer', () => {
-      useLayoutStore.getState().focusSidebarView('files');
-    }, { category: 'View', key: 'ctrl+shift+e' });
+    builtin(
+      'workbench.action.focusExplorer',
+      'Focus Explorer',
+      () => {
+        useLayoutStore.getState().focusSidebarView('files');
+      },
+      { category: 'View', key: 'ctrl+shift+e' },
+    );
 
-    builtin('workbench.action.focusSearch', 'Focus Search', () => {
-      useLayoutStore.getState().focusSidebarView('search');
-    }, { category: 'View', key: 'ctrl+shift+f' });
+    builtin(
+      'workbench.action.focusSearch',
+      'Focus Search',
+      () => {
+        useLayoutStore.getState().focusSidebarView('search');
+      },
+      { category: 'View', key: 'ctrl+shift+f' },
+    );
 
-    builtin('workbench.action.focusSourceControl', 'Focus Source Control', () => {
-      useLayoutStore.getState().focusSidebarView('git');
-    }, { category: 'View', key: 'ctrl+shift+g' });
+    builtin(
+      'workbench.action.focusSourceControl',
+      'Focus Source Control',
+      () => {
+        useLayoutStore.getState().focusSidebarView('git');
+      },
+      { category: 'View', key: 'ctrl+shift+g' },
+    );
 
-    builtin('workbench.action.focusExtensions', 'Focus Extensions', () => {
-      useLayoutStore.getState().focusSidebarView('extensions');
-    }, { category: 'View' });
+    builtin(
+      'workbench.action.focusExtensions',
+      'Focus Extensions',
+      () => {
+        useLayoutStore.getState().focusSidebarView('extensions');
+      },
+      { category: 'View' },
+    );
 
-    builtin('workbench.action.focusSkills', 'Focus Skills', () => {
-      useLayoutStore.getState().focusSidebarView('skills');
-    }, { category: 'View' });
+    builtin(
+      'workbench.action.focusSkills',
+      'Focus Skills',
+      () => {
+        useLayoutStore.getState().focusSidebarView('skills');
+      },
+      { category: 'View' },
+    );
 
-    builtin('workbench.action.focusDevices', 'Focus Devices', () => {
-      useLayoutStore.getState().focusSidebarView('devices');
-    }, { category: 'View' });
+    builtin(
+      'workbench.action.focusDevices',
+      'Focus Devices',
+      () => {
+        useLayoutStore.getState().focusSidebarView('devices');
+      },
+      { category: 'View' },
+    );
 
-    builtin('workbench.action.focusDocker', 'Focus Docker', () => {
-      useLayoutStore.getState().focusSidebarView('docker');
-    }, { category: 'View' });
+    builtin(
+      'workbench.action.focusDocker',
+      'Focus Docker',
+      () => {
+        useLayoutStore.getState().focusSidebarView('docker');
+      },
+      { category: 'View' },
+    );
 
-    builtin('workbench.action.switchToEditorMode', 'Switch to Editor Mode', () => {
-      useLayoutStore.getState().setWorkspaceMode('editor');
-    }, { category: 'View' });
+    builtin(
+      'workbench.action.switchToEditorMode',
+      'Switch to Editor Mode',
+      () => {
+        useLayoutStore.getState().setWorkspaceMode('editor');
+      },
+      { category: 'View' },
+    );
 
-    builtin('workbench.action.switchToAgentMode', 'Switch to Agent Mode', () => {
-      useLayoutStore.getState().setWorkspaceMode('agent');
-    }, { category: 'View' });
+    builtin(
+      'workbench.action.switchToAgentMode',
+      'Switch to Agent Mode',
+      () => {
+        useLayoutStore.getState().setWorkspaceMode('agent');
+      },
+      { category: 'View' },
+    );
 
-    builtin('workbench.action.switchToReviewMode', 'Switch to Review Mode', () => {
-      useLayoutStore.getState().setWorkspaceMode('review');
-    }, { category: 'View' });
+    builtin(
+      'workbench.action.switchToReviewMode',
+      'Switch to Review Mode',
+      () => {
+        useLayoutStore.getState().setWorkspaceMode('review');
+      },
+      { category: 'View' },
+    );
 
-    builtin('workbench.action.reloadExtensions', 'Reload Extensions', () => {
-      useExtensionStore.getState().loadExtensions().catch(console.error);
-    }, { category: 'Extensions' });
+    builtin(
+      'workbench.action.reloadExtensions',
+      'Reload Extensions',
+      () => {
+        useExtensionStore.getState().loadExtensions().catch(console.error);
+      },
+      { category: 'Extensions' },
+    );
 
     // ── Git commands ─────────────────────────────────────────────────────
-    builtin('git.init', 'Initialize Repository', async () => {
-      await useGitStore.getState().initRepo();
-    }, { category: 'Git' });
+    builtin(
+      'git.init',
+      'Initialize Repository',
+      async () => {
+        await useGitStore.getState().initRepo();
+      },
+      { category: 'Git' },
+    );
 
-    builtin('git.refresh', 'Refresh Status', async () => {
-      await useGitStore.getState().refresh();
-    }, { category: 'Git' });
+    builtin(
+      'git.refresh',
+      'Refresh Status',
+      async () => {
+        await useGitStore.getState().refresh();
+      },
+      { category: 'Git' },
+    );
 
-    builtin('git.stageAll', 'Stage All Changes', async () => {
-      await useGitStore.getState().stageAll();
-    }, { category: 'Git' });
+    builtin(
+      'git.stageAll',
+      'Stage All Changes',
+      async () => {
+        await useGitStore.getState().stageAll();
+      },
+      { category: 'Git' },
+    );
 
-    builtin('git.unstageAll', 'Unstage All', async () => {
-      await useGitStore.getState().unstageAll();
-    }, { category: 'Git' });
+    builtin(
+      'git.unstageAll',
+      'Unstage All',
+      async () => {
+        await useGitStore.getState().unstageAll();
+      },
+      { category: 'Git' },
+    );
 
-    builtin('git.discardAll', 'Discard All Changes', async () => {
-      await useGitStore.getState().discardAll();
-    }, { category: 'Git' });
+    builtin(
+      'git.discardAll',
+      'Discard All Changes',
+      async () => {
+        await useGitStore.getState().discardAll();
+      },
+      { category: 'Git' },
+    );
 
-    builtin('git.commit', 'Commit Staged', async () => {
-      try {
-        await useGitStore.getState().commit();
-      } catch (err) {
-        console.warn('[Git] Commit failed:', err);
-      }
-    }, { category: 'Git' });
+    builtin(
+      'git.commit',
+      'Commit Staged',
+      async () => {
+        try {
+          await useGitStore.getState().commit();
+        } catch (err) {
+          console.warn('[Git] Commit failed:', err);
+        }
+      },
+      { category: 'Git' },
+    );
 
-    builtin('git.push', 'Push', async () => {
-      try {
-        await useGitStore.getState().push();
-      } catch (err) {
-        console.warn('[Git] Push failed:', err);
-      }
-    }, { category: 'Git' });
+    builtin(
+      'git.push',
+      'Push',
+      async () => {
+        try {
+          await useGitStore.getState().push();
+        } catch (err) {
+          console.warn('[Git] Push failed:', err);
+        }
+      },
+      { category: 'Git' },
+    );
 
-    builtin('git.pull', 'Pull', async () => {
-      try {
-        await useGitStore.getState().pull();
-      } catch (err) {
-        console.warn('[Git] Pull failed:', err);
-      }
-    }, { category: 'Git' });
+    builtin(
+      'git.pull',
+      'Pull',
+      async () => {
+        try {
+          await useGitStore.getState().pull();
+        } catch (err) {
+          console.warn('[Git] Pull failed:', err);
+        }
+      },
+      { category: 'Git' },
+    );
 
-    builtin('git.fetch', 'Fetch', async () => {
-      try {
-        await useGitStore.getState().fetch();
-      } catch (err) {
-        console.warn('[Git] Fetch failed:', err);
-      }
-    }, { category: 'Git' });
+    builtin(
+      'git.fetch',
+      'Fetch',
+      async () => {
+        try {
+          await useGitStore.getState().fetch();
+        } catch (err) {
+          console.warn('[Git] Fetch failed:', err);
+        }
+      },
+      { category: 'Git' },
+    );
 
-    builtin('git.stash', 'Stash Changes', async () => {
-      await useGitStore.getState().stashChanges();
-    }, { category: 'Git' });
+    builtin(
+      'git.stash',
+      'Stash Changes',
+      async () => {
+        await useGitStore.getState().stashChanges();
+      },
+      { category: 'Git' },
+    );
 
-    builtin('git.stashPop', 'Pop Latest Stash', async () => {
-      await useGitStore.getState().popStash(0);
-    }, { category: 'Git' });
+    builtin(
+      'git.stashPop',
+      'Pop Latest Stash',
+      async () => {
+        await useGitStore.getState().popStash(0);
+      },
+      { category: 'Git' },
+    );
 
-    builtin('git.fetchLog', 'Show Commit Log', async () => {
-      await useGitStore.getState().fetchLog();
-    }, { category: 'Git' });
+    builtin(
+      'git.fetchLog',
+      'Show Commit Log',
+      async () => {
+        await useGitStore.getState().fetchLog();
+      },
+      { category: 'Git' },
+    );
 
-    builtin('git.fetchBranches', 'List Branches', async () => {
-      await useGitStore.getState().fetchBranches();
-    }, { category: 'Git' });
+    builtin(
+      'git.fetchBranches',
+      'List Branches',
+      async () => {
+        await useGitStore.getState().fetchBranches();
+      },
+      { category: 'Git' },
+    );
 
     // ── Editor / Tab commands ────────────────────────────────────────────
-    builtin('workbench.action.closeOtherEditors', 'Close Other Editors', () => {
-      const activeId = useEditorStore.getState().activeTabId;
-      if (activeId) useEditorStore.getState().closeOtherTabs(activeId);
-    }, { category: 'View' });
+    builtin(
+      'workbench.action.closeOtherEditors',
+      'Close Other Editors',
+      () => {
+        const activeId = useEditorStore.getState().activeTabId;
+        if (activeId) useEditorStore.getState().closeOtherTabs(activeId);
+      },
+      { category: 'View' },
+    );
 
-    builtin('workbench.action.closeEditorsToTheRight', 'Close Editors to the Right', () => {
-      const activeId = useEditorStore.getState().activeTabId;
-      if (activeId) useEditorStore.getState().closeTabsToTheRight(activeId);
-    }, { category: 'View' });
+    builtin(
+      'workbench.action.closeEditorsToTheRight',
+      'Close Editors to the Right',
+      () => {
+        const activeId = useEditorStore.getState().activeTabId;
+        if (activeId) useEditorStore.getState().closeTabsToTheRight(activeId);
+      },
+      { category: 'View' },
+    );
 
-    builtin('workbench.action.closeSavedEditors', 'Close Saved Editors', () => {
-      useEditorStore.getState().closeSavedTabs();
-    }, { category: 'View' });
+    builtin(
+      'workbench.action.closeSavedEditors',
+      'Close Saved Editors',
+      () => {
+        useEditorStore.getState().closeSavedTabs();
+      },
+      { category: 'View' },
+    );
 
-    builtin('workbench.action.closeAllEditors', 'Close All Editors', () => {
-      useEditorStore.getState().closeAllTabs();
-    }, { category: 'View' });
+    builtin(
+      'workbench.action.closeAllEditors',
+      'Close All Editors',
+      () => {
+        useEditorStore.getState().closeAllTabs();
+      },
+      { category: 'View' },
+    );
 
-    builtin('workbench.action.pinEditor', 'Pin Editor', () => {
-      const activeId = useEditorStore.getState().activeTabId;
-      if (activeId) useEditorStore.getState().pinTab(activeId);
-    }, { category: 'View' });
+    builtin(
+      'workbench.action.pinEditor',
+      'Pin Editor',
+      () => {
+        const activeId = useEditorStore.getState().activeTabId;
+        if (activeId) useEditorStore.getState().pinTab(activeId);
+      },
+      { category: 'View' },
+    );
 
-    builtin('workbench.action.unpinEditor', 'Unpin Editor', () => {
-      const activeId = useEditorStore.getState().activeTabId;
-      if (activeId) useEditorStore.getState().unpinTab(activeId);
-    }, { category: 'View' });
+    builtin(
+      'workbench.action.unpinEditor',
+      'Unpin Editor',
+      () => {
+        const activeId = useEditorStore.getState().activeTabId;
+        if (activeId) useEditorStore.getState().unpinTab(activeId);
+      },
+      { category: 'View' },
+    );
 
     // ── Settings / Preferences ───────────────────────────────────────────
-    builtin('workbench.action.openSettings', 'Open Settings', () => {
-      useSettingsStore.getState().openSettings();
-    }, { category: 'Preferences', key: 'ctrl+,' });
+    builtin(
+      'workbench.action.openSettings',
+      'Open Settings',
+      () => {
+        useSettingsStore.getState().openSettings();
+      },
+      { category: 'Preferences', key: 'ctrl+,' },
+    );
 
     // ── Rules commands ─────────────────────────────────────────────────────
-    builtin('agent.rules.openPanel', 'Open Rules Panel', () => {
-      useLayoutStore.getState().setRulesPanelOpen(true);
-    }, { category: 'Agent' });
+    builtin(
+      'agent.rules.openPanel',
+      'Open Rules Panel',
+      () => {
+        useLayoutStore.getState().setRulesPanelOpen(true);
+      },
+      { category: 'Agent' },
+    );
 
-    builtin('agent.rules.closePanel', 'Close Rules Panel', () => {
-      useLayoutStore.getState().setRulesPanelOpen(false);
-    }, { category: 'Agent' });
+    builtin(
+      'agent.rules.closePanel',
+      'Close Rules Panel',
+      () => {
+        useLayoutStore.getState().setRulesPanelOpen(false);
+      },
+      { category: 'Agent' },
+    );
 
-    builtin('agent.rules.togglePanel', 'Toggle Rules Panel', () => {
-      const s = useLayoutStore.getState();
-      s.setRulesPanelOpen(!s.rulesPanelOpen);
-    }, { category: 'Agent', key: 'ctrl+shift+r' });
+    builtin(
+      'agent.rules.togglePanel',
+      'Toggle Rules Panel',
+      () => {
+        const s = useLayoutStore.getState();
+        s.setRulesPanelOpen(!s.rulesPanelOpen);
+      },
+      { category: 'Agent', key: 'ctrl+shift+r' },
+    );
 
-    builtin('agent.rules.openSettings', 'Open Rules Settings', () => {
-      useSettingsStore.getState().openSettings();
-    }, { category: 'Agent' });
+    builtin(
+      'agent.rules.openSettings',
+      'Open Rules Settings',
+      () => {
+        useSettingsStore.getState().openSettings();
+      },
+      { category: 'Agent' },
+    );
 
-    builtin('agent.rules.createGlobal', 'Create Global Rule', () => {
-      useLayoutStore.getState().setWorkspaceMode('agent');
-      useLayoutStore.getState().setRulesPanelOpen(true);
-      useRulesStore.getState().openRuleEditor({ scope: 'global' });
-    }, { category: 'Agent' });
+    builtin(
+      'agent.rules.createGlobal',
+      'Create Global Rule',
+      () => {
+        useLayoutStore.getState().setWorkspaceMode('agent');
+        useLayoutStore.getState().setRulesPanelOpen(true);
+        useRulesStore.getState().openRuleEditor({ scope: 'global' });
+      },
+      { category: 'Agent' },
+    );
 
-    builtin('agent.rules.createWorkspace', 'Create Workspace Rule', () => {
-      useLayoutStore.getState().setWorkspaceMode('agent');
-      useLayoutStore.getState().setRulesPanelOpen(true);
-      useRulesStore.getState().openRuleEditor({ scope: 'workspace' });
-    }, { category: 'Agent' });
+    builtin(
+      'agent.rules.createWorkspace',
+      'Create Workspace Rule',
+      () => {
+        useLayoutStore.getState().setWorkspaceMode('agent');
+        useLayoutStore.getState().setRulesPanelOpen(true);
+        useRulesStore.getState().openRuleEditor({ scope: 'workspace' });
+      },
+      { category: 'Agent' },
+    );
 
-    builtin('agent.rules.reload', 'Reload Rules from Disk', async () => {
-      try {
-        const discovered = await HarnessBridge.get().loadRules();
-        useRulesStore.getState().setDiscoveredRules(discovered);
-      } catch (err) {
-        console.error('[Rules] Reload failed:', err);
-      }
-    }, { category: 'Agent' });
+    builtin(
+      'agent.rules.reload',
+      'Reload Rules from Disk',
+      async () => {
+        try {
+          const discovered = await HarnessBridge.get().loadRules();
+          useRulesStore.getState().setDiscoveredRules(discovered);
+        } catch (err) {
+          console.error('[Rules] Reload failed:', err);
+        }
+      },
+      { category: 'Agent' },
+    );
 
     // ── Terminal commands ─────────────────────────────────────────────────
-    builtin('workbench.action.terminal.new', 'New Terminal', () => {
-      useTerminalStore.getState().createSession();
-      useLayoutStore.getState().setTerminalVisible(true);
-    }, { category: 'Terminal', key: 'ctrl+shift+`' });
+    builtin(
+      'workbench.action.terminal.new',
+      'New Terminal',
+      () => {
+        useTerminalStore.getState().createSession();
+        useLayoutStore.getState().setTerminalVisible(true);
+      },
+      { category: 'Terminal', key: 'ctrl+shift+`' },
+    );
 
-    builtin('workbench.action.terminal.newInEditor', 'New Terminal in Editor', () => {
-      const sessionId = useTerminalStore.getState().createSession(undefined, false, undefined, 'editor');
-      const session = useTerminalStore.getState().sessions.find((s) => s.id === sessionId);
-      useEditorStore.getState().openTerminalTab(sessionId, session?.name ?? 'Terminal');
-    }, { category: 'Terminal' });
+    builtin(
+      'workbench.action.terminal.newInEditor',
+      'New Terminal in Editor',
+      () => {
+        const sessionId = useTerminalStore
+          .getState()
+          .createSession(undefined, false, undefined, 'editor');
+        const session = useTerminalStore.getState().sessions.find((s) => s.id === sessionId);
+        useEditorStore.getState().openTerminalTab(sessionId, session?.name ?? 'Terminal');
+      },
+      { category: 'Terminal' },
+    );
 
-    builtin('workbench.action.terminal.moveToBottom', 'Move Terminal to Bottom', () => {
-      useLayoutStore.getState().moveTerminalToBottom();
-    }, { category: 'Terminal' });
+    builtin(
+      'workbench.action.terminal.moveToBottom',
+      'Move Terminal to Bottom',
+      () => {
+        useLayoutStore.getState().moveTerminalToBottom();
+      },
+      { category: 'Terminal' },
+    );
 
-    builtin('workbench.action.terminal.moveToSidebar', 'Move Terminal to Sidebar', () => {
-      useLayoutStore.getState().moveTerminalToSidebar();
-    }, { category: 'Terminal' });
+    builtin(
+      'workbench.action.terminal.moveToSidebar',
+      'Move Terminal to Sidebar',
+      () => {
+        useLayoutStore.getState().moveTerminalToSidebar();
+      },
+      { category: 'Terminal' },
+    );
 
     // ── File Tree commands ───────────────────────────────────────────────
-    builtin('workbench.action.toggleHiddenFiles', 'Toggle Hidden Files', async () => {
-      await useFileStore.getState().toggleShowHidden();
-    }, { category: 'Explorer' });
+    builtin(
+      'workbench.action.toggleHiddenFiles',
+      'Toggle Hidden Files',
+      async () => {
+        await useFileStore.getState().toggleShowHidden();
+      },
+      { category: 'Explorer' },
+    );
 
-    builtin('workbench.action.refreshExplorer', 'Refresh Explorer', async () => {
-      await useFileStore.getState().refreshExpandedDirs();
-    }, { category: 'Explorer' });
+    builtin(
+      'workbench.action.refreshExplorer',
+      'Refresh Explorer',
+      async () => {
+        await useFileStore.getState().refreshExpandedDirs();
+      },
+      { category: 'Explorer' },
+    );
 
     // ── Theme ────────────────────────────────────────────────────────────
-    builtin('workbench.action.selectTheme', 'Change Color Theme', () => {
-      useSettingsStore.getState().openSettings();
-    }, { category: 'Preferences', key: 'ctrl+k ctrl+t' });
+    builtin(
+      'workbench.action.selectTheme',
+      'Change Color Theme',
+      () => {
+        useSettingsStore.getState().openSettings();
+      },
+      { category: 'Preferences', key: 'ctrl+k ctrl+t' },
+    );
 
     return () => {
       for (const dispose of disposers) dispose();
@@ -598,7 +878,10 @@ export function App() {
 
     const clearChord = () => {
       waitingForSecond = null;
-      if (timer) { clearTimeout(timer); timer = null; }
+      if (timer) {
+        clearTimeout(timer);
+        timer = null;
+      }
     };
 
     const handler = async (e: KeyboardEvent) => {
