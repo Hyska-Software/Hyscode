@@ -1520,6 +1520,7 @@ Investigate the error, fix the underlying issue in the affected files, and verif
           const outputTokens = (current?.outputTokens ?? 0) + u.outputTokens;
           const cacheReadTokens = (current?.cacheReadTokens ?? 0) + (u.cacheReadTokens ?? 0);
           const cacheWriteTokens = (current?.cacheWriteTokens ?? 0) + (u.cacheWriteTokens ?? 0);
+          const effectiveInput = Math.max(0, u.inputTokens - (u.cacheReadTokens ?? 0));
           const totalTokens =
             u.totalTokens > 0
               ? (current?.totalTokens ?? 0) + u.totalTokens
@@ -1528,8 +1529,20 @@ Investigate the error, fix the underlying issue in the affected files, and verif
             inputTokens,
             outputTokens,
             totalTokens,
+            requestCount: (current?.requestCount ?? 0) + 1,
+            lastInputTokens: u.inputTokens,
+            lastEffectiveInputTokens: effectiveInput,
+            peakInputTokens: Math.max(current?.peakInputTokens ?? 0, u.inputTokens),
+            peakEffectiveInputTokens: Math.max(
+              current?.peakEffectiveInputTokens ?? 0,
+              effectiveInput,
+            ),
             cacheReadTokens,
             cacheWriteTokens,
+            reasoningTokens: (current?.reasoningTokens ?? 0) + (u.reasoningTokens ?? 0),
+            retryCount: (current?.retryCount ?? 0) + (u.retryCount ?? 0),
+            possibleDuplicateCharge:
+              Boolean(current?.possibleDuplicateCharge) || Boolean(u.possibleDuplicateCharge),
           });
         }
         break;

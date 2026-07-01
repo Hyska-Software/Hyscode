@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import type { AIModel, AIProvider, Message, ProviderCapabilities } from '@hyscode/ai-providers';
-import { RequestPreparation, estimateActualCost } from './request-preparation';
+import {
+  RequestPreparation,
+  estimateActualCost,
+  recordRequestUsageMetrics,
+} from './request-preparation';
 import { ContextManager } from './context-manager';
 
 function provider(capabilities: ProviderCapabilities): AIProvider {
@@ -95,5 +99,34 @@ describe('RequestPreparation', () => {
         model,
       ),
     ).toBeCloseTo(2.05);
+  });
+
+  it('tracks the last and peak input for individual API requests', () => {
+    const usage = {
+      inputTokens: 0,
+      outputTokens: 0,
+      totalTokens: 0,
+    };
+
+    recordRequestUsageMetrics(usage, {
+      inputTokens: 120_000,
+      outputTokens: 1_000,
+      totalTokens: 121_000,
+      cacheReadTokens: 100_000,
+    });
+    recordRequestUsageMetrics(usage, {
+      inputTokens: 90_000,
+      outputTokens: 2_000,
+      totalTokens: 92_000,
+      cacheReadTokens: 40_000,
+    });
+
+    expect(usage).toMatchObject({
+      requestCount: 2,
+      lastInputTokens: 90_000,
+      lastEffectiveInputTokens: 50_000,
+      peakInputTokens: 120_000,
+      peakEffectiveInputTokens: 50_000,
+    });
   });
 });
