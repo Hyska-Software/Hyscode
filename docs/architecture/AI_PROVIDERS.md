@@ -94,10 +94,21 @@ type StreamChunk =
 interface TokenUsage {
   inputTokens: number;
   outputTokens: number;
+  totalTokens: number;
+  requestCount?: number;
+  lastInputTokens?: number;
+  lastEffectiveInputTokens?: number;
+  peakInputTokens?: number;
+  peakEffectiveInputTokens?: number;
   cacheReadTokens?: number;
   cacheWriteTokens?: number;
 }
 ```
+
+Turn-level `inputTokens`, `outputTokens`, and cache fields are cumulative across API
+requests. Context-window indicators must use `peakInputTokens` (with
+`lastInputTokens` as fallback), because cumulative turn input can exceed a model's
+window without any individual request overflowing it.
 
 ### Frontend Consumption
 

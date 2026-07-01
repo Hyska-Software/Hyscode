@@ -126,6 +126,15 @@ export function estimateActualCost(usage: TokenUsage, model?: AIModel): number {
   );
 }
 
+export function recordRequestUsageMetrics(total: TokenUsage, request: TokenUsage): void {
+  const effectiveInput = Math.max(0, request.inputTokens - (request.cacheReadTokens ?? 0));
+  total.requestCount = (total.requestCount ?? 0) + 1;
+  total.lastInputTokens = request.inputTokens;
+  total.lastEffectiveInputTokens = effectiveInput;
+  total.peakInputTokens = Math.max(total.peakInputTokens ?? 0, request.inputTokens);
+  total.peakEffectiveInputTokens = Math.max(total.peakEffectiveInputTokens ?? 0, effectiveInput);
+}
+
 function stripReasoningReplay(messages: Message[]): Message[] {
   let changed = false;
   const result = messages.map((message) => {

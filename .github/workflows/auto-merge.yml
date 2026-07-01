@@ -1,0 +1,230 @@
+name: Auto-merge
+
+on:
+  pull_request:
+    types: [labeled, unlabeled, synchronize, opened, reopened]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: "PR number to merge (optional, defaults to latest open PR with the label)"
+        required: false
+
+permissions:
+  contents: write
+  pull-requests: write
+  checks: read
+
+jobs:
+  auto-merge:
+    name: Auto-merge approved PRs
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve target PR
+        id: target
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const label = 'workflow:agent-can-merge';
+            let prNumber = null;
+            if (context.payload.pull_request) {
+              prNumber = context.payload.pull_request.number;
+            } else if (context.payload.inputs && context.payload.inputs.pr_number) {
+              prNumber = parseInt(context.payload.inputs.pr_number, 10);
+            }
+            if (prNumber) {
+              const { data: pr } = await github.rest.pulls.get({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: prNumber,
+              });
+              const hasLabel = pr.labels.some((l) => l.name === label);
+              if (!hasLabel) {
+                core.setFailed(`PR #${prNumber} does not have label '${label}'. Aborting.`);
+                return;
+              }
+              if (pr.draft) {
+                core.setFailed(`PR #${prNumber} is a draft. Aborting.`);
+                return;
+              }
+              core.setOutput('pr_number', String(prNumber));
+              core.setOutput('head_sha', pr.head.sha);
+              return;
+            }
+            const { data: prs } = await github.rest.pulls.list({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              per_page: 20,
+            });
+            for (const pr of prs) {
+              if (pr.draft) continue;
+              if (!pr.labels.some((l) => l.name === label)) continue;
+              core.setOutput('pr_number', String(pr.number));
+              core.setOutput('head_sha', pr.head.sha);
+              core.info(`Selected PR #${pr.number} (${pr.head.ref}).`);
+              return;
+            }
+            core.setFailed(`No open non-draft PR with label '${label}' found.`);
+
+      - name: Wait for CI Success
+        if: steps.target.outputs.pr_number
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const prNumber = parseInt('${{ steps.target.outputs.pr_number }}', 10);
+            const headSha = '${{ steps.target.outputs.head_sha }}';
+            const maxMinutes = 15;
+            const timeoutMs = maxMinutes * 60_000;
+            const start = Date.now();
+
+            while (Date.now() - start < timeoutMs) {
+              const { data: pr } = await github.rest.pulls.get({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: prNumber,
+              });
+              if (pr.state !== 'open') {
+                core.setFailed(`PR #${prNumber} is no longer open (state=${pr.state}).`);
+                return;
+              }
+              if (!pr.labels.some((l) => l.name === 'workflow:agent-can-merge')) {
+                core.setFailed('Label workflow:agent-can-merge was removed. Aborting.');
+                return;
+              }
+
+              const { data: checks } = await github.rest.checks.listForRef({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                ref: headSha,
+                per_page: 100,
+              });
+              const ci = checks.check_runs.find((c) => c.name === 'CI Success');
+              if (!ci) {
+                core.info('CI Success check not yet reported; waiting...');
+                await new Promise((r) => setTimeout(r, 20_000));
+                continue;
+              }
+              if (ci.conclusion === 'failure' || ci.conclusion === 'cancelled') {
+                core.setFailed(`CI Success concluded with ${ci.conclusion}. Aborting.`);
+                return;
+              }
+              if (ci.status !== 'completed') {
+                core.info(`CI Success still ${ci.status}; waiting...`);
+                await new Promise((r) => setTimeout(r, 20_000));
+                continue;
+              }
+              core.info('CI Success passed.');
+              return;
+            }
+            core.setFailed(`CI Success did not complete within ${maxMinutes} minutes.`);
+
+      - name: Rebase onto base
+        if: steps.target.outputs.pr_number
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const prNumber = parseInt('${{ steps.target.outputs.pr_number }}', 10);
+            const headSha = '${{ steps.target.outputs.head_sha }}';
+            try {
+              await github.rest.pulls.updateBranch({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: prNumber,
+                expected_head_sha: headSha,
+              });
+              core.info('Branch is up-to-date with base.');
+            } catch (e) {
+              core.warning(`updateBranch: ${e.message}. Continuing.`);
+            }
+
+      - name: Squash-merge
+        if: steps.target.outputs.pr_number
+        id: merge
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const prNumber = parseInt('${{ steps.target.outputs.pr_number }}', 10);
+            const { data: pr } = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: prNumber,
+            });
+            if (pr.merged) {
+              core.info(`PR #${prNumber} already merged at ${pr.merged_at}.`);
+              return;
+            }
+            if (!pr.labels.some((l) => l.name === 'workflow:agent-can-merge')) {
+              core.setFailed('Label workflow:agent-can-merge was removed at the last check. Aborting.');
+              return;
+            }
+            try {
+              await github.rest.pulls.merge({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: prNumber,
+                merge_method: 'squash',
+                commit_title: `${pr.title} (#${prNumber})`,
+                commit_message: `Auto-merged via workflow:agent-can-merge label.\n\n${pr.body || ''}`,
+              });
+              core.info(`Squash-merged PR #${prNumber}.`);
+              return;
+            } catch (e) {
+              const msg = e.message || '';
+              core.warning(`Direct merge blocked: ${msg}`);
+              core.setOutput('blocked_reason', msg);
+              core.setOutput('html_url', pr.html_url);
+              return;
+            }
+
+      - name: Notify if manual merge required
+        if: steps.target.outputs.pr_number && steps.merge.outputs.blocked_reason
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const prNumber = parseInt('${{ steps.target.outputs.pr_number }}', 10);
+            const url = '${{ steps.merge.outputs.html_url }}';
+            const reason = '${{ steps.merge.outputs.blocked_reason }}';
+            const marker = '<!-- auto-merge-bot -->';
+            const baseRef = (context.payload.pull_request && context.payload.pull_request.base && context.payload.pull_request.base.ref) || 'main';
+            const lines = [
+              marker,
+              '## Auto-merge: ready, manual click required',
+              '',
+              'All preconditions are satisfied (label `workflow:agent-can-merge`, CI Success passed, branch rebased on `' + baseRef + '`).',
+              '',
+              'GitHub blocks the Actions integration from completing the merge itself for one of:',
+              '- The PR author is the only maintainer and the API requires an approving review.',
+              '- The default `GITHUB_TOKEN` does not have `repo: admin` scope to relax branch protection.',
+              '',
+              '**Click the green Merge button in the UI to finish:**',
+              url,
+              '',
+              '```',
+              reason,
+              '```',
+              '',
+            ];
+            const body = lines.join('\n');
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNumber,
+              per_page: 100,
+            });
+            const existing = comments.find((c) => c.body && c.body.includes(marker));
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: prNumber,
+                body,
+              });
+            }
+            core.setFailed('Auto-merge blocked; manual click required. Comment posted on PR #' + prNumber + '.');

@@ -59,6 +59,11 @@ export interface TokenUsage {
   inputTokens: number;
   outputTokens: number;
   totalTokens: number;
+  requestCount?: number;
+  lastInputTokens?: number;
+  lastEffectiveInputTokens?: number;
+  peakInputTokens?: number;
+  peakEffectiveInputTokens?: number;
   cacheReadTokens?: number;
   cacheWriteTokens?: number;
   reasoningTokens?: number;

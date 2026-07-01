@@ -51,7 +51,11 @@ import { MemoryExtractor } from './memory-extractor';
 import { MemoryContextProvider } from './memory-context-provider';
 import { TurnController } from './turn-controller';
 import { selectToolPlan, type ToolSelectionDecision } from './tool-selection';
-import { RequestPreparation, estimateActualCost } from './request-preparation';
+import {
+  RequestPreparation,
+  estimateActualCost,
+  recordRequestUsageMetrics,
+} from './request-preparation';
 
 export interface HarnessOptions {
   config?: Partial<HarnessConfig>;
@@ -827,6 +831,7 @@ export class Harness {
                 case 'usage':
                   // Each provider emits one consolidated usage chunk per API request.
                   // Sum across iterations of a multi-iteration turn.
+                  recordRequestUsageMetrics(tokenUsage, chunk.usage);
                   tokenUsage.inputTokens += chunk.usage.inputTokens;
                   tokenUsage.outputTokens += chunk.usage.outputTokens;
                   if (chunk.usage.cacheReadTokens !== undefined) {

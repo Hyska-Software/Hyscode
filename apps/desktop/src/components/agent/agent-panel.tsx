@@ -33,6 +33,7 @@ import { getProviderRegistry } from '@hyscode/ai-providers';
 import { TerminalPanel } from '@/components/terminal';
 import type { AIModel } from '@hyscode/ai-providers';
 import { resolveContextWindow } from '@/lib/context-window';
+import { getContextUsageMetrics } from '@/lib/token-usage';
 
 // ─── Context Window Pie Popup ─────────────────────────────────────────────────
 
@@ -142,7 +143,8 @@ function ContextPieButton({
   const model = useActiveModel();
   const modelId = useSettingsStore((s) => s.activeModelId);
   const contextWindow = resolveContextWindow(model, modelId ?? undefined);
-  const pct = usage && contextWindow ? usage.inputTokens / contextWindow : 0;
+  const metrics = getContextUsageMetrics(usage, contextWindow);
+  const pct = metrics.percentage;
   const pctDisplay = Math.round(pct * 100);
   const hasContextWindow = contextWindow != null;
 
@@ -155,7 +157,8 @@ function ContextPieButton({
     usage && model?.outputPricePerMToken
       ? (usage.outputTokens / 1_000_000) * model.outputPricePerMToken
       : null;
-  const totalCost = usage?.estimatedCostUsd ??
+  const totalCost =
+    usage?.estimatedCostUsd ??
     (inputCost != null && outputCost != null ? inputCost + outputCost : null);
 
   useEffect(() => {
@@ -177,7 +180,7 @@ function ContextPieButton({
 
   const cacheRead = usage?.cacheReadTokens ?? 0;
   const cacheWrite = usage?.cacheWriteTokens ?? 0;
-  const effectiveInput = usage ? Math.max(usage.inputTokens - cacheRead, 0) : 0;
+  const effectiveInput = metrics.effectiveInputTokens;
   const hasCache = cacheRead > 0 || cacheWrite > 0;
 
   return (
@@ -223,11 +226,23 @@ function ContextPieButton({
             </span>
             {usage ? (
               <>
+                {(usage.requestCount ?? 0) > 0 && (
+                  <StatRow label="API requests" value={String(usage.requestCount)} />
+                )}
+                {(usage.peakInputTokens ?? usage.lastInputTokens) !== undefined && (
+                  <StatRow
+                    label="Peak request input"
+                    value={metrics.contextInputTokens.toLocaleString()}
+                  />
+                )}
                 <StatRow label="Input tokens" value={usage.inputTokens.toLocaleString()} />
                 <StatRow label="Output tokens" value={usage.outputTokens.toLocaleString()} />
                 <StatRow label="Total tokens" value={usage.totalTokens.toLocaleString()} accent />
                 {(usage.reasoningTokens ?? 0) > 0 && (
-                  <StatRow label="Reasoning tokens" value={(usage.reasoningTokens ?? 0).toLocaleString()} />
+                  <StatRow
+                    label="Reasoning tokens"
+                    value={(usage.reasoningTokens ?? 0).toLocaleString()}
+                  />
                 )}
                 {(usage.retryCount ?? 0) > 0 && (
                   <StatRow label="Retries" value={String(usage.retryCount)} />
