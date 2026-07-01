@@ -104,6 +104,7 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
       - run: npm ci
+      - run: npx tsc -b apps/desktop/tsconfig.json --emitDeclarationOnly
       - run: npm run typecheck
 
   # ─────────────────────────────────────────────────────────────────
