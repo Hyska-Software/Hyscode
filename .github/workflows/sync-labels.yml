@@ -1,0 +1,99 @@
+name: Sync Labels
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/labels.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  sync:
+    name: Sync labels to GitHub
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Parse labels.yml and apply
+        uses: actions/github-script@v7
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT || secrets.GITHUB_TOKEN }}
+        with:
+          script: |
+            const fs = require('fs');
+            const yaml = require('js-yaml');
+            const path = '.github/labels.yml';
+
+            let raw;
+            try {
+              raw = fs.readFileSync(path, 'utf8');
+            } catch (e) {
+              core.setFailed(`Cannot read ${path}: ${e.message}`);
+              return;
+            }
+
+            let labels;
+            try {
+              labels = yaml.load(raw);
+            } catch (e) {
+              core.setFailed(`Invalid YAML in ${path}: ${e.message}`);
+              return;
+            }
+
+            if (!Array.isArray(labels)) {
+              core.setFailed(`${path} must be a YAML array of label objects`);
+              return;
+            }
+
+            const list = await github.paginate(
+              github.rest.issues.listLabelsForRepo,
+              { owner: context.repo.owner, repo: context.repo.repo, per_page: 100 }
+            );
+            const existing = new Map(list.map(l => [l.name, l]));
+
+            let created = 0, updated = 0, skipped = 0;
+            for (const def of labels) {
+              if (!def.name || !def.color) {
+                core.warning(`Skipping invalid label: ${JSON.stringify(def)}`);
+                skipped++;
+                continue;
+              }
+              const color = def.color.replace(/^#/, '');
+              const description = def.description || '';
+              const current = existing.get(def.name);
+              if (current) {
+                if (current.color !== color || (current.description || '') !== description) {
+                  await github.rest.issues.updateLabel({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    name: def.name,
+                    color,
+                    description,
+                  });
+                  updated++;
+                  core.info(`  updated: ${def.name}`);
+                } else {
+                  skipped++;
+                }
+              } else {
+                await github.rest.issues.createLabel({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  name: def.name,
+                  color,
+                  description,
+                });
+                created++;
+                core.info(`  created: ${def.name}`);
+              }
+            }
+
+            core.info(`Done. created=${created} updated=${updated} skipped=${skipped}`);
+
+      - name: Summary
+        if: always()
+        run: echo "Sync labels completed"

@@ -1,0 +1,170 @@
+name: PR Lint
+
+on:
+  pull_request_target:
+    branches: [main]
+    types: [opened, edited, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: read
+
+jobs:
+  # ─────────────────────────────────────────────────────────────────
+  # 1. Apply area:* and type:* labels automatically
+  # ─────────────────────────────────────────────────────────────────
+  labeler:
+    name: Apply area/type labels
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/labeler@v5
+        with:
+          sync-labels: true
+
+  # ─────────────────────────────────────────────────────────────────
+  # 2. Validate PR title (Conventional Commits)
+  # ─────────────────────────────────────────────────────────────────
+  semantic:
+    name: PR title (Conventional Commits)
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: read
+    steps:
+      - uses: amannn/action-semantic-pull-request@v5
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          # Enforce Conventional Commits in PR title.
+          # Allowed types match docs/WORKFLOW.md §3.1 / §5.1
+          types: |
+            feat
+            fix
+            chore
+            refactor
+            perf
+            docs
+            test
+          requireScope: false
+          subjectPattern: ^(?![A-Z]).+$
+          subjectPatternError: |
+            O subject do PR deve começar com letra minúscula.
+            Use Conventional Commits: type(scope): subject
+          bodyPattern: ^(?![\s\S]*$).+
+          bodyPatternError: |
+            O body do PR não pode estar vazio.
+            Preencha o .github/PULL_REQUEST_TEMPLATE.md.
+
+  # ─────────────────────────────────────────────────────────────────
+  # 3. Validate branch name + body contains Closes/Refs
+  # ─────────────────────────────────────────────────────────────────
+  workflow:
+    name: Branch + body validation
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+      issues: read
+    steps:
+      - name: Validate branch name and PR body
+        uses: actions/github-script@v7
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          script: |
+            const branch = context.payload.pull_request.head.ref;
+            const body = context.payload.pull_request.body || '';
+            const errors = [];
+
+            // 1. Branch name pattern: <type>/<issue#>-<scope>-<slug>
+            const branchPattern = /^(feat|fix|chore|refactor|perf|docs|test)\/[0-9]+-[a-z0-9][a-z0-9-]*$/;
+            if (!branchPattern.test(branch)) {
+              errors.push(
+                `❌ Branch name \`${branch}\` does not match \`<type>/<issue#>-<scope>-<slug>\`.\n` +
+                `   Examples: \`feat/142-agent-harness-streaming\`, \`fix/87-desktop-pty-leak\`.\n` +
+                `   See docs/WORKFLOW.md §3.1.`
+              );
+            }
+
+            // 2. Body must contain Closes #N or Refs #N
+            const refPattern = /(Closes|Fixes|Resolves|Refs)\s+#\d+/i;
+            if (!refPattern.test(body)) {
+              errors.push(
+                `❌ PR body must contain \`Closes #N\`, \`Fixes #N\`, \`Resolves #N\` or \`Refs #N\`.\n` +
+                `   See docs/WORKFLOW.md §5.3.`
+              );
+            }
+
+            // 3. Extract referenced issue numbers and verify they are open (if Closes/Fixes/Resolves)
+            const closesPattern = /(Closes|Fixes|Resolves)\s+#(\d+)/gi;
+            const refsPattern = /Refs\s+#(\d+)/gi;
+            const closesMatches = [...body.matchAll(closesPattern)];
+            const refsMatches = [...body.matchAll(refsPattern)];
+
+            if (closesMatches.length === 0 && refsMatches.length === 0) {
+              // already caught by check 2, but explicit
+              errors.push(`❌ No issue reference found in PR body.`);
+            }
+
+            for (const m of closesMatches) {
+              const issueNum = m[2];
+              try {
+                const { data: issue } = await github.rest.issues.get({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: parseInt(issueNum, 10),
+                });
+                if (issue.state !== 'open') {
+                  errors.push(
+                    `❌ Issue #${issueNum} referenced with \`${m[1]}\` is **${issue.state}**.\n` +
+                    `   Use \`Refs #${issueNum}\` for already-closed issues, or open a new issue.`
+                  );
+                }
+                if (issue.pull_request) {
+                  errors.push(
+                    `❌ #${issueNum} is a pull request, not an issue. Link to issues only.`
+                  );
+                }
+              } catch (e) {
+                errors.push(`❌ Referenced issue #${issueNum} not found.`);
+              }
+            }
+
+            if (errors.length > 0) {
+              const summary = errors.join('\n\n');
+              core.setFailed(summary);
+
+              // Post a single comment with all errors
+              const marker = '<!-- pr-lint-bot -->';
+              try {
+                const { data: comments } = await github.rest.issues.listComments({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: context.payload.pull_request.number,
+                });
+                const existing = comments.find(c => c.body && c.body.includes(marker));
+                if (existing) {
+                  await github.rest.issues.updateComment({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    comment_id: existing.id,
+                    body: `${marker}\n## PR Lint Failures\n\n${summary}\n\n---\n_Fix and push — this comment will update on next run._`,
+                  });
+                } else {
+                  await github.rest.issues.createComment({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    issue_number: context.payload.pull_request.number,
+                    body: `${marker}\n## PR Lint Failures\n\n${summary}\n\n---\n_Fix and push — this comment will update on next run._`,
+                  });
+                }
+              } catch (e) {
+                core.warning(`Could not post comment: ${e.message}`);
+              }
+            } else {
+              core.info(`✓ Branch name ok: ${branch}`);
+              core.info(`✓ PR body references issue correctly`);
+            }

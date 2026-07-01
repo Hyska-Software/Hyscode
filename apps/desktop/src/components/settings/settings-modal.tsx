@@ -296,7 +296,7 @@ export function SettingsModal() {
         if (e.target === e.currentTarget) closeSettings();
       }}
     >
-      <div className="flex h-[580px] w-[860px] overflow-hidden rounded-xl bg-surface shadow-2xl">
+      <div className="flex h-[580px] w-[1100px] overflow-hidden rounded-xl bg-surface shadow-2xl">
         {/* Left navigation */}
         <nav className="flex w-[240px] flex-col overflow-hidden border-r border-border/40 bg-background">
           <div className="flex items-center justify-between px-3 pb-2 pt-3">

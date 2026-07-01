@@ -1,0 +1,51 @@
+name: Stale
+
+on:
+  schedule:
+    # Run daily at 03:00 UTC
+    - cron: "0 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  issues: write
+  pull-requests: write
+
+jobs:
+  stale:
+    name: Mark/close stale items
+    runs-on: ubuntu-latest
+    steps:
+      - name: Close stale issues
+        uses: actions/stale@v9
+        with:
+          # ── Issues ──
+          issues-to-pr: false
+          close-issue-message: |
+            Esta issue foi fechada por inatividade (60 dias).
+            Reabra ou comente se ainda for relevante.
+          days-before-issue-stale: 30
+          days-before-issue-close: 7
+          stale-issue-label: "status:blocked"
+          exempt-issue-labels: |
+            priority:p0
+            workflow:good-first-issue
+            workflow:agent-tasks
+            workflow:pin
+            workflow:help-wanted
+          # ── PRs ──
+          close-pr-message: |
+            Este PR foi fechado por inatividade (21 dias).
+            Reabra se ainda for relevante.
+          days-before-pr-stale: 14
+          days-before-pr-close: 7
+          stale-pr-label: "status:blocked"
+          exempt-pr-labels: |
+            priority:p0
+            workflow:good-first-issue
+            workflow:agent-tasks
+            workflow:pin
+            workflow:agent-can-merge
+          # ── Behavior ──
+          operations-per-run: 30
+          remove-stale-when-updated: true
+          only: issues

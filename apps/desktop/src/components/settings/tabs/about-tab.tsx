@@ -6,7 +6,7 @@ const APP_VERSION = '0.2.1';
 const APP_IDENTIFIER = 'com.hyscode.app';
 const APP_DESCRIPTION =
   'A modern, AI-powered code editor built with Tauri, React, and Monaco. Designed for developers who want an intelligent, fast, and extensible coding experience.';
-const REPO_URL = 'https://github.com/hyskasoftware/Hyscode';
+const REPO_URL = 'https://github.com/Hyska-Software/Hyscode';
 
 export function AboutTab() {
   const updateStatus = useUpdateStore((s) => s.status);

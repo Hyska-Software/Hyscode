@@ -1,0 +1,49 @@
+# HysCode — CODEOWNERS
+#
+# GitHub usa este arquivo para requerir review de owners quando arquivos
+# matching são modificados. Source of truth: docs/WORKFLOW.md §CODEOWNERS.
+#
+# Formato: <pattern>  <owner1>  <owner2> ...
+# Última regra matching vence.
+
+# Default owner
+*                          @Estevaobonatto
+
+# ── Apps ──────────────────────────────────────────────────────────────
+/apps/desktop/             @Estevaobonatto
+/apps/desktop/src-tauri/   @Estevaobonatto
+
+# ── Packages ──────────────────────────────────────────────────────────
+/packages/agent-harness/   @Estevaobonatto
+/packages/ai-providers/    @Estevaobonatto
+/packages/mcp-client/      @Estevaobonatto
+/packages/skills/          @Estevaobonatto
+/packages/ui/              @Estevaobonatto
+/packages/extension-api/   @Estevaobonatto
+/packages/extension-host/  @Estevaobonatto
+/packages/lsp-client/      @Estevaobonatto
+
+# ── Extensions ────────────────────────────────────────────────────────
+/extensions/               @Estevaobonatto
+
+# ── Docs ──────────────────────────────────────────────────────────────
+/docs/architecture/        @Estevaobonatto
+/docs/specs/               @Estevaobonatto
+
+# Workflow canônico (alta fricção para mudanças)
+/AGENTS.md                 @Estevaobonatto
+/CONTRIBUTING.md           @Estevaobonatto
+/docs/WORKFLOW.md          @Estevaobonatto
+/docs/AGENT_PLAYBOOK.md    @Estevaobonatto
+/docs/MILESTONES.md        @Estevaobonatto
+
+# GitHub workflow definitions
+/.github/CODEOWNERS        @Estevaobonatto
+/.github/labels.yml        @Estevaobonatto
+/.github/labeler.yml       @Estevaobonatto
+/.github/PULL_REQUEST_TEMPLATE.md  @Estevaobonatto
+/.github/ISSUE_TEMPLATE/   @Estevaobonatto
+/.github/workflows/        @Estevaobonatto
+
+# Build/release scripts
+/scripts/                  @Estevaobonatto

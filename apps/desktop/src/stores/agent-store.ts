@@ -389,7 +389,7 @@ interface AgentState {
 
   // Mode switch / delegation
   setPendingModeSwitch: (request: ModeSwitchRequest | null) => void;
-  resolveModeSwitch: (approved: boolean) => void;
+  resolveModeSwitch: (request: ModeSwitchRequest, approved: boolean) => void;
 
   // User questions (ask_user tool)
   setPendingUserQuestion: (question: PendingUserQuestion | null) => void;
@@ -805,17 +805,15 @@ export const useAgentStore = create<AgentState>()(
         state.pendingModeSwitch = request;
       }),
 
-    resolveModeSwitch: (approved) =>
+    resolveModeSwitch: (request, approved) =>
       set((state) => {
-        const req = state.pendingModeSwitch;
-        if (!req) return;
         if (approved) {
           state.delegationChain.push({
-            fromMode: req.fromMode as AgentMode,
-            toMode: req.toMode as AgentMode,
-            reason: req.reason,
+            fromMode: request.fromMode as AgentMode,
+            toMode: request.toMode as AgentMode,
+            reason: request.reason,
           });
-          state.mode = req.toMode as AgentMode;
+          state.mode = request.toMode as AgentMode;
         }
         state.pendingModeSwitch = null;
       }),

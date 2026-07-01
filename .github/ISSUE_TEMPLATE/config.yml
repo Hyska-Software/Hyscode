@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Discussões e perguntas
+    url: https://github.com/Hyska-Software/Hyscode/discussions
+    about: Use para perguntas, ideias abertas e conversas — não para bugs ou features.
+  - name: Documentação de Workflow
+    url: https://github.com/Hyska-Software/Hyscode/blob/main/docs/WORKFLOW.md
+    about: Leia antes de abrir uma issue. Define o sistema de labels, branches e PRs.
+  - name: Agent Playbook
+    url: https://github.com/Hyska-Software/Hyscode/blob/main/docs/AGENT_PLAYBOOK.md
+    about: Manual para agentes de IA (Kilo, Claude Code, etc) executarem o loop.

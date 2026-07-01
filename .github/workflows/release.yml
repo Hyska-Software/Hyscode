@@ -24,8 +24,8 @@ name: "Build & Release"
 # ── IDE Update System ────────────────────────────────────────────────────────
 # apps/desktop/src-tauri/src/commands/updater.rs reads app.package_info().version
 # (from tauri.conf.json) as the installed version — not CARGO_PKG_VERSION.
-#   Stable channel    → GET /repos/hyskasoftware/Hyscode/releases/latest
-#   Pre-release ch.   → GET /repos/hyskasoftware/Hyscode/releases?per_page=20
+#   Stable channel    → GET /repos/Hyska-Software/Hyscode/releases/latest
+#   Pre-release ch.   → GET /repos/Hyska-Software/Hyscode/releases?per_page=20
 #                        (picks the highest semver with a compatible platform asset)
 #
 # Asset selection by extension:

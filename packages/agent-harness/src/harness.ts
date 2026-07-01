@@ -329,8 +329,10 @@ export class Harness {
   }
 
   /** Set the delegation chain for the current session */
-  setDelegationChain(chain: Array<{ fromMode: string; toMode: string; reason: string }>): void {
-    this.delegationChain = chain;
+  setDelegationChain(
+    chain: ReadonlyArray<{ fromMode: string; toMode: string; reason: string }>,
+  ): void {
+    this.delegationChain = chain.map((delegation) => ({ ...delegation }));
   }
 
   /** Inject delegation chain as a context source so the agent is aware of mode switches */
@@ -481,6 +483,32 @@ export class Harness {
     imageContent?: Array<{ base64: string; mediaType: string }>,
   ): Promise<TurnOutcome>;
   async run(
+    requestOrMessage: string | TurnRequest,
+    history: Message[] = [],
+    imageContent?: Array<{ base64: string; mediaType: string }>,
+  ): Promise<TurnOutcome> {
+    const previousTurnId = this.turnController.id;
+    try {
+      return await this.runInternal(requestOrMessage, history, imageContent);
+    } catch (error) {
+      if (this.turnController.id !== previousTurnId) {
+        const message = error instanceof Error ? error.message : String(error);
+        this.traceRecorder.recordError(message);
+        this.finishTurn(
+          'error',
+          {
+            inputTokens: 0,
+            outputTokens: 0,
+            totalTokens: 0,
+          },
+          message,
+        );
+      }
+      throw error;
+    }
+  }
+
+  private async runInternal(
     requestOrMessage: string | TurnRequest,
     history: Message[] = [],
     imageContent?: Array<{ base64: string; mediaType: string }>,
@@ -1140,7 +1168,10 @@ export class Harness {
             const filePath = `${basePath}/${skillName}.md`;
             // Write skill file via Tauri invoke
             await executionContext.invoke('create_directory', { path: basePath });
-            await executionContext.invoke('write_file', { path: filePath, content: skillContent });
+            await executionContext.invoke('write_file', {
+              path: filePath,
+              content: skillContent,
+            });
             record.output.output = `Skill "${skillName}" created at ${filePath}. It will be available after refreshing skills.`;
             record.output.metadata = { ...record.output.metadata, filePath };
           } catch (err) {
@@ -1176,14 +1207,16 @@ export class Harness {
               },
               activeTurn.signal,
             ).finally(() => this.turnController.transition('executing_tools'));
-            this.emit({ type: 'mode_switch_resolved', request: switchRequest, approved });
             // Override the tool output so the agent knows the user's decision
             if (approved) {
-              this.delegationChain.push({
-                fromMode: switchRequest.fromMode,
-                toMode: targetMode,
-                reason,
-              });
+              this.delegationChain = [
+                ...this.delegationChain,
+                {
+                  fromMode: switchRequest.fromMode,
+                  toMode: targetMode,
+                  reason,
+                },
+              ];
               this.setAgentType(targetMode as AgentType);
               agentDef = getAgentDefinition(this.agentType);
               policy = this.getEffectivePolicy();
@@ -1195,6 +1228,7 @@ export class Harness {
             } else {
               record.output.output = `Mode switch DENIED by user. The user chose to stay in the current mode (${this.agentType}). Ask the user what they'd like to change or adjust in the plan before proceeding. Do NOT request another mode switch immediately — engage with the user first.`;
             }
+            this.emit({ type: 'mode_switch_resolved', request: switchRequest, approved });
           }
         }
 

@@ -62,4 +62,4 @@ Este é o primeiro lançamento do HysCode em versão pública. Ainda é uma vers
 
 ---
 
-[0.1.0]: https://github.com/hyskasoftware/Hyscode/releases/tag/v0.1.0
+[0.1.0]: https://github.com/Hyska-Software/Hyscode/releases/tag/v0.1.0

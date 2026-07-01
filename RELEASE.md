@@ -60,7 +60,7 @@ HysCode reimagina o desenvolvimento de software ao trazer a inteligência artifi
 
 ```bash
 # Clonar o repositório
-git clone https://github.com/Estevaobonatto/Hyscode.git
+git clone https://github.com/Hyska-Software/Hyscode.git
 cd Hyscode
 
 # Instalar dependências
@@ -148,7 +148,7 @@ Adoraríamos sua contribuição! Aqui está como começar:
 
 ## Reportando Bugs
 
-Encontrou um problema? Abra uma [Issue no GitHub](https://github.com/Estevaobonatto/Hyscode/issues) com:
+Encontrou um problema? Abra uma [Issue no GitHub](https://github.com/Hyska-Software/Hyscode/issues) com:
 
 - Descrição clara do problema
 - Passos para reproduzir
@@ -215,8 +215,8 @@ Este projeto é licenciado sob a **MIT License** — veja o arquivo [LICENSE](./
 
 ## Comunidade
 
-- Discussões: [GitHub Discussions](https://github.com/Estevaobonatto/Hyscode/discussions)
-- Issues: [Bug Reports & Features](https://github.com/Estevaobonatto/Hyscode/issues)
+- Discussões: [GitHub Discussions](https://github.com/Hyska-Software/Hyscode/discussions)
+- Issues: [Bug Reports & Features](https://github.com/Hyska-Software/Hyscode/issues)
 - Email: [dev@hyscode.io](mailto:dev@hyscode.io) *(em breve)*
 
 ---

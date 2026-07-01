@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Estevaobonatto/Hyscode/actions/workflows/ci.yml"><img src="https://github.com/Estevaobonatto/Hyscode/actions/workflows/ci.yml/badge.svg" alt="CI"/></a>
+  <a href="https://github.com/Hyska-Software/Hyscode/actions/workflows/ci.yml"><img src="https://github.com/Hyska-Software/Hyscode/actions/workflows/ci.yml/badge.svg" alt="CI"/></a>
   <a href="./LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License"/></a>
   <a href="./CHANGELOG.md"><img src="https://img.shields.io/badge/version-0.1.0-blue" alt="Version"/></a>
 </p>
@@ -105,7 +105,7 @@ Passos rápidos:
 
 ```bash
 # Clonar o repositório
-git clone https://github.com/Estevaobonatto/Hyscode.git
+git clone https://github.com/Hyska-Software/Hyscode.git
 cd Hyscode
 
 # Instalar dependências

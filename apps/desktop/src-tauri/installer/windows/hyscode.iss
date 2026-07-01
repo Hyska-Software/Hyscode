@@ -5,7 +5,7 @@
 #define MyAppName "HysCode"
 #define MyAppVersion "0.1.0"
 #define MyAppPublisher "HysCode"
-#define MyAppURL "https://github.com/Estevaobonatto/Hyscode"
+#define MyAppURL "https://github.com/Hyska-Software/Hyscode"
 #define MyAppExeName "HysCode.exe"
 #define MyAppAssocName "HysCode File"
 

@@ -1,0 +1,163 @@
+# HysCode — Label canônica
+#
+# Este arquivo é a fonte de verdade. O workflow `sync-labels.yml` aplica
+# estas definições ao GitHub via `gh label sync` (ou actions/labeler).
+# Idempotente: cria/atualiza, sem apagar labels manuais.
+#
+# Veja docs/WORKFLOW.md §2.2 para a taxonomia completa.
+
+# ─────────────────────────────────────────────────────────────────────
+# type:*  (obrigatório, exatamente um por issue)
+# ─────────────────────────────────────────────────────────────────────
+- name: type:bug
+  color: "d73a4a"
+  description: Comportamento incorreto ou regressão
+- name: type:feat
+  color: "a2eeef"
+  description: Nova funcionalidade
+- name: type:chore
+  color: "cfd3d7"
+  description: Manutenção, build, dependência
+- name: type:refactor
+  color: "7057ff"
+  description: Refatoração sem mudança de comportamento
+- name: type:perf
+  color: "fbca04"
+  description: Melhoria de performance
+- name: type:docs
+  color: "0075ca"
+  description: Apenas documentação
+- name: type:test
+  color: "bfdadc"
+  description: Apenas testes
+
+# ─────────────────────────────────────────────────────────────────────
+# area:*  (obrigatório, exatamente um por issue)
+# ─────────────────────────────────────────────────────────────────────
+- name: area:desktop
+  color: "1d76db"
+  description: apps/desktop (Tauri shell, React UI)
+- name: area:agent-harness
+  color: "5319e7"
+  description: packages/agent-harness
+- name: area:ai-providers
+  color: "0e8a16"
+  description: packages/ai-providers
+- name: area:mcp-client
+  color: "b60205"
+  description: packages/mcp-client
+- name: area:skills
+  color: "d93f0b"
+  description: packages/skills
+- name: area:ui
+  color: "f9d0c4"
+  description: packages/ui
+- name: area:extension-api
+  color: "c5def5"
+  description: packages/extension-api
+- name: area:extension-host
+  color: "bf9000"
+  description: packages/extension-host
+- name: area:lsp-client
+  color: "e99695"
+  description: packages/lsp-client
+- name: area:infra
+  color: "2e2e2e"
+  description: CI, build, release, dependências
+- name: area:docs
+  color: "0e8a16"
+  description: docs/, README, AGENTS, WORKFLOW
+
+# ─────────────────────────────────────────────────────────────────────
+# priority:*  (opcional, no máximo um)
+# ─────────────────────────────────────────────────────────────────────
+- name: priority:p0
+  color: "b60205"
+  description: Bloqueia release — drop everything
+- name: priority:p1
+  color: "d93f0b"
+  description: Alto, alvo da próxima release
+- name: priority:p2
+  color: "fbca04"
+  description: Médio
+- name: priority:p3
+  color: "0e8a16"
+  description: Baixo / nice-to-have
+
+# ─────────────────────────────────────────────────────────────────────
+# status:*  (gerenciado pelo fluxo)
+# ─────────────────────────────────────────────────────────────────────
+- name: status:needs-triage
+  color: "ededed"
+  description: Acabou de ser criado, precisa triagem
+- name: status:ready
+  color: "0e8a16"
+  description: Triado, pronto para implementação
+- name: status:in-progress
+  color: "1d76db"
+  description: Em andamento (alguém atribuído)
+- name: status:blocked
+  color: "b60205"
+  description: Bloqueado por dependência externa
+- name: status:needs-review
+  color: "fbca04"
+  description: PR aberto aguardando review
+- name: status:ready-to-merge
+  color: "7057ff"
+  description: Aprovado, aguardando merge
+
+# ─────────────────────────────────────────────────────────────────────
+# milestone:*  (alinhado com docs/MILESTONES.md)
+# ─────────────────────────────────────────────────────────────────────
+- name: milestone:m0
+  color: "c5def5"
+  description: M0 — Foundation
+- name: milestone:m1
+  color: "c5def5"
+  description: M1 — Core IDE
+- name: milestone:m2
+  color: "c5def5"
+  description: M2 — AI Provider Layer
+- name: milestone:m3
+  color: "c5def5"
+  description: M3 — Agent Harness v1
+- name: milestone:m4
+  color: "c5def5"
+  description: M4 — SDD Flow
+- name: milestone:m5
+  color: "c5def5"
+  description: M5 — MCP + Skills
+- name: milestone:m6
+  color: "c5def5"
+  description: M6 — Code Sandbox + Git
+- name: milestone:m7
+  color: "c5def5"
+  description: M7 — Polish + Optimization
+
+# ─────────────────────────────────────────────────────────────────────
+# workflow:*  (sinais de processo)
+# ─────────────────────────────────────────────────────────────────────
+- name: workflow:agent-tasks
+  color: "5319e7"
+  description: Task que agente de IA pode executar
+- name: workflow:agent-can-merge
+  color: "bf9000"
+  description: Aprovado para auto-merge por agente
+- name: workflow:good-first-issue
+  color: "7057ff"
+  description: Apropriado para newcomers
+- name: workflow:help-wanted
+  color: "008672"
+  description: Mantenedor aceita contribuições
+- name: workflow:breaking-change
+  color: "b60205"
+  description: Mudança incompatível
+- name: workflow:duplicate
+  color: "cfd3d7"
+  description: Duplicata de outra issue
+- name: workflow:wontfix
+  color: "cfd3d7"
+  description: Não será corrigido/implementado
+- name: workflow:pin
+  color: "f9d0c4"
+  description: Fixado para visibilidade

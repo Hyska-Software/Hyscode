@@ -181,6 +181,7 @@ export class HarnessBridge {
   private _projectId: string = '';
   private approvalResolvers = new Map<string, (approved: boolean) => void>();
   private modeSwitchResolvers = new Map<string, (approved: boolean) => void>();
+  private resolvedModeSwitchIds = new Set<string>();
   private userQuestionResolvers = new Map<
     string,
     (answers: import('@hyscode/agent-harness').AgentQuestionAnswer[]) => void
@@ -991,21 +992,17 @@ Investigate the error, fix the underlying issue in the affected files, and verif
     const req = store.pendingModeSwitch;
     if (!req) return;
 
-    if (approved) {
-      this.debug(`Delegação aprovada: ${req.fromMode} → ${req.toMode}`);
-      this.setAgentType(req.toMode as AgentType);
-    } else {
-      this.debug(`Delegação rejeitada: ${req.fromMode} → ${req.toMode}`);
-    }
-
     // Resolve the promise that pauses the harness loop
     const resolver = this.modeSwitchResolvers.get(req.id);
-    if (resolver) {
-      resolver(approved);
-      this.modeSwitchResolvers.delete(req.id);
-    }
-
-    store.resolveModeSwitch(approved);
+    if (!resolver) return;
+    this.modeSwitchResolvers.delete(req.id);
+    store.setPendingModeSwitch(null);
+    this.debug(
+      approved
+        ? `Delegação aprovada: ${req.fromMode} → ${req.toMode}`
+        : `Delegação rejeitada: ${req.fromMode} → ${req.toMode}`,
+    );
+    resolver(approved);
   }
 
   /** Resolve a pending approval from the UI */
@@ -1767,9 +1764,14 @@ Investigate the error, fix the underlying issue in the affected files, and verif
       }
 
       case 'mode_switch_resolved': {
-        // Handled by resolveModeSwitch() which is called from the UI.
-        // The harness emits this after the callback resolves — just log it.
         const req = event.request;
+        if (this.resolvedModeSwitchIds.has(req.id)) break;
+        this.resolvedModeSwitchIds.add(req.id);
+        if (this.resolvedModeSwitchIds.size > 256) {
+          const oldest = this.resolvedModeSwitchIds.values().next().value;
+          if (oldest) this.resolvedModeSwitchIds.delete(oldest);
+        }
+        store.resolveModeSwitch(req, event.approved);
         if (event.approved) {
           this.debug(`Delegação resolvida: aprovada → ${req.toMode}`);
         } else {

@@ -49,4 +49,26 @@ describe('agent tab turn ownership', () => {
     expect(useAgentStore.getState().connectionState).toBe('degraded');
     expect(useAgentStore.getState().recoverableError?.action).toBe('continue');
   });
+
+  it('applies a mode switch only from the confirmed request', () => {
+    const request = {
+      id: 'switch-1',
+      fromMode: 'review' as const,
+      toMode: 'build' as const,
+      reason: 'Implement reviewed fixes',
+      contextSummary: 'Validated findings',
+    };
+    useAgentStore.getState().setMode('review');
+    useAgentStore.getState().setPendingModeSwitch(request);
+
+    expect(useAgentStore.getState().mode).toBe('review');
+    useAgentStore.getState().setPendingModeSwitch(null);
+    expect(useAgentStore.getState().mode).toBe('review');
+
+    useAgentStore.getState().resolveModeSwitch(request, true);
+    expect(useAgentStore.getState().mode).toBe('build');
+    expect(useAgentStore.getState().delegationChain).toEqual([
+      { fromMode: 'review', toMode: 'build', reason: 'Implement reviewed fixes' },
+    ]);
+  });
 });

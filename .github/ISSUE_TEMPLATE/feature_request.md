@@ -2,7 +2,7 @@
 name: Feature Request
 about: Sugerir uma ideia ou funcionalidade
 title: "[FEATURE] "
-labels: "enhancement"
+labels: "type:feat,status:needs-triage"
 assignees: ""
 ---
 
@@ -28,20 +28,39 @@ Uma descrição clara de quaisquer soluções ou funcionalidades alternativas qu
 
 Adicione qualquer outro contexto ou screenshots sobre o feature request.
 
+## Critérios de Aceitação
+
+- [ ] ...
+- [ ] ...
+
+## Plano de Teste
+
+1. ...
+2. ...
+
 ## Impacto
 
 - **Prioridade**: [Alta / Média / Baixa]
 - **Esforço Estimado**: [Pequeno / Médio / Grande]
-- **Categoria**: [Editor / IA / Git / Docker / Outro]
+
+## Classificação (workflow)
+
+<!-- O labeler pode aplicar area:* automaticamente; confirme abaixo -->
+
+- **Área**: <!-- area:desktop | area:agent-harness | area:ai-providers | area:mcp-client | area:skills | area:ui | area:extension-api | area:extension-host | area:lsp-client | area:infra | area:docs -->
+- **Milestone**: <!-- milestone:m0 … milestone:m7 -->
+- **Breaking change?**: <!-- sim / não -->
+- **Bom para newcomer?**: <!-- sim / não -->
+- **Mantenedor aceita contribuição?**: <!-- sim / não -->
 
 ## Compatibilidade
 
 - [ ] Afeta múltiplas plataformas (Windows, macOS, Linux)
-- [ ] Requer mudanças na API
+- [ ] Requer mudanças na API pública
 - [ ] Pode ser uma breaking change
 
 ## Checklist
 
-- [ ] Procurei por feature requests relacionadas
+- [ ] Procurei por feature requests relacionadas (`gh issue list --search "<termo>"`)
 - [ ] Esta é uma funcionalidade nova (não um bug fix)
 - [ ] Tenho um caso de uso claro para este feature

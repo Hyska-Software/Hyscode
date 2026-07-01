@@ -93,20 +93,50 @@ docs/                 # Architecture docs and specs
 
 ## Workflow
 
+> **Source of truth:** [`docs/WORKFLOW.md`](docs/WORKFLOW.md). Este guia é um
+> resumo — sempre consulte a spec canônica quando houver dúvida.
+
 1. **Check existing issues** before starting work to avoid duplication.
-2. **Open an issue** to discuss large changes before writing code.
-3. **Create a branch** from `main`:
    ```bash
-   git checkout -b feat/my-feature
-   # or
-   git checkout -b fix/my-bug
+   gh issue list --search "<keyword>" --state all
    ```
-4. **Make your changes**, keeping commits focused and atomic.
-5. **Run checks** before pushing:
+2. **Open an issue** using the right template (`.github/ISSUE_TEMPLATE/`).
+   Apply labels in the form `type:*`, `area:*`, `priority:*` and (if AI-driven)
+   `workflow:agent-tasks`.
+3. **Create a branch** from `main` following the strict pattern:
    ```bash
-   pnpm lint && pnpm typecheck
+   # Substitua <remote> pelo nome do seu remote (`git remote -v` para descobrir).
+   # No repositório upstream é `hyska`; em clones pode ser `origin`.
+   git fetch <remote>
+   git switch -c <type>/<issue#>-<scope>-<slug> main
+   # e.g. feat/142-agent-harness-streaming-tools
    ```
-6. **Open a Pull Request** against `main`.
+   Pattern: `^(feat|fix|chore|refactor|perf|docs|test)/[0-9]+-[a-z0-9][a-z0-9-]*$`
+4. **Make your changes**, keeping commits focused, atomic and following
+   [Conventional Commits](https://www.conventionalcommits.org/). Reference the
+   issue in the footer with `Refs #N` (or `Closes #N` for delivery).
+5. **Run pre-flight** (also works for AI agents):
+   ```bash
+   ./scripts/agent-preflight.sh   # or pwsh scripts/agent-preflight.ps1 on Windows
+   ```
+6. **Run checks** before pushing:
+   ```bash
+   pnpm lint && pnpm typecheck && pnpm test
+   # Plus for Rust changes:
+   cd apps/desktop/src-tauri && cargo fmt && cargo clippy -- -D warnings && cargo test
+   ```
+7. **Push and open a Pull Request** against `main`:
+   ```bash
+   git push -u <remote> HEAD
+   gh pr create --title "<type>(<scope>): <subject>" \
+     --body-file .github/PULL_REQUEST_TEMPLATE.md --base main
+   ```
+8. **Squash-merge** is the only allowed merge strategy. The PR title (in
+   Conventional Commits format) becomes the squash commit message on `main`.
+
+See [`docs/WORKFLOW.md`](docs/WORKFLOW.md) for the complete spec (label taxonomy,
+PR template, merge strategy, etc). For AI agents, see
+[`docs/AGENT_PLAYBOOK.md`](docs/AGENT_PLAYBOOK.md).
 
 ---
 
@@ -177,10 +207,13 @@ When adding a new feature, include tests where feasible. For bug fixes, add a re
 
 ## Submitting a Pull Request
 
-- Fill out the pull request template completely.
-- Link the related issue (`Closes #123`).
-- Keep the PR focused — one logical change per PR.
+- Fill out the pull request template completely (`.github/PULL_REQUEST_TEMPLATE.md`).
+- PR title **must** follow [Conventional Commits](https://www.conventionalcommits.org/) — enforced by `pr-lint` workflow.
+- Link the related issue with `Closes #N` (delivery) or `Refs #N` (partial work) — enforced by `pr-lint` workflow.
+- Branch name **must** follow `<type>/<issue#>-<scope>-<slug>` — enforced by `pr-lint` workflow.
+- Keep the PR focused — one logical change per PR (1 issue = 1 PR = 1 squash).
 - Ensure CI passes before requesting review.
+- Squash-merge is the only allowed strategy. See [`docs/WORKFLOW.md`](docs/WORKFLOW.md) §5.
 - Be responsive to review feedback.
 
 ---
@@ -205,4 +238,4 @@ Use the [feature request template](.github/ISSUE_TEMPLATE/feature_request.md). C
 
 ## Questions
 
-Open a [GitHub Discussion](https://github.com/Estevaobonatto/Hyscode/discussions) for questions that are not bug reports or feature requests.
+Open a [GitHub Discussion](https://github.com/Hyska-Software/Hyscode/discussions) for questions that are not bug reports or feature requests.

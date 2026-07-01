@@ -1,0 +1,99 @@
+# HysCode — Auto-labeler
+#
+# Aplica `area:*` por path modificado e `type:*` por prefixo de branch
+# automaticamente em PRs. Source of truth: docs/WORKFLOW.md §2.2.
+#
+# Veja https://github.com/actions/labeler
+
+area:desktop:
+  - changed-files:
+      - any-glob-to-any-file:
+          - apps/desktop/**
+
+area:agent-harness:
+  - changed-files:
+      - any-glob-to-any-file:
+          - packages/agent-harness/**
+
+area:ai-providers:
+  - changed-files:
+      - any-glob-to-any-file:
+          - packages/ai-providers/**
+
+area:mcp-client:
+  - changed-files:
+      - any-glob-to-any-file:
+          - packages/mcp-client/**
+
+area:skills:
+  - changed-files:
+      - any-glob-to-any-file:
+          - packages/skills/**
+
+area:ui:
+  - changed-files:
+      - any-glob-to-any-file:
+          - packages/ui/**
+
+area:extension-api:
+  - changed-files:
+      - any-glob-to-any-file:
+          - packages/extension-api/**
+
+area:extension-host:
+  - changed-files:
+      - any-glob-to-any-file:
+          - packages/extension-host/**
+
+area:lsp-client:
+  - changed-files:
+      - any-glob-to-any-file:
+          - packages/lsp-client/**
+
+area:infra:
+  - changed-files:
+      - any-glob-to-any-file:
+          - .github/**
+          - scripts/**
+          - package.json
+          - package-lock.json
+          - '**/turbo.json'
+          - '**/Cargo.toml'
+          - '**/tauri.conf.json'
+
+area:docs:
+  - changed-files:
+      - any-glob-to-any-file:
+          - docs/**
+          - '**/*.md'
+
+# ─────────────────────────────────────────────────────────────────────
+# type:* via prefixo de branch
+# ─────────────────────────────────────────────────────────────────────
+type:bug:
+  - branch:
+      - pattern: 'fix/**'
+
+type:feat:
+  - branch:
+      - pattern: 'feat/**'
+
+type:chore:
+  - branch:
+      - pattern: 'chore/**'
+
+type:refactor:
+  - branch:
+      - pattern: 'refactor/**'
+
+type:perf:
+  - branch:
+      - pattern: 'perf/**'
+
+type:docs:
+  - branch:
+      - pattern: 'docs/**'
+
+type:test:
+  - branch:
+      - pattern: 'test/**'

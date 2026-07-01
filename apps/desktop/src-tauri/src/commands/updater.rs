@@ -79,7 +79,7 @@ struct DownloadProgress {
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
-const GITHUB_RELEASES_BASE: &str = "https://api.github.com/repos/hyskasoftware/Hyscode/releases";
+const GITHUB_RELEASES_BASE: &str = "https://api.github.com/repos/Hyska-Software/Hyscode/releases";
 
 const USER_AGENT: &str = "HysCode-Updater";
 
@@ -133,7 +133,7 @@ async fn fetch_commits_between(
     head_tag: &str,
 ) -> Result<Vec<CommitInfo>, String> {
     let url = format!(
-        "https://api.github.com/repos/hyskasoftware/Hyscode/compare/{}...{}",
+        "https://api.github.com/repos/Hyska-Software/Hyscode/compare/{}...{}",
         base_tag, head_tag
     );
     let response = client

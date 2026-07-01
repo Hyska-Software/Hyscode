@@ -4,6 +4,64 @@
 
 HysCode is a desktop IDE powered by AI agents. Agents write, edit, and execute code using real developer tools (Monaco Editor, terminal, git, filesystem). Built with Tauri v2 (Rust) + React 19 (TypeScript).
 
+---
+
+## Issue → Branch → PR Loop (mandatory)
+
+**Todo trabalho, mesmo chores, começa por issue.** O sistema é canônico e está
+documentado em [`docs/WORKFLOW.md`](docs/WORKFLOW.md) e operacionalizado em
+[`docs/AGENT_PLAYBOOK.md`](docs/AGENT_PLAYBOOK.md). Resumo:
+
+1. **Search** — `gh issue list --search "<keyword>" --state open` ou procure por label `workflow:agent-tasks`.
+2. **Open or claim**:
+   - Não existe: `gh issue create --label "type:X,area:Y,workflow:agent-tasks" --body-file ...`
+   - Existe: comente `🤖 claiming` e `gh issue edit N --add-assignee @me --add-label "status:in-progress"`.
+3. **Branch** (sempre a partir de `main`):
+   ```bash
+   # Substitua <remote> pelo nome do seu remote (geralmente 'origin' ou 'hyska').
+   # Use `git remote -v` para descobrir.
+   git fetch <remote>
+   git switch -c <type>/<issue#>-<scope>-<slug> main
+   ```
+   Pattern regex: `^(feat|fix|chore|refactor|perf|docs|test)/[0-9]+-[a-z0-9][a-z0-9-]*$`
+4. **Commits** — Conventional Commits, atômicos, com `Refs #N` (ou `Closes #N`) no footer.
+5. **Pre-flight** — `./scripts/agent-preflight.sh` (ou `pwsh scripts/agent-preflight.ps1` no Windows).
+6. **PR**:
+   ```bash
+   git push -u <remote> HEAD
+   gh pr create --title "<type>(<scope>): <subject>" \
+     --body-file .github/PULL_REQUEST_TEMPLATE.md --base main
+   ```
+7. **CI** — aguardar checks; corrigir até verde. Nunca ignorar.
+8. **Self-review** — preencha checklist do template.
+9. **Merge** — humano OU label `workflow:agent-can-merge` aplicada por humano.
+
+## Regras invioláveis do agente
+
+- **Nunca** commitar diretamente em `main`.
+- **Nunca** usar `git push --force` em `main` ou em PR aberta.
+- **Nunca** abrir PR sem `Closes #N` ou `Refs #N` no body.
+- **Nunca** misturar escopos em um PR (1 issue = 1 PR = 1 squash).
+- **Nunca** ignorar falha de CI — corrigir ou pedir ajuda.
+- **Nunca** usar placeholder (`TODO`, `FIXME`, `// implement later`, `your code here`).
+- **Nunca** auto-merge sem a label `workflow:agent-can-merge` aplicada por humano.
+- **Sempre** rodar `npm run lint && npm run typecheck` antes de PR.
+- **Sempre** rodar `scripts/agent-preflight.sh` antes de `git push`.
+- **Sempre** atualizar `docs/` quando contrato/arquitetura mudar.
+- **Sempre** atualizar `AGENTS.md` ou `docs/WORKFLOW.md` se a convenção mudar.
+- **Sempre** referenciar este `AGENTS.md` em qualquer resposta sobre workflow.
+
+Em caso de dúvida: `docs/WORKFLOW.md` é a fonte de verdade.
+
+## URL Canônico
+
+- **Repositório**: `https://github.com/Hyska-Software/Hyscode`
+- **Maintainer**: `@Estevaobonatto`
+- **Histórico**: original era `Estevaobonatto/Hyscode` (user account), depois `hyskasoftware/Hyscode` (user account), agora `Hyska-Software/Hyscode` (Organization). A Org foi criada em 2026-07-01 ao converter o user account.
+- **Em caso de mudança de owner/org**, atualizar em um único PR: `README.md`, `RELEASE.md`, `AGENTS.md`, `CONTRIBUTING.md`, `docs/*.md`, `scripts/CHANGELOG.md`, `.github/ISSUE_TEMPLATE/config.yml`, `.github/workflows/release.yml`, `apps/desktop/src-tauri/installer/windows/hyscode.iss`, `apps/desktop/src-tauri/src/commands/updater.rs`, `apps/desktop/src/components/settings/tabs/about-tab.tsx`.
+
+> **Nota**: O repo `hyskasoftware/Hyscode-Extensions` (store de extensões) é um projeto separado e pode estar em outro owner. Ele não é migrado automaticamente junto com o Hyscode principal.
+
 ## Tech Stack
 
 | Layer         | Technology                            |
