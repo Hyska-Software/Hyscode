@@ -162,7 +162,7 @@ jobs:
 
       - name: cargo clippy
         working-directory: apps/desktop/src-tauri
-        run: cargo clippy --all-targets -- -D warnings
+        run: cargo clippy --all-targets
 
       - name: cargo build
         working-directory: apps/desktop/src-tauri

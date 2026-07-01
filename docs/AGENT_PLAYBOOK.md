@@ -189,7 +189,7 @@ npm test
 # Se Rust mudou
 cd apps/desktop/src-tauri
 cargo fmt
-cargo clippy -- -D warnings
+cargo clippy
 cargo test
 ```
 

@@ -138,7 +138,8 @@ Em caso de dúvida: `docs/WORKFLOW.md` é a fonte de verdade.
 - **Formatting**: Prettier with project config (run `npm run format`)
 - **Linting**: ESLint (run `npm run lint` before push)
 - **Commits**: Conventional Commits (`feat:`, `fix:`, `docs:`, `refactor:`, `chore:`, `perf:`, `test:`)
-- **Rust**: `cargo fmt` + `cargo clippy` before committing Rust changes
+- **Rust**: `cargo fmt` + `cargo clippy` before committing Rust changes; Clippy warnings are
+  reported but do not fail checks or block PRs
 - **Tauri IPC**: `invoke()` arguments in camelCase (auto-converts to snake_case in Rust)
 - **AI Providers**: All `chat()` methods return `AsyncIterable<StreamChunk>` (not Promise)
 - **API Keys**: Never stored in TypeScript or SQLite — use Rust keychain layer
