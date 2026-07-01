@@ -493,7 +493,7 @@ export function AgentInput() {
             }}
             onPaste={handlePaste}
             placeholder={`${currentCap.placeholder} (Enter para enviar, Shift+Enter para nova linha)`}
-            className="max-h-40 min-h-[52px] w-full resize-none border-0 bg-transparent px-0 py-1.5 text-[13px] leading-[1.6] text-foreground/90 placeholder:text-muted-foreground/50 focus-visible:ring-0 focus-visible:ring-offset-0"
+            className="max-h-40 min-h-[52px] w-full resize-none border-0 bg-transparent px-0 py-1.5 text-[13px] leading-[1.6] text-foreground/90 placeholder:text-muted-foreground/50 focus-visible:ring-0 focus-visible:ring-offset-0 dark:bg-transparent"
             onKeyDown={(e) => {
               if (
                 mentionPickerOpen &&
@@ -515,25 +515,33 @@ export function AgentInput() {
         </div>
 
         {/* Bottom toolbar: selectors left, actions right */}
-        <div className="flex items-center justify-between gap-2 px-2.5 pb-2 pt-1">
+        <div className="flex items-center justify-between gap-1.5 px-2 pb-1.5 pt-1">
           {/* Agent mode + model + approval selectors */}
-          <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
-            {/* Agent mode dropdown */}
+          <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1">
+            {/* Agent mode dropdown (icon-only) */}
             {(() => {
               const cap = AGENT_CAPABILITIES[mode];
               const ModeIcon = cap.icon;
               return (
                 <DropdownMenu>
-                  <DropdownMenuTrigger
-                    className={cn(
-                      'flex h-7 cursor-pointer items-center gap-1 rounded-lg border border-foreground/[0.07] bg-transparent px-2 text-[11px] font-medium transition-colors focus:outline-none',
-                      'text-foreground/75 hover:border-foreground/[0.14] hover:bg-foreground/[0.03] hover:text-foreground',
-                    )}
-                  >
-                    <ModeIcon className={cn('h-3 w-3 shrink-0', cap.color)} />
-                    <span>{cap.label}</span>
-                    <ChevronDown className="h-2.5 w-2.5 shrink-0 opacity-50" />
-                  </DropdownMenuTrigger>
+                  <Tooltip>
+                    <TooltipTrigger
+                      render={
+                        <DropdownMenuTrigger
+                          className={cn(
+                            'flex h-8 w-8 cursor-pointer items-center justify-center rounded-lg border border-foreground/[0.07] bg-transparent transition-all focus:outline-none',
+                            'hover:border-foreground/[0.14] hover:bg-foreground/[0.03]',
+                            cap.color,
+                          )}
+                        />
+                      }
+                    >
+                      <ModeIcon className="h-3.5 w-3.5" />
+                    </TooltipTrigger>
+                    <TooltipContent side="top">
+                      Agent mode: {cap.label}
+                    </TooltipContent>
+                  </Tooltip>
                   <DropdownMenuContent side="top" className="min-w-[200px]">
                     <div className="px-2 pb-1 pt-1.5 text-[9px] uppercase tracking-wider text-muted-foreground">
                       Agent Mode
@@ -580,9 +588,9 @@ export function AgentInput() {
 
             {/* Model selector */}
             <DropdownMenu>
-              <DropdownMenuTrigger className="flex h-7 cursor-pointer items-center gap-1 rounded-lg border border-foreground/[0.07] bg-transparent px-2 text-[11px] text-foreground/75 transition-colors hover:border-foreground/[0.14] hover:bg-foreground/[0.03] hover:text-foreground focus:outline-none">
-                <span className="max-w-[140px] truncate">{activeModelLabel}</span>
-                <ChevronDown className="h-2.5 w-2.5 shrink-0 opacity-50" />
+              <DropdownMenuTrigger className="flex h-8 max-w-[180px] cursor-pointer items-center gap-1 rounded-lg border border-foreground/[0.07] bg-transparent px-2.5 text-[11px] text-foreground/75 transition-colors hover:border-foreground/[0.14] hover:bg-foreground/[0.03] hover:text-foreground focus:outline-none">
+                <span className="truncate">{activeModelLabel}</span>
+                <ChevronDown className="h-3 w-3 shrink-0 opacity-50" />
               </DropdownMenuTrigger>
               <DropdownMenuContent side="top" className="max-h-72 min-w-[200px] overflow-auto">
                 {useAllProviders ? (
@@ -671,25 +679,28 @@ export function AgentInput() {
               </DropdownMenuContent>
             </DropdownMenu>
 
-            {/* Thinking control */}
+            {/* Thinking control (icon-only) */}
             {activeModelInfo?.supportsThinking && (
               <DropdownMenu>
-                <DropdownMenuTrigger
-                  className={cn(
-                    'flex h-7 cursor-pointer items-center gap-1 rounded-lg border border-foreground/[0.07] bg-transparent px-2 text-[11px] transition-colors focus:outline-none',
-                    currentThinking.enabled
-                      ? 'border-amber-500/20 text-amber-400 hover:border-amber-500/35 hover:bg-amber-500/[0.04]'
-                      : 'text-foreground/75 hover:border-foreground/[0.14] hover:bg-foreground/[0.03] hover:text-foreground',
-                  )}
-                >
-                  <Brain className="h-3 w-3 shrink-0" />
-                  <span>
-                    {currentThinking.enabled
-                      ? `Thinking: ${currentThinking.level ?? 'default'}`
-                      : 'Thinking off'}
-                  </span>
-                  <ChevronDown className="h-2.5 w-2.5 shrink-0 opacity-50" />
-                </DropdownMenuTrigger>
+                <Tooltip>
+                  <TooltipTrigger
+                    render={
+                      <DropdownMenuTrigger
+                        className={cn(
+                          'flex h-8 w-8 cursor-pointer items-center justify-center rounded-lg border transition-all focus:outline-none',
+                          currentThinking.enabled
+                            ? 'border-amber-500/30 bg-amber-500/[0.06] text-amber-400 hover:border-amber-500/50 hover:bg-amber-500/[0.1]'
+                            : 'border-foreground/[0.07] text-foreground/60 hover:border-foreground/[0.14] hover:bg-foreground/[0.03] hover:text-foreground',
+                        )}
+                      />
+                    }
+                  >
+                    <Brain className="h-3.5 w-3.5" />
+                  </TooltipTrigger>
+                  <TooltipContent side="top">
+                    Thinking: {currentThinking.enabled ? currentThinking.level ?? 'default' : 'off'}
+                  </TooltipContent>
+                </Tooltip>
                 <DropdownMenuContent side="top" className="min-w-[180px]">
                   <div className="px-2 pb-1 pt-1.5 text-[9px] uppercase tracking-wider text-muted-foreground">
                     Thinking Mode
@@ -748,23 +759,30 @@ export function AgentInput() {
               </DropdownMenu>
             )}
 
-            {/* Approval mode selector */}
+            {/* Approval mode selector (icon-only) */}
             {(() => {
               const cfg = APPROVAL_CONFIG[approvalMode];
               const ApprovalIcon = cfg.icon;
               return (
                 <DropdownMenu>
-                  <DropdownMenuTrigger
-                    className={cn(
-                      'flex h-7 cursor-pointer items-center gap-1 rounded-lg border border-foreground/[0.07] bg-transparent px-2 text-[11px] transition-colors focus:outline-none',
-                      'text-foreground/75 hover:border-foreground/[0.14] hover:bg-foreground/[0.03] hover:text-foreground',
-                      cfg.color,
-                    )}
-                  >
-                    <ApprovalIcon className="h-3 w-3 shrink-0" />
-                    <span>{cfg.shortLabel}</span>
-                    <ChevronDown className="h-2.5 w-2.5 shrink-0 opacity-50" />
-                  </DropdownMenuTrigger>
+                  <Tooltip>
+                    <TooltipTrigger
+                      render={
+                        <DropdownMenuTrigger
+                          className={cn(
+                            'flex h-8 w-8 cursor-pointer items-center justify-center rounded-lg border border-foreground/[0.07] bg-transparent transition-all focus:outline-none',
+                            'hover:border-foreground/[0.14] hover:bg-foreground/[0.03]',
+                            cfg.color,
+                          )}
+                        />
+                      }
+                    >
+                      <ApprovalIcon className="h-3.5 w-3.5" />
+                    </TooltipTrigger>
+                    <TooltipContent side="top">
+                      Approval: {cfg.label}
+                    </TooltipContent>
+                  </Tooltip>
                   <DropdownMenuContent side="top" className="min-w-[220px]">
                     <div className="px-2 pb-1 pt-1.5 text-[9px] uppercase tracking-wider text-muted-foreground">
                       Approval Mode
@@ -813,19 +831,19 @@ export function AgentInput() {
           </div>
 
           {/* Actions */}
-          <div className="flex shrink-0 items-center gap-0.5">
+          <div className="flex shrink-0 items-center gap-1">
             <Tooltip>
               <TooltipTrigger
                 render={
                   <Button
                     variant="ghost"
-                    size="icon-xs"
+                    size="icon-sm"
                     onClick={openSettings}
-                    className="h-7 w-7 text-muted-foreground/60 hover:bg-foreground/[0.04] hover:text-foreground"
+                    className="text-muted-foreground/60 hover:bg-foreground/[0.04] hover:text-foreground"
                   />
                 }
               >
-                <Settings className="h-3.5 w-3.5" />
+                <Settings className="h-4 w-4" />
               </TooltipTrigger>
               <TooltipContent side="top">Settings</TooltipContent>
             </Tooltip>
@@ -835,13 +853,13 @@ export function AgentInput() {
                 render={
                   <Button
                     variant="ghost"
-                    size="icon-xs"
-                    className="h-7 w-7 text-muted-foreground/60 hover:bg-foreground/[0.04] hover:text-foreground"
+                    size="icon-sm"
+                    className="text-muted-foreground/60 hover:bg-foreground/[0.04] hover:text-foreground"
                     onClick={() => setMentionPickerOpen((v) => !v)}
                   />
                 }
               >
-                <Plus className="h-3.5 w-3.5" />
+                <Plus className="h-4 w-4" />
               </TooltipTrigger>
               <TooltipContent side="top">Add context (@)</TooltipContent>
             </Tooltip>
@@ -851,16 +869,16 @@ export function AgentInput() {
                 render={
                   <Button
                     variant="ghost"
-                    size="icon-xs"
+                    size="icon-sm"
                     className={cn(
-                      'h-7 w-7 text-muted-foreground/60 hover:bg-foreground/[0.04] hover:text-foreground',
+                      'text-muted-foreground/60 hover:bg-foreground/[0.04] hover:text-foreground',
                       attachedImages.length > 0 && 'text-accent',
                     )}
                     onClick={() => fileInputRef.current?.click()}
                   />
                 }
               >
-                <Paperclip className="h-3.5 w-3.5" />
+                <Paperclip className="h-4 w-4" />
               </TooltipTrigger>
               <TooltipContent side="top">Attach image</TooltipContent>
             </Tooltip>
@@ -870,13 +888,13 @@ export function AgentInput() {
                 <TooltipTrigger
                   render={
                     <Button
-                      size="icon-xs"
+                      size="icon-sm"
                       onClick={handleStop}
-                      className="h-7 w-7 bg-destructive/90 text-destructive-foreground hover:bg-destructive"
+                      variant="destructive"
                     />
                   }
                 >
-                  <Square className="h-3 w-3" />
+                  <Square className="h-3.5 w-3.5 fill-current" />
                 </TooltipTrigger>
                 <TooltipContent side="top">Stop (Esc)</TooltipContent>
               </Tooltip>
@@ -885,14 +903,15 @@ export function AgentInput() {
                 <TooltipTrigger
                   render={
                     <Button
-                      size="icon-xs"
+                      variant="default"
+                      size="icon-sm"
                       disabled={!input.trim() && attachedImages.length === 0}
                       onClick={handleSend}
-                      className="h-7 w-7 text-foreground/70 hover:bg-foreground/[0.04] hover:text-foreground disabled:opacity-30"
+                      className="disabled:opacity-30"
                     />
                   }
                 >
-                  <Send className="h-3.5 w-3.5" />
+                  <Send className="h-4 w-4" />
                 </TooltipTrigger>
                 <TooltipContent side="top">Send (Enter)</TooltipContent>
               </Tooltip>
