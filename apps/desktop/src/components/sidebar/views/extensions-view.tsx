@@ -32,7 +32,7 @@ import { TabBadge } from '../../ui/tab-badge';
 
 // ── README helpers ────────────────────────────────────────────────────────────
 
-const STORE_README_BASE = 'https://raw.githubusercontent.com/hyskasoftware/Hyscode-Extensions/main/';
+const STORE_README_BASE = 'https://raw.githubusercontent.com/Hyska-Software/Hyscode-Extensions/main/';
 
 async function fetchStoreReadme(name: string): Promise<string> {
   try {

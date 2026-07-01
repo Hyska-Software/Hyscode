@@ -65,7 +65,7 @@ export interface StoreItem {
   sha: string;         // git blob sha for deduplication / update detection
 }
 
-const STORE_REPO_API = 'https://api.github.com/repos/hyskasoftware/Hyscode-Extensions/contents/';
+const STORE_REPO_API = 'https://api.github.com/repos/Hyska-Software/Hyscode-Extensions/contents/';
 export const STORE_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
 // ── Store-sha persistence (localStorage) ─────────────────────────────────────
