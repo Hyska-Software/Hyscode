@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   X,
   Code2,
@@ -7,13 +7,9 @@ import {
   GitBranch,
   Settings2,
   BrainCircuit,
-  Braces,
-  Smartphone,
-  Container,
   Info,
   Blocks,
-  BookText,
-  Bot,
+  RotateCcw,
   type LucideIcon,
 } from 'lucide-react';
 import { useSettingsStore } from '../../stores';
@@ -33,28 +29,25 @@ import { ExtensionSettingsTab } from './tabs/extension-settings-tab';
 import { ExtensionCustomTab } from './tabs/extension-custom-tab';
 import { RulesTab } from './tabs/rules-tab';
 import { SubAgentsTab } from './tabs/sub-agents-tab';
+import { SettingsSearch } from './settings-search';
+import { SettingsTree } from './settings-tree';
+import {
+  BUILTIN_GROUPS,
+  buildExtensionsGroup,
+  findGroupForBuiltin,
+  findBuiltinLeaf,
+  isTabModified,
+  resetTabToDefaults,
+  type BuiltinTabId,
+  type GroupId,
+  type ExtensionTabRef,
+} from './tree-data';
 
 // ── Built-in tabs ────────────────────────────────────────────────────────────
 
-type BuiltinTabId = 'editor' | 'theme' | 'terminal' | 'git' | 'general' | 'ai' | 'languages' | 'mobile' | 'docker' | 'about' | 'extensions' | 'rules' | 'sub-agents';
+type BuiltinTabIdAny = BuiltinTabId;
 
-const BUILTIN_TAB_ITEMS: { id: BuiltinTabId; icon: LucideIcon; label: string }[] = [
-  { id: 'editor', icon: Code2, label: 'Editor' },
-  { id: 'theme', icon: Palette, label: 'Themes' },
-  { id: 'languages', icon: Braces, label: 'Languages' },
-  { id: 'terminal', icon: Terminal, label: 'Terminal' },
-  { id: 'git', icon: GitBranch, label: 'Git' },
-  { id: 'ai', icon: BrainCircuit, label: 'AI & Providers' },
-  { id: 'rules', icon: BookText, label: 'Rules' },
-  { id: 'sub-agents', icon: Bot, label: 'Sub-agents' },
-  { id: 'mobile', icon: Smartphone, label: 'Mobile' },
-  { id: 'docker', icon: Container, label: 'Docker' },
-  { id: 'extensions', icon: Blocks, label: 'Extensions' },
-  { id: 'general', icon: Settings2, label: 'General' },
-  { id: 'about', icon: Info, label: 'About' },
-];
-
-const BUILTIN_TAB_CONTENT: Record<BuiltinTabId, ReactNode> = {
+const BUILTIN_TAB_CONTENT: Record<BuiltinTabIdAny, ReactNode> = {
   editor: <EditorTab />,
   theme: <ThemeTab />,
   languages: <LanguageServersTab />,
@@ -73,7 +66,7 @@ const BUILTIN_TAB_CONTENT: Record<BuiltinTabId, ReactNode> = {
 // ── Active tab discriminated union ───────────────────────────────────────────
 
 type ActiveTab =
-  | { type: 'builtin'; id: BuiltinTabId }
+  | { type: 'builtin'; id: BuiltinTabIdAny }
   | { type: 'extension'; tabId: string; extensionName: string; label: string };
 
 // ── Icon map for extension-contributed icons ─────────────────────────────────
@@ -98,133 +91,279 @@ function resolveExtIcon(icon?: string): LucideIcon {
 
 export function SettingsModal() {
   const open = useSettingsStore((s) => s.settingsOpen);
-  const close = useSettingsStore((s) => s.closeSettings);
+  const closeSettings = useSettingsStore((s) => s.closeSettings);
+  const setTreeExpandedGroups = useSettingsStore((s) => s.setTreeExpandedGroups);
+  const treeExpandedGroups = useSettingsStore((s) => s.treeExpandedGroups);
   const settingsInitialTab = useSettingsStore((s) => s.settingsInitialTab);
   const extensionSettingsTabs = useExtensionStore((s) => s.contributions.settingsTabs);
 
-  const [activeTab, setActiveTab] = useState<ActiveTab>({ type: 'builtin', id: 'editor' });
+  const [activeTab, setActiveTab] = useState<ActiveTab>({ type: 'builtin', id: 'general' });
+  const [query, setQuery] = useState('');
+  const searchRef = useRef<HTMLInputElement | null>(null);
+  const wasOpenRef = useRef(false);
 
-  // Navigate to requested tab when modal opens
+  const expandedIds = useMemo(
+    () => new Set<GroupId>(treeExpandedGroups as GroupId[]),
+    [treeExpandedGroups],
+  );
+
+  // Build the extensions group (null when none exist).
+  const extensionsGroup = useMemo<ReturnType<typeof buildExtensionsGroup>>(() => {
+    const refs: ExtensionTabRef[] = extensionSettingsTabs.map((t) => ({
+      id: t.id,
+      label: t.label,
+      icon: resolveExtIcon(t.icon),
+      extensionName: t.extensionName,
+    }));
+    return buildExtensionsGroup(refs);
+  }, [extensionSettingsTabs]);
+
+  // Convert extension tabs into BUILTIN_GROUPS-compatible form (with icon already resolved)
+  // by passing the resolved extensionsGroup directly to the tree.
+
+  // Compute result count for the search footer. Must run before any early return.
+  const resultCount = useMemo(() => {
+    if (!query.trim()) return undefined;
+    let count = 0;
+    for (const group of BUILTIN_GROUPS) {
+      for (const leaf of group.leaves) {
+        if (matchesLeafQuery(leaf.label, leaf.keywords, query)) count++;
+      }
+    }
+    if (extensionsGroup) {
+      for (const leaf of extensionsGroup.leaves) {
+        if (matchesLeafQuery(leaf.label, leaf.keywords, query)) count++;
+      }
+    }
+    return count;
+  }, [query, extensionsGroup]);
+
+  // Auto-expand the group containing the active tab when the active tab *changes*.
+  // (Not on every render — that would fight manual collapse.)
+  const activeKey = activeTab.type === 'builtin' ? `b:${activeTab.id}` : `e:${activeTab.tabId}`;
+  const prevActiveKeyRef = useRef<string>(activeKey);
+  useEffect(() => {
+    if (!open) return;
+    const prev = prevActiveKeyRef.current;
+    prevActiveKeyRef.current = activeKey;
+    if (prev === activeKey) return;
+    if (activeTab.type !== 'builtin') return;
+    const gid = findGroupForBuiltin(activeTab.id);
+    if (!gid) return;
+    if (expandedIds.has(gid)) return;
+    setTreeExpandedGroups([gid, ...treeExpandedGroups.filter((g) => g !== gid)]);
+  }, [open, activeKey]);
+
+  // Navigate to requested tab when modal opens.
   useEffect(() => {
     if (open && settingsInitialTab) {
-      const builtin = BUILTIN_TAB_ITEMS.find((t) => t.id === settingsInitialTab);
-      if (builtin) {
-        setActiveTab({ type: 'builtin', id: builtin.id });
+      if (settingsInitialTab in BUILTIN_TAB_CONTENT) {
+        setActiveTab({ type: 'builtin', id: settingsInitialTab as BuiltinTabIdAny });
+        const gid = findGroupForBuiltin(settingsInitialTab);
+        if (gid && !expandedIds.has(gid)) {
+          setTreeExpandedGroups([gid, ...treeExpandedGroups.filter((g) => g !== gid)]);
+        }
+      } else {
+        const ext = extensionSettingsTabs.find((t) => t.id === settingsInitialTab);
+        if (ext) {
+          setActiveTab({
+            type: 'extension',
+            tabId: ext.id,
+            extensionName: ext.extensionName,
+            label: ext.label,
+          });
+          notifyTabVisible(ext.id);
+        }
       }
       useSettingsStore.getState().set('settingsInitialTab', null);
     }
-  }, [open, settingsInitialTab]);
+  }, [open, settingsInitialTab, extensionSettingsTabs, expandedIds, treeExpandedGroups, setTreeExpandedGroups]);
 
-  // Close on Escape
+  // Focus search on first open; reset query on close.
+  useEffect(() => {
+    if (open && !wasOpenRef.current) {
+      wasOpenRef.current = true;
+      requestAnimationFrame(() => searchRef.current?.focus());
+    } else if (!open && wasOpenRef.current) {
+      wasOpenRef.current = false;
+      setQuery('');
+    }
+  }, [open]);
+
+  // Keyboard: Ctrl+F / Cmd+F focuses the search bar from anywhere in the modal.
   useEffect(() => {
     if (!open) return;
     const handler = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') close();
+      const isFind = (e.ctrlKey || e.metaKey) && (e.key === 'f' || e.key === 'F');
+      if (isFind) {
+        e.preventDefault();
+        searchRef.current?.focus();
+        searchRef.current?.select();
+      } else if (e.key === 'Escape') {
+        // If a query is active, clear it first; otherwise close.
+        if (query) {
+          setQuery('');
+        } else {
+          closeSettings();
+        }
+      } else if (e.key === '/' && document.activeElement === document.body) {
+        e.preventDefault();
+        searchRef.current?.focus();
+      }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [open, close]);
+  }, [open, query, closeSettings]);
 
-  // When the active extension tab is removed (extension disabled), fall back to editor
+  // When the active extension tab is removed (extension disabled), fall back to general.
   useEffect(() => {
     if (activeTab.type !== 'extension') return;
     const still = extensionSettingsTabs.find((t) => t.id === activeTab.tabId);
-    if (!still) setActiveTab({ type: 'builtin', id: 'editor' });
+    if (!still) setActiveTab({ type: 'builtin', id: 'general' });
   }, [extensionSettingsTabs, activeTab]);
+
+  const handleBuiltinTabClick = useCallback((id: BuiltinTabIdAny) => {
+    setActiveTab({ type: 'builtin', id });
+  }, []);
+
+  const handleExtTabClick = useCallback((tab: { id: string; extensionName: string; label: string }) => {
+    setActiveTab({ type: 'extension', tabId: tab.id, extensionName: tab.extensionName, label: tab.label });
+    notifyTabVisible(tab.id);
+  }, []);
+
+  const handleToggleGroup = useCallback(
+    (groupId: GroupId) => {
+      const next = expandedIds.has(groupId)
+        ? treeExpandedGroups.filter((g) => g !== groupId)
+        : [...treeExpandedGroups, groupId];
+      setTreeExpandedGroups(next);
+    },
+    [expandedIds, treeExpandedGroups, setTreeExpandedGroups],
+  );
+
+  const handleResetTab = useCallback(() => {
+    if (activeTab.type !== 'builtin') return;
+    if (!isTabModified(activeTab.id)) return;
+    resetTabToDefaults(activeTab.id);
+  }, [activeTab]);
+
+  const handleSearchEnter = useCallback(() => {
+    // Find the first matching leaf (by search query) and select it.
+    if (!query.trim()) return;
+    const trimmed = query.toLowerCase();
+    const matches = (label: string, keywords?: readonly string[]): boolean =>
+      trimmed
+        .split(/\s+/)
+        .filter(Boolean)
+        .every((t) => [label, ...(keywords ?? [])].join(' ').toLowerCase().includes(t));
+    for (const group of BUILTIN_GROUPS) {
+      for (const leaf of group.leaves) {
+        if (matches(leaf.label, leaf.keywords)) {
+          handleBuiltinTabClick(leaf.id as BuiltinTabIdAny);
+          return;
+        }
+      }
+    }
+    if (extensionsGroup) {
+      for (const leaf of extensionsGroup.leaves) {
+        if (matches(leaf.label, leaf.keywords)) {
+          const ext = extensionSettingsTabs.find((t) => t.id === leaf.id);
+          if (ext) handleExtTabClick(ext);
+          return;
+        }
+      }
+    }
+  }, [query, extensionsGroup, extensionSettingsTabs, handleBuiltinTabClick, handleExtTabClick]);
 
   if (!open) return null;
 
-  const handleBuiltinTabClick = (id: BuiltinTabId) => {
-    setActiveTab({ type: 'builtin', id });
-  };
-
-  const handleExtTabClick = (tab: typeof extensionSettingsTabs[number]) => {
-    setActiveTab({ type: 'extension', tabId: tab.id, extensionName: tab.extensionName, label: tab.label });
-    notifyTabVisible(tab.id);
-  };
-
+  // Resolve display info for the active tab.
   const activeLabel =
     activeTab.type === 'builtin'
-      ? BUILTIN_TAB_ITEMS.find((t) => t.id === activeTab.id)?.label ?? ''
+      ? findBuiltinLeaf(activeTab.id)?.leaf.label ?? ''
       : activeTab.label;
+  const activeGroupLabel =
+    activeTab.type === 'builtin'
+      ? BUILTIN_GROUPS.find((g) => g.id === findGroupForBuiltin(activeTab.id))?.label ?? null
+      : extensionsGroup && extensionsGroup.leaves.some((l) => l.id === activeTab.tabId)
+        ? extensionsGroup.label
+        : null;
 
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
       onClick={(e) => {
-        if (e.target === e.currentTarget) close();
+        if (e.target === e.currentTarget) closeSettings();
       }}
     >
       <div className="flex h-[580px] w-[860px] overflow-hidden rounded-xl bg-surface shadow-2xl">
         {/* Left navigation */}
-        <nav className="flex w-[200px] flex-col bg-background p-3 overflow-y-auto">
-          <div className="mb-4 flex items-center justify-between px-2">
+        <nav className="flex w-[240px] flex-col overflow-hidden border-r border-border/40 bg-background">
+          <div className="flex items-center justify-between px-3 pb-2 pt-3">
             <span className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
               Settings
             </span>
             <button
-              onClick={close}
+              onClick={closeSettings}
               className="flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+              aria-label="Close settings"
             >
               <X className="h-3.5 w-3.5" />
             </button>
           </div>
 
-          {/* Built-in tabs */}
-          <div className="flex flex-col gap-0.5">
-            {BUILTIN_TAB_ITEMS.map(({ id, icon: Icon, label }) => (
-              <button
-                key={id}
-                onClick={() => handleBuiltinTabClick(id)}
-                className={`flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-[12px] font-medium transition-colors ${
-                  activeTab.type === 'builtin' && activeTab.id === id
-                    ? 'bg-surface-raised text-foreground'
-                    : 'text-muted-foreground hover:bg-surface-raised/50 hover:text-foreground'
-                }`}
-              >
-                <Icon className="h-4 w-4" />
-                {label}
-              </button>
-            ))}
-          </div>
+          <SettingsSearch
+            ref={searchRef}
+            value={query}
+            onChange={setQuery}
+            onEnter={handleSearchEnter}
+            resultCount={resultCount}
+          />
 
-          {/* Extension tabs — only shown when extensions contribute them */}
-          {extensionSettingsTabs.length > 0 && (
-            <>
-              <div className="my-2 border-t border-border/40" />
-              <span className="mb-1 px-2.5 text-[9px] font-semibold uppercase tracking-widest text-muted-foreground/50">
-                Extensions
-              </span>
-              <div className="flex flex-col gap-0.5">
-                {extensionSettingsTabs.map((tab) => {
-                  const Icon = resolveExtIcon(tab.icon);
-                  const isActive =
-                    activeTab.type === 'extension' && activeTab.tabId === tab.id;
-                  return (
-                    <button
-                      key={tab.id}
-                      onClick={() => handleExtTabClick(tab)}
-                      className={`flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-[12px] font-medium transition-colors ${
-                        isActive
-                          ? 'bg-surface-raised text-foreground'
-                          : 'text-muted-foreground hover:bg-surface-raised/50 hover:text-foreground'
-                      }`}
-                    >
-                      <Icon className="h-4 w-4" />
-                      {tab.label}
-                    </button>
-                  );
-                })}
-              </div>
-            </>
-          )}
+          <SettingsTree
+            groups={BUILTIN_GROUPS}
+            extensionsGroup={extensionsGroup ?? undefined}
+            activeLeafId={activeTab.type === 'builtin' ? activeTab.id : activeTab.tabId}
+            expandedIds={expandedIds}
+            query={query}
+            onSelectLeaf={(id) => {
+              const isBuiltin = id in BUILTIN_TAB_CONTENT;
+              if (isBuiltin) {
+                handleBuiltinTabClick(id as BuiltinTabIdAny);
+              } else {
+                const ext = extensionSettingsTabs.find((t) => t.id === id);
+                if (ext) handleExtTabClick(ext);
+              }
+            }}
+            onToggleGroup={handleToggleGroup}
+          />
         </nav>
 
         {/* Right content */}
         <div className="flex flex-1 flex-col overflow-hidden">
           {/* Tab header */}
-          <div className="flex h-12 items-center border-b border-surface-raised px-6">
-            <h2 className="text-[13px] font-semibold text-foreground">{activeLabel}</h2>
+          <div className="flex h-12 items-center justify-between border-b border-surface-raised px-6">
+            <div className="flex flex-col">
+              {activeGroupLabel && activeTab.type === 'builtin' && findGroupForBuiltin(activeTab.id) !== activeTab.id && (
+                <div className="flex items-center gap-1 text-[9px] font-mono uppercase tracking-widest text-muted-foreground/60">
+                  <span>{activeGroupLabel}</span>
+                  <span className="text-muted-foreground/40">›</span>
+                  <span>{activeLabel}</span>
+                </div>
+              )}
+              <h2 className="text-[13px] font-semibold text-foreground">{activeLabel}</h2>
+            </div>
+            {activeTab.type === 'builtin' && isTabModified(activeTab.id) && (
+              <button
+                type="button"
+                onClick={handleResetTab}
+                className="flex items-center gap-1.5 rounded-md px-2 py-1 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-surface-raised hover:text-foreground"
+                title="Reset all settings on this tab to their defaults"
+              >
+                <RotateCcw className="h-3 w-3" />
+                <span>Reset to defaults</span>
+              </button>
+            )}
           </div>
 
           {/* Scrollable body */}
@@ -241,3 +380,14 @@ export function SettingsModal() {
   );
 }
 
+// ── Local helper ────────────────────────────────────────────────────────────
+
+function matchesLeafQuery(label: string, keywords: readonly string[] | undefined, query: string): boolean {
+  if (!query.trim()) return true;
+  const haystack = [label, ...(keywords ?? [])].join(' ').toLowerCase();
+  return query
+    .toLowerCase()
+    .split(/\s+/)
+    .filter(Boolean)
+    .every((token) => haystack.includes(token));
+}

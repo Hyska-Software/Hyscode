@@ -4,6 +4,7 @@ import { persist, createJSONStorage } from 'zustand/middleware';
 import type { AgentType, ToolCategory } from '@hyscode/agent-harness';
 import type { AgentMode } from './agent-store';
 import type { SidebarViewId } from './layout-store';
+import { SETTINGS_DEFAULTS } from './settings-store-defaults';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -215,6 +216,8 @@ interface SettingsState {
   settingsOpen: boolean;
   /** When set, the Settings modal will navigate to this tab on open */
   settingsInitialTab: string | null;
+  /** Group ids that are currently expanded in the settings sidebar tree. Persisted. */
+  treeExpandedGroups: string[];
 
   // ─ Actions ─
   set: <K extends keyof SettingsState>(key: K, value: SettingsState[K]) => void;
@@ -243,6 +246,8 @@ interface SettingsState {
   setLspCustomBinaryPath: (serverId: string, path: string) => void;
   /** Remove the custom binary path override for a language server */
   clearLspCustomBinaryPath: (serverId: string) => void;
+  /** Replace the entire expanded-groups list for the settings tree. */
+  setTreeExpandedGroups: (groupIds: string[]) => void;
 }
 
 // ── Store ────────────────────────────────────────────────────────────────────
@@ -250,141 +255,20 @@ interface SettingsState {
 export const useSettingsStore = create<SettingsState>()(
   persist(
     immer((set) => ({
-      // Theme
-      themeId: 'hyscode-dark',
-      iconThemeId: 'default',
-      disableRoundedBorders: false,
-
-      // Editor
-      fontSize: 14,
-      fontFamily: 'Geist Mono',
-      lineHeight: 1.5,
-      tabSize: 2,
-      insertSpaces: true,
-      wordWrap: 'off',
-      minimap: true,
-      lineNumbers: 'on',
-      cursorStyle: 'line',
-      renderWhitespace: 'none',
-      bracketPairColorization: true,
-      scrollBeyondLastLine: false,
-      smoothScrolling: true,
-      autoClosingBrackets: 'languageDefined',
-      autoClosingQuotes: 'languageDefined',
-      formatOnPaste: false,
-      formatOnType: false,
-      autoSave: 'off',
-      autoSaveDelay: 1000,
-      gitBlameInline: true,
-
-      // Terminal
-      terminalFontSize: 13,
-      terminalFontFamily: 'Geist Mono',
-      terminalScrollback: 1000,
-      terminalShell: '',
-      terminalCursorStyle: 'block',
-
-      // Git
-      gitUserName: '',
-      gitUserEmail: '',
-      gitDefaultBranch: 'main',
-      gitAutoFetch: false,
-      gitAutoFetchInterval: 5,
-      gitConfirmDiscard: true,
-      commitAiProviderId: null,
-      commitAiModelId: null,
-
-      // General
-      confirmOnClose: false,
-      showWelcomeOnStartup: true,
-      reducedMotion: false,
-
-      // Updates
-      updateChannel: 'stable' as UpdateChannel,
-      checkForUpdatesOnStartup: true,
-      autoDownload: false,
-
-      // Agent / Provider
-      activeProviderId: null,
-      activeModelId: null,
-      useAllProviders: false,
-      agentType: 'chat' as AgentType,
-      providers: [],
-      approvalMode: 'manual',
-      customApprovalRules: {
-        categoryRules: {},
-        toolRules: {},
-      },
-      maxIterations: 25,
-      temperature: 0.0,
-      maxTokens: 8192,
-      topP: null,
-
-      // Inline Completion
-      inlineCompletionEnabled: true,
-      inlineCompletionProviderId: null,
-      inlineCompletionModelId: null,
-      inlineCompletionDelay: 300,
-      inlineCompletionMaxTokens: 128,
-      inlineCompletionTemperature: 0.2,
-
-      // Per-provider enabled models (default: empty = all enabled)
-      enabledModels: {},
-      customModels: [],
-
-      // Thinking / Reasoning
-      thinkingSettings: {},
-
-      // MCP Servers
-      mcpServers: [],
-
-      // Skills
-      skillsPath: '',
-
-      // Rules
-      globalRulesPath: '',
-
-      // Mobile / Devices
-      flutterSdkPath: '',
-      androidSdkPath: '',
-      reactNativeAutoDetect: true,
-
-      // Docker
-      dockerSocketPath: '',
-      dockerShowStopped: true,
-      dockerAutoRefreshInterval: 5,
-      dockerComposeFile: 'docker-compose.yml',
-
-      // Language Servers
-      lspCustomBinaryPaths: {},
-
-      // Sub-agents
-      subAgentEnabled: true,
-      subAgentDefaultMode: 'build' as Exclude<AgentMode, 'chat'>,
-      subAgentMaxIterations: 20,
-      subAgentAutoApprove: false,
-
-      // Layout tabs
-      showAgentTab: true,
-      showReviewTab: true,
-      showAgentChatPanel: true,
-      agentCenterPanelMode: 'chat' as const,
-      visibleSidebarTabs: {
-        files: true,
-        search: true,
-        git: true,
-        skills: true,
-        extensions: true,
-        agent: true,
-        devices: true,
-        docker: true,
-        memories: true,
-      },
-      visibleExtensionViews: {},
-
-      // Settings modal
+      ...(SETTINGS_DEFAULTS as unknown as Omit<SettingsState,
+        | 'set' | 'setThemeId' | 'setIconThemeId' | 'setActiveProvider' | 'openSettings'
+        | 'openSettingsOnTab' | 'closeSettings' | 'addMcpServer' | 'removeMcpServer'
+        | 'updateMcpServer' | 'toggleModel' | 'setEnabledModels' | 'addCustomModel'
+        | 'removeCustomModel' | 'setCustomCategoryRule' | 'setCustomToolRule'
+        | 'getThinkingConfig' | 'setThinkingConfig' | 'setLspCustomBinaryPath'
+        | 'clearLspCustomBinaryPath' | 'setTreeExpandedGroups'
+        | 'settingsOpen' | 'settingsInitialTab' | 'treeExpandedGroups'
+      >),
+      // Settings modal (transient)
       settingsOpen: false,
       settingsInitialTab: null,
+      // Default tree state: workspace group expanded so the user lands on General
+      treeExpandedGroups: ['workspace'],
 
       // Generic setter for any key
       set: (key, value) =>
@@ -528,6 +412,11 @@ export const useSettingsStore = create<SettingsState>()(
       clearLspCustomBinaryPath: (serverId) =>
         set((state) => {
           delete state.lspCustomBinaryPaths[serverId];
+        }),
+
+      setTreeExpandedGroups: (groupIds) =>
+        set((state) => {
+          state.treeExpandedGroups = groupIds;
         }),
     })),
     {
