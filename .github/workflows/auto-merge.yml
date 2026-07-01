@@ -185,22 +185,26 @@ jobs:
             const url = '${{ steps.merge.outputs.html_url }}';
             const reason = '${{ steps.merge.outputs.blocked_reason }}';
             const marker = '<!-- auto-merge-bot -->';
-            const body = `${marker}
-## Auto-merge: ready, manual click required
-
-All preconditions are satisfied (label \`workflow:agent-can-merge\`, CI Success passed, branch rebased on \`${context.payload.pull_request?.base?.ref || 'main'}\`).
-
-GitHub blocks the Actions integration from completing the merge itself for one of:
-- The PR author is the only maintainer and the API requires an approving review.
-- The default \`GITHUB_TOKEN\` does not have \`repo: admin\` scope to relax branch protection.
-
-**Click the green Merge button in the UI to finish:**
-${url}
-
-\`\`\`
-${reason}
-\`\`\`
-`;
+            const baseRef = (context.payload.pull_request && context.payload.pull_request.base && context.payload.pull_request.base.ref) || 'main';
+            const lines = [
+              marker,
+              '## Auto-merge: ready, manual click required',
+              '',
+              'All preconditions are satisfied (label `workflow:agent-can-merge`, CI Success passed, branch rebased on `' + baseRef + '`).',
+              '',
+              'GitHub blocks the Actions integration from completing the merge itself for one of:',
+              '- The PR author is the only maintainer and the API requires an approving review.',
+              '- The default `GITHUB_TOKEN` does not have `repo: admin` scope to relax branch protection.',
+              '',
+              '**Click the green Merge button in the UI to finish:**',
+              url,
+              '',
+              '```',
+              reason,
+              '```',
+              '',
+            ];
+            const body = lines.join('\n');
             const { data: comments } = await github.rest.issues.listComments({
               owner: context.repo.owner,
               repo: context.repo.repo,
@@ -223,4 +227,4 @@ ${reason}
                 body,
               });
             }
-            core.setFailed(`Auto-merge blocked; manual click required. Comment posted on PR #${prNumber}.`);
+            core.setFailed('Auto-merge blocked; manual click required. Comment posted on PR #' + prNumber + '.');
