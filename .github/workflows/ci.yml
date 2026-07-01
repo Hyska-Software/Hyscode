@@ -104,6 +104,8 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
       - run: npm ci
+      - name: Build TypeScript project references
+        run: npx tsc -b apps/desktop/tsconfig.json --emitDeclarationOnly
       - run: npm run typecheck
 
   # ─────────────────────────────────────────────────────────────────
