@@ -200,6 +200,40 @@ gh pr checks <N> --watch --fail-fast
 
 Se a falha for de **infra** (labeler, sync-labels), comente no PR e peça ao humano.
 
+### 7.1. CI Failure Recovery Playbook
+
+Quando CI falha, siga esta ordem antes de pedir ajuda:
+
+**1. Identifique qual check falhou**
+```bash
+gh pr checks <N>           # lista todos os checks
+gh run view <run-id> --log-failed   # detalhes do job que falhou
+```
+
+**2. Categorize a falha**
+| Sintoma | Categoria | Ação |
+|---------|-----------|------|
+| `npm run lint` errors | código | `npm run lint -- --fix`, commit |
+| `npm run typecheck` errors | código | corrigir tipos, commit |
+| `npm test` falha | código | adicionar/atualizar teste, commit |
+| `cargo fmt` / `cargo clippy` | código Rust | rodar `cargo fmt && cargo clippy --fix`, commit |
+| `ci-success` (aggregator) failed | transitório | re-rodar: `gh run rerun <run-id>` |
+| `pr-lint` failed (branch/title/body) | workflow do agente | corrigir o que pediu, `git commit --amend` ou novo commit |
+| `Sync Labels` / `labeler` failed | infra | ver logs; bug conhecido do workflow |
+| `Build & Release` failed (cargo) | código Rust | ver `cd apps/desktop/src-tauri && cargo build --release` |
+
+**3. Re-rodar após correção**
+- Correção de código: novo commit na branch (mais simples)
+- Correção de metadata (branch name, PR title): `git commit --amend --no-edit` para branch, ou edite o PR title no GitHub
+
+**4. Pular CI quando apropriado**
+- Apenas mudança de docs em `.md` apenas → use `[skip ci]` no commit subject
+- Apenas mudança de CI workflow em `.github/workflows/` → CI não roda automaticamente mesmo (o push só atualiza o workflow)
+- **Nunca** use `[skip ci]` em mudança de código
+
+**5. Escalar**
+Se após 2 tentativas o mesmo check continua falhando sem causa óbvia, comente no PR pedindo review humano. Não gaste mais de 30min em CI flaky.
+
 ---
 
 ## 8. Self-review
