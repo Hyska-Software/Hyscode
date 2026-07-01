@@ -278,6 +278,7 @@ export const TAB_DEFAULT_KEYS: Record<BuiltinTabId, readonly SettingsKey[]> = {
     'providers',
     'approvalMode',
     'customApprovalRules',
+    'interactionLimitEnabled',
     'maxIterations',
     'temperature',
     'maxTokens',

@@ -113,7 +113,7 @@ export class ClaudeAgentProvider implements AIProvider {
       model: params.model,
       systemPrompt: params.systemPrompt,
       messages,
-      maxTurns: 10,
+      maxTurns: params.maxTurns,
     });
   }
 }

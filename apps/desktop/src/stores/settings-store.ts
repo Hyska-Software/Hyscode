@@ -145,6 +145,8 @@ interface SettingsState {
   approvalMode: ApprovalMode;
   /** Per-category and per-tool overrides used when approvalMode === 'custom' */
   customApprovalRules: CustomApprovalRules;
+  /** Whether maxIterations is enforced for the main agent. */
+  interactionLimitEnabled: boolean;
   maxIterations: number;
   temperature: number;
   maxTokens: number;
@@ -257,6 +259,12 @@ interface SettingsState {
   clearLspCustomBinaryPath: (serverId: string) => void;
   /** Replace the entire expanded-groups list for the settings tree. */
   setTreeExpandedGroups: (groupIds: string[]) => void;
+}
+
+export function migrateSettingsState(persistedState: unknown, version: number): unknown {
+  const state = persistedState as Partial<SettingsState>;
+  if (version < 1) return { ...state, interactionLimitEnabled: false };
+  return state;
 }
 
 // ── Store ────────────────────────────────────────────────────────────────────
@@ -457,6 +465,8 @@ export const useSettingsStore = create<SettingsState>()(
     {
       name: 'hyscode-settings',
       storage: createJSONStorage(() => localStorage),
+      version: 1,
+      migrate: migrateSettingsState,
       partialize: (state) => {
         // Exclude transient UI state and action functions from persistence
         const { settingsOpen: _, settingsInitialTab: _tab, ...rest } = state;

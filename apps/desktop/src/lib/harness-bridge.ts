@@ -317,7 +317,7 @@ export class HarnessBridge {
       config: {
         providerId: settings.activeProviderId ?? '',
         modelId: settings.activeModelId ?? '',
-        maxIterations: settings.maxIterations,
+        maxIterations: settings.interactionLimitEnabled ? settings.maxIterations : null,
         maxOutputTokens: settings.maxTokens,
         maxInputTokens: 200_000,
         turnTimeoutMs: 300_000,
@@ -464,7 +464,7 @@ export class HarnessBridge {
       {
         approvalMode: settings.approvalMode,
         customApproval,
-        maxIterations: settings.maxIterations,
+        maxIterations: settings.interactionLimitEnabled ? settings.maxIterations : null,
         maxOutputTokens: settings.maxTokens,
       },
     );

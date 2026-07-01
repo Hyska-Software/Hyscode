@@ -38,11 +38,20 @@ The **Harness** is the orchestration engine that powers agentic behavior in HysC
 5. **Update Context**: incorporate tool results into conversation, update token budget
 6. **Repeat**: continue until LLM returns final text response or user interrupts
 
-### Iteration Limits
+### Interaction Limits
 
-- **Max iterations per turn**: configurable (default: 25)
+- **Agent interactions per turn**: unlimited by default; users can opt into a
+  configurable limit from Settings
+- **GitHub Copilot**: retains mode-specific interaction caps because each
+  interaction consumes a premium request; a lower user limit still wins
+- **Mode policy compatibility**: persisted `max_iterations` values remain in
+  the policy schema but do not cap the main agent
 - **Max tokens per turn**: configurable (default: 200k input, 16k output)
 - **Timeout**: configurable (default: 5 minutes per turn)
+
+Unlimited turns still stop on normal model completion, explicit cancellation,
+request timeout, repeated-call loop detection, or provider failure. Sub-agents
+retain their separate interaction-limit setting.
 
 ### Turn Lifecycle
 

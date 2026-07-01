@@ -65,7 +65,7 @@ pub async fn claude_agent_run(
             "model": request.model,
             "systemPrompt": request.system_prompt,
             "messages": request.messages,
-            "maxTurns": request.max_turns.unwrap_or(10),
+            "maxTurns": request.max_turns,
             "cwd": request.cwd,
         });
 

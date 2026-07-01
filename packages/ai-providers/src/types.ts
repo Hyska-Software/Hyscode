@@ -120,6 +120,8 @@ export interface ChatParams {
   cachePrompt?: boolean;
   promptCacheKey?: string;
   maxTokens?: number;
+  /** Optional provider-native agent turn limit. Omitted means unlimited. */
+  maxTurns?: number;
   temperature?: number;
   topP?: number;
   stopSequences?: string[];
