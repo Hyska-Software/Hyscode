@@ -463,6 +463,16 @@ const PER_REQUEST_ITERATION_CAPS: Partial<Record<AgentType, number>> = {
   plan: 5,
 };
 
+/** Return the provider cost cap for a mode, or null when no implicit cap applies. */
+export function getPerRequestIterationCap(
+  mode: AgentType,
+  modelId: string,
+  providerId = '',
+): number | null {
+  if (!isPerRequestCostModel(modelId, providerId)) return null;
+  return PER_REQUEST_ITERATION_CAPS[mode] ?? null;
+}
+
 /**
  * Get the model profile matching the given model ID.
  * Returns null if no profile matches.
@@ -497,11 +507,11 @@ export function adjustPolicyForModel(
 
   // Per-request-cost providers (GitHub Copilot): reduce iterations while
   // preserving the mode/DB verification requirement.
-  if (isPerRequestCostModel(modelId, providerId)) {
-    const cap = PER_REQUEST_ITERATION_CAPS[policy.mode] ?? policy.maxIterations;
+  const costCap = getPerRequestIterationCap(policy.mode, modelId, providerId);
+  if (costCap !== null) {
     adjusted = {
       ...adjusted,
-      maxIterations: Math.min(adjusted.maxIterations, cap),
+      maxIterations: Math.min(adjusted.maxIterations, costCap),
     };
   }
 

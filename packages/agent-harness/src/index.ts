@@ -111,6 +111,7 @@ export {
   adjustPolicyForModel,
   getModelProfile,
   isPerRequestCostModel,
+  getPerRequestIterationCap,
 } from './mode-policies';
 export type { ModePolicy, ModelProfile } from './mode-policies';
 export { resolveEffectiveAgentPolicy, effectivePolicyConfig } from './effective-policy';

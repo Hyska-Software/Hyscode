@@ -343,8 +343,8 @@ export interface HarnessConfig {
   providerId: string;
   /** Default model ID */
   modelId: string;
-  /** Max iterations per agent turn */
-  maxIterations: number;
+  /** Max iterations per agent turn. Null disables the interaction limit. */
+  maxIterations: number | null;
   /** Max total input tokens per turn */
   maxInputTokens: number;
   /** Max output tokens per turn */
@@ -418,7 +418,7 @@ export type TurnOutcome = {
 export const DEFAULT_HARNESS_CONFIG: HarnessConfig = {
   providerId: '',
   modelId: '',
-  maxIterations: 25,
+  maxIterations: null,
   maxInputTokens: 200_000,
   maxOutputTokens: 16_000,
   turnTimeoutMs: 300_000, // 5 minutes

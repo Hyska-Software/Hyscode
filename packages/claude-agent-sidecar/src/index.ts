@@ -75,7 +75,7 @@ async function main(): Promise<void> {
       options: {
         model: request.model,
         systemPrompt: request.systemPrompt ?? 'You are a helpful coding assistant.',
-        maxTurns: request.maxTurns ?? 10,
+        ...(typeof request.maxTurns === 'number' ? { maxTurns: request.maxTurns } : {}),
         abortController: new AbortController(),
         cwd: request.cwd,
         allowedTools: request.allowedTools,

@@ -38,6 +38,31 @@ function provider(toolName: string, input: Record<string, unknown>): AIProvider 
   };
 }
 
+function longRunningProvider(iterationsBeforeCompletion: number): AIProvider {
+  let call = 0;
+  return {
+    id: 'harness-test',
+    name: 'Harness Test',
+    models: [model],
+    isConfigured: () => true,
+    listModels: async () => [model],
+    async *chat(params: ChatParams): AsyncIterable<StreamChunk> {
+      call++;
+      expect(params.maxTurns).toBeUndefined();
+      if (call > iterationsBeforeCompletion) {
+        yield { type: 'text_delta', text: 'completed after a long run' };
+        yield { type: 'done', stopReason: 'end_turn' };
+        return;
+      }
+      const id = `call-${call}`;
+      yield { type: 'tool_call_start', id, name: 'read_file' };
+      yield { type: 'tool_call_delta', id, input: JSON.stringify({ path: `file-${call}.ts` }) };
+      yield { type: 'tool_call_end', id };
+      yield { type: 'done', stopReason: 'tool_use' };
+    },
+  };
+}
+
 function modeSwitchProvider(onRequest?: (params: ChatParams, call: number) => void): AIProvider {
   let call = 0;
   return {
@@ -73,6 +98,29 @@ function modeSwitchProvider(onRequest?: (params: ChatParams, call: number) => vo
 afterEach(() => getProviderRegistry().unregister('harness-test'));
 
 describe('Harness lifecycle', () => {
+  it('runs beyond the former 25-iteration default when unlimited', async () => {
+    getProviderRegistry().register(longRunningProvider(26));
+    const harness = new Harness({
+      workspacePath: 'C:/workspace',
+      projectId: 'project',
+      invoke: async () => 'content' as never,
+      config: {
+        providerId: 'harness-test',
+        modelId: 'test-model',
+        approval: { mode: 'yolo' },
+        costOptimization: false,
+      },
+    });
+    harness.setAgentType('build');
+    harness.setConversationId('conversation');
+
+    const result = await harness.run('complete a long task', []);
+
+    expect(result.status).toBe('complete');
+    expect(result.turnRecord.iterations).toBe(27);
+    expect(result.response).toBe('completed after a long run');
+  });
+
   it('switches from review to build within the same turn using a frozen delegation chain', async () => {
     const requests: Array<{ call: number; tools: string[] }> = [];
     getProviderRegistry().register(

@@ -12,8 +12,8 @@ export interface MiddlewareContext {
   mode: AgentType;
   /** Current iteration number (1-indexed) */
   iteration: number;
-  /** Max allowed iterations */
-  maxIterations: number;
+  /** Max allowed iterations, or null when the turn is unlimited */
+  maxIterations: number | null;
   /** All tool calls made during this turn so far */
   toolCallHistory: ToolCallRecord[];
   /** Accumulated assistant text in this turn */

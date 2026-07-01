@@ -1,14 +1,20 @@
 import type { ApprovalConfig, ApprovalMode, AgentType, HarnessConfig } from './types';
-import { adjustPolicyForModel, getModePolicy, type ModePolicy } from './mode-policies';
+import {
+  adjustPolicyForModel,
+  getModePolicy,
+  getPerRequestIterationCap,
+  type ModePolicy,
+} from './mode-policies';
 
-export type EffectiveAgentPolicy = ModePolicy & {
+export type EffectiveAgentPolicy = Omit<ModePolicy, 'maxIterations'> & {
+  maxIterations: number | null;
   approval: ApprovalConfig;
 };
 
 export type EffectivePolicyPreferences = {
   approvalMode?: ApprovalMode;
   customApproval?: Omit<ApprovalConfig, 'mode'>;
-  maxIterations?: number;
+  maxIterations?: number | null;
   maxOutputTokens?: number;
 };
 
@@ -20,6 +26,14 @@ export function resolveEffectiveAgentPolicy(
   preferences: EffectivePolicyPreferences = {},
 ): EffectiveAgentPolicy {
   const modelPolicy = adjustPolicyForModel(getModePolicy(mode), modelId, providerId);
+  const costCap = getPerRequestIterationCap(mode, modelId, providerId);
+  const requestedLimit = preferences.maxIterations ?? null;
+  const maxIterations =
+    costCap === null
+      ? requestedLimit
+      : requestedLimit === null
+        ? costCap
+        : Math.min(requestedLimit, costCap);
   const approvalMode = preferences.approvalMode ?? modelPolicy.approvalMode;
   const approval: ApprovalConfig = {
     mode: approvalMode,
@@ -28,7 +42,7 @@ export function resolveEffectiveAgentPolicy(
 
   return {
     ...modelPolicy,
-    maxIterations: preferences.maxIterations ?? modelPolicy.maxIterations,
+    maxIterations,
     maxOutputTokens: preferences.maxOutputTokens ?? modelPolicy.maxOutputTokens,
     approval,
   };

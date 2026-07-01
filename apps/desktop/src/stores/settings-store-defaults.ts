@@ -73,6 +73,7 @@ export const SETTINGS_DEFAULTS = {
   providers: [],
   approvalMode: 'manual',
   customApprovalRules: { categoryRules: {}, toolRules: {} },
+  interactionLimitEnabled: false,
   maxIterations: 25,
   temperature: 0.0,
   maxTokens: 8192,

@@ -24,4 +24,21 @@ describe('resolveEffectiveAgentPolicy', () => {
       }).approval,
     ).toEqual({ mode: 'custom', ...customApproval });
   });
+
+  it('is unlimited by default and honors an explicit user limit', () => {
+    expect(resolveEffectiveAgentPolicy('build', 'model', 'provider').maxIterations).toBeNull();
+    expect(
+      resolveEffectiveAgentPolicy('build', 'model', 'provider', { maxIterations: 42 })
+        .maxIterations,
+    ).toBe(42);
+  });
+
+  it('retains the GitHub Copilot cost cap and lets a lower user limit win', () => {
+    expect(resolveEffectiveAgentPolicy('build', 'gpt-5.5', 'github-copilot').maxIterations).toBe(8);
+    expect(
+      resolveEffectiveAgentPolicy('build', 'gpt-5.5', 'github-copilot', {
+        maxIterations: 4,
+      }).maxIterations,
+    ).toBe(4);
+  });
 });

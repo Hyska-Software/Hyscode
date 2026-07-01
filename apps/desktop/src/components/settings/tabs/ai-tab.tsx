@@ -331,14 +331,25 @@ export function AiTab() {
             step={0.05}
           />
         </Row>
-        <Row label="Max Iterations">
-          <NumberInput
-            value={store.maxIterations}
-            onChange={(v) => store.set('maxIterations', v)}
-            min={1}
-            max={500}
+        <Row
+          label="Limit Interactions"
+          description="Off by default. GitHub Copilot retains provider cost caps."
+        >
+          <Toggle
+            checked={store.interactionLimitEnabled}
+            onChange={(v) => store.set('interactionLimitEnabled', v)}
           />
         </Row>
+        {store.interactionLimitEnabled && (
+          <Row label="Max Interactions">
+            <NumberInput
+              value={store.maxIterations}
+              onChange={(v) => store.set('maxIterations', v)}
+              min={1}
+              max={500}
+            />
+          </Row>
+        )}
         <Row label="Approval Mode" description="Controls when the agent asks before running tools">
           <SelectInput
             value={store.approvalMode}

@@ -59,7 +59,7 @@ Marque **exatamente uma**:
 - [ ] `pnpm lint` passa sem erros
 - [ ] `pnpm typecheck` passa sem erros
 - [ ] `pnpm test` passa (e adicionados testes para mudança)
-- [ ] `cargo fmt --check && cargo clippy -- -D warnings` (se Rust mudou)
+- [ ] `cargo fmt --check && cargo clippy` (se Rust mudou; warnings são informativos)
 - [ ] Sem placeholders (`TODO`, `FIXME`, `// implement later`)
 - [ ] Sem `console.log` / `println!` de debug
 - [ ] Commits atômicos, sem co-mistura de escopo

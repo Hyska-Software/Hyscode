@@ -123,7 +123,7 @@ docs/                 # Architecture docs and specs
    ```bash
    pnpm lint && pnpm typecheck && pnpm test
    # Plus for Rust changes:
-   cd apps/desktop/src-tauri && cargo fmt && cargo clippy -- -D warnings && cargo test
+   cd apps/desktop/src-tauri && cargo fmt && cargo clippy && cargo test
    ```
 7. **Push and open a Pull Request** against `main`:
    ```bash

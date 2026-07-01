@@ -423,6 +423,7 @@ function QuickSettingsSection() {
   const activeModelId = useSettingsStore((s) => s.activeModelId);
   const approvalMode = useSettingsStore((s) => s.approvalMode);
   const temperature = useSettingsStore((s) => s.temperature);
+  const interactionLimitEnabled = useSettingsStore((s) => s.interactionLimitEnabled);
   const maxIterations = useSettingsStore((s) => s.maxIterations);
   const setSetting = useSettingsStore((s) => s.set);
   const openSettings = useSettingsStore((s) => s.openSettings);
@@ -503,27 +504,17 @@ function QuickSettingsSection() {
         />
       </div>
 
-      {/* Max Iterations */}
+      {/* Interaction limit */}
       <div>
         <div className="flex items-center justify-between">
-          <span className="text-[9px] text-muted-foreground">Max Iterations</span>
-          <div className="flex items-center gap-1">
-            <button
-              onClick={() => setSetting('maxIterations', Math.max(5, maxIterations - 5))}
-              className="rounded bg-muted px-1.5 py-px text-[9px] text-muted-foreground hover:text-foreground transition-colors"
-            >
-              −
-            </button>
-            <span className="min-w-[20px] text-center text-[10px] tabular-nums text-foreground">
-              {maxIterations}
-            </span>
-            <button
-              onClick={() => setSetting('maxIterations', Math.min(500, maxIterations + 5))}
-              className="rounded bg-muted px-1.5 py-px text-[9px] text-muted-foreground hover:text-foreground transition-colors"
-            >
-              +
-            </button>
-          </div>
+          <span className="text-[9px] text-muted-foreground">Interaction Limit</span>
+          <button
+            onClick={openSettings}
+            className="rounded bg-muted px-1.5 py-px text-[9px] tabular-nums text-foreground transition-colors hover:text-accent"
+            title="Configure interaction limit in Settings"
+          >
+            {interactionLimitEnabled ? maxIterations : 'Infinite'}
+          </button>
         </div>
       </div>
     </Section>

@@ -294,7 +294,7 @@ Settings > Agent
 │  │ (optional custom instructions)        │   │
 │  └───────────────────────────────────────┘   │
 │                                              │
-│  Max Agent Iterations: [25]                  │
+│  Limit Agent Interactions: [off]  [25]       │
 │  Turn Timeout: [5] minutes                   │
 └──────────────────────────────────────────────┘
 ```

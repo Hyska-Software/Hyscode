@@ -45,7 +45,12 @@ import {
   compactToolOutput,
 } from './middleware';
 import { TraceRecorder } from './trace-recorder';
-import { type ModePolicy, getModePolicy, adjustPolicyForModel } from './mode-policies';
+import {
+  type ModePolicy,
+  getModePolicy,
+  adjustPolicyForModel,
+  getPerRequestIterationCap,
+} from './mode-policies';
 import type { MemoryManager } from './memory-manager';
 import { MemoryExtractor } from './memory-extractor';
 import { MemoryContextProvider } from './memory-context-provider';
@@ -157,7 +162,11 @@ export class Harness {
   // ─── Tracing & Policies ───────────────────────────────────────────
   private traceRecorder = new TraceRecorder();
   private requestPreparation = new RequestPreparation();
-  private _effectivePolicy: ModePolicy | null = null;
+  private _effectivePolicy:
+    | (Omit<ModePolicy, 'maxIterations'> & {
+        maxIterations: number | null;
+      })
+    | null = null;
 
   // ─── Memory System ────────────────────────────────────────────────
   private memoryManager: MemoryManager | null = null;
@@ -410,16 +419,29 @@ export class Harness {
    * Merges the base mode policy with model-specific adjustments.
    * Respects user-configured maxIterations from the HarnessConfig.
    */
-  getEffectivePolicy(): ModePolicy {
+  getEffectivePolicy(): Omit<ModePolicy, 'maxIterations'> & { maxIterations: number | null } {
     if (!this._effectivePolicy || this._effectivePolicy.mode !== this.agentType) {
       const base = getModePolicy(this.agentType);
       const providerAdjusted = this.config.modelId
         ? adjustPolicyForModel(base, this.config.modelId, this.config.providerId)
         : { ...base };
-      // User settings are the final global safety ceilings.
+      const costCap = getPerRequestIterationCap(
+        this.agentType,
+        this.config.modelId,
+        this.config.providerId,
+      );
+      const requestedLimit = this.config.maxIterations;
+      const maxIterations =
+        costCap === null
+          ? requestedLimit
+          : requestedLimit === null
+            ? costCap
+            : Math.min(requestedLimit, costCap);
+      // Mode policies retain token/timeout ceilings. Iterations are unlimited
+      // unless the user opts in or a per-request provider has a cost cap.
       this._effectivePolicy = {
         ...providerAdjusted,
-        maxIterations: Math.min(providerAdjusted.maxIterations, this.config.maxIterations),
+        maxIterations,
         maxInputTokens: Math.min(providerAdjusted.maxInputTokens, this.config.maxInputTokens),
         maxOutputTokens: Math.min(providerAdjusted.maxOutputTokens, this.config.maxOutputTokens),
         turnTimeoutMs: Math.min(providerAdjusted.turnTimeoutMs, this.config.turnTimeoutMs),
@@ -618,7 +640,7 @@ export class Harness {
       ? initialOutputBudget(this.agentType, policy.maxOutputTokens)
       : policy.maxOutputTokens;
 
-    while (iteration < maxIter && !this.cancelled) {
+    while ((maxIter === null || iteration < maxIter) && !this.cancelled) {
       this.turnController.transition('streaming');
       iteration++;
       this.traceRecorder.startIteration(iteration);
@@ -730,6 +752,7 @@ export class Harness {
       const chatParams = {
         ...prepared.params,
         signal: abortController.signal,
+        maxTurns: maxIter ?? undefined,
       };
 
       let assistantText = '';
@@ -1228,7 +1251,10 @@ export class Harness {
               outputBudget = this.config.costOptimization
                 ? initialOutputBudget(this.agentType, policy.maxOutputTokens)
                 : policy.maxOutputTokens;
-              maxIter = Math.max(iteration + 1, policy.maxIterations);
+              maxIter =
+                policy.maxIterations === null
+                  ? null
+                  : Math.max(iteration + 1, policy.maxIterations);
               record.output.output = `Mode switch APPROVED by user. The ${targetMode} agent has taken over this turn. Continue from this context summary:\n${contextSummary}`;
             } else {
               record.output.output = `Mode switch DENIED by user. The user chose to stay in the current mode (${this.agentType}). Ask the user what they'd like to change or adjust in the plan before proceeding. Do NOT request another mode switch immediately — engage with the user first.`;
@@ -1282,7 +1308,7 @@ export class Harness {
     );
     if (cancellationWasPartial) terminalStatus = 'cancelled_partial';
     else if (this.cancelled || activeTurn.signal.aborted) terminalStatus = 'cancelled';
-    else if (terminalStatus === 'complete' && iteration >= maxIter)
+    else if (terminalStatus === 'complete' && maxIter !== null && iteration >= maxIter)
       terminalStatus = 'max_iterations';
     const stopReason: TurnRecord['stopReason'] = terminalStatus;
     if (!finalResponse.trim() && terminalStatus === 'max_iterations') {

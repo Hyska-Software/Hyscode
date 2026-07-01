@@ -138,14 +138,25 @@ export function GeneralTab() {
             ]}
           />
         </Row>
-        <Row label="Max Iterations">
-          <NumberInput
-            value={store.maxIterations}
-            onChange={(v) => store.set('maxIterations', v)}
-            min={1}
-            max={500}
+        <Row
+          label="Limit Interactions"
+          description="Off by default. Loop detection, cancellation, and request timeouts remain active."
+        >
+          <Toggle
+            checked={store.interactionLimitEnabled}
+            onChange={(v) => store.set('interactionLimitEnabled', v)}
           />
         </Row>
+        {store.interactionLimitEnabled && (
+          <Row label="Max Interactions">
+            <NumberInput
+              value={store.maxIterations}
+              onChange={(v) => store.set('maxIterations', v)}
+              min={1}
+              max={500}
+            />
+          </Row>
+        )}
         <Row label="Temperature">
           <NumberInput
             value={store.temperature}
