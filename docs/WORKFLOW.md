@@ -273,6 +273,57 @@ Agentes **nunca devem**:
 
 ---
 
+## 9. Limitações Conhecidas e Workarounds
+
+Descobertas durante o primeiro end-to-end real (PR #3, 2026-07-01):
+
+### 9.1. PRs só de `.md` não disparam o CI por padrão
+
+A workflow `ci.yml` usa `dorny/paths-filter` para detectar mudanças em TS/Rust
+e pular jobs irrelevantes. Para PRs que alteram só `docs/**/*.md`, todos os
+jobs (lint, typecheck, test, rust) são pulados e o `ci-success` aggregator
+passa automaticamente.
+
+**Impacto**: A branch protection exige `ci-success` como required check. Para
+PRs só de docs, esse check é pulado e o branch fica "behind" no estado
+de merge.
+
+**Workaround**:
+- Opção A (preferida): adicionar `[skip ci]` no subject do commit quando
+  for 100% docs; o merge via UI ainda funciona porque o admin bypass
+  pode confirmar visualmente
+- Opção B: fazer um commit vazio (`git commit --allow-empty -m "ci: retrigger"`)
+  para forçar o workflow a rodar
+- Opção C: atualizar o `paths-filter` em `ci.yml` para incluir
+  `docs/**` e fazer `lint` rodar no prettier markdown check
+
+### 9.2. PR author não pode auto-aprovar nem mesmo com bypass
+
+O `bypass_pull_request_allowances` permite um usuário bypassar CODEOWNERS
+review, mas **NÃO** permite bypassar `required_approving_review_count`
+quando o usuário é o autor do PR. Isso é uma limitação da API do GitHub
+(mesmo `gh pr merge --admin` falha com "At least 1 approving review is
+required").
+
+**Impacto**: Em projeto solo, o autor do PR não consegue mergear seu
+próprio PR via CLI/API, mesmo sendo admin do repo.
+
+**Workarounds**:
+- **Bootstrap trick** (atual): desabilitar `enforce_admins` +
+  `required_pull_request_reviews` via API, fazer o merge, re-habilitar
+  (ver `scripts/set-branch-protection.sh`)
+- **UI direta**: abrir a PR no navegador e usar o botão "Merge" (que tem
+  lógica de bypass diferente da API)
+- **Co-owner**: adicionar um segundo usuário GitHub como admin/collaborator
+  que aprove os PRs do maintainer principal
+- **Desabilitar reviews**: remover `required_approving_review_count`
+  (perde a segurança, não recomendado)
+
+A documentação deveria recomendar adicionar pelo menos um co-owner para
+evitar o bootstrap trick em produção.
+
+---
+
 ## 9. URL Canônico
 
 Todas as referências ao repositório neste workflow devem usar:

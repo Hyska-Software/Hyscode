@@ -269,6 +269,28 @@ gh pr merge <N> --squash \
 Caso contrário, **comente no PR**:
 > "🤖 ready for review. Aguardando aprovação humana."
 
+### 9.1. Self-merge (bootstrap trick) — known gap
+
+Em projeto solo, o autor do PR **não pode** auto-aprovar via API mesmo
+sendo bypass user. Limitação documentada do GitHub API. Para
+mergear seu próprio PR sem co-owner, use o **bootstrap trick**:
+
+```bash
+# 1. Desabilitar enforce_admins e required_pull_request_reviews
+gh api --method PUT repos/<owner>/<repo>/branches/main/protection \
+  --input scripts/disable-reviews.json
+
+# 2. Merge com --admin
+gh pr merge <N> --repo <owner>/<repo> --squash --admin \
+  --body "<conventional-commit-message>"
+
+# 3. Re-habilitar tudo
+./scripts/set-branch-protection.sh
+```
+
+Veja `docs/WORKFLOW.md` §9.2 para detalhes e alternativas (UI,
+co-owner).
+
 ---
 
 ## 10. Cenários end-to-end

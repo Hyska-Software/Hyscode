@@ -34,7 +34,7 @@ documentado em [`docs/WORKFLOW.md`](docs/WORKFLOW.md) e operacionalizado em
    ```
 7. **CI** — aguardar checks; corrigir até verde. Nunca ignorar.
 8. **Self-review** — preencha checklist do template.
-9. **Merge** — humano OU label `workflow:agent-can-merge` aplicada por humano.
+9. **Merge** — humano OU label `workflow:agent-can-merge` aplicada por humano. Solo maintainer: ver `docs/WORKFLOW.md` §9.2 sobre o "bootstrap trick" (limitação do GitHub API que impede auto-approve do PR author via CLI).
 
 ## Regras invioláveis do agente
 
