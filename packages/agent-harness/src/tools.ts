@@ -12,6 +12,7 @@ import type {
   MemoryType,
 } from './types';
 import { resolveWorkspacePath } from './path-policy';
+import { normalizeTerminalSnapshot, TerminalCommandRunner } from './terminal-command-runner';
 
 // ─── Helper ─────────────────────────────────────────────────────────────────
 
@@ -585,6 +586,8 @@ export const searchCodeTool = defineTool(
 
 // ─── Terminal Tools ─────────────────────────────────────────────────────────
 
+const terminalCommandRunner = new TerminalCommandRunner();
+
 export const runTerminalCommandTool = defineTool(
   'run_terminal_command',
   'Execute a command in the terminal. The command runs in the visible Agent Terminal so the user can watch it live. Returns stdout and stderr. Use for running tests, installing packages, running scripts, etc.',
@@ -601,183 +604,135 @@ export const runTerminalCommandTool = defineTool(
       type: 'string',
       description: 'Optional name for the terminal session (used when new_terminal is true).',
     },
+    background: {
+      type: 'boolean',
+      description: 'Keep the command running in a dedicated visible terminal.',
+    },
+    ready_pattern: {
+      type: 'string',
+      description: 'Optional regular expression that confirms a background process is ready.',
+    },
+    startup_timeout_ms: {
+      type: 'integer',
+      description:
+        'Maximum time to wait for a background process to become ready (default: 15000).',
+    },
   },
   ['command'],
   'terminal',
   true,
+  async (input, ctx) =>
+    terminalCommandRunner.run(
+      {
+        command: String(input.command),
+        cwd: input.cwd as string | undefined,
+        timeoutMs: input.timeout_ms as number | undefined,
+        forceNew: Boolean(input.new_terminal),
+        sessionName: input.session_name as string | undefined,
+        background: Boolean(input.background),
+        readyPattern: input.ready_pattern as string | undefined,
+        startupTimeoutMs: input.startup_timeout_ms as number | undefined,
+      },
+      ctx,
+    ),
+);
+
+export const readTerminalOutputTool = defineTool(
+  'read_terminal_output',
+  'Read recent output and lifecycle state from a terminal created by the agent.',
+  {
+    terminal_id: {
+      type: 'string',
+      description: 'Terminal identifier returned by a terminal tool.',
+    },
+    after_sequence: { type: 'integer', description: 'Return only output after this sequence.' },
+    max_chars: {
+      type: 'integer',
+      description: 'Maximum normalized characters to return (default: 16000).',
+    },
+  },
+  ['terminal_id'],
+  'terminal',
+  false,
   async (input, ctx) => {
+    const terminalId = String(input.terminal_id);
+    const adapter = ctx.terminal;
+    if (!adapter) return { success: false, output: '', error: 'Terminal runtime is unavailable.' };
     try {
-      const cwd = input.cwd
-        ? resolvePath(input.cwd as string, ctx.workspacePath)
-        : ctx.workspacePath;
-      const command = input.command as string;
-      const timeoutMs = (input.timeout_ms as number) || 30_000;
-      const forceNewTerminal = !!input.new_terminal;
-
-      // If no event listener available, return a clear error
-      if (!ctx.listen) {
-        return {
-          success: false,
-          output: '',
-          error:
-            'Terminal execution requires event listener support. The listen callback is not available.',
-        };
-      }
-
-      const isWin = typeof navigator !== 'undefined' && navigator.userAgent?.includes('Win');
-      let ptyId: string;
-      let useSharedPty = false;
-
-      // Decide whether to use the shared agent terminal or spawn a disposable one
-      if (!forceNewTerminal && ctx.agentTerminalPtyId) {
-        // Health-check the shared PTY before committing to it
-        const alive = await ctx
-          .invoke<boolean>('pty_exists', { ptyId: ctx.agentTerminalPtyId })
-          .catch(() => false);
-        if (alive) {
-          ptyId = ctx.agentTerminalPtyId;
-          useSharedPty = true;
-        } else {
-          // Shared PTY died — fall back to a disposable one for this command
-          ptyId = await ctx.invoke<string>('pty_spawn', { cwd });
-        }
-      } else {
-        ptyId = await ctx.invoke<string>('pty_spawn', { cwd });
-      }
-
-      // Collect output via pty:data events
-      let output = '';
-      let exited = false;
-      let exitCode: number | null = null;
-      let markerFound = false;
-
-      const unlisten = await ctx.listen('pty:data', (payload: unknown) => {
-        const data = payload as { pty_id: string; data: string };
-        if (data.pty_id === ptyId) {
-          output += data.data;
-        }
-      });
-
-      const unlistenExit = await ctx.listen('pty:exit', (payload: unknown) => {
-        const data = payload as { pty_id: string; code: number | null };
-        if (data.pty_id === ptyId) {
-          exited = true;
-          exitCode = data.code ?? null;
-        }
-      });
-      const abortTerminal = () => {
-        const commandName = useSharedPty ? 'pty_write' : 'pty_kill';
-        const args = useSharedPty ? { ptyId, data: '\u0003' } : { ptyId };
-        void ctx.invoke(commandName, args).catch(() => undefined);
-      };
-      ctx.signal.addEventListener('abort', abortTerminal, { once: true });
-
-      // For the shared PTY, cd into the target cwd first if it differs from workspace root
-      if (useSharedPty && cwd !== ctx.workspacePath) {
-        const cdCmd = isWin ? `cd "${cwd}"\r\n` : `cd "${cwd}"\n`;
-        await ctx.invoke('pty_write', { ptyId, data: cdCmd });
-        // Small delay so the cd completes before we send the real command
-        await new Promise((r) => setTimeout(r, 150));
-        // Reset output to avoid capturing the cd noise
-        output = '';
-      }
-
-      // Write command followed by an exit marker
-      // Use a marker that is extremely unlikely to appear in normal output
-      const exitMarker = `__HYSCODE_EXIT_${crypto.randomUUID()}__`;
-      const exitCodeVar = isWin ? '$LASTEXITCODE' : '$?';
-
-      // On Windows/PowerShell, wrap in a script block to avoid ; conflicts in the user's command
-      const wrappedCommand = isWin
-        ? `& { ${command} }; Write-Output '${exitMarker}'; Write-Output "EXIT_CODE:$${exitCodeVar}"\r\n`
-        : `${command}; echo '${exitMarker}'; echo "EXIT_CODE:${exitCodeVar}"\n`;
-
-      try {
-        await ctx.invoke('pty_write', { ptyId, data: wrappedCommand });
-      } catch (writeErr) {
-        // If the PTY vanished between our health-check and the write, try one last disposable fallback
-        const errMsg = String(writeErr);
-        if (errMsg.includes('not found') && useSharedPty) {
-          useSharedPty = false;
-          ptyId = await ctx.invoke<string>('pty_spawn', { cwd });
-          await ctx.invoke('pty_write', { ptyId, data: wrappedCommand });
-        } else {
-          throw writeErr;
-        }
-      }
-
-      // Wait for exit marker or timeout
-      const startTime = Date.now();
-      while (Date.now() - startTime < timeoutMs && !exited && !markerFound && !ctx.signal.aborted) {
-        // Check if we've received the exit marker
-        if (output.includes(exitMarker)) {
-          const exitMatch = output.match(/EXIT_CODE:(-?\d+)/);
-          exitCode = exitMatch ? parseInt(exitMatch[1], 10) : 0;
-          const markerIdx = output.indexOf(exitMarker);
-          output = output.slice(0, markerIdx).trim();
-          markerFound = true;
-          break;
-        }
-        await new Promise((r) => setTimeout(r, 100));
-      }
-
-      // Cleanup listeners
-      unlisten();
-      unlistenExit();
-      ctx.signal.removeEventListener('abort', abortTerminal);
-
-      // Only kill the PTY if we spawned a disposable one
-      if (!useSharedPty) {
-        try {
-          await ctx.invoke('pty_kill', { ptyId });
-        } catch {
-          // Ignore kill errors if PTY already exited
-        }
-      }
-
-      if (ctx.signal.aborted) {
-        ctx.onTerminalCommand?.(command, output || '', null);
-        return { success: false, output: output || '', error: 'Command cancelled.' };
-      }
-
-      // For the shared PTY, cd back to workspace root after command (keep cwd stable)
-      if (useSharedPty && cwd !== ctx.workspacePath) {
-        const cdBack = isWin ? `cd "${ctx.workspacePath}"\r\n` : `cd "${ctx.workspacePath}"\n`;
-        await ctx.invoke('pty_write', { ptyId, data: cdBack });
-      }
-
-      // Trim PTY noise (echoed command prompt)
-      const lines = output.split('\n');
-      const cmdIdx = lines.findIndex((l) => l.includes(command.slice(0, 40)));
-      if (cmdIdx >= 0 && cmdIdx < 3) {
-        output = lines
-          .slice(cmdIdx + 1)
-          .join('\n')
-          .trim();
-      }
-
-      const timedOut = !markerFound && !exited && Date.now() - startTime >= timeoutMs;
-      if (timedOut) {
-        ctx.onTerminalCommand?.(command, output || '', null);
-        return {
-          success: false,
-          output: output || '',
-          error: `Command timed out after ${Math.round(timeoutMs / 1000)}s`,
-          metadata: { cwd, timeoutMs, timedOut: true },
-        };
-      }
-
-      // Notify bridge about the completed terminal command (for context tracking)
-      ctx.onTerminalCommand?.(command, output || '', exitCode);
-
+      const snapshot = await adapter.snapshot(
+        terminalId,
+        input.after_sequence as number | undefined,
+      );
       return {
-        success: exitCode === 0 || exitCode === null,
-        output: output || `Command completed with exit code ${exitCode}`,
-        error: exitCode !== null && exitCode !== 0 ? `Exit code: ${exitCode}` : undefined,
-        metadata: { cwd, exitCode, timeoutMs, usedSharedPty: useSharedPty },
+        success: true,
+        output: normalizeTerminalSnapshot(snapshot, (input.max_chars as number) || 16_000),
+        metadata: {
+          terminalId,
+          sequence: snapshot.toSequence,
+          alive: snapshot.alive,
+          exitCode: snapshot.exitCode,
+          truncated: snapshot.truncated,
+        },
       };
-    } catch (err) {
-      return { success: false, output: '', error: String(err) };
+    } catch (error) {
+      return { success: false, output: '', error: String(error) };
+    }
+  },
+);
+
+export const respondTerminalInputTool = defineTool(
+  'respond_terminal_input',
+  'Send an approved response to a command that is waiting for interactive terminal input. Never use this for passwords, tokens, MFA codes, CAPTCHA responses, or other secrets.',
+  {
+    terminal_id: {
+      type: 'string',
+      description: 'Terminal identifier returned by the waiting command.',
+    },
+    input: {
+      type: 'string',
+      description: 'Exact text to send. The user sees this value in the approval dialog.',
+    },
+    timeout_ms: {
+      type: 'integer',
+      description: 'How long to observe the command after sending input (default: 30000).',
+    },
+  },
+  ['terminal_id', 'input'],
+  'terminal',
+  true,
+  async (input, ctx) =>
+    terminalCommandRunner.respond(
+      String(input.terminal_id),
+      String(input.input),
+      (input.timeout_ms as number | undefined) ?? 30_000,
+      ctx,
+    ),
+);
+
+export const stopTerminalProcessTool = defineTool(
+  'stop_terminal_process',
+  'Interrupt and close a background terminal process previously started by the agent.',
+  {
+    terminal_id: {
+      type: 'string',
+      description: 'Terminal identifier returned by run_terminal_command.',
+    },
+  },
+  ['terminal_id'],
+  'terminal',
+  true,
+  async (input, ctx) => {
+    const terminalId = String(input.terminal_id);
+    if (!ctx.terminal)
+      return { success: false, output: '', error: 'Terminal runtime is unavailable.' };
+    try {
+      await ctx.terminal.interrupt(terminalId);
+      await new Promise((resolve) => setTimeout(resolve, 750));
+      const snapshot = await ctx.terminal.snapshot(terminalId).catch(() => null);
+      if (snapshot?.alive) await ctx.terminal.kill(terminalId);
+      return { success: true, output: `Stopped terminal ${terminalId}.`, metadata: { terminalId } };
+    } catch (error) {
+      return { success: false, output: '', error: String(error) };
     }
   },
 );
@@ -2647,6 +2602,9 @@ export function getAllBuiltinTools(): ToolHandler[] {
     listContextTool,
     // Terminal
     runTerminalCommandTool,
+    respondTerminalInputTool,
+    readTerminalOutputTool,
+    stopTerminalProcessTool,
     // Code
     getDiagnosticsTool,
     runCodeTool,

@@ -1,4 +1,4 @@
-import { FileCode, Brain, X } from 'lucide-react';
+import { FileCode, Brain, Terminal, X } from 'lucide-react';
 import { useAgentStore } from '@/stores/agent-store';
 
 function relevanceColor(relevance: number): string {
@@ -12,8 +12,14 @@ export function ContextChipsBar() {
   const removeContextFile = useAgentStore((s) => s.removeContextFile);
   const gatheredContext = useAgentStore((s) => s.gatheredContext);
   const attachedImages = useAgentStore((s) => s.attachedImages);
+  const attachedTerminal = useAgentStore((s) => s.attachedTerminal);
 
-  if (contextFiles.length === 0 && gatheredContext.length === 0 && attachedImages.length === 0)
+  if (
+    contextFiles.length === 0 &&
+    gatheredContext.length === 0 &&
+    attachedImages.length === 0 &&
+    !attachedTerminal
+  )
     return null;
 
   return (
@@ -66,6 +72,21 @@ export function ContextChipsBar() {
             </span>
           ))}
         </>
+      )}
+      {attachedTerminal && (
+        <span
+          className="group/chip flex items-center gap-1 rounded-md border border-foreground/[0.06] px-2 py-0.5 text-[10px] text-foreground/80"
+          title={`Terminal snapshot: ${attachedTerminal.name}`}
+        >
+          <Terminal className="h-2.5 w-2.5 text-muted-foreground/50" />
+          <span className="max-w-[120px] truncate">{attachedTerminal.name}</span>
+          <button
+            onClick={() => useAgentStore.getState().setAttachedTerminal(null)}
+            className="ml-0.5 rounded-full p-0.5 text-muted-foreground/40 opacity-0 transition-opacity hover:text-foreground group-hover/chip:opacity-100"
+          >
+            <X className="h-2 w-2" />
+          </button>
+        </span>
       )}
       {gatheredContext.length > 0 && (
         <>

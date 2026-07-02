@@ -15,6 +15,7 @@ import {
   type HarnessEventHandler,
   type AgentType,
   type ToolCallRecord,
+  type TerminalRuntimeAdapter,
   type ConversationMode,
   type ToolExecutionContext,
   type ToolHandler,
@@ -112,6 +113,7 @@ export interface HarnessOptions {
   agentTerminalPtyId?: string;
   /** Callback fired after a terminal command finishes (for environment context tracking). */
   onTerminalCommand?: (command: string, output: string, exitCode: number | null) => void;
+  terminalRuntime?: TerminalRuntimeAdapter;
   /** Memory manager — enables persistent cross-session knowledge. */
   memoryManager?: MemoryManager;
   hasDirtyBuffers?: () => boolean;
@@ -148,6 +150,7 @@ export class Harness {
   private onTerminalCommand:
     | ((command: string, output: string, exitCode: number | null) => void)
     | undefined;
+  private terminalRuntime: TerminalRuntimeAdapter | undefined;
 
   // ─── Middleware ────────────────────────────────────────────────────
   private preCompletionHooks: PreCompletionHook[] = [verificationMiddleware];
@@ -188,6 +191,7 @@ export class Harness {
     // Agent terminal integration
     this.agentTerminalPtyId = options.agentTerminalPtyId;
     this.onTerminalCommand = options.onTerminalCommand;
+    this.terminalRuntime = options.terminalRuntime;
 
     // Initialize context manager
     this.contextManager = new ContextManager();
@@ -1086,6 +1090,8 @@ export class Harness {
         // Agent terminal integration — shared PTY + command tracking
         agentTerminalPtyId: this.agentTerminalPtyId,
         onTerminalCommand: this.onTerminalCommand,
+        onTerminalProgress: (progress) => this.emit({ type: 'terminal_progress', progress }),
+        terminal: this.terminalRuntime,
         gatheredContext: {
           add: (path, content, relevance, reason) => {
             const tokens = this.contextManager.addGatheredFile(path, content, relevance, reason);

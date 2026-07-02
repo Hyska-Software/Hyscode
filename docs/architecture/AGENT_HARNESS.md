@@ -216,21 +216,24 @@ interface ToolResult {
 
 ### Built-in Tools
 
-| Tool                   | Category   | Approval Default |
-| ---------------------- | ---------- | ---------------- |
-| `read_file`            | filesystem | no               |
-| `write_file`           | filesystem | yes              |
-| `create_file`          | filesystem | yes              |
-| `list_directory`       | filesystem | no               |
-| `search_code`          | filesystem | no               |
-| `run_terminal_command` | terminal   | yes              |
-| `git_status`           | git        | no               |
-| `git_diff`             | git        | no               |
-| `git_commit`           | git        | yes              |
-| `git_add`              | git        | yes              |
-| `run_code`             | code       | yes              |
-| `web_search`           | browser    | no               |
-| `mcp_call`             | mcp        | configurable     |
+| Tool                     | Category   | Approval Default |
+| ------------------------ | ---------- | ---------------- |
+| `read_file`              | filesystem | no               |
+| `write_file`             | filesystem | yes              |
+| `create_file`            | filesystem | yes              |
+| `list_directory`         | filesystem | no               |
+| `search_code`            | filesystem | no               |
+| `run_terminal_command`   | terminal   | yes              |
+| `respond_terminal_input` | terminal   | yes              |
+| `read_terminal_output`   | terminal   | no               |
+| `stop_terminal_process`  | terminal   | yes              |
+| `git_status`             | git        | no               |
+| `git_diff`               | git        | no               |
+| `git_commit`             | git        | yes              |
+| `git_add`                | git        | yes              |
+| `run_code`               | code       | yes              |
+| `web_search`             | browser    | no               |
+| `mcp_call`               | mcp        | configurable     |
 
 ### Approval Workflow
 
@@ -348,6 +351,11 @@ CREATE TABLE agent_sdd_tasks (
 The harness owns provider-native assistant and tool-result blocks. It emits `transcript_message` events with immutable turn/conversation/iteration identity. Desktop adapters render and persist these blocks without reconstructing ordering.
 
 Cancellation is cooperative for PTY and provider operations. Native calls without cancellation support are awaited; if one completes after cancellation, the turn ends as `cancelled_partial`.
+
+Terminal execution is delegated through `TerminalRuntimeAdapter`. The harness owns framed command
+capture and the canonical result returned to the model; the desktop adapter owns visible session and
+conversation identity; Rust owns process lifecycle, ordered replay, and exit state. Live
+`terminal_progress` events update the UI but are not persisted as provider transcript blocks.
 
 Workspace-relative paths are normalized and checked by segment containment. External absolute paths are rejected by default and require explicitly authorized adapter policy.
 

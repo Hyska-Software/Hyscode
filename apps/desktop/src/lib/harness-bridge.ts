@@ -39,6 +39,7 @@ import { useRulesStore } from '@/stores/rules-store';
 import { useFileStore } from '@/stores/file-store';
 import { useEditorStore } from '@/stores/editor-store';
 import { useTerminalStore } from '@/stores/terminal-store';
+import { desktopTerminalRuntime } from './terminal-runtime';
 import type {
   ToolCallDisplay,
   PendingApproval,
@@ -195,14 +196,15 @@ export class HarnessBridge {
   private activeTurnId: string | null = null;
 
   // ─── Agent Terminal Integration ───────────────────────────────────
-  /** Pool of terminal store session ids owned by the agent, keyed by conversationId */
-  private _agentTerminalSessionIds: Map<string, string[]> = new Map();
-  /** Last terminal command executed by the agent (persists across turns within a conversation) */
-  private _lastTerminalCommand: {
-    command: string;
-    output: string;
-    exitCode: number | null;
-  } | null = null;
+  /** Last terminal command, isolated by conversation for deterministic context injection. */
+  private _lastTerminalCommands = new Map<
+    string,
+    {
+      command: string;
+      output: string;
+      exitCode: number | null;
+    }
+  >();
 
   private constructor(workspacePath: string, projectId: string, homePath: string) {
     this._projectId = projectId;
@@ -347,6 +349,16 @@ export class HarnessBridge {
       onModeSwitchRequest: (request, signal) => this.handleModeSwitchRequest(request, signal),
       onUserQuestionRequest: (id, questions, title, signal) =>
         this.handleUserQuestionRequest(id, questions, title, signal),
+      terminalRuntime: desktopTerminalRuntime,
+      onTerminalCommand: (command, output, exitCode) => {
+        const conversationId = useAgentStore.getState().conversationId;
+        if (!conversationId) return;
+        this._lastTerminalCommands.set(conversationId, {
+          command,
+          output: output.slice(-16_000),
+          exitCode,
+        });
+      },
       skillLoader,
       ruleLoader,
     });
@@ -358,13 +370,6 @@ export class HarnessBridge {
       const session = ts.sessions.find((s) => s.ptyId === deadPtyId && s.isAgentSession);
       if (session) {
         ts.markPtyDead(session.id);
-        // Remove from all tab pools so the next command spawns a fresh one
-        for (const [convId, ids] of this._agentTerminalSessionIds.entries()) {
-          const filtered = ids.filter((id) => id !== session.id);
-          if (filtered.length !== ids.length) {
-            this._agentTerminalSessionIds.set(convId, filtered);
-          }
-        }
       }
     }).catch(() => {});
   }
@@ -571,6 +576,25 @@ export class HarnessBridge {
       }
     }
 
+    const attachedTerminal = store.attachedTerminal;
+    if (attachedTerminal) {
+      this.harness.addContextSource({
+        id: `terminal-${attachedTerminal.terminalId}-${attachedTerminal.sequence}`,
+        type: 'terminal',
+        priority: 'high',
+        content: `<terminal_snapshot id="${attachedTerminal.terminalId}" name="${attachedTerminal.name}">\n${attachedTerminal.output}\n</terminal_snapshot>`,
+        tokenEstimate: Math.ceil(attachedTerminal.output.length / 4),
+        origin: 'explicit',
+        identity: `terminal:${attachedTerminal.terminalId}:${attachedTerminal.sequence}`,
+        metadata: {
+          terminalId: attachedTerminal.terminalId,
+          terminalName: attachedTerminal.name,
+          sequence: attachedTerminal.sequence,
+        },
+      });
+      useAgentStore.getState().setAttachedTerminal(null);
+    }
+
     // Snapshot attached images and clear them from the store
     const attachedImages = store.attachedImages.slice();
     if (attachedImages.length > 0) {
@@ -646,10 +670,8 @@ export class HarnessBridge {
       const history = this.buildHistory(historyMessages);
 
       // Reset iteration tracking for the new turn
-      // ── Ensure agent terminal is available ──
-      // Creates or finds the shared agent terminal session so the agent's
-      // run_terminal_command tool uses the visible terminal tab instead of hidden PTYs.
-      await this.ensureAgentTerminal();
+      // The conversation-scoped terminal runtime acquires a visible session only
+      // when a terminal tool actually executes.
 
       // ── Inject deterministic environment context ──
       // Gives the agent awareness of the current workspace state before it starts
@@ -1614,6 +1636,35 @@ Investigate the error, fix the underlying issue in the affected files, and verif
         break;
       }
 
+      case 'terminal_progress': {
+        const progress = event.progress;
+        useTerminalStore
+          .getState()
+          .setAwaitingInput(progress.terminalId, progress.state === 'awaiting_input');
+        if (progress.state !== 'awaiting_input') {
+          for (const toolCall of useAgentStore.getState().pendingToolCalls) {
+            if (
+              toolCall.id !== progress.toolCallId &&
+              toolCall.terminalId === progress.terminalId &&
+              toolCall.terminalState === 'awaiting_input'
+            ) {
+              store.updateToolCall(toolCall.id, { terminalState: progress.state });
+            }
+          }
+        }
+        const current = useAgentStore
+          .getState()
+          .pendingToolCalls.find((toolCall) => toolCall.id === progress.toolCallId);
+        const liveOutput = `${current?.liveOutput ?? ''}${progress.chunk}`.slice(-65_536);
+        store.updateToolCall(progress.toolCallId, {
+          terminalId: progress.terminalId,
+          terminalState: progress.state,
+          outputSequence: progress.sequence,
+          liveOutput,
+        });
+        break;
+      }
+
       case 'tool_call_pending': {
         const pending = event.pending;
         const existing = useAgentStore
@@ -1645,7 +1696,37 @@ Investigate the error, fix the underlying issue in the affected files, and verif
           output: event.result.output,
           error: event.result.error,
           completedAt: Date.now(),
+          terminalId:
+            (event.result.metadata?.terminalId as string | undefined) ??
+            useAgentStore
+              .getState()
+              .pendingToolCalls.find((toolCall) => toolCall.id === event.toolCallId)?.terminalId,
         });
+        if (event.toolName === 'run_terminal_command') {
+          const completedCall = useAgentStore
+            .getState()
+            .pendingToolCalls.find((toolCall) => toolCall.id === event.toolCallId);
+          if (completedCall?.terminalId) {
+            const command = String(completedCall.input.command ?? '');
+            const exitCode = (event.result.metadata?.exitCode as number | null | undefined) ?? null;
+            const output = event.result.output.slice(-16_000);
+            const terminalStore = useTerminalStore.getState();
+            terminalStore.setLastCommand(
+              completedCall.terminalId,
+              command,
+              output,
+              exitCode,
+              'agent',
+            );
+            terminalStore.appendCommandHistory(completedCall.terminalId, {
+              command,
+              output,
+              exitCode,
+              timestamp: Date.now(),
+              source: 'agent',
+            });
+          }
+        }
 
         // Handle metadata actions from tools
         const meta = event.result.metadata;
@@ -2164,11 +2245,15 @@ Investigate the error, fix the underlying issue in the affected files, and verif
     }
 
     // Last terminal command executed by the agent (if any)
-    if (this._lastTerminalCommand) {
+    const conversationId = useAgentStore.getState().conversationId;
+    const lastTerminalCommand = conversationId
+      ? this._lastTerminalCommands.get(conversationId)
+      : undefined;
+    if (lastTerminalCommand) {
       env.lastTerminalCommand = {
-        command: this._lastTerminalCommand.command,
-        output: this._lastTerminalCommand.output,
-        exitCode: this._lastTerminalCommand.exitCode,
+        command: lastTerminalCommand.command,
+        output: lastTerminalCommand.output,
+        exitCode: lastTerminalCommand.exitCode,
       };
     }
 
@@ -2556,133 +2641,5 @@ ${hints.map((h) => `- ${h}`).join('\n')}
       captured?.tabId ?? useEditorStore.getState().tabs.find((tab) => tab.filePath === path)?.id;
     if (tabId) useEditorStore.getState().markDirty(tabId, false);
     this.mutationSnapshots.delete(path);
-  }
-
-  // ─── Agent Terminal Integration ──────────────────────────────────────
-
-  /**
-   * Ensure at least one healthy agent terminal session exists.
-   * Reuses an existing healthy session when possible; otherwise creates a fresh one.
-   * Updates the Harness with the active PTY id.
-   */
-  private async ensureAgentTerminal(): Promise<void> {
-    try {
-      const termStore = useTerminalStore.getState();
-      const workspacePath = this.harness.getWorkspacePath() as string;
-      const convId = useAgentStore.getState().conversationId ?? '_global';
-
-      // Get (or create) the terminal pool for the current tab's conversation
-      const pool = this._agentTerminalSessionIds.get(convId) ?? [];
-      if (!this._agentTerminalSessionIds.has(convId)) {
-        this._agentTerminalSessionIds.set(convId, pool);
-      }
-
-      // Reuse a healthy session if we already have one in the pool
-      let sessionId = pool.find((id) => {
-        const s = termStore.sessions.find((sess) => sess.id === id);
-        return s && !s.isDead && s.ptyId;
-      });
-
-      // Also look for any other healthy agent session in the store
-      if (!sessionId) {
-        const healthy = termStore.findHealthyAgentSession();
-        if (healthy) {
-          sessionId = healthy.id;
-          if (!pool.includes(sessionId)) {
-            pool.push(sessionId);
-          }
-        }
-      }
-
-      // Nothing healthy — create a fresh agent session
-      if (!sessionId) {
-        sessionId = termStore.ensureAgentSession({ reuseHealthy: false });
-        pool.push(sessionId);
-      }
-
-      // Get the session to read its PTY id
-      let session = termStore.sessions.find((s) => s.id === sessionId);
-
-      // If no PTY has been spawned yet (component hasn't mounted), spawn one directly
-      if (!session?.ptyId) {
-        const ptyId = await tauriInvokeRaw<string>('pty_spawn', {
-          shell: null,
-          cwd: workspacePath,
-          env: null,
-        });
-        useTerminalStore.getState().setPtyId(sessionId, ptyId);
-        session = useTerminalStore.getState().sessions.find((s) => s.id === sessionId);
-      }
-
-      if (session?.ptyId) {
-        this.harness.setAgentTerminalPtyId(session.ptyId);
-      }
-
-      // Wire the command callback so we can track agent terminal commands
-      this.harness.setOnTerminalCommand(
-        (command: string, output: string, exitCode: number | null) => {
-          this._lastTerminalCommand = { command, output, exitCode };
-
-          // Update history on every healthy agent session in the current tab's pool
-          const ts = useTerminalStore.getState();
-          const activeConv = useAgentStore.getState().conversationId ?? '_global';
-          const activePool = this._agentTerminalSessionIds.get(activeConv) ?? [];
-          for (const sid of activePool) {
-            const s = ts.sessions.find((sess) => sess.id === sid);
-            if (s && !s.isDead) {
-              ts.setLastCommand(sid, command, output.slice(0, 2000), exitCode);
-              ts.appendCommandHistory(sid, {
-                command,
-                output: output.slice(0, 2000),
-                exitCode,
-                timestamp: Date.now(),
-                source: 'agent',
-              });
-            }
-          }
-        },
-      );
-    } catch (err) {
-      // Agent terminal is best-effort — fall back to hidden PTY behavior
-      console.warn('[HarnessBridge] Failed to ensure agent terminal:', err);
-    }
-  }
-
-  /**
-   * Health-check the current shared agent PTY. If it died, spawn a new one
-   * and wire it into the Harness so the next tool call uses a live session.
-   */
-  async refreshAgentTerminal(): Promise<void> {
-    try {
-      const termStore = useTerminalStore.getState();
-
-      // Find the currently-wired PTY id
-      const currentPtyId = this.harness.getAgentTerminalPtyId?.();
-
-      // If we have a PTY, verify it still exists in the Rust backend
-      if (currentPtyId) {
-        const alive = await tauriInvokeRaw<boolean>('pty_exists', { ptyId: currentPtyId }).catch(
-          () => false,
-        );
-        if (alive) return; // still good
-
-        // PTY is dead — mark it in the store
-        const deadSession = termStore.sessions.find((s) => s.ptyId === currentPtyId);
-        if (deadSession) {
-          termStore.markPtyDead(deadSession.id);
-          for (const [convId, ids] of this._agentTerminalSessionIds.entries()) {
-            const filtered = ids.filter((id) => id !== deadSession.id);
-            if (filtered.length !== ids.length) {
-              this._agentTerminalSessionIds.set(convId, filtered);
-            }
-          }
-        }
-      }
-
-      // No live PTY — ensure a fresh one
-      await this.ensureAgentTerminal();
-    } catch (err) {
-      console.warn('[HarnessBridge] Failed to refresh agent terminal:', err);
-    }
   }
 }
