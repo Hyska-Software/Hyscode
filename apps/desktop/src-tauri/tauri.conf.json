@@ -1,7 +1,7 @@
 {
   "$schema": "https://raw.githubusercontent.com/nicklasbekkevold/tauri-settings/refs/heads/main/schema.json",
   "productName": "HysCode",
-  "version": "0.5.0-build.55",
+  "version": "0.5.0-build.56",
   "identifier": "com.hyscode.app",
   "build": {
     "beforeDevCommand": "npm run frontend:dev",
