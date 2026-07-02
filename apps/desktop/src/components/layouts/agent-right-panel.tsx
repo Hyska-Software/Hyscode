@@ -1,5 +1,14 @@
 import { Suspense, lazy, useState, useMemo, useEffect } from 'react';
-import { Terminal, GitCompare, GitBranch, Eye, FileCode2, Check, Undo2, Loader2 } from 'lucide-react';
+import {
+  Terminal,
+  GitCompare,
+  GitBranch,
+  Eye,
+  FileCode2,
+  Check,
+  Undo2,
+  Loader2,
+} from 'lucide-react';
 import { MarkdownViewer } from '../editor/viewers/markdown-viewer';
 import { TerminalPanel } from '../terminal';
 import { GitView } from '../sidebar/views/git-view-new';
@@ -15,6 +24,7 @@ import { defineAllMonacoThemes, getMonacoThemeName } from '@/lib/monaco-themes';
 import { cn } from '@/lib/utils';
 import { TabBadge } from '../ui/tab-badge';
 import type { AgentEditSession } from '@/stores/agent-store';
+import { countDiffLines } from '@/lib/compute-diff';
 
 const MonacoEditor = lazy(() => import('@monaco-editor/react'));
 const MonacoDiffEditor = lazy(() =>
@@ -24,11 +34,21 @@ const MonacoDiffEditor = lazy(() =>
 // ─── Language detection ─────────────────────────────────────────────────────
 
 const LANG_MAP: Record<string, string> = {
-  ts: 'typescript', tsx: 'typescriptreact',
-  js: 'javascript', jsx: 'javascriptreact',
-  json: 'json', md: 'markdown', css: 'css', html: 'html',
-  rs: 'rust', py: 'python', toml: 'toml', yaml: 'yaml',
-  yml: 'yaml', sql: 'sql', sh: 'shell',
+  ts: 'typescript',
+  tsx: 'typescriptreact',
+  js: 'javascript',
+  jsx: 'javascriptreact',
+  json: 'json',
+  md: 'markdown',
+  css: 'css',
+  html: 'html',
+  rs: 'rust',
+  py: 'python',
+  toml: 'toml',
+  yaml: 'yaml',
+  yml: 'yaml',
+  sql: 'sql',
+  sh: 'shell',
 };
 
 function detectLang(filePath: string): string {
@@ -39,11 +59,7 @@ function detectLang(filePath: string): string {
 // ─── Line count helpers ─────────────────────────────────────────────────────
 
 function computeLineCounts(session: AgentEditSession) {
-  const oldLines = session.originalContent?.split('\n').length ?? 0;
-  const newLines = session.newContent.split('\n').length;
-  const added = Math.max(0, newLines - oldLines);
-  const removed = Math.max(0, oldLines - newLines);
-  return { added, removed };
+  return countDiffLines(session.hunks);
 }
 
 // ─── Changes Tab (with Agent + Git sub-tabs) ───────────────────────────────
@@ -54,9 +70,9 @@ function ChangesTab() {
   const [subTab, setSubTab] = useState<ChangesSubTab>('agent');
 
   const pendingCount = useAgentStore(
-    (s) => s.agentEditSessions.filter(
-      (es) => es.phase === 'streaming' || es.phase === 'pending_review',
-    ).length,
+    (s) =>
+      s.agentEditSessions.filter((es) => es.phase === 'streaming' || es.phase === 'pending_review')
+        .length,
   );
 
   const gitChangesCount = useGitStore(
@@ -111,21 +127,20 @@ function ChangesTab() {
 // ─── Agent Changes Content ──────────────────────────────────────────────────
 
 function AgentChangesContent() {
-  const [selectedFile, setSelectedFile] = useState<string | null>(null);
+  const selectedFile = useLayoutStore((s) => s.agentSelectedChangeFile);
+  const setSelectedFile = useLayoutStore((s) => s.setAgentSelectedChangeFile);
   const allSessions = useAgentStore((s) => s.agentEditSessions);
   const themeId = useSettingsStore((s) => s.themeId);
   const monacoTheme = getMonacoThemeName(themeId);
 
   const sessions = useMemo(
-    () => allSessions.filter(
-      (es) => es.phase === 'streaming' || es.phase === 'pending_review',
-    ),
+    () => allSessions.filter((es) => es.phase === 'streaming' || es.phase === 'pending_review'),
     [allSessions],
   );
 
   const selectedSession = useMemo(
-    () => sessions.find((s) => s.filePath === selectedFile) ?? null,
-    [sessions, selectedFile],
+    () => allSessions.find((s) => s.filePath === selectedFile) ?? null,
+    [allSessions, selectedFile],
   );
 
   // Auto-select first file if current selection is no longer valid
@@ -140,9 +155,7 @@ function AgentChangesContent() {
       <div className="flex h-full flex-col items-center justify-center text-muted-foreground">
         <GitCompare className="mb-3 h-8 w-8 opacity-20" />
         <span className="text-[11px]">No pending changes</span>
-        <span className="mt-1 text-[10px] opacity-60">
-          Agent edits will appear here
-        </span>
+        <span className="mt-1 text-[10px] opacity-60">Agent edits will appear here</span>
       </div>
     );
   }
@@ -221,7 +234,10 @@ function AgentChangesContent() {
               <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
                 <span
                   role="button"
-                  onClick={(e) => { e.stopPropagation(); handleAcceptOne(session.id); }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleAcceptOne(session.id);
+                  }}
                   className="rounded p-0.5 hover:bg-green-500/15 text-green-400"
                   title="Accept"
                 >
@@ -229,7 +245,10 @@ function AgentChangesContent() {
                 </span>
                 <span
                   role="button"
-                  onClick={(e) => { e.stopPropagation(); handleRejectOne(session.id); }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleRejectOne(session.id);
+                  }}
                   className="rounded p-0.5 hover:bg-muted"
                   title="Reject"
                 >
@@ -287,10 +306,15 @@ function PreviewTab() {
   const [mdMode, setMdMode] = useState<'preview' | 'code'>('preview');
 
   // Reset markdown mode when file changes
-  useEffect(() => { setMdMode('preview'); }, [previewFile]);
+  useEffect(() => {
+    setMdMode('preview');
+  }, [previewFile]);
 
   useEffect(() => {
-    if (!previewFile) { setContent(null); return; }
+    if (!previewFile) {
+      setContent(null);
+      return;
+    }
 
     let cancelled = false;
     setLoading(true);
@@ -303,12 +327,21 @@ function PreviewTab() {
       return;
     }
 
-    tauriFs.readFile(previewFile)
-      .then((text) => { if (!cancelled) setContent(text); })
-      .catch(() => { if (!cancelled) setContent('// Error reading file'); })
-      .finally(() => { if (!cancelled) setLoading(false); });
+    tauriFs
+      .readFile(previewFile)
+      .then((text) => {
+        if (!cancelled) setContent(text);
+      })
+      .catch(() => {
+        if (!cancelled) setContent('// Error reading file');
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
 
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [previewFile]);
 
   if (!previewFile) {
@@ -316,9 +349,7 @@ function PreviewTab() {
       <div className="flex h-full flex-col items-center justify-center text-muted-foreground">
         <Eye className="mb-3 h-8 w-8 opacity-20" />
         <span className="text-[11px]">No file selected</span>
-        <span className="mt-1 text-[10px] opacity-60">
-          Click a file in the explorer to preview
-        </span>
+        <span className="mt-1 text-[10px] opacity-60">Click a file in the explorer to preview</span>
       </div>
     );
   }
@@ -345,7 +376,9 @@ function PreviewTab() {
       <div className="flex shrink-0 items-center gap-2 border-b border-border/30 px-3 py-1.5">
         <FileCode2 className="h-3 w-3 text-muted-foreground" />
         <span className="truncate text-[11px] text-foreground">{fileName}</span>
-        <span className="text-[9px] text-muted-foreground uppercase">{detectLang(previewFile)}</span>
+        <span className="text-[9px] text-muted-foreground uppercase">
+          {detectLang(previewFile)}
+        </span>
       </div>
       <div className="flex-1 overflow-hidden">
         <Suspense fallback={<LoadingSpinner />}>
@@ -398,9 +431,9 @@ export function AgentRightPanel() {
 
   // Badge: count of pending changes
   const pendingCount = useAgentStore(
-    (s) => s.agentEditSessions.filter(
-      (es) => es.phase === 'streaming' || es.phase === 'pending_review',
-    ).length,
+    (s) =>
+      s.agentEditSessions.filter((es) => es.phase === 'streaming' || es.phase === 'pending_review')
+        .length,
   );
 
   // Pulsing dot: agent is streaming and has an agent terminal active
@@ -448,7 +481,9 @@ export function AgentRightPanel() {
         <div className={cn('absolute inset-0', activeTab === 'preview' ? 'z-10' : 'z-0 invisible')}>
           <PreviewTab />
         </div>
-        <div className={cn('absolute inset-0', activeTab === 'terminal' ? 'z-10' : 'z-0 invisible')}>
+        <div
+          className={cn('absolute inset-0', activeTab === 'terminal' ? 'z-10' : 'z-0 invisible')}
+        >
           <TerminalPanel />
         </div>
       </div>

@@ -61,6 +61,8 @@ CREATE TABLE messages (
   role TEXT NOT NULL,                     -- 'user' | 'assistant' | 'tool' | 'system'
   content TEXT NOT NULL,                  -- JSON: MessageContent[]
   tool_calls TEXT,                        -- JSON: ToolCall[] (for assistant messages)
+  blocks TEXT,                            -- JSON: provider-native transcript blocks
+  turn_summary TEXT,                      -- JSON: deterministic UI-only completion summary
   tool_call_id TEXT,                      -- for tool result messages
   token_count INTEGER,                    -- estimated token count
   created_at TEXT NOT NULL
@@ -68,6 +70,9 @@ CREATE TABLE messages (
 
 CREATE INDEX idx_messages_conversation ON messages(conversation_id, created_at ASC);
 ```
+
+`turn_summary` is restored only into the desktop timeline and edit-session state. It is not
+included when conversation history is reconstructed for an AI provider.
 
 ### Context Files
 
@@ -206,6 +211,7 @@ async fn run_migrations(pool: &SqlitePool) -> Result<()> {
 ```
 
 ### Migration Rules
+
 1. Migrations are **append-only** — never modify existing migration files
 2. Each migration is wrapped in a transaction
 3. Destructive changes (DROP TABLE, DROP COLUMN) require a 2-step migration:
@@ -225,7 +231,7 @@ Frontend code **never** accesses SQLite directly. All database operations go thr
 // Frontend
 const conversations = await invoke<Conversation[]>('db_query', {
   query: 'SELECT * FROM conversations WHERE project_id = ? ORDER BY updated_at DESC LIMIT ?',
-  params: [projectId, 20]
+  params: [projectId, 20],
 });
 ```
 

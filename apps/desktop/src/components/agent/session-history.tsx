@@ -196,6 +196,7 @@ async function restoreSession(conversationId: string): Promise<void> {
       content: r.content,
       toolCalls: r.tool_calls ? JSON.parse(r.tool_calls) : undefined,
       blocks: r.blocks ? JSON.parse(r.blocks) : undefined,
+      turnSummary: r.turn_summary ? JSON.parse(r.turn_summary) : undefined,
       timestamp: new Date(r.created_at).getTime(),
     }));
 
@@ -211,6 +212,7 @@ async function restoreSession(conversationId: string): Promise<void> {
     store.setConversationId(conversationId);
     for (const msg of messages) {
       store.addMessage(msg);
+      if (msg.turnSummary) store.hydrateTurnSummary(msg.turnSummary);
     }
 
     // Update the active tab title to first user message snippet

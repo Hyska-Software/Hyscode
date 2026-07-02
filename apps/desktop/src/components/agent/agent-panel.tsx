@@ -18,7 +18,6 @@ import { SddStepper } from './sdd/sdd-stepper';
 import { SddSpecReview } from './sdd/sdd-spec-review';
 import { SddTaskList } from './sdd/sdd-task-list';
 import { AgentTaskList } from './agent-task-list';
-import { AgentChangedFiles } from './agent-changed-files';
 import { AgentQuestionCard } from './agent-question-card';
 import { RulesPanelDialog } from './rules-panel-dialog';
 import { useAgentStore } from '@/stores/agent-store';
@@ -362,7 +361,7 @@ function CreditUsageIndicator() {
   );
 }
 
-export function AgentPanel({ hideChangedFiles }: { hideChangedFiles?: boolean } = {}) {
+export function AgentPanel() {
   const sddPhase = useAgentStore((s) => s.sddPhase);
   const sddSpec = useAgentStore((s) => s.sddSpec);
   const sddTasks = useAgentStore((s) => s.sddTasks);
@@ -585,9 +584,6 @@ export function AgentPanel({ hideChangedFiles }: { hideChangedFiles?: boolean } 
 
           {/* Messages */}
           <AgentMessages />
-
-          {/* Changed files summary (above input) */}
-          {!hideChangedFiles && <AgentChangedFiles />}
 
           {/* Input + selectors at the bottom */}
           <AgentInput />

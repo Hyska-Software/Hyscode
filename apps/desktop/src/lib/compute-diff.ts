@@ -15,10 +15,7 @@ interface DiffOp {
  * Compute diff hunks between two texts (line-level).
  * Returns hunks suitable for Monaco gutter/minimap decorations.
  */
-export function computeDiffHunks(
-  original: string | null,
-  modified: string,
-): DiffHunk[] {
+export function computeDiffHunks(original: string | null, modified: string): DiffHunk[] {
   // New file: entire content is an addition
   if (original === null || original === '') {
     const lines = modified.split('\n');
@@ -41,6 +38,16 @@ export function computeDiffHunks(
   return opsToHunks(ops);
 }
 
+export function countDiffLines(hunks: DiffHunk[]): { added: number; removed: number } {
+  return hunks.reduce(
+    (total, hunk) => ({
+      added: total.added + hunk.newLines,
+      removed: total.removed + hunk.oldLines,
+    }),
+    { added: 0, removed: 0 },
+  );
+}
+
 /**
  * Myers-like diff producing a list of equal/insert/delete operations.
  * For files up to ~5000 lines this is fast enough on the UI thread.
@@ -51,9 +58,7 @@ function computeLineOps(oldLines: string[], newLines: string[]): DiffOp[] {
 
   // Optimisation: handle trivial cases
   if (oldLen === 0) {
-    return newLen > 0
-      ? [{ type: 'insert', oldIdx: 0, newIdx: 0, count: newLen }]
-      : [];
+    return newLen > 0 ? [{ type: 'insert', oldIdx: 0, newIdx: 0, count: newLen }] : [];
   }
   if (newLen === 0) {
     return [{ type: 'delete', oldIdx: 0, newIdx: 0, count: oldLen }];
@@ -66,9 +71,7 @@ function computeLineOps(oldLines: string[], newLines: string[]): DiffOp[] {
   }
 
   // Standard LCS
-  const dp: number[][] = Array.from({ length: oldLen + 1 }, () =>
-    new Array(newLen + 1).fill(0),
-  );
+  const dp: number[][] = Array.from({ length: oldLen + 1 }, () => new Array(newLen + 1).fill(0));
 
   for (let i = 1; i <= oldLen; i++) {
     for (let j = 1; j <= newLen; j++) {
@@ -140,7 +143,11 @@ function simpleDiff(oldLines: string[], newLines: string[]): DiffOp[] {
       let oldEnd = i;
       let newEnd = i;
       while (oldEnd < oldLines.length || newEnd < newLines.length) {
-        if (oldEnd < oldLines.length && newEnd < newLines.length && oldLines[oldEnd] === newLines[newEnd]) {
+        if (
+          oldEnd < oldLines.length &&
+          newEnd < newLines.length &&
+          oldLines[oldEnd] === newLines[newEnd]
+        ) {
           break;
         }
         if (oldEnd < oldLines.length) oldEnd++;
@@ -206,11 +213,7 @@ function opsToHunks(ops: DiffOp[]): DiffHunk[] {
     const current = hunks[i];
     const next = hunks[i + 1];
 
-    if (
-      current.type === 'delete' &&
-      next?.type === 'add' &&
-      next.newStart === current.newStart
-    ) {
+    if (current.type === 'delete' && next?.type === 'add' && next.newStart === current.newStart) {
       merged.push({
         type: 'modify',
         oldStart: current.oldStart,

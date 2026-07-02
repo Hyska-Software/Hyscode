@@ -32,6 +32,8 @@ interface LayoutState {
   agentRightTab: 'changes' | 'preview' | 'terminal';
   /** File path to preview in agent-mode right panel */
   agentPreviewFile: string | null;
+  /** File path selected in the agent changes panel */
+  agentSelectedChangeFile: string | null;
   /** Whether the rules panel popup is open in the agent panel */
   rulesPanelOpen: boolean;
   /** Whether the left sidebar is visible */
@@ -45,6 +47,7 @@ interface LayoutState {
   setSidebarActiveTab: (tab: 'chat' | 'terminal') => void;
   setAgentRightTab: (tab: 'changes' | 'preview' | 'terminal') => void;
   setAgentPreviewFile: (filePath: string | null) => void;
+  setAgentSelectedChangeFile: (filePath: string | null) => void;
   setRulesPanelOpen: (open: boolean) => void;
   setSidebarVisible: (visible: boolean) => void;
   setSidebarActiveView: (view: SidebarView) => void;
@@ -64,6 +67,7 @@ export const useLayoutStore = create<LayoutState>()(
       sidebarActiveTab: 'chat',
       agentRightTab: 'changes',
       agentPreviewFile: null,
+      agentSelectedChangeFile: null,
       rulesPanelOpen: false,
       sidebarVisible: true,
       sidebarActiveView: 'files',
@@ -74,6 +78,8 @@ export const useLayoutStore = create<LayoutState>()(
       setSidebarActiveTab: (tab) => set({ sidebarActiveTab: tab }),
       setAgentRightTab: (tab) => set({ agentRightTab: tab }),
       setAgentPreviewFile: (filePath) => set({ agentPreviewFile: filePath, agentRightTab: 'preview' }),
+      setAgentSelectedChangeFile: (filePath) =>
+        set({ agentSelectedChangeFile: filePath, agentRightTab: 'changes' }),
       setRulesPanelOpen: (open) => set({ rulesPanelOpen: open }),
       setSidebarVisible: (visible) => set({ sidebarVisible: visible }),
       setSidebarActiveView: (view) => set({ sidebarActiveView: view }),

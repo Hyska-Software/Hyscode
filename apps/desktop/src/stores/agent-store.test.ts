@@ -71,4 +71,56 @@ describe('agent tab turn ownership', () => {
       { fromMode: 'review', toMode: 'build', reason: 'Implement reviewed fixes' },
     ]);
   });
+
+  it('resolves only edit sessions and summary files owned by one turn', () => {
+    const makeSession = (id: string, turnId: string) => ({
+      id,
+      turnId,
+      filePath: `${id}.ts`,
+      toolName: 'write_file',
+      toolCallId: `tool-${id}`,
+      originalContent: 'before',
+      newContent: 'after',
+      phase: 'pending_review' as const,
+      isNewFile: false,
+      hunks: [{ type: 'modify' as const, oldStart: 1, oldLines: 1, newStart: 1, newLines: 1 }],
+      createdAt: 0,
+    });
+    useAgentStore.setState({
+      agentEditSessions: [makeSession('a', 'turn-a'), makeSession('b', 'turn-b')],
+    });
+    useAgentStore.getState().addMessage({
+      id: 'assistant-a',
+      role: 'assistant',
+      content: 'done',
+      timestamp: 0,
+      turnSummary: {
+        turnId: 'turn-a',
+        status: 'complete',
+        durationMs: 10,
+        toolCallCount: 1,
+        files: [
+          {
+            sessionId: 'a',
+            filePath: 'a.ts',
+            kind: 'edited',
+            added: 1,
+            removed: 1,
+            originalContent: 'before',
+            newContent: 'after',
+            hunks: [{ type: 'modify', oldStart: 1, oldLines: 1, newStart: 1, newLines: 1 }],
+            resolution: 'pending',
+          },
+        ],
+      },
+    });
+
+    useAgentStore.getState().resolveTurnEditSessions('turn-a', false);
+
+    expect(useAgentStore.getState().agentEditSessions.map((item) => item.phase)).toEqual([
+      'rejected',
+      'pending_review',
+    ]);
+    expect(useAgentStore.getState().messages[0].turnSummary?.files[0].resolution).toBe('undone');
+  });
 });

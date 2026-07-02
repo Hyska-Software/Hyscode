@@ -143,8 +143,32 @@ export interface ChatMessage {
   /** Structured LLM content blocks for faithful history reconstruction.
    *  When present, buildHistory() uses these instead of `content` string. */
   blocks?: MessageContent[];
+  turnSummary?: TurnSummary;
   timestamp: number;
 }
+
+export type TurnSummaryResolution = 'pending' | 'kept' | 'undone';
+export type TurnSummaryFileKind = 'created' | 'edited' | 'deleted';
+
+export type TurnSummaryFile = {
+  sessionId: string;
+  filePath: string;
+  kind: TurnSummaryFileKind;
+  added: number;
+  removed: number;
+  originalContent: string | null;
+  newContent: string;
+  hunks: DiffHunk[];
+  resolution: TurnSummaryResolution;
+};
+
+export type TurnSummary = {
+  turnId: string;
+  status: TurnTerminalStatus;
+  durationMs: number;
+  toolCallCount: number;
+  files: TurnSummaryFile[];
+};
 
 export interface PendingApproval {
   id: string;
@@ -183,6 +207,7 @@ export interface DiffHunk {
 
 export interface AgentEditSession {
   id: string;
+  turnId: string;
   filePath: string;
   toolName: string;
   toolCallId: string;
@@ -367,6 +392,9 @@ interface AgentState {
   upsertEditSession: (session: AgentEditSession) => void;
   resolveEditSession: (id: string, accepted: boolean) => void;
   resolveAllEditSessions: (accepted: boolean) => void;
+  resolveTurnEditSessions: (turnId: string, accepted: boolean) => void;
+  setTurnSummary: (turnId: string, summary: TurnSummary) => void;
+  hydrateTurnSummary: (summary: TurnSummary) => void;
 
   // SDD
   setSddPhase: (phase: SddStatus | null) => void;
@@ -695,6 +723,7 @@ export const useAgentStore = create<AgentState>()(
       set((state) => {
         const existing = state.agentEditSessions.find(
           (s) =>
+            s.turnId === session.turnId &&
             s.filePath === session.filePath &&
             (s.phase === 'streaming' || s.phase === 'pending_review'),
         );
@@ -721,6 +750,64 @@ export const useAgentStore = create<AgentState>()(
           if (session.phase === 'streaming' || session.phase === 'pending_review') {
             session.phase = accepted ? 'accepted' : 'rejected';
           }
+        }
+      }),
+
+    resolveTurnEditSessions: (turnId, accepted) =>
+      set((state) => {
+        for (const session of state.agentEditSessions) {
+          if (
+            session.turnId === turnId &&
+            (session.phase === 'streaming' || session.phase === 'pending_review')
+          ) {
+            session.phase = accepted ? 'accepted' : 'rejected';
+          }
+        }
+        for (const message of state.messages) {
+          if (message.turnSummary?.turnId === turnId) {
+            for (const file of message.turnSummary.files) {
+              if (file.resolution === 'pending') {
+                file.resolution = accepted ? 'kept' : 'undone';
+              }
+            }
+          }
+        }
+      }),
+
+    setTurnSummary: (turnId, summary) =>
+      set((state) => {
+        const message = [...state.messages]
+          .reverse()
+          .find((candidate) => candidate.role === 'assistant');
+        if (message && message.turnSummary?.turnId !== turnId) {
+          message.turnSummary = summary;
+        }
+      }),
+
+    hydrateTurnSummary: (summary) =>
+      set((state) => {
+        for (const file of summary.files) {
+          if (state.agentEditSessions.some((session) => session.id === file.sessionId)) continue;
+          state.agentEditSessions.push({
+            id: file.sessionId,
+            turnId: summary.turnId,
+            filePath: file.filePath,
+            toolName: 'restored_turn_summary',
+            toolCallId: `restored:${file.sessionId}`,
+            originalContent: file.originalContent,
+            diskOriginalContent: file.originalContent,
+            wasDirty: false,
+            newContent: file.newContent,
+            phase:
+              file.resolution === 'kept'
+                ? 'accepted'
+                : file.resolution === 'undone'
+                  ? 'rejected'
+                  : 'pending_review',
+            isNewFile: file.kind === 'created',
+            hunks: file.hunks,
+            createdAt: Date.now(),
+          });
         }
       }),
 
