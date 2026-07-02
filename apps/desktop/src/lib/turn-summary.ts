@@ -2,14 +2,18 @@ import type { TurnRecord } from '@hyscode/agent-harness';
 import type { AgentEditSession, TurnSummary } from '@/stores/agent-store';
 import { countDiffLines } from './compute-diff';
 
-export function buildTurnSummary(record: TurnRecord, sessions: AgentEditSession[]): TurnSummary {
+export function buildTurnSummary(
+  turnId: string,
+  record: TurnRecord,
+  sessions: AgentEditSession[],
+): TurnSummary {
   return {
-    turnId: record.id,
+    turnId,
     status: record.stopReason,
     durationMs: record.durationMs,
     toolCallCount: record.toolCalls.length,
     files: sessions
-      .filter((session) => session.turnId === record.id)
+      .filter((session) => session.turnId === turnId)
       .map((session) => {
         const counts = countDiffLines(session.hunks);
         return {
