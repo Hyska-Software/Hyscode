@@ -1,9 +1,8 @@
-import { useEffect, useCallback, useRef } from 'react';
+import { useEffect, useCallback } from 'react';
 import { Terminal, Plus, X, GripVertical, Bot } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 import { useTerminalStore } from '../../stores/terminal-store';
 import { useLayoutStore } from '../../stores/layout-store';
-import { useAgentStore } from '../../stores/agent-store';
 import { TerminalInstance } from './terminal-instance';
 
 export function TerminalPanel() {
@@ -14,36 +13,13 @@ export function TerminalPanel() {
   const closeSession = useTerminalStore((s) => s.closeSession);
   const setActiveSession = useTerminalStore((s) => s.setActiveSession);
   const terminalLocation = useLayoutStore((s) => s.terminalLocation);
-  const isStreaming = useAgentStore((s) => s.isStreaming);
-
-  // Track whether the user was on the agent tab before we auto-switched
-  const prevActiveRef = useRef<string | null>(null);
 
   // Auto-create first terminal session
   useEffect(() => {
     if (sessions.length === 0) {
       createSession();
     }
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Auto-focus the most recent agent terminal when agent starts streaming
-  useEffect(() => {
-    if (isStreaming) {
-      const agentSessions = sessions.filter((s) => s.isAgentSession);
-      const latestAgent = agentSessions[agentSessions.length - 1];
-      if (latestAgent && activeSessionId !== latestAgent.id) {
-        prevActiveRef.current = activeSessionId;
-        setActiveSession(latestAgent.id);
-      }
-    } else if (prevActiveRef.current) {
-      // Restore previous tab when streaming ends
-      const prev = sessions.find((s) => s.id === prevActiveRef.current);
-      if (prev) {
-        setActiveSession(prev.id);
-      }
-      prevActiveRef.current = null;
-    }
-  }, [isStreaming]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, []);
 
   const handleClose = useCallback(
     (e: React.MouseEvent, sessionId: string, ptyId: string | null) => {
@@ -57,13 +33,10 @@ export function TerminalPanel() {
   );
 
   // Drag the terminal header to move it to the sidebar
-  const handleDragStart = useCallback(
-    (e: React.DragEvent) => {
-      e.dataTransfer.setData('hyscode/terminal-move', 'to-sidebar');
-      e.dataTransfer.effectAllowed = 'move';
-    },
-    [],
-  );
+  const handleDragStart = useCallback((e: React.DragEvent) => {
+    e.dataTransfer.setData('hyscode/terminal-move', 'to-sidebar');
+    e.dataTransfer.effectAllowed = 'move';
+  }, []);
 
   return (
     <div className="flex h-full flex-col">
@@ -82,9 +55,9 @@ export function TerminalPanel() {
             </div>
           )}
           {sessions.map((session) => {
-              const isAgent = session.isAgentSession;
-              const TabIcon = isAgent ? Bot : Terminal;
-              return (
+            const isAgent = session.isAgentSession;
+            const TabIcon = isAgent ? Bot : Terminal;
+            return (
               <button
                 key={session.id}
                 onClick={() => setActiveSession(session.id)}
@@ -98,28 +71,40 @@ export function TerminalPanel() {
               >
                 <TabIcon className={`h-3 w-3 shrink-0 ${isAgent ? 'text-primary' : ''}`} />
                 <span className="truncate max-w-[100px]">{session.name}</span>
-                {/* Allow closing dead agent sessions or user terminals. Protect only the active agent terminal while streaming. */}
-                {(!isAgent || session.isDead || (isStreaming && activeSessionId !== session.id)) && (
-                <span
-                  role="button"
-                  onClick={(e) => handleClose(e, session.id, session.ptyId)}
-                  className="ml-1 flex h-4 w-4 shrink-0 items-center justify-center rounded-sm opacity-0 group-hover:opacity-100 hover:bg-muted transition-all"
-                >
-                  <X className="h-2.5 w-2.5" />
-                </span>
+                {session.activeToolCallId && (
+                  <span
+                    className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-accent motion-reduce:animate-none"
+                    title="Agent command running"
+                  />
+                )}
+                {session.awaitingInput && (
+                  <span
+                    className="h-1.5 w-1.5 shrink-0 rounded-full bg-amber-400"
+                    title="Command waiting for input"
+                  />
+                )}
+                {/* Explicit close owns process termination; block it only while the harness controls the PTY. */}
+                {!session.activeToolCallId && (
+                  <span
+                    role="button"
+                    onClick={(e) => handleClose(e, session.id, session.ptyId)}
+                    className="ml-1 flex h-4 w-4 shrink-0 items-center justify-center rounded-sm opacity-0 group-hover:opacity-100 hover:bg-muted transition-all"
+                  >
+                    <X className="h-2.5 w-2.5" />
+                  </span>
                 )}
               </button>
-              );
-            })}
-            <button
-              onClick={() => createSession()}
-              className="flex h-8 w-8 items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-              title="New Terminal"
-            >
-              <Plus className="h-3 w-3" />
-            </button>
-          </div>
+            );
+          })}
+          <button
+            onClick={() => createSession()}
+            className="flex h-8 w-8 items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+            title="New Terminal"
+          >
+            <Plus className="h-3 w-3" />
+          </button>
         </div>
+      </div>
 
       {/* Terminal instances */}
       <div className="relative flex-1 overflow-hidden bg-surface">

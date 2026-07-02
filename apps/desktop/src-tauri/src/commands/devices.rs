@@ -535,7 +535,7 @@ pub async fn run_on_device(
         }
     }
 
-    let child = pair
+    let mut child = pair
         .slave
         .spawn_command(cmd)
         .map_err(|e| format!("Failed to spawn: {e}"))?;
@@ -544,40 +544,16 @@ pub async fn run_on_device(
 
     let pty_id = uuid::Uuid::new_v4().to_string();
 
-    // ── Reader thread ─────────────────────────────────────────────────────────
-    let reader_id = pty_id.clone();
+    // ── Store session before starting event threads ───────────────────────────
     let mut reader = pair
         .master
         .try_clone_reader()
         .map_err(|e| format!("Failed to clone PTY reader: {e}"))?;
-    let app_clone = app.clone();
-
-    std::thread::spawn(move || {
-        let mut buf = [0u8; 4096];
-        loop {
-            match reader.read(&mut buf) {
-                Ok(0) => break,
-                Ok(n) => {
-                    let text = String::from_utf8_lossy(&buf[..n]).to_string();
-                    let _ = app_clone.emit(
-                        "pty:data",
-                        serde_json::json!({ "pty_id": reader_id, "data": text }),
-                    );
-                }
-                Err(_) => break,
-            }
-        }
-        let _ = app_clone.emit(
-            "pty:exit",
-            serde_json::json!({ "pty_id": reader_id, "code": null }),
-        );
-    });
-
-    // ── Store session ─────────────────────────────────────────────────────────
     let writer = pair
         .master
         .take_writer()
         .map_err(|e| format!("Failed to take PTY writer: {e}"))?;
+    let killer = child.clone_killer();
     {
         let mut sessions = state.0.lock().map_err(|e| format!("Lock error: {e}"))?;
         sessions.insert(
@@ -585,10 +561,62 @@ pub async fn run_on_device(
             super::pty::PtySession {
                 writer,
                 master: pair.master,
-                child,
+                killer,
+                alive: true,
+                exit_code: None,
+                output: super::pty::OutputBuffer::new(),
             },
         );
     }
+
+    // ── Reader thread ─────────────────────────────────────────────────────────
+    let reader_id = pty_id.clone();
+    let reader_state = std::sync::Arc::clone(&state.0);
+    let app_clone = app.clone();
+    std::thread::spawn(move || {
+        let mut buf = [0u8; 4096];
+        loop {
+            match reader.read(&mut buf) {
+                Ok(0) => break,
+                Ok(n) => {
+                    let text = String::from_utf8_lossy(&buf[..n]).to_string();
+                    let sequence = reader_state.lock().ok().and_then(|mut sessions| {
+                        sessions
+                            .get_mut(&reader_id)
+                            .map(|session| session.output.append(text.clone()))
+                    });
+                    if let Some(sequence) = sequence {
+                        let _ = app_clone.emit(
+                            "pty:data",
+                            serde_json::json!({ "pty_id": reader_id, "sequence": sequence, "data": text }),
+                        );
+                    }
+                }
+                Err(_) => break,
+            }
+        }
+    });
+
+    let waiter_id = pty_id.clone();
+    let waiter_state = std::sync::Arc::clone(&state.0);
+    std::thread::spawn(move || {
+        let exit_code = child.wait().ok().map(|status| status.exit_code());
+        let sequence = waiter_state
+            .lock()
+            .ok()
+            .and_then(|mut sessions| {
+                sessions.get_mut(&waiter_id).map(|session| {
+                    session.alive = false;
+                    session.exit_code = exit_code;
+                    session.output.sequence
+                })
+            })
+            .unwrap_or_default();
+        let _ = app.emit(
+            "pty:exit",
+            serde_json::json!({ "pty_id": waiter_id, "sequence": sequence, "code": exit_code }),
+        );
+    });
 
     Ok(pty_id)
 }

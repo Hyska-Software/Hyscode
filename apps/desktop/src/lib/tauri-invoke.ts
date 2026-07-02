@@ -119,6 +119,18 @@ interface TauriCommands {
   pty_resize: { args: { ptyId: string; cols: number; rows: number }; ret: void };
   pty_kill: { args: { ptyId: string }; ret: void };
   pty_exists: { args: { ptyId: string }; ret: boolean };
+  pty_snapshot: {
+    args: { ptyId: string; afterSequence?: number };
+    ret: {
+      data: string;
+      from_sequence: number;
+      to_sequence: number;
+      truncated: boolean;
+      alive: boolean;
+      exit_code: number | null;
+    };
+  };
+  pty_interrupt: { args: { ptyId: string }; ret: void };
 
   // Keychain
   keychain_set: { args: { service: string; account: string; password: string }; ret: void };

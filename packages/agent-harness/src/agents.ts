@@ -267,6 +267,9 @@ You are a conversational coding assistant. Help the user with questions, explana
       'rename_file',
       'copy_file',
       'run_terminal_command',
+      'respond_terminal_input',
+      'read_terminal_output',
+      'stop_terminal_process',
       'run_code',
       'git_commit',
       'git_add',
@@ -392,6 +395,9 @@ You are an expert code reviewer. Analyze code for quality, correctness, security
       'rename_file',
       'copy_file',
       'run_terminal_command',
+      'respond_terminal_input',
+      'read_terminal_output',
+      'stop_terminal_process',
       'run_code',
       'git_commit',
       'git_add',
@@ -464,7 +470,8 @@ Before applying any fix:
 const planAgent: AgentDefinition = {
   type: 'plan',
   name: 'Plan',
-  description: 'Plans architecture, writes specs, designs systems, and creates technical documents.',
+  description:
+    'Plans architecture, writes specs, designs systems, and creates technical documents.',
   basePrompt: `${BASE_SYSTEM_PROMPT}
 
 ## Your Role: Planning & Architecture Agent
@@ -530,6 +537,9 @@ You are a software architecture and planning specialist. You analyze codebases, 
       'rename_file',
       'copy_file',
       'run_terminal_command',
+      'respond_terminal_input',
+      'read_terminal_output',
+      'stop_terminal_process',
       'run_code',
       'git_commit',
       'git_add',

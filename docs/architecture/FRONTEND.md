@@ -33,6 +33,7 @@ The frontend is a React 19 SPA running inside Tauri's WebView. It uses shadcn/ui
 ```
 
 ### Panel System
+
 - All panels are **resizable** via drag handles (react-resizable-panels)
 - All panels are **collapsible** (toggle via keyboard shortcut or button)
 - Panel layout state persisted in `settingsStore`
@@ -92,7 +93,7 @@ The frontend is a React 19 SPA running inside Tauri's WebView. It uses shadcn/ui
 ```typescript
 interface EditorStore {
   // State
-  tabs: Tab[];                          // { id, path, language, isDirty }
+  tabs: Tab[]; // { id, path, language, isDirty }
   activeTabId: string | null;
   cursorPositions: Map<string, Position>; // per-tab cursor memory
 
@@ -112,7 +113,7 @@ interface EditorStore {
 interface FileStore {
   // State
   rootPath: string | null;
-  tree: FileNode[];                     // { name, path, type, children? }
+  tree: FileNode[]; // { name, path, type, children? }
   expandedDirs: Set<string>;
   fileContentCache: Map<string, string>;
 
@@ -152,11 +153,11 @@ interface AgentStore {
 interface SettingsStore {
   // State
   theme: 'dark' | 'light' | 'system';
-  aiProvider: string;                   // active provider id
-  aiModel: string;                      // active model id
+  aiProvider: string; // active provider id
+  aiModel: string; // active model id
   providerConfigs: Map<string, ProviderConfig>;
-  editorSettings: EditorSettings;       // fontSize, tabSize, wordWrap, etc.
-  agentSettings: AgentSettings;         // autoApprove, maxTokens, temperature
+  editorSettings: EditorSettings; // fontSize, tabSize, wordWrap, etc.
+  agentSettings: AgentSettings; // autoApprove, maxTokens, temperature
   panelLayout: PanelLayoutConfig;
   keybindings: Keybinding[];
 
@@ -187,18 +188,21 @@ interface ProjectStore {
 ## Monaco Editor Integration
 
 ### Lazy Loading
+
 ```typescript
 // Only import Monaco when editor panel mounts
 const MonacoEditor = lazy(() => import('@monaco-editor/react'));
 ```
 
 ### Configuration
+
 - **Theme**: custom dark theme matching shadcn/ui Zinc palette
 - **Languages**: TypeScript, JavaScript, Python, Rust, Go, JSON, Markdown, HTML, CSS (built-in)
 - **Font**: Geist Mono, 14px, ligatures enabled
 - **Features**: minimap, bracket colorization, indent guides, word wrap toggle
 
 ### Agent Edit Visualization
+
 - Agent edits appear as **diff decorations** (green for additions, red for deletions)
 - Real-time streaming: characters appear with a "typing cursor" effect
 - Each agent edit creates an **undo checkpoint** so user can revert individual agent edits
@@ -213,6 +217,12 @@ const MonacoEditor = lazy(() => import('@monaco-editor/react'));
 - Multiple terminal instances with tabs
 - Captures last command output for agent context
 - Agent can write to terminal via `run_terminal_command` tool
+- Interactive prompts surface as `awaiting_input`; approved agent responses resume the same PTY
+- Users may type into a waiting agent terminal unless approval mode is `Auto-approve`
+- Agent terminals are owned by a conversation through the desktop terminal runtime adapter
+- xterm attaches with listen-before-snapshot replay and never owns PTY process lifetime
+- Terminal tool cards stream a bounded output tail without moving focus away from chat
+- `@terminal` attaches a one-turn sanitized snapshot of the active terminal
 
 ---
 
@@ -256,7 +266,7 @@ Most navigation is panel-based (not route-based). Routes are used for full-page 
   --card-foreground: 0 0% 98%;
   --popover: 240 10% 3.9%;
   --popover-foreground: 0 0% 98%;
-  --primary: 217 91% 60%;           /* Electric Blue #3B82F6 */
+  --primary: 217 91% 60%; /* Electric Blue #3B82F6 */
   --primary-foreground: 0 0% 100%;
   --secondary: 240 3.7% 15.9%;
   --secondary-foreground: 0 0% 98%;
@@ -273,6 +283,7 @@ Most navigation is panel-based (not route-based). Routes are used for full-page 
 ```
 
 ### Typography
+
 - **UI text**: Geist Sans (400, 500, 600)
 - **Code/Editor**: Geist Mono (400, 500)
 - **Headings**: Geist Sans 600, tracking-tight
@@ -282,15 +293,15 @@ Most navigation is panel-based (not route-based). Routes are used for full-page 
 
 ## Keyboard Shortcuts
 
-| Action | Shortcut |
-|---|---|
-| Open file | `Ctrl+P` |
-| Command palette | `Ctrl+Shift+P` |
-| Toggle terminal | `` Ctrl+` `` |
-| Toggle agent panel | `Ctrl+Shift+A` |
-| Toggle file tree | `Ctrl+B` |
-| Save file | `Ctrl+S` |
-| New agent chat | `Ctrl+Shift+N` |
-| Focus agent input | `Ctrl+L` |
-| Accept agent edit | `Ctrl+Enter` (in diff view) |
-| Reject agent edit | `Ctrl+Backspace` (in diff view) |
+| Action             | Shortcut                        |
+| ------------------ | ------------------------------- |
+| Open file          | `Ctrl+P`                        |
+| Command palette    | `Ctrl+Shift+P`                  |
+| Toggle terminal    | `` Ctrl+` ``                    |
+| Toggle agent panel | `Ctrl+Shift+A`                  |
+| Toggle file tree   | `Ctrl+B`                        |
+| Save file          | `Ctrl+S`                        |
+| New agent chat     | `Ctrl+Shift+N`                  |
+| Focus agent input  | `Ctrl+L`                        |
+| Accept agent edit  | `Ctrl+Enter` (in diff view)     |
+| Reject agent edit  | `Ctrl+Backspace` (in diff view) |

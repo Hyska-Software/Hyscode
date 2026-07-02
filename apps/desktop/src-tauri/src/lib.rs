@@ -21,7 +21,9 @@ pub fn run() {
         .plugin(tauri_plugin_http::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_notification::init())
-        .manage(commands::pty::PtyState(Mutex::new(HashMap::new())))
+        .manage(commands::pty::PtyState(std::sync::Arc::new(Mutex::new(
+            HashMap::new(),
+        ))))
         .manage(LspState(Mutex::new(HashMap::new())))
         .manage(FsWatcherState(Mutex::new(HashMap::new())))
         .manage(DockerWatchState(Mutex::new(HashMap::new())))
@@ -93,6 +95,8 @@ pub fn run() {
             commands::pty::pty_resize,
             commands::pty::pty_kill,
             commands::pty::pty_exists,
+            commands::pty::pty_snapshot,
+            commands::pty::pty_interrupt,
             // Extension commands
             commands::extension::extension_install,
             commands::extension::extension_install_zip,

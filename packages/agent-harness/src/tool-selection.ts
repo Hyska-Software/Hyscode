@@ -33,7 +33,13 @@ const MUTATION_TOOLS = new Set([
   'rename_file',
   'copy_file',
 ]);
-const EXECUTION_TOOLS = new Set(['run_terminal_command', 'run_code']);
+const EXECUTION_TOOLS = new Set([
+  'run_terminal_command',
+  'respond_terminal_input',
+  'read_terminal_output',
+  'stop_terminal_process',
+  'run_code',
+]);
 
 export function selectToolDefinitions(
   tools: ToolDefinition[],

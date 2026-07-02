@@ -59,8 +59,10 @@ async fn pty_resize(pty_id: PtyId, cols: u16, rows: u16) -> Result<(), Error>;
 
 #[tauri::command]
 async fn pty_kill(pty_id: PtyId) -> Result<(), Error>;
+async fn pty_interrupt(pty_id: PtyId) -> Result<(), Error>;
+async fn pty_snapshot(pty_id: PtyId, after_sequence: Option<u64>) -> Result<PtySnapshot, Error>;
 
-// PTY output is streamed via events: emit("pty:data", { pty_id, data })
+// PTY output is ordered and replayable: emit("pty:data", { pty_id, sequence, data })
 ```
 
 ### Git Commands
@@ -128,17 +130,17 @@ async fn keychain_delete(key: String) -> Result<(), Error>;
 
 ## Tauri Plugins
 
-| Plugin | Purpose | Version |
-|---|---|---|
-| `tauri-plugin-fs` | Extended FS operations | v2 |
-| `tauri-plugin-shell` | PTY spawn, process exec | v2 |
-| `tauri-plugin-sql` | SQLite driver (sqlx) | v2 |
-| `tauri-plugin-http` | HTTP client (AI API calls) | v2 |
-| `tauri-plugin-os` | OS info, paths | v2 |
-| `tauri-plugin-dialog` | Native file/folder dialogs | v2 |
-| `tauri-plugin-clipboard` | Clipboard R/W | v2 |
-| `tauri-plugin-notification` | Native notifications | v2 |
-| `tauri-plugin-store` | JSON key-value store | v2 |
+| Plugin                      | Purpose                    | Version |
+| --------------------------- | -------------------------- | ------- |
+| `tauri-plugin-fs`           | Extended FS operations     | v2      |
+| `tauri-plugin-shell`        | PTY spawn, process exec    | v2      |
+| `tauri-plugin-sql`          | SQLite driver (sqlx)       | v2      |
+| `tauri-plugin-http`         | HTTP client (AI API calls) | v2      |
+| `tauri-plugin-os`           | OS info, paths             | v2      |
+| `tauri-plugin-dialog`       | Native file/folder dialogs | v2      |
+| `tauri-plugin-clipboard`    | Clipboard R/W              | v2      |
+| `tauri-plugin-notification` | Native notifications       | v2      |
+| `tauri-plugin-store`        | JSON key-value store       | v2      |
 
 ---
 
@@ -193,14 +195,14 @@ Tauri v2 uses **capabilities** to restrict what IPC commands each window/webview
 
 Tauri events for real-time communication between Rust and frontend:
 
-| Event | Direction | Payload |
-|---|---|---|
-| `fs:changed` | Rust → TS | `{ path, kind: "create" \| "modify" \| "delete" }` |
-| `pty:data` | Rust → TS | `{ pty_id, data: string }` |
-| `pty:exit` | Rust → TS | `{ pty_id, code: number }` |
-| `sandbox:output` | Rust → TS | `{ sandbox_id, stdout, stderr }` |
-| `sandbox:exit` | Rust → TS | `{ sandbox_id, code, duration_ms }` |
-| `db:migrated` | Rust → TS | `{ version, applied: string[] }` |
+| Event            | Direction | Payload                                            |
+| ---------------- | --------- | -------------------------------------------------- |
+| `fs:changed`     | Rust → TS | `{ path, kind: "create" \| "modify" \| "delete" }` |
+| `pty:data`       | Rust → TS | `{ pty_id, sequence, data: string }`               |
+| `pty:exit`       | Rust → TS | `{ pty_id, sequence, code: number }`               |
+| `sandbox:output` | Rust → TS | `{ sandbox_id, stdout, stderr }`                   |
+| `sandbox:exit`   | Rust → TS | `{ sandbox_id, code, duration_ms }`                |
+| `db:migrated`    | Rust → TS | `{ version, applied: string[] }`                   |
 
 ---
 

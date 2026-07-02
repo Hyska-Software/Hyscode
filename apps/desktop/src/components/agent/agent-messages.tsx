@@ -8,7 +8,7 @@ import {
   Copy,
   RotateCw,
 } from 'lucide-react';
-import { useRef, useEffect, useState, memo } from 'react';
+import { useRef, useEffect, useMemo, useState, memo } from 'react';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { useAgentStore } from '@/stores/agent-store';
 import { ToolCallGroup } from './tool-call-card';
@@ -18,6 +18,7 @@ import { ModeSwitchDialog } from './mode-switch-dialog';
 import { cn } from '@/lib/utils';
 import type { ChatMessage } from '@/stores/agent-store';
 import { TurnSummaryCard } from './turn-summary-card';
+import { FileActivity, isFileMutation } from './file-activity';
 import { MarkdownContent } from './markdown-renderer';
 import { HarnessBridge } from '@/lib/harness-bridge';
 import { useSettingsStore } from '@/stores/settings-store';
@@ -317,6 +318,22 @@ export function AgentMessages() {
   const connectionState = useAgentStore((s) => s.connectionState);
   const connectionMessage = useAgentStore((s) => s.connectionMessage);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const liveFileOperations = useMemo(() => {
+    let lastUserMessageIndex = -1;
+    for (let index = messages.length - 1; index >= 0; index--) {
+      if (messages[index].role === 'user') {
+        lastUserMessageIndex = index;
+        break;
+      }
+    }
+    return messages
+      .slice(lastUserMessageIndex + 1)
+      .flatMap((message) => message.toolCalls ?? [])
+      .filter(isFileMutation);
+  }, [messages]);
+  const fileActivitySignature = liveFileOperations
+    .map((toolCall) => `${toolCall.id}:${toolCall.status}`)
+    .join('|');
 
   // Auto-scroll on new messages (throttled to avoid jank during fast streaming)
   const lastScrollRef = useRef(0);
@@ -326,7 +343,7 @@ export function AgentMessages() {
     if (isStreaming && now - lastScrollRef.current < 100) return;
     lastScrollRef.current = now;
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages.length, isStreaming, pendingApprovals.length]);
+  }, [messages.length, isStreaming, pendingApprovals.length, fileActivitySignature]);
 
   // Empty state
   if (messages.length === 0) {
@@ -373,6 +390,8 @@ export function AgentMessages() {
               />
             );
           })}
+
+          {isStreaming && <FileActivity toolCalls={liveFileOperations} />}
 
           {/* Pending approvals */}
           {pendingApprovals.map((approval) => (

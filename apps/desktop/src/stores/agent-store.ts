@@ -54,6 +54,7 @@ export interface PerTabState {
   streamingText: string;
   contextFiles: string[];
   attachedImages: AttachedImage[];
+  attachedTerminal: TerminalAttachment | null;
   gatheredContext: Array<{ path: string; relevance: number; tokenEstimate: number }>;
   pendingToolCalls: ToolCallDisplay[];
   pendingApprovals: PendingApproval[];
@@ -94,6 +95,7 @@ export function defaultPerTabState(mode: AgentMode = 'chat'): PerTabState {
     streamingText: '',
     contextFiles: [],
     attachedImages: [],
+    attachedTerminal: null,
     gatheredContext: [],
     pendingToolCalls: [],
     pendingApprovals: [],
@@ -130,6 +132,18 @@ export interface ToolCallDisplay {
   error?: string;
   startedAt?: number;
   completedAt?: number;
+  /** Ephemeral output tail streamed while a terminal command is running. */
+  liveOutput?: string;
+  terminalId?: string;
+  terminalState?:
+    | 'started'
+    | 'running'
+    | 'awaiting_input'
+    | 'background'
+    | 'complete'
+    | 'error'
+    | 'cancelled';
+  outputSequence?: number;
 }
 
 export interface ChatMessage {
@@ -236,6 +250,13 @@ export interface AttachedImage {
   previewUrl: string;
 }
 
+export type TerminalAttachment = {
+  terminalId: string;
+  name: string;
+  output: string;
+  sequence: number;
+};
+
 export interface SessionSummary {
   id: string;
   title: string;
@@ -264,6 +285,7 @@ interface AgentState {
   streamingText: string;
   contextFiles: string[];
   attachedImages: AttachedImage[];
+  attachedTerminal: TerminalAttachment | null;
 
   // Agent gathered context (working memory)
   gatheredContext: Array<{ path: string; relevance: number; tokenEstimate: number }>;
@@ -364,6 +386,7 @@ interface AgentState {
   addAttachedImage: (img: AttachedImage) => void;
   removeAttachedImage: (id: string) => void;
   clearAttachedImages: () => void;
+  setAttachedTerminal: (terminal: TerminalAttachment | null) => void;
   setGatheredContext: (
     entries: Array<{ path: string; relevance: number; tokenEstimate: number }>,
   ) => void;
@@ -453,6 +476,7 @@ export const useAgentStore = create<AgentState>()(
     agentEditSessions: [],
     contextFiles: [],
     attachedImages: [],
+    attachedTerminal: null,
     gatheredContext: [],
     sddPhase: null,
     sddSpec: null,
@@ -601,6 +625,11 @@ export const useAgentStore = create<AgentState>()(
         state.attachedImages = [];
       }),
 
+    setAttachedTerminal: (terminal) =>
+      set((state) => {
+        state.attachedTerminal = terminal;
+      }),
+
     setGatheredContext: (entries) =>
       set((state) => {
         state.gatheredContext = entries;
@@ -631,6 +660,7 @@ export const useAgentStore = create<AgentState>()(
         state.agentEditSessions = [];
         state.contextFiles = [];
         state.attachedImages = [];
+        state.attachedTerminal = null;
         state.gatheredContext = [];
         state.streamingText = '';
         state.sddPhase = null;
@@ -1080,6 +1110,7 @@ function _extractTab(s: any): PerTabState {
     streamingText: s.streamingText,
     contextFiles: s.contextFiles,
     attachedImages: s.attachedImages,
+    attachedTerminal: s.attachedTerminal,
     gatheredContext: s.gatheredContext,
     pendingToolCalls: s.pendingToolCalls,
     pendingApprovals: s.pendingApprovals,
@@ -1116,6 +1147,7 @@ function _applyTab(s: any, ps: PerTabState): void {
   s.streamingText = ps.streamingText;
   s.contextFiles = ps.contextFiles;
   s.attachedImages = ps.attachedImages;
+  s.attachedTerminal = ps.attachedTerminal;
   s.gatheredContext = ps.gatheredContext;
   s.pendingToolCalls = ps.pendingToolCalls;
   s.pendingApprovals = ps.pendingApprovals;

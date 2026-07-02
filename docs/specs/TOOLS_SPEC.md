@@ -345,7 +345,7 @@ type ToolCategory = 'filesystem' | 'terminal' | 'git' | 'code' | 'browser' | 'mc
 ```json
 {
   "name": "run_terminal_command",
-  "description": "Execute a command in the terminal. Returns stdout and stderr. Use for running tests, installing packages, running scripts, etc.",
+  "description": "Execute a command in a visible terminal. Returns normalized combined PTY output and the exit code.",
   "inputSchema": {
     "type": "object",
     "properties": {
@@ -360,14 +360,37 @@ type ToolCategory = 'filesystem' | 'terminal' | 'git' | 'code' | 'browser' | 'mc
       "timeout_ms": {
         "type": "integer",
         "description": "Timeout in milliseconds (default: 30000)"
-      }
+      },
+      "new_terminal": { "type": "boolean" },
+      "session_name": { "type": "string" },
+      "background": { "type": "boolean" },
+      "ready_pattern": { "type": "string" },
+      "startup_timeout_ms": { "type": "integer" }
     },
     "required": ["command"]
   }
 }
 ```
 
-**Output**: `{ stdout, stderr, exitCode, durationMs }`
+**Output**: Combined normalized PTY output plus metadata containing `exitCode`, `terminalId`, and
+`background`. With `background=true`, the tool uses a dedicated persistent terminal and returns once
+`ready_pattern` matches or observable startup is confirmed.
+
+### 7b. read_terminal_output
+
+Reads buffered output and lifecycle state from a terminal id returned by `run_terminal_command`.
+Supports incremental reads through `after_sequence`. This read-only tool does not require approval.
+
+### 7c. stop_terminal_process
+
+Interrupts a background process, waits briefly, and terminates the PTY if it remains alive. This
+terminal mutation requires approval.
+
+### 7d. respond_terminal_input
+
+Sends an exact response to a resumable terminal interaction. Each call follows normal terminal
+approval policy and displays the response before execution. Passwords, tokens, MFA codes, CAPTCHA
+answers, and other sensitive values cannot be supplied by the agent and must be entered by the user.
 
 ---
 
@@ -594,11 +617,11 @@ Agent returns tool_call
 
 ## Error Handling
 
-| Error | Behavior |
-|---|---|
-| Invalid input (schema validation) | Return validation error to agent, agent retries |
-| File not found | Return error message, agent should try different path |
-| Permission denied | Return error, suggest correct approach |
-| Timeout | Kill execution, return timeout error |
-| Agent rejected tool call | Return rejection with user's reason |
-| Tool handler exception | Return generic error, log details |
+| Error                             | Behavior                                              |
+| --------------------------------- | ----------------------------------------------------- |
+| Invalid input (schema validation) | Return validation error to agent, agent retries       |
+| File not found                    | Return error message, agent should try different path |
+| Permission denied                 | Return error, suggest correct approach                |
+| Timeout                           | Kill execution, return timeout error                  |
+| Agent rejected tool call          | Return rejection with user's reason                   |
+| Tool handler exception            | Return generic error, log details                     |

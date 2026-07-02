@@ -24,6 +24,7 @@ import {
 } from 'lucide-react';
 import { useState, useRef, useMemo, useCallback } from 'react';
 import { ContextMentionPicker } from './context-mention-picker';
+import { desktopTerminalRuntime } from '@/lib/terminal-runtime';
 import { Textarea } from '@/components/ui/textarea';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
@@ -301,9 +302,12 @@ export function AgentInput() {
 
   const handleSend = () => {
     const hasImages = useAgentStore.getState().attachedImages.length > 0;
-    if ((!input.trim() && !hasImages) || isStreaming) return;
+    const hasTerminal = Boolean(useAgentStore.getState().attachedTerminal);
+    if ((!input.trim() && !hasImages && !hasTerminal) || isStreaming) return;
     try {
-      HarnessBridge.get().sendMessage(input.trim() || '(image attached)');
+      HarnessBridge.get().sendMessage(
+        input.trim() || (hasTerminal ? '(terminal output attached)' : '(image attached)'),
+      );
     } catch {
       // Bridge not initialized yet
     }
@@ -330,10 +334,16 @@ export function AgentInput() {
     useSettingsStore.getState().set('approvalMode', mode);
   };
 
-  const handleMentionSelect = useCallback((path: string) => {
-    // Special tokens are not file paths
-    if (path.startsWith('__') && path.endsWith('__')) return;
-    useAgentStore.getState().addContextFile(path);
+  const handleMentionSelect = useCallback(async (path: string) => {
+    if (path === '__terminal__') {
+      try {
+        useAgentStore.getState().setAttachedTerminal(await desktopTerminalRuntime.snapshotActive());
+      } catch {
+        return;
+      }
+    } else if (!path.startsWith('__')) {
+      useAgentStore.getState().addContextFile(path);
+    }
     // Remove the trailing '@' from input if present
     setInput((prev) => {
       const trimmed = prev.replace(/@\s*$/, '');
@@ -538,9 +548,7 @@ export function AgentInput() {
                     >
                       <ModeIcon className="h-3.5 w-3.5" />
                     </TooltipTrigger>
-                    <TooltipContent side="top">
-                      Agent mode: {cap.label}
-                    </TooltipContent>
+                    <TooltipContent side="top">Agent mode: {cap.label}</TooltipContent>
                   </Tooltip>
                   <DropdownMenuContent side="top" className="min-w-[200px]">
                     <div className="px-2 pb-1 pt-1.5 text-[9px] uppercase tracking-wider text-muted-foreground">
@@ -698,7 +706,8 @@ export function AgentInput() {
                     <Brain className="h-3.5 w-3.5" />
                   </TooltipTrigger>
                   <TooltipContent side="top">
-                    Thinking: {currentThinking.enabled ? currentThinking.level ?? 'default' : 'off'}
+                    Thinking:{' '}
+                    {currentThinking.enabled ? (currentThinking.level ?? 'default') : 'off'}
                   </TooltipContent>
                 </Tooltip>
                 <DropdownMenuContent side="top" className="min-w-[180px]">
@@ -779,9 +788,7 @@ export function AgentInput() {
                     >
                       <ApprovalIcon className="h-3.5 w-3.5" />
                     </TooltipTrigger>
-                    <TooltipContent side="top">
-                      Approval: {cfg.label}
-                    </TooltipContent>
+                    <TooltipContent side="top">Approval: {cfg.label}</TooltipContent>
                   </Tooltip>
                   <DropdownMenuContent side="top" className="min-w-[220px]">
                     <div className="px-2 pb-1 pt-1.5 text-[9px] uppercase tracking-wider text-muted-foreground">
@@ -886,13 +893,7 @@ export function AgentInput() {
             {isStreaming ? (
               <Tooltip>
                 <TooltipTrigger
-                  render={
-                    <Button
-                      size="icon-sm"
-                      onClick={handleStop}
-                      variant="destructive"
-                    />
-                  }
+                  render={<Button size="icon-sm" onClick={handleStop} variant="destructive" />}
                 >
                   <Square className="h-3.5 w-3.5 fill-current" />
                 </TooltipTrigger>

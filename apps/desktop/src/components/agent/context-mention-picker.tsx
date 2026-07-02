@@ -1,11 +1,5 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
-import {
-  File,
-  Folder,
-  ChevronRight,
-  ArrowLeft,
-  Search,
-} from 'lucide-react';
+import { File, Folder, ChevronRight, ArrowLeft, Search, Terminal } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useFileStore } from '@/stores/file-store';
 import { useExtensionStore } from '@/stores/extension-store';
@@ -25,8 +19,26 @@ interface CategoryItem {
 }
 
 const CATEGORIES: CategoryItem[] = [
-  { id: 'files', icon: File, label: 'Files', description: 'Browse workspace files', browsable: true },
-  { id: 'directories', icon: Folder, label: 'Directories', description: 'Attach a directory for context', browsable: true },
+  {
+    id: 'files',
+    icon: File,
+    label: 'Files',
+    description: 'Browse workspace files',
+    browsable: true,
+  },
+  {
+    id: 'directories',
+    icon: Folder,
+    label: 'Directories',
+    description: 'Attach a directory for context',
+    browsable: true,
+  },
+  {
+    id: 'terminal',
+    icon: Terminal,
+    label: 'Terminal',
+    description: 'Attach the active terminal output',
+  },
 ];
 
 // ─── File Browser Sub-view ─────────────────────────────────────────────────
@@ -50,15 +62,20 @@ function FileBrowser({ mode, rootPath, onSelect, onBack, searchQuery }: FileBrow
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
-    tauriFs.listDir(currentDir, false).then((result) => {
-      if (cancelled) return;
-      setEntries(result);
-      setLoading(false);
-      setSelectedIdx(0);
-    }).catch(() => {
-      if (!cancelled) setLoading(false);
-    });
-    return () => { cancelled = true; };
+    tauriFs
+      .listDir(currentDir, false)
+      .then((result) => {
+        if (cancelled) return;
+        setEntries(result);
+        setLoading(false);
+        setSelectedIdx(0);
+      })
+      .catch(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [currentDir]);
 
   // Filter entries based on mode and search
@@ -82,21 +99,24 @@ function FileBrowser({ mode, rootPath, onSelect, onBack, searchQuery }: FileBrow
     el?.scrollIntoView({ block: 'nearest' });
   }, [selectedIdx]);
 
-  const handleSelect = useCallback((entry: FileEntry) => {
-    if (entry.is_dir) {
-      if (mode === 'directories') {
-        // In directory mode, clicking a dir can either navigate into it or attach it
-        // We navigate in; user uses the explicit "attach" action or presses Enter
-        setCurrentDir(entry.path);
+  const handleSelect = useCallback(
+    (entry: FileEntry) => {
+      if (entry.is_dir) {
+        if (mode === 'directories') {
+          // In directory mode, clicking a dir can either navigate into it or attach it
+          // We navigate in; user uses the explicit "attach" action or presses Enter
+          setCurrentDir(entry.path);
+        } else {
+          // In file mode, navigate into directory
+          setCurrentDir(entry.path);
+        }
       } else {
-        // In file mode, navigate into directory
-        setCurrentDir(entry.path);
+        // Select the file
+        onSelect(entry.path);
       }
-    } else {
-      // Select the file
-      onSelect(entry.path);
-    }
-  }, [mode, onSelect]);
+    },
+    [mode, onSelect],
+  );
 
   const handleAttachDir = useCallback(() => {
     onSelect(currentDir);
@@ -163,9 +183,7 @@ function FileBrowser({ mode, rootPath, onSelect, onBack, searchQuery }: FileBrow
           </div>
         ) : (
           filtered.map((entry, idx) => {
-            const Icon = entry.is_dir
-              ? getFolderIcon(entry.name, false)
-              : getFileIcon(entry.name);
+            const Icon = entry.is_dir ? getFolderIcon(entry.name, false) : getFileIcon(entry.name);
 
             return (
               <button
@@ -201,11 +219,7 @@ interface ContextMentionPickerProps {
   onSelect: (path: string) => void;
 }
 
-export function ContextMentionPicker({
-  open,
-  onClose,
-  onSelect,
-}: ContextMentionPickerProps) {
+export function ContextMentionPicker({ open, onClose, onSelect }: ContextMentionPickerProps) {
   const rootPath = useFileStore((s) => s.rootPath);
   // Re-render when extension icon themes change
   useExtensionStore((s) => s.extensionIconThemesVersion);
@@ -245,54 +259,63 @@ export function ContextMentionPicker({
     return CATEGORIES.filter((c) => c.label.toLowerCase().includes(q));
   }, [searchQuery]);
 
-  const handleCategoryClick = useCallback((cat: CategoryItem) => {
-    if (cat.browsable && (cat.id === 'files' || cat.id === 'directories')) {
-      setView(cat.id as PickerView);
-      setSearchQuery('');
-      setSelectedIdx(0);
-    } else if (cat.id === 'terminal') {
-      // Attach terminal output as context
-      onSelect('__terminal__');
-    } else if (cat.id === 'conversation') {
-      onSelect('__conversation__');
-    }
-    // Other categories are not yet implemented
-  }, [onSelect]);
-
-  const handleFileSelect = useCallback((path: string) => {
-    onSelect(path);
-    onClose();
-  }, [onSelect, onClose]);
-
-  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
-    if (e.key === 'Escape') {
-      if (view !== 'categories') {
-        setView('categories');
+  const handleCategoryClick = useCallback(
+    (cat: CategoryItem) => {
+      if (cat.browsable && (cat.id === 'files' || cat.id === 'directories')) {
+        setView(cat.id as PickerView);
         setSearchQuery('');
         setSelectedIdx(0);
-      } else {
-        onClose();
+      } else if (cat.id === 'terminal') {
+        // Attach terminal output as context
+        onSelect('__terminal__');
+      } else if (cat.id === 'conversation') {
+        onSelect('__conversation__');
       }
-      e.preventDefault();
-      return;
-    }
+      // Other categories are not yet implemented
+    },
+    [onSelect],
+  );
 
-    if (view === 'categories') {
-      const items = filteredCategories;
-      if (e.key === 'ArrowDown') {
+  const handleFileSelect = useCallback(
+    (path: string) => {
+      onSelect(path);
+      onClose();
+    },
+    [onSelect, onClose],
+  );
+
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        if (view !== 'categories') {
+          setView('categories');
+          setSearchQuery('');
+          setSelectedIdx(0);
+        } else {
+          onClose();
+        }
         e.preventDefault();
-        setSelectedIdx((i) => Math.min(i + 1, items.length - 1));
-      } else if (e.key === 'ArrowUp') {
-        e.preventDefault();
-        setSelectedIdx((i) => Math.max(i - 1, 0));
-      } else if (e.key === 'Enter') {
-        e.preventDefault();
-        const sel = items[selectedIdx];
-        if (sel) handleCategoryClick(sel);
+        return;
       }
-    }
-    // In file/dir browser, keyboard navigation is handled within the browser
-  }, [view, filteredCategories, selectedIdx, handleCategoryClick, onClose]);
+
+      if (view === 'categories') {
+        const items = filteredCategories;
+        if (e.key === 'ArrowDown') {
+          e.preventDefault();
+          setSelectedIdx((i) => Math.min(i + 1, items.length - 1));
+        } else if (e.key === 'ArrowUp') {
+          e.preventDefault();
+          setSelectedIdx((i) => Math.max(i - 1, 0));
+        } else if (e.key === 'Enter') {
+          e.preventDefault();
+          const sel = items[selectedIdx];
+          if (sel) handleCategoryClick(sel);
+        }
+      }
+      // In file/dir browser, keyboard navigation is handled within the browser
+    },
+    [view, filteredCategories, selectedIdx, handleCategoryClick, onClose],
+  );
 
   if (!open) return null;
 

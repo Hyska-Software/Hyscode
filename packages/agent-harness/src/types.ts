@@ -66,6 +66,10 @@ export interface ToolExecutionContext {
   agentTerminalPtyId?: string;
   /** Callback fired after a terminal command completes (for environment context tracking). */
   onTerminalCommand?: (command: string, output: string, exitCode: number | null) => void;
+  /** Desktop adapter that owns visible PTY sessions and conversation isolation. */
+  terminal?: TerminalRuntimeAdapter;
+  /** Ephemeral progress for real-time UI; final output remains the canonical tool result. */
+  onTerminalProgress?: (progress: TerminalProgress) => void;
   /** Project ID for scoped operations (e.g. memory) */
   projectId?: string;
   /** Memory manager for persistent cross-session knowledge */
@@ -73,6 +77,54 @@ export interface ToolExecutionContext {
   /** Reports whether Monaco has unsaved buffers that Git mutations could overwrite. */
   hasDirtyBuffers?: () => boolean;
 }
+
+export type TerminalAcquireRequest = {
+  conversationId: string;
+  toolCallId: string;
+  cwd: string;
+  forceNew: boolean;
+  sessionName?: string;
+  background: boolean;
+};
+
+export type TerminalBinding = {
+  terminalId: string;
+  ptyId: string;
+  persistent: boolean;
+};
+
+export type TerminalSnapshot = {
+  data: string;
+  fromSequence: number;
+  toSequence: number;
+  truncated: boolean;
+  alive: boolean;
+  exitCode: number | null;
+};
+
+export interface TerminalRuntimeAdapter {
+  acquire(request: TerminalAcquireRequest): Promise<TerminalBinding>;
+  snapshot(terminalId: string, afterSequence?: number): Promise<TerminalSnapshot>;
+  write(terminalId: string, data: string): Promise<void>;
+  interrupt(terminalId: string): Promise<void>;
+  kill(terminalId: string): Promise<void>;
+  release?(terminalId: string, toolCallId: string): void;
+}
+
+export type TerminalProgress = {
+  toolCallId: string;
+  terminalId: string;
+  sequence: number;
+  chunk: string;
+  state:
+    | 'started'
+    | 'running'
+    | 'awaiting_input'
+    | 'background'
+    | 'complete'
+    | 'error'
+    | 'cancelled';
+};
 
 /** Emitted when a tool writes/edits/creates a file so the UI can track it */
 export interface FileChangePending {
@@ -147,6 +199,8 @@ export const SAFE_TOOLS = new Set([
 /** Destructive tools that always need approval (even in smart mode) */
 export const DESTRUCTIVE_TOOLS = new Set([
   'run_terminal_command',
+  'respond_terminal_input',
+  'stop_terminal_process',
   'git_commit',
   'git_push',
   'delete_file',
@@ -440,6 +494,7 @@ type HarnessEventPayload =
   | { type: 'turn_recoverable_error'; recovery: RecoverableTurnError }
   | { type: 'stream_chunk'; chunk: StreamChunk }
   | { type: 'transcript_message'; role: 'assistant' | 'tool'; blocks: Message['content'] }
+  | { type: 'terminal_progress'; progress: TerminalProgress }
   | {
       type: 'tool_call_start';
       toolCallId: string;

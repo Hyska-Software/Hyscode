@@ -23,12 +23,16 @@ import {
   Code2,
   Trash2,
   CheckCircle2,
+  Maximize2,
+  Minimize2,
   type LucideIcon,
 } from 'lucide-react';
-import { useState, memo, useMemo } from 'react';
+import { useEffect, useRef, useState, memo, useMemo } from 'react';
 import { cn } from '@/lib/utils';
 import { useTerminalStore } from '@/stores/terminal-store';
+import { useLayoutStore } from '@/stores/layout-store';
 import type { ToolCallDisplay } from '@/stores/agent-store';
+import { sanitizeTerminalOutput } from './terminal-output';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -387,28 +391,65 @@ function FileReferenceRow({ toolCall }: { toolCall: ToolCallDisplay }) {
 // ─── Terminal Card (run_terminal_command / *command*) ──────────────────────────
 
 function TerminalCard({ toolCall }: { toolCall: ToolCallDisplay }) {
-  const command = (toolCall.input.command as string) ?? '';
+  const command =
+    (toolCall.input.command as string) ??
+    (toolCall.name === 'respond_terminal_input'
+      ? `Respond: ${String(toolCall.input.input ?? '')}`
+      : '');
   const isRunning = toolCall.status === 'running' || toolCall.status === 'cancelling';
+  const isWaiting = toolCall.terminalState === 'awaiting_input';
   const isDone = toolCall.status === 'success';
   const isError = toolCall.status === 'error';
   const duration = formatDuration(toolCall.startedAt, toolCall.completedAt);
   const [showOutput, setShowOutput] = useState(false);
+  const [isExpanded, setIsExpanded] = useState(false);
+  const outputRef = useRef<HTMLPreElement>(null);
+  const rawVisibleOutput = isRunning ? toolCall.liveOutput : toolCall.output;
+  const visibleOutput = sanitizeTerminalOutput(rawVisibleOutput);
+  const outputVisible = Boolean((isRunning || isWaiting || showOutput) && visibleOutput);
+  const lineCount = visibleOutput ? visibleOutput.split('\n').length : 0;
+
+  useEffect(() => {
+    if (!isRunning || !outputRef.current) return;
+    outputRef.current.scrollTop = outputRef.current.scrollHeight;
+  }, [isRunning, visibleOutput]);
+
+  const focusTerminal = () => {
+    if (!toolCall.terminalId) return;
+    const layout = useLayoutStore.getState();
+    layout.setTerminalVisible(true);
+    if (layout.terminalLocation === 'sidebar') layout.setSidebarActiveTab('terminal');
+    useTerminalStore.getState().setActiveSession(toolCall.terminalId);
+  };
 
   return (
-    <div className="agent-fade-in my-2">
-      {isRunning && <div className="agent-shimmer-bar h-[1.5px] w-full opacity-40" />}
-
+    <div className="agent-fade-in my-1.5">
       {/* Header */}
       <div className="flex items-center gap-2 py-1.5">
-        <Terminal className="h-3.5 w-3.5 shrink-0 text-green-400/50" />
-        <span className="flex-1 truncate font-mono text-[11px] text-foreground/65">{command}</span>
+        <Terminal
+          className={cn(
+            'h-3.5 w-3.5 shrink-0',
+            isRunning ? 'text-emerald-400/80' : 'text-muted-foreground/45',
+          )}
+        />
+        <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-foreground/70">
+          {command}
+        </span>
         {duration && (
           <span className="shrink-0 text-[9px] tabular-nums text-muted-foreground/30">
             {duration}
           </span>
         )}
         {isRunning && (
-          <Loader2 className="h-3 w-3 shrink-0 animate-spin text-muted-foreground/40" />
+          <span className="flex shrink-0 items-center gap-1.5 text-[9px] font-medium text-emerald-400/80">
+            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-400 motion-reduce:animate-none" />
+            Running
+          </span>
+        )}
+        {isWaiting && (
+          <span className="shrink-0 rounded-full bg-amber-500/10 px-2 py-0.5 text-[9px] font-medium text-amber-400">
+            Waiting for input
+          </span>
         )}
         {isError && <X className="h-3 w-3 shrink-0 text-destructive" />}
         {isDone && (
@@ -421,10 +462,7 @@ function TerminalCard({ toolCall }: { toolCall: ToolCallDisplay }) {
         )}
         <button
           onClick={() => {
-            const agentSession = useTerminalStore.getState().getAgentSession();
-            if (agentSession) {
-              useTerminalStore.getState().setActiveSession(agentSession.id);
-            }
+            focusTerminal();
           }}
           className="shrink-0 rounded p-0.5 text-muted-foreground/30 transition-colors hover:text-muted-foreground/70"
           title="Jump to agent terminal"
@@ -434,10 +472,32 @@ function TerminalCard({ toolCall }: { toolCall: ToolCallDisplay }) {
       </div>
 
       {/* Output */}
-      {showOutput && toolCall.output && (
-        <div className="rounded-md bg-muted/30">
-          <pre className="max-h-[200px] cursor-text select-text overflow-auto px-4 py-3 font-mono text-[11px] leading-[1.65] text-[var(--color-success)]/85">
-            {toolCall.output}
+      {outputVisible && (
+        <div className="ml-[6px] border-l border-border/60 pl-[13px]">
+          <div className="flex h-7 items-center gap-2 text-[9px] text-muted-foreground/45">
+            <span className="font-mono tabular-nums">
+              {lineCount} {lineCount === 1 ? 'line' : 'lines'}
+            </span>
+            <span className="flex-1" />
+            <button
+              type="button"
+              onClick={() => setIsExpanded((expanded) => !expanded)}
+              aria-expanded={isExpanded}
+              className="flex items-center gap-1 rounded px-1.5 py-1 text-muted-foreground/50 transition-colors hover:bg-foreground/[0.04] hover:text-muted-foreground active:scale-[0.98]"
+              title={isExpanded ? 'Collapse terminal output' : 'Expand terminal output'}
+            >
+              {isExpanded ? <Minimize2 className="h-3 w-3" /> : <Maximize2 className="h-3 w-3" />}
+              {isExpanded ? 'Collapse' : 'Expand'}
+            </button>
+          </div>
+          <pre
+            ref={outputRef}
+            className={cn(
+              'cursor-text select-text overflow-auto whitespace-pre-wrap break-words rounded-md bg-foreground/[0.025] px-3 py-2.5 font-mono text-[11px] leading-[1.7] text-foreground/70 transition-[max-height] duration-300',
+              isExpanded ? 'max-h-[60vh] min-h-64' : 'max-h-44',
+            )}
+          >
+            {visibleOutput}
           </pre>
         </div>
       )}
@@ -853,6 +913,18 @@ export function CompactToolCallRow({ toolCall }: { toolCall: ToolCallDisplay }) 
         <div className="agent-fade-in ml-5">
           <ToolCallCard toolCall={toolCall} />
         </div>
+      )}
+      {isTerminal && isRunning && toolCall.liveOutput && !expanded && (
+        <pre className="ml-5 max-h-24 overflow-hidden whitespace-pre-wrap rounded-md bg-muted/20 px-3 py-2 font-mono text-[10px] leading-relaxed text-foreground/55">
+          {toolCall.liveOutput
+            .replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, '')
+            .split(/\r?\n/)
+            .filter(
+              (line) => !line.includes('__HYSCODE_BEGIN_') && !line.includes('__HYSCODE_END_'),
+            )
+            .join('\n')
+            .slice(-4_000)}
+        </pre>
       )}
     </div>
   );

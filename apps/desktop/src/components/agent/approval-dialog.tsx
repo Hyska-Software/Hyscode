@@ -55,6 +55,7 @@ function inferRiskLevel(toolName: string): RiskLevel {
   ]);
   const destructiveTools = new Set([
     'run_terminal_command',
+    'respond_terminal_input',
     'run_code',
     'git_commit',
     'git_push',

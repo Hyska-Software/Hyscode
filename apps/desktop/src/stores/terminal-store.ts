@@ -28,15 +28,36 @@ export interface TerminalSession {
   commandHistory: CommandHistoryEntry[];
   /** When true the PTY exited and should not be reused */
   isDead: boolean;
+  /** Conversation that owns an agent terminal. User terminals remain unowned. */
+  ownerConversationId: string | null;
+  /** Tool currently controlling the PTY; manual input is disabled while set. */
+  activeToolCallId: string | null;
+  /** Process is paused at an interactive prompt. */
+  awaitingInput: boolean;
+  /** Latest backend output sequence applied to the xterm view. */
+  outputSequence: number;
 }
 
 const MAX_HISTORY = 50;
+
+export function canUserWriteToTerminal(
+  session: Pick<TerminalSession, 'isAgentSession' | 'activeToolCallId' | 'awaitingInput'>,
+  approvalMode: string,
+): boolean {
+  if (!session.isAgentSession) return true;
+  return !session.activeToolCallId && session.awaitingInput && approvalMode !== 'yolo';
+}
 
 interface TerminalState {
   sessions: TerminalSession[];
   activeSessionId: string | null;
   nextIndex: number;
-  createSession: (name?: string, isAgentSession?: boolean, cwd?: string, location?: 'panel' | 'editor') => string;
+  createSession: (
+    name?: string,
+    isAgentSession?: boolean,
+    cwd?: string,
+    location?: 'panel' | 'editor',
+  ) => string;
   closeSession: (id: string) => void;
   setActiveSession: (id: string) => void;
   renameSession: (id: string, name: string) => void;
@@ -44,20 +65,34 @@ interface TerminalState {
   /** Mark a session's PTY as dead (exited / killed) so it won't be reused */
   markPtyDead: (sessionId: string) => void;
   /** Record a finished command on a session */
-  setLastCommand: (sessionId: string, command: string, output: string, exitCode: number | null) => void;
+  setLastCommand: (
+    sessionId: string,
+    command: string,
+    output: string,
+    exitCode: number | null,
+    source?: 'user' | 'agent',
+  ) => void;
   /** Append a command to the rolling history */
   appendCommandHistory: (sessionId: string, entry: CommandHistoryEntry) => void;
   /** Find or create a dedicated agent terminal session.
    *  If `name` is provided, looks for an existing agent session with that exact name.
    *  If `reuseHealthy` is true (default), reuses an existing agent session that still has a PTY.
    *  Otherwise creates a fresh one. */
-  ensureAgentSession: (opts?: { name?: string; reuseHealthy?: boolean }) => string;
+  ensureAgentSession: (opts?: {
+    name?: string;
+    reuseHealthy?: boolean;
+    conversationId?: string;
+    cwd?: string;
+  }) => string;
   /** Get all agent sessions */
   getAgentSessions: () => TerminalSession[];
   /** Get the first agent session (legacy compat) */
   getAgentSession: () => TerminalSession | undefined;
   /** Find an agent session that has a live PTY */
-  findHealthyAgentSession: () => TerminalSession | undefined;
+  findHealthyAgentSession: (conversationId?: string) => TerminalSession | undefined;
+  setAgentActivity: (sessionId: string, toolCallId: string | null) => void;
+  setAwaitingInput: (sessionId: string, awaiting: boolean) => void;
+  setOutputSequence: (sessionId: string, sequence: number) => void;
   /** Kill the PTY and remove the session from store */
   removeAgentSession: (id: string) => void;
 }
@@ -73,7 +108,12 @@ export const useTerminalStore = create<TerminalState>()(
     activeSessionId: null,
     nextIndex: 1,
 
-    createSession: (name?: string, isAgentSession = false, cwd?: string, location: 'panel' | 'editor' = 'panel') => {
+    createSession: (
+      name?: string,
+      isAgentSession = false,
+      cwd?: string,
+      location: 'panel' | 'editor' = 'panel',
+    ) => {
       const id = genId();
       const idx = get().nextIndex;
       const sessionName = name ?? `Terminal ${idx}`;
@@ -88,6 +128,10 @@ export const useTerminalStore = create<TerminalState>()(
           lastCommand: null,
           commandHistory: [],
           isDead: false,
+          ownerConversationId: null,
+          activeToolCallId: null,
+          awaitingInput: false,
+          outputSequence: 0,
         });
         state.activeSessionId = id;
         state.nextIndex = idx + 1;
@@ -135,16 +179,17 @@ export const useTerminalStore = create<TerminalState>()(
       set((state) => {
         const session = state.sessions.find((s) => s.id === sessionId);
         if (session) {
-          session.ptyId = null;
           session.isDead = true;
+          session.activeToolCallId = null;
+          session.awaitingInput = false;
         }
       }),
 
-    setLastCommand: (sessionId: string, command: string, output: string, exitCode: number | null) =>
+    setLastCommand: (sessionId, command, output, exitCode, source = 'user') =>
       set((state) => {
         const session = state.sessions.find((s) => s.id === sessionId);
         if (session) {
-          session.lastCommand = { command, output, exitCode, timestamp: Date.now(), source: 'user' };
+          session.lastCommand = { command, output, exitCode, timestamp: Date.now(), source };
         }
       }),
 
@@ -160,18 +205,29 @@ export const useTerminalStore = create<TerminalState>()(
         }
       }),
 
-    ensureAgentSession: (opts?: { name?: string; reuseHealthy?: boolean }) => {
-      const { name, reuseHealthy = true } = opts ?? {};
+    ensureAgentSession: (opts) => {
+      const { name, reuseHealthy = true, conversationId, cwd } = opts ?? {};
 
       // 1) If a specific name is requested, try to find an existing one
       if (name) {
-        const named = get().sessions.find((s) => s.isAgentSession && s.name === name);
+        const named = get().sessions.find(
+          (s) =>
+            s.isAgentSession &&
+            s.name === name &&
+            (!conversationId || s.ownerConversationId === conversationId),
+        );
         if (named) return named.id;
       }
 
       // 2) If reuse is allowed, pick any healthy agent session
       if (reuseHealthy) {
-        const healthy = get().sessions.find((s) => s.isAgentSession && !s.isDead && s.ptyId);
+        const healthy = get().sessions.find(
+          (s) =>
+            s.isAgentSession &&
+            !s.isDead &&
+            s.ptyId &&
+            (!conversationId || s.ownerConversationId === conversationId),
+        );
         if (healthy) return healthy.id;
       }
 
@@ -186,10 +242,14 @@ export const useTerminalStore = create<TerminalState>()(
           ptyId: null,
           isAgentSession: true,
           location: 'panel',
-          cwd: null,
+          cwd: cwd ?? null,
           lastCommand: null,
           commandHistory: [],
           isDead: false,
+          ownerConversationId: conversationId ?? null,
+          activeToolCallId: null,
+          awaitingInput: false,
+          outputSequence: 0,
         });
         state.nextIndex = idx + 1;
       });
@@ -204,9 +264,33 @@ export const useTerminalStore = create<TerminalState>()(
       return get().sessions.find((s) => s.isAgentSession);
     },
 
-    findHealthyAgentSession: () => {
-      return get().sessions.find((s) => s.isAgentSession && !s.isDead && s.ptyId);
+    findHealthyAgentSession: (conversationId) => {
+      return get().sessions.find(
+        (s) =>
+          s.isAgentSession &&
+          !s.isDead &&
+          s.ptyId &&
+          (!conversationId || s.ownerConversationId === conversationId),
+      );
     },
+
+    setAgentActivity: (sessionId, toolCallId) =>
+      set((state) => {
+        const session = state.sessions.find((item) => item.id === sessionId);
+        if (session) session.activeToolCallId = toolCallId;
+      }),
+
+    setAwaitingInput: (sessionId, awaiting) =>
+      set((state) => {
+        const session = state.sessions.find((item) => item.id === sessionId);
+        if (session) session.awaitingInput = awaiting;
+      }),
+
+    setOutputSequence: (sessionId, sequence) =>
+      set((state) => {
+        const session = state.sessions.find((item) => item.id === sessionId);
+        if (session) session.outputSequence = Math.max(session.outputSequence, sequence);
+      }),
 
     removeAgentSession: (id: string) => {
       set((state) => {
