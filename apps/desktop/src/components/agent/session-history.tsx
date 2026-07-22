@@ -7,7 +7,6 @@ import {
   Bug,
   ClipboardList,
   Trash2,
-  ArrowRight,
   Loader2,
   Plus,
 } from 'lucide-react';
@@ -120,11 +119,24 @@ function SessionRow({
 
   return (
     <div
+      role={isActive ? undefined : 'button'}
+      tabIndex={isActive ? undefined : 0}
+      onClick={isActive ? undefined : onRestore}
+      onKeyDown={
+        isActive
+          ? undefined
+          : (e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                onRestore();
+              }
+            }
+      }
       className={cn(
         'group flex items-start gap-2 rounded-lg px-2.5 py-2 transition-colors',
         isActive
           ? 'bg-accent/10 text-foreground'
-          : 'text-muted-foreground hover:bg-surface-raised hover:text-foreground',
+          : 'cursor-pointer text-muted-foreground hover:bg-surface-raised hover:text-foreground',
       )}
     >
       <Icon className="mt-0.5 h-3.5 w-3.5 shrink-0" />
@@ -139,15 +151,6 @@ function SessionRow({
         </div>
       </div>
       <div className="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
-        {!isActive && (
-          <button
-            onClick={onRestore}
-            title="Restore session"
-            className="rounded p-1 hover:bg-muted hover:text-accent"
-          >
-            <ArrowRight className="h-3 w-3" />
-          </button>
-        )}
         <button
           onClick={(e) => {
             e.stopPropagation();
