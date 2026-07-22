@@ -1,15 +1,10 @@
 import { useEffect } from 'react';
 import { FileMenu } from './file-menu';
 import { ViewMenu } from './view-menu';
+import { ModeSelector } from './mode-selector';
 import { BrandMark } from '../brand-mark';
 import { useLayoutStore } from '../../stores/layout-store';
 import { useSettingsStore } from '../../stores';
-import type { WorkspaceMode } from '../../stores/layout-store';
-
-const MODE_LABELS: Record<WorkspaceMode, string> = {
-  editor: 'editor',
-  agent: 'agent',
-};
 
 export function TitleBar() {
   const mode = useLayoutStore((s) => s.workspaceMode);
@@ -30,11 +25,6 @@ export function TitleBar() {
     }
   }, [mode, showAgentChatPanel, setSettings]);
 
-  const visibleModes = (['editor', 'agent'] as const).filter((m) => {
-    if (m === 'agent') return showAgentTab;
-    return true;
-  });
-
   return (
     <header
       data-tauri-drag-region
@@ -49,29 +39,13 @@ export function TitleBar() {
         <ViewMenu />
       </div>
 
-      {/* Center: filled mode pills */}
-      <div className="flex flex-1 items-center justify-center">
-        {visibleModes.length > 1 && (
-          <div className="flex items-center gap-0.5 rounded-pill bg-surface-raised p-[3px]">
-            {visibleModes.map((m) => (
-              <button
-                key={m}
-                onClick={() => setMode(m)}
-                className={`rounded-pill px-4 py-[3px] text-[10px] font-medium uppercase tracking-wider transition-colors ${
-                  mode === m
-                    ? 'bg-muted text-foreground'
-                    : 'text-muted-foreground hover:text-foreground'
-                }`}
-              >
-                {MODE_LABELS[m]}
-              </button>
-            ))}
-          </div>
-        )}
-      </div>
+      {/* Center spacer for visual balance */}
+      <div className="flex-1" />
 
-      {/* Right spacer for visual balance */}
-      <div className="w-16 shrink-0" />
+      {/* Right: layout mode selector */}
+      <div className="flex shrink-0 items-center gap-2">
+        <ModeSelector />
+      </div>
     </header>
   );
 }
