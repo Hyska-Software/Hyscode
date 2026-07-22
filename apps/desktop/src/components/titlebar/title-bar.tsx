@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { FileMenu } from './file-menu';
 import { ViewMenu } from './view-menu';
 import { ModeSelector } from './mode-selector';
+import { WindowControls } from './window-controls';
 import { BrandMark } from '../brand-mark';
 import { useLayoutStore } from '../../stores/layout-store';
 import { useSettingsStore } from '../../stores';
@@ -26,13 +27,10 @@ export function TitleBar() {
   }, [mode, showAgentChatPanel, setSettings]);
 
   return (
-    <header
-      data-tauri-drag-region
-      className="flex h-10 items-center bg-background px-2"
-    >
+    <header data-tauri-drag-region className="flex h-10 items-center bg-background px-2">
       {/* Left: brand + menus */}
       <div className="flex items-center shrink-0 gap-2">
-        <div data-tauri-drag-region className="flex items-center gap-2 px-1">
+        <div className="flex items-center gap-2 px-1">
           <BrandMark className="h-4 w-4 rounded-[4px]" alt="HysCode" />
         </div>
         <FileMenu />
@@ -42,9 +40,10 @@ export function TitleBar() {
       {/* Center spacer for visual balance */}
       <div className="flex-1" />
 
-      {/* Right: layout mode selector */}
+      {/* Right: layout mode selector + window controls */}
       <div className="flex shrink-0 items-center gap-2">
         <ModeSelector />
+        <WindowControls />
       </div>
     </header>
   );

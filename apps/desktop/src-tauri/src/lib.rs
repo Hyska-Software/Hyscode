@@ -220,6 +220,8 @@ pub fn run() {
             commands::updater::updater_install,
             // Shell exec
             commands::utils::shell_exec,
+            // Window controls
+            commands::window::start_resize,
         ])
         .setup(|app| {
             let _window = app.get_webview_window("main").unwrap();

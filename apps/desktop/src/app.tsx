@@ -1,4 +1,5 @@
 import { TitleBar } from './components/titlebar';
+import { WindowResizeHandles } from './components/window-resize-handles';
 import { StatusBar } from './components/statusbar';
 import { WelcomePage } from './components/welcome';
 import { SettingsModal } from './components/settings';
@@ -243,6 +244,7 @@ function IDE() {
 
   return (
     <div className="flex h-screen w-screen flex-col bg-background text-foreground">
+      <WindowResizeHandles />
       <TitleBar />
 
       <div className="flex flex-1 overflow-hidden p-1.5 pt-0">
