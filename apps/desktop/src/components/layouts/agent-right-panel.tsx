@@ -8,6 +8,7 @@ import {
   Check,
   Undo2,
   Loader2,
+  PanelRightClose,
 } from 'lucide-react';
 import { MarkdownViewer } from '../editor/viewers/markdown-viewer';
 import { TerminalPanel } from '../terminal';
@@ -428,6 +429,7 @@ const TAB_CONFIG: Array<{ id: RightTab; label: string; icon: React.ElementType }
 export function AgentRightPanel() {
   const activeTab = useLayoutStore((s) => s.agentRightTab);
   const setActiveTab = useLayoutStore((s) => s.setAgentRightTab);
+  const setRightCollapsed = useLayoutStore((s) => s.setAgentRightCollapsed);
 
   // Badge: count of pending changes
   const pendingCount = useAgentStore(
@@ -443,8 +445,16 @@ export function AgentRightPanel() {
 
   return (
     <div className="flex h-full flex-col">
-      {/* Tab bar */}
-      <div className="flex h-8 shrink-0 items-center bg-surface-raised">
+      {/* Header / tab bar */}
+      <div className="flex h-8 shrink-0 items-center gap-1 border-b border-border/30 bg-surface-raised px-2">
+        <button
+          onClick={() => setRightCollapsed(true)}
+          title="Collapse panel"
+          aria-label="Collapse panel"
+          className="rounded-md p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+        >
+          <PanelRightClose className="h-3.5 w-3.5" />
+        </button>
         {TAB_CONFIG.map(({ id, label, icon: Icon }) => (
           <button
             key={id}

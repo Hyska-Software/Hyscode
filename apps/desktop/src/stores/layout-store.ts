@@ -40,6 +40,10 @@ interface LayoutState {
   sidebarVisible: boolean;
   /** Which view is active in the left sidebar */
   sidebarActiveView: SidebarView;
+  /** Whether the agent left panel is collapsed */
+  agentLeftCollapsed: boolean;
+  /** Whether the agent right panel is collapsed */
+  agentRightCollapsed: boolean;
 
   setWorkspaceMode: (mode: WorkspaceMode) => void;
   setTerminalLocation: (location: TerminalLocation) => void;
@@ -51,6 +55,8 @@ interface LayoutState {
   setRulesPanelOpen: (open: boolean) => void;
   setSidebarVisible: (visible: boolean) => void;
   setSidebarActiveView: (view: SidebarView) => void;
+  setAgentLeftCollapsed: (collapsed: boolean) => void;
+  setAgentRightCollapsed: (collapsed: boolean) => void;
   toggleTerminal: () => void;
   toggleSidebar: () => void;
   focusSidebarView: (view: SidebarView) => void;
@@ -71,6 +77,8 @@ export const useLayoutStore = create<LayoutState>()(
       rulesPanelOpen: false,
       sidebarVisible: true,
       sidebarActiveView: 'files',
+      agentLeftCollapsed: false,
+      agentRightCollapsed: false,
 
       setWorkspaceMode: (mode) => set({ workspaceMode: mode }),
       setTerminalLocation: (location) => set({ terminalLocation: location }),
@@ -83,6 +91,8 @@ export const useLayoutStore = create<LayoutState>()(
       setRulesPanelOpen: (open) => set({ rulesPanelOpen: open }),
       setSidebarVisible: (visible) => set({ sidebarVisible: visible }),
       setSidebarActiveView: (view) => set({ sidebarActiveView: view }),
+      setAgentLeftCollapsed: (collapsed) => set({ agentLeftCollapsed: collapsed }),
+      setAgentRightCollapsed: (collapsed) => set({ agentRightCollapsed: collapsed }),
 
       toggleTerminal: () =>
         set((state) => ({ terminalVisible: !state.terminalVisible })),
@@ -107,6 +117,8 @@ export const useLayoutStore = create<LayoutState>()(
         terminalVisible: state.terminalVisible,
         sidebarVisible: state.sidebarVisible,
         sidebarActiveView: state.sidebarActiveView,
+        agentLeftCollapsed: state.agentLeftCollapsed,
+        agentRightCollapsed: state.agentRightCollapsed,
       }),
     },
   ),

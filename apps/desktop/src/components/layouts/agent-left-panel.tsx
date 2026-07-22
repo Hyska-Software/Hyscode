@@ -1,10 +1,18 @@
 import { useState } from 'react';
 import { createPortal } from 'react-dom';
-import { ChevronDown, ChevronRight, Settings, Blocks, X } from 'lucide-react';
+import {
+  ChevronDown,
+  ChevronRight,
+  Settings,
+  Blocks,
+  X,
+  PanelLeftClose,
+} from 'lucide-react';
 import { SessionHistory } from '../agent/session-history';
 import { FileExplorerView } from '../sidebar/views/file-explorer-view';
 import { ExtensionsView } from '../sidebar/views/extensions-view';
 import { useSettingsStore } from '../../stores/settings-store';
+import { useLayoutStore } from '../../stores/layout-store';
 
 function CollapsibleSection({
   title,
@@ -71,10 +79,26 @@ function ExtensionsModal({ onClose }: { onClose: () => void }) {
 
 export function AgentLeftPanel() {
   const openSettings = useSettingsStore((s) => s.openSettings);
+  const setLeftCollapsed = useLayoutStore((s) => s.setAgentLeftCollapsed);
   const [extensionsOpen, setExtensionsOpen] = useState(false);
 
   return (
     <div className="flex h-full flex-col">
+      {/* Header with toggle */}
+      <div className="flex h-8 shrink-0 items-center justify-between border-b border-border/30 px-2">
+        <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+          Workspace
+        </span>
+        <button
+          onClick={() => setLeftCollapsed(true)}
+          title="Collapse panel"
+          aria-label="Collapse panel"
+          className="rounded-md p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+        >
+          <PanelLeftClose className="h-3.5 w-3.5" />
+        </button>
+      </div>
+
       {/* Sessions section */}
       <CollapsibleSection title="Sessions" icon={({ className }: { className?: string }) => (
         <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">

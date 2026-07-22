@@ -8,6 +8,8 @@ import {
   Zap,
   Plus,
   X,
+  PanelLeftOpen,
+  PanelRightOpen,
 } from 'lucide-react';
 import { useState, useRef, useEffect } from 'react';
 import { AgentMessages } from './agent-messages';
@@ -373,6 +375,10 @@ export function AgentPanel() {
   const setHistoryOpen = useAgentStore((s) => s.setHistoryOpen);
   const rulesOpen = useLayoutStore((s) => s.rulesPanelOpen);
   const setRulesOpen = useLayoutStore((s) => s.setRulesPanelOpen);
+  const leftCollapsed = useLayoutStore((s) => s.agentLeftCollapsed);
+  const rightCollapsed = useLayoutStore((s) => s.agentRightCollapsed);
+  const setLeftCollapsed = useLayoutStore((s) => s.setAgentLeftCollapsed);
+  const setRightCollapsed = useLayoutStore((s) => s.setAgentRightCollapsed);
   const agentCenterPanelMode = useSettingsStore((s) => s.agentCenterPanelMode);
   const openTabs = useAgentStore((s) => s.openTabs);
   const activeTabId = useAgentStore((s) => s.activeTabId);
@@ -441,6 +447,16 @@ export function AgentPanel() {
       {/* Header */}
       <div className="flex h-8 shrink-0 items-center justify-between border-b border-foreground/[0.06] px-3">
         <div className="flex items-center gap-2">
+          {leftCollapsed && (
+            <button
+              onClick={() => setLeftCollapsed(false)}
+              title="Expand left panel"
+              aria-label="Expand left panel"
+              className="rounded-md p-1 text-muted-foreground/60 transition-colors hover:bg-muted hover:text-foreground"
+            >
+              <PanelLeftOpen className="h-3.5 w-3.5" />
+            </button>
+          )}
           <Bot className="h-3.5 w-3.5 text-muted-foreground/50" />
           <span className="text-[11px] font-medium text-foreground/80">Agent</span>
         </div>
@@ -547,6 +563,16 @@ export function AgentPanel() {
               </TooltipTrigger>
               <TooltipContent side="bottom">Clear conversation</TooltipContent>
             </Tooltip>
+          )}
+          {rightCollapsed && (
+            <button
+              onClick={() => setRightCollapsed(false)}
+              title="Expand right panel"
+              aria-label="Expand right panel"
+              className="rounded-md p-1 text-muted-foreground/60 transition-colors hover:bg-muted hover:text-foreground"
+            >
+              <PanelRightOpen className="h-3.5 w-3.5" />
+            </button>
           )}
         </div>
       </div>
