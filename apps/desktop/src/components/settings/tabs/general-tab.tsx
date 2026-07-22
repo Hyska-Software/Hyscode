@@ -188,15 +188,6 @@ export function GeneralTab() {
           />
         </Row>
         <Row
-          label="Show Review Tab"
-          description="Display the Review mode tab in the title bar"
-        >
-          <Toggle
-            checked={store.showReviewTab}
-            onChange={(v) => store.set('showReviewTab', v)}
-          />
-        </Row>
-        <Row
           label="Show Agent Chat Panel"
           description="Display the agent chat panel on the right side of the editor"
         >

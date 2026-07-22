@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 
 export type TerminalLocation = 'bottom' | 'sidebar';
-export type WorkspaceMode = 'editor' | 'agent' | 'review';
+export type WorkspaceMode = 'editor' | 'agent';
 
 /** Builtin sidebar views exposed in ActivityBar and View menu */
 export type SidebarViewId =

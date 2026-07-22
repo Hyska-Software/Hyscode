@@ -130,7 +130,6 @@ export const SETTINGS_DEFAULTS = {
 
   // ─ Layout tabs ─
   showAgentTab: true,
-  showReviewTab: true,
   showAgentChatPanel: true,
   agentCenterPanelMode: 'chat',
   visibleSidebarTabs: {

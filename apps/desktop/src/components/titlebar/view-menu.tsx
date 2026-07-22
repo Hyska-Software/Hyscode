@@ -70,12 +70,6 @@ export function ViewMenu() {
         >
           Agent Mode
         </DropdownMenuItem>
-        <DropdownMenuItem
-          onClick={() => setWorkspaceMode('review')}
-          className={workspaceMode === 'review' ? 'bg-accent text-accent-foreground' : ''}
-        >
-          Review Mode
-        </DropdownMenuItem>
 
         <DropdownMenuSeparator />
 

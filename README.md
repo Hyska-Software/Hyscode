@@ -88,7 +88,7 @@ HysCode reimagina o fluxo de desenvolvimento trazendo agentes de IA para o cora�
 - Editor de código: Monaco Editor
 - Terminal: xterm.js + Tauri PTY
 - Banco de dados: SQLite (tauri-plugin-sql)
-- Monorepo: Turborepo + pnpm workspaces
+- Monorepo: Turborepo + npm workspaces
 
 ---
 
@@ -97,8 +97,8 @@ HysCode reimagina o fluxo de desenvolvimento trazendo agentes de IA para o cora�
 Pré-requisitos:
 
 - Node.js 18+
-- pnpm 10+
-- Rust 1.70+
+- npm 10+ (o projeto fixa a versão via `packageManager` em `package.json`)
+- Rust 1.70+ (o `cargo` deve estar no PATH — `C:\Users\<user>\.cargo\bin` no Windows)
 - Tauri CLI prerequisites — veja https://tauri.app/start/prerequisites/
 
 Passos rápidos:
@@ -109,10 +109,10 @@ git clone https://github.com/Hyska-Software/Hyscode.git
 cd Hyscode
 
 # Instalar dependências
-pnpm install
+npm install
 
 # Rodar em modo dev (hot reload)
-pnpm dev
+npm run dev
 ```
 
 Ao iniciar, a janela Tauri será aberta automaticamente.
@@ -123,11 +123,11 @@ Ao iniciar, a janela Tauri será aberta automaticamente.
 
 Scripts úteis (definidos em `package.json`):
 
-- `pnpm dev` — inicia todos os apps em modo desenvolvimento (turbo dev)
-- `pnpm build` — build do monorepo (turbo build)
-- `pnpm lint` — executa linter
-- `pnpm typecheck` — checagem de tipos TypeScript
-- `pnpm format` — formata o código com Prettier
+- `npm run dev` — inicia todos os apps em modo desenvolvimento (turbo dev)
+- `npm run build` — build do monorepo (turbo build)
+- `npm run lint` — executa linter
+- `npm run typecheck` — checagem de tipos TypeScript
+- `npm run format` — formata o código com Prettier
 
 ---
 
@@ -137,10 +137,10 @@ Para gerar builds:
 
 ```bash
 # Windows (script PowerShell que empacota o app)
-pnpm run build:prod
+npm run build:prod
 
 # macOS / Linux
-pnpm run build
+npm run build
 ```
 
 Os instaladores ficam em `apps/desktop/src-tauri/target/release/bundle/` após o build.

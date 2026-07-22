@@ -9,22 +9,19 @@ import type { WorkspaceMode } from '../../stores/layout-store';
 const MODE_LABELS: Record<WorkspaceMode, string> = {
   editor: 'editor',
   agent: 'agent',
-  review: 'review',
 };
 
 export function TitleBar() {
   const mode = useLayoutStore((s) => s.workspaceMode);
   const setMode = useLayoutStore((s) => s.setWorkspaceMode);
   const showAgentTab = useSettingsStore((s) => s.showAgentTab);
-  const showReviewTab = useSettingsStore((s) => s.showReviewTab);
   const showAgentChatPanel = useSettingsStore((s) => s.showAgentChatPanel);
   const setSettings = useSettingsStore((s) => s.set);
 
   // If the current mode's tab is hidden, fall back to editor
   useEffect(() => {
     if (mode === 'agent' && !showAgentTab) setMode('editor');
-    if (mode === 'review' && !showReviewTab) setMode('editor');
-  }, [showAgentTab, showReviewTab, mode, setMode]);
+  }, [showAgentTab, mode, setMode]);
 
   // Agent mode requires chat to be visible
   useEffect(() => {
@@ -33,9 +30,8 @@ export function TitleBar() {
     }
   }, [mode, showAgentChatPanel, setSettings]);
 
-  const visibleModes = (['editor', 'agent', 'review'] as const).filter((m) => {
+  const visibleModes = (['editor', 'agent'] as const).filter((m) => {
     if (m === 'agent') return showAgentTab;
-    if (m === 'review') return showReviewTab;
     return true;
   });
 

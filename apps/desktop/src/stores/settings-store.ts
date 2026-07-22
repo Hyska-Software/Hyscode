@@ -211,7 +211,6 @@ interface SettingsState {
 
   // ─ Layout tabs ─
   showAgentTab: boolean;
-  showReviewTab: boolean;
   showAgentChatPanel: boolean;
   agentCenterPanelMode: 'chat' | 'terminal';
   /** Which builtin sidebar tabs are visible in the ActivityBar */

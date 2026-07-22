@@ -6,13 +6,6 @@
 
 import { useEditorStore, type Tab } from '@/stores/editor-store';
 import { useAgentStore, type AgentMode } from '@/stores/agent-store';
-import {
-  useReviewStore,
-  type ReviewComment,
-  type ReviewFileEntry,
-  type ReviewSummary,
-  type ReviewSource,
-} from '@/stores/review-store';
 import { useLayoutStore, type WorkspaceMode } from '@/stores/layout-store';
 import { tauriInvoke } from './tauri-invoke';
 
@@ -28,20 +21,11 @@ export interface AgentSnapshot {
   mode: AgentMode;
 }
 
-export interface ReviewSnapshot {
-  comments: ReviewComment[];
-  files: ReviewFileEntry[];
-  selectedFile: string | null;
-  source: ReviewSource;
-  summary: ReviewSummary;
-}
-
 export interface ProjectSnapshot {
   version: 1;
   savedAt: number;
   editor: EditorSnapshot;
   agent: AgentSnapshot;
-  review: ReviewSnapshot;
   workspaceMode?: WorkspaceMode;
 }
 
@@ -84,11 +68,6 @@ function getAgentSnapshot(): AgentSnapshot {
   return { conversationId, mode };
 }
 
-function getReviewSnapshot(): ReviewSnapshot {
-  const { comments, files, selectedFile, source, summary } = useReviewStore.getState();
-  return { comments, files, selectedFile, source, summary };
-}
-
 // ─── Public API ─────────────────────────────────────────────────────────────
 
 /**
@@ -100,7 +79,6 @@ export function saveProjectState(rootPath: string): void {
     savedAt: Date.now(),
     editor: getEditorSnapshot(),
     agent: getAgentSnapshot(),
-    review: getReviewSnapshot(),
     workspaceMode: useLayoutStore.getState().workspaceMode,
   };
   try {
@@ -199,29 +177,6 @@ async function restoreAgentState(snapshot: AgentSnapshot): Promise<void> {
   }
 }
 
-/**
- * Restore review state from a snapshot.
- */
-function restoreReviewState(snapshot: ReviewSnapshot): void {
-  const store = useReviewStore.getState();
-  store.reset();
-
-  // Restore files, comments, selection, source
-  if (snapshot.files.length > 0 || snapshot.comments.length > 0) {
-    // Use the store's internal set via public actions
-    store.setSource(snapshot.source);
-
-    // We need direct state mutation for bulk restore — use the store's setState
-    useReviewStore.setState((s) => ({
-      ...s,
-      files: snapshot.files,
-      comments: snapshot.comments,
-      selectedFile: snapshot.selectedFile,
-      summary: snapshot.summary,
-    }));
-  }
-}
-
 // ─── Agent Sessions Loader ──────────────────────────────────────────────────
 
 /**
@@ -260,7 +215,6 @@ export function clearAllProjectState(): void {
   useEditorStore.getState().closeAllTabs();
   useAgentStore.getState().clearConversation();
   useAgentStore.getState().setSessions([]);
-  useReviewStore.getState().reset();
 }
 
 /**
@@ -289,7 +243,6 @@ export async function switchProject(
   if (snapshot) {
     restoreEditorState(snapshot.editor);
     await restoreAgentState(snapshot.agent);
-    restoreReviewState(snapshot.review);
     if (snapshot.workspaceMode) {
       useLayoutStore.getState().setWorkspaceMode(snapshot.workspaceMode);
     }

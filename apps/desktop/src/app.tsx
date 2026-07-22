@@ -7,7 +7,7 @@ import { ExtensionOverlays } from './components/editor/extension-overlays';
 import { CommandPalette, openCommandPalette } from './components/editor/command-palette';
 import { TooltipProvider } from './components/ui/tooltip';
 import { DialogProvider } from './components/ui/dialogs';
-import { EditorLayout, AgentLayout, ReviewLayout } from './components/layouts';
+import { EditorLayout, AgentLayout } from './components/layouts';
 import {
   useProjectStore,
   useFileStore,
@@ -248,7 +248,6 @@ function IDE() {
       <div className="flex flex-1 overflow-hidden p-1.5 pt-0">
         {workspaceMode === 'editor' && <EditorLayout />}
         {workspaceMode === 'agent' && <AgentLayout />}
-        {workspaceMode === 'review' && <ReviewLayout />}
       </div>
 
       <UpdateBanner />
@@ -496,15 +495,6 @@ export function App() {
       'Switch to Agent Mode',
       () => {
         useLayoutStore.getState().setWorkspaceMode('agent');
-      },
-      { category: 'View' },
-    );
-
-    builtin(
-      'workbench.action.switchToReviewMode',
-      'Switch to Review Mode',
-      () => {
-        useLayoutStore.getState().setWorkspaceMode('review');
       },
       { category: 'View' },
     );
