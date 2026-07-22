@@ -29,7 +29,7 @@ interface LayoutState {
   /** Which tab is active when terminal is in sidebar mode */
   sidebarActiveTab: 'chat' | 'terminal';
   /** Which tab is active in the agent-mode right panel */
-  agentRightTab: 'changes' | 'preview' | 'terminal';
+  agentRightTab: 'changes' | 'preview' | 'terminal' | 'files';
   /** File path to preview in agent-mode right panel */
   agentPreviewFile: string | null;
   /** File path selected in the agent changes panel */
@@ -49,7 +49,7 @@ interface LayoutState {
   setTerminalLocation: (location: TerminalLocation) => void;
   setTerminalVisible: (visible: boolean) => void;
   setSidebarActiveTab: (tab: 'chat' | 'terminal') => void;
-  setAgentRightTab: (tab: 'changes' | 'preview' | 'terminal') => void;
+  setAgentRightTab: (tab: 'changes' | 'preview' | 'terminal' | 'files') => void;
   setAgentPreviewFile: (filePath: string | null) => void;
   setAgentSelectedChangeFile: (filePath: string | null) => void;
   setRulesPanelOpen: (open: boolean) => void;

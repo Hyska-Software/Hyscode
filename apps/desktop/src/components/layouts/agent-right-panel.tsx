@@ -9,10 +9,12 @@ import {
   Undo2,
   Loader2,
   PanelRightClose,
+  Folder,
 } from 'lucide-react';
 import { MarkdownViewer } from '../editor/viewers/markdown-viewer';
 import { TerminalPanel } from '../terminal';
 import { GitView } from '../sidebar/views/git-view-new';
+import { FileExplorerView } from '../sidebar/views/file-explorer-view';
 import { useAgentStore } from '@/stores/agent-store';
 import { useGitStore } from '@/stores/git-store';
 import { useLayoutStore } from '@/stores/layout-store';
@@ -418,10 +420,11 @@ function LoadingSpinner() {
 
 // ─── Main Component ─────────────────────────────────────────────────────────
 
-type RightTab = 'changes' | 'preview' | 'terminal';
+type RightTab = 'changes' | 'preview' | 'terminal' | 'files';
 
 const TAB_CONFIG: Array<{ id: RightTab; label: string; icon: React.ElementType }> = [
   { id: 'changes', label: 'Changes', icon: GitCompare },
+  { id: 'files', label: 'Files', icon: Folder },
   { id: 'preview', label: 'Preview', icon: Eye },
   { id: 'terminal', label: 'Terminal', icon: Terminal },
 ];
@@ -487,6 +490,11 @@ export function AgentRightPanel() {
       <div className="relative flex-1 overflow-hidden">
         <div className={cn('absolute inset-0', activeTab === 'changes' ? 'z-10' : 'z-0 invisible')}>
           <ChangesTab />
+        </div>
+        <div className={cn('absolute inset-0', activeTab === 'files' ? 'z-10' : 'z-0 invisible')}>
+          <div className="h-full overflow-auto px-2">
+            <FileExplorerView />
+          </div>
         </div>
         <div className={cn('absolute inset-0', activeTab === 'preview' ? 'z-10' : 'z-0 invisible')}>
           <PreviewTab />
