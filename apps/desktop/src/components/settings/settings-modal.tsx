@@ -29,7 +29,6 @@ import { ExtensionSettingsTab } from './tabs/extension-settings-tab';
 import { ExtensionCustomTab } from './tabs/extension-custom-tab';
 import { RulesTab } from './tabs/rules-tab';
 import { SubAgentsTab } from './tabs/sub-agents-tab';
-import { SettingsSearch } from './settings-search';
 import { SettingsTree } from './settings-tree';
 import {
   BUILTIN_GROUPS,
@@ -98,9 +97,6 @@ export function SettingsModal() {
   const extensionSettingsTabs = useExtensionStore((s) => s.contributions.settingsTabs);
 
   const [activeTab, setActiveTab] = useState<ActiveTab>({ type: 'builtin', id: 'general' });
-  const [query, setQuery] = useState('');
-  const searchRef = useRef<HTMLInputElement | null>(null);
-  const wasOpenRef = useRef(false);
 
   const expandedIds = useMemo(
     () => new Set<GroupId>(treeExpandedGroups as GroupId[]),
@@ -120,23 +116,6 @@ export function SettingsModal() {
 
   // Convert extension tabs into BUILTIN_GROUPS-compatible form (with icon already resolved)
   // by passing the resolved extensionsGroup directly to the tree.
-
-  // Compute result count for the search footer. Must run before any early return.
-  const resultCount = useMemo(() => {
-    if (!query.trim()) return undefined;
-    let count = 0;
-    for (const group of BUILTIN_GROUPS) {
-      for (const leaf of group.leaves) {
-        if (matchesLeafQuery(leaf.label, leaf.keywords, query)) count++;
-      }
-    }
-    if (extensionsGroup) {
-      for (const leaf of extensionsGroup.leaves) {
-        if (matchesLeafQuery(leaf.label, leaf.keywords, query)) count++;
-      }
-    }
-    return count;
-  }, [query, extensionsGroup]);
 
   // Auto-expand the group containing the active tab when the active tab *changes*.
   // (Not on every render — that would fight manual collapse.)
@@ -179,41 +158,17 @@ export function SettingsModal() {
     }
   }, [open, settingsInitialTab, extensionSettingsTabs, expandedIds, treeExpandedGroups, setTreeExpandedGroups]);
 
-  // Focus search on first open; reset query on close.
-  useEffect(() => {
-    if (open && !wasOpenRef.current) {
-      wasOpenRef.current = true;
-      requestAnimationFrame(() => searchRef.current?.focus());
-    } else if (!open && wasOpenRef.current) {
-      wasOpenRef.current = false;
-      setQuery('');
-    }
-  }, [open]);
-
-  // Keyboard: Ctrl+F / Cmd+F focuses the search bar from anywhere in the modal.
+  // Keyboard: Escape closes the modal.
   useEffect(() => {
     if (!open) return;
     const handler = (e: KeyboardEvent) => {
-      const isFind = (e.ctrlKey || e.metaKey) && (e.key === 'f' || e.key === 'F');
-      if (isFind) {
-        e.preventDefault();
-        searchRef.current?.focus();
-        searchRef.current?.select();
-      } else if (e.key === 'Escape') {
-        // If a query is active, clear it first; otherwise close.
-        if (query) {
-          setQuery('');
-        } else {
-          closeSettings();
-        }
-      } else if (e.key === '/' && document.activeElement === document.body) {
-        e.preventDefault();
-        searchRef.current?.focus();
+      if (e.key === 'Escape') {
+        closeSettings();
       }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [open, query, closeSettings]);
+  }, [open, closeSettings]);
 
   // When the active extension tab is removed (extension disabled), fall back to general.
   useEffect(() => {
@@ -246,34 +201,6 @@ export function SettingsModal() {
     if (!isTabModified(activeTab.id)) return;
     resetTabToDefaults(activeTab.id);
   }, [activeTab]);
-
-  const handleSearchEnter = useCallback(() => {
-    // Find the first matching leaf (by search query) and select it.
-    if (!query.trim()) return;
-    const trimmed = query.toLowerCase();
-    const matches = (label: string, keywords?: readonly string[]): boolean =>
-      trimmed
-        .split(/\s+/)
-        .filter(Boolean)
-        .every((t) => [label, ...(keywords ?? [])].join(' ').toLowerCase().includes(t));
-    for (const group of BUILTIN_GROUPS) {
-      for (const leaf of group.leaves) {
-        if (matches(leaf.label, leaf.keywords)) {
-          handleBuiltinTabClick(leaf.id as BuiltinTabIdAny);
-          return;
-        }
-      }
-    }
-    if (extensionsGroup) {
-      for (const leaf of extensionsGroup.leaves) {
-        if (matches(leaf.label, leaf.keywords)) {
-          const ext = extensionSettingsTabs.find((t) => t.id === leaf.id);
-          if (ext) handleExtTabClick(ext);
-          return;
-        }
-      }
-    }
-  }, [query, extensionsGroup, extensionSettingsTabs, handleBuiltinTabClick, handleExtTabClick]);
 
   if (!open) return null;
 
@@ -312,20 +239,11 @@ export function SettingsModal() {
             </button>
           </div>
 
-          <SettingsSearch
-            ref={searchRef}
-            value={query}
-            onChange={setQuery}
-            onEnter={handleSearchEnter}
-            resultCount={resultCount}
-          />
-
           <SettingsTree
             groups={BUILTIN_GROUPS}
             extensionsGroup={extensionsGroup ?? undefined}
             activeLeafId={activeTab.type === 'builtin' ? activeTab.id : activeTab.tabId}
             expandedIds={expandedIds}
-            query={query}
             onSelectLeaf={(id) => {
               const isBuiltin = id in BUILTIN_TAB_CONTENT;
               if (isBuiltin) {
@@ -378,16 +296,4 @@ export function SettingsModal() {
       </div>
     </div>
   );
-}
-
-// ── Local helper ────────────────────────────────────────────────────────────
-
-function matchesLeafQuery(label: string, keywords: readonly string[] | undefined, query: string): boolean {
-  if (!query.trim()) return true;
-  const haystack = [label, ...(keywords ?? [])].join(' ').toLowerCase();
-  return query
-    .toLowerCase()
-    .split(/\s+/)
-    .filter(Boolean)
-    .every((token) => haystack.includes(token));
 }

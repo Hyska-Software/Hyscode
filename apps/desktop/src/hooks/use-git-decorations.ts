@@ -125,12 +125,30 @@ function backendHunksToDiffHunks(hunks: DiffHunkInfo[]): DiffHunk[] {
     const isAddition = h.old_lines === 0;
     const isDeletion = h.new_lines === 0;
     if (isDeletion) {
-      return { type: 'delete' as const, oldStart: h.new_start, oldLines: h.old_lines, newStart: h.new_start, newLines: 0 };
+      return {
+        type: 'delete' as const,
+        oldStart: h.new_start,
+        oldLines: h.old_lines,
+        newStart: h.new_start,
+        newLines: 0,
+      };
     }
     if (isAddition) {
-      return { type: 'add' as const, oldStart: h.new_start, oldLines: 0, newStart: h.new_start, newLines: h.new_lines };
+      return {
+        type: 'add' as const,
+        oldStart: h.new_start,
+        oldLines: 0,
+        newStart: h.new_start,
+        newLines: h.new_lines,
+      };
     }
-    return { type: 'modify' as const, oldStart: h.new_start, oldLines: h.old_lines, newStart: h.new_start, newLines: h.new_lines };
+    return {
+      type: 'modify' as const,
+      oldStart: h.new_start,
+      oldLines: h.old_lines,
+      newStart: h.new_start,
+      newLines: h.new_lines,
+    };
   });
 }
 
@@ -267,6 +285,9 @@ export function useGitDecorations(
       invoke<{ original: string }>('git_file_content', {
         repoPath: rootPath,
         filePath: relPath,
+        originalRef: undefined,
+        modifiedRef: undefined,
+        baseBranch: undefined,
       })
         .then((result) => {
           originalContentRef.current = result.original;

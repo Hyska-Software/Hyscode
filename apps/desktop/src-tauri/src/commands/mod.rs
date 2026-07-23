@@ -15,3 +15,4 @@ pub mod notifications;
 pub mod pty;
 pub mod updater;
 pub mod utils;
+pub mod window;

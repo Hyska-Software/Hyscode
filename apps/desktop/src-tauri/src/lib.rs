@@ -89,6 +89,7 @@ pub fn run() {
             commands::git::git_blame,
             commands::git::git_tag_create,
             commands::git::git_log_graph,
+            commands::git::git_branch_changes,
             // PTY commands
             commands::pty::pty_spawn,
             commands::pty::pty_write,
@@ -220,6 +221,8 @@ pub fn run() {
             commands::updater::updater_install,
             // Shell exec
             commands::utils::shell_exec,
+            // Window controls
+            commands::window::start_resize,
         ])
         .setup(|app| {
             let _window = app.get_webview_window("main").unwrap();

@@ -444,6 +444,7 @@ export function AgentInput() {
           'border border-foreground/[0.06]',
           'focus-within:border-foreground/[0.1]',
           isDragOver && 'border-accent/40',
+          'mx-auto max-w-4xl',
         )}
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}

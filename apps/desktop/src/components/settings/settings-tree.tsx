@@ -47,8 +47,8 @@ export interface SettingsTreeProps {
   activeLeafId: string;
   /** Expanded group ids. */
   expandedIds: ReadonlySet<GroupId>;
-  /** Active search query (already trimmed). */
-  query: string;
+  /** Active search query (already trimmed). Unused now that the search bar is removed. */
+  query?: string;
   /** Fired when the user selects a leaf. */
   onSelectLeaf: (leafId: string) => void;
   /** Fired when the user toggles a group's expanded state. */
@@ -68,7 +68,7 @@ export function SettingsTree({
   extensionsGroup,
   activeLeafId,
   expandedIds,
-  query,
+  query = '',
   onSelectLeaf,
   onToggleGroup,
 }: SettingsTreeProps) {

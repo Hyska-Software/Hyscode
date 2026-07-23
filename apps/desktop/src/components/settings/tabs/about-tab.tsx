@@ -1,5 +1,6 @@
 import { ExternalLink, Github, Heart, RefreshCw, Loader2, CheckCircle, ArrowUpCircle } from 'lucide-react';
 import { useUpdateStore } from '../../../stores/update-store';
+import { BrandMark } from '../../brand-mark';
 
 const APP_NAME = 'HysCode';
 const APP_VERSION = '0.2.1';
@@ -18,14 +19,9 @@ export function AboutTab() {
     <div className="flex flex-col gap-6">
       {/* Hero */}
       <div className="flex flex-col items-center gap-3 rounded-xl bg-surface-raised px-6 py-8">
-        <img
-          src="/img-logos/logo-150px.png"
-          alt={APP_NAME}
-          className="h-16 w-16 rounded-xl"
-          onError={(e) => {
-            (e.target as HTMLImageElement).style.display = 'none';
-          }}
-        />
+        <div className="flex h-16 w-16 items-center justify-center rounded-xl">
+          <BrandMark className="h-12 w-12" />
+        </div>
         <div className="flex flex-col items-center gap-1">
           <h2 className="text-[18px] font-bold tracking-tight text-foreground">
             {APP_NAME}

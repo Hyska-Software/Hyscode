@@ -9,7 +9,6 @@ import {
   ChevronRight,
   Plus,
   Trash2,
-  ArrowRight,
   Zap,
   Server,
   FileText,
@@ -319,11 +318,24 @@ function SessionsSection() {
             return (
               <div
                 key={session.id}
+                role={isActive ? undefined : 'button'}
+                tabIndex={isActive ? undefined : 0}
+                onClick={isActive ? undefined : () => restoreSession(session.id)}
+                onKeyDown={
+                  isActive
+                    ? undefined
+                    : (e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          restoreSession(session.id);
+                        }
+                      }
+                }
                 className={cn(
                   'group flex items-start gap-1.5 rounded-md px-1.5 py-1 transition-colors',
                   isActive
                     ? 'bg-accent/10 text-foreground'
-                    : 'text-muted-foreground hover:bg-muted/50 hover:text-foreground',
+                    : 'cursor-pointer text-muted-foreground hover:bg-muted/50 hover:text-foreground',
                 )}
               >
                 <Icon className="mt-0.5 h-3 w-3 shrink-0" />
@@ -338,15 +350,6 @@ function SessionsSection() {
                   </div>
                 </div>
                 <div className="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
-                  {!isActive && (
-                    <button
-                      onClick={() => restoreSession(session.id)}
-                      title="Restore"
-                      className="rounded p-0.5 hover:bg-muted hover:text-accent"
-                    >
-                      <ArrowRight className="h-2.5 w-2.5" />
-                    </button>
-                  )}
                   <button
                     onClick={(e) => {
                       e.stopPropagation();

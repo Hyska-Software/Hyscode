@@ -1,5 +1,5 @@
 import { useSettingsStore } from '../../../stores';
-import type { ApprovalMode, UpdateChannel } from '../../../stores/settings-store';
+import type { ActivityBarPosition, ApprovalMode, UpdateChannel } from '../../../stores/settings-store';
 import { useUpdateStore } from '../../../stores/update-store';
 import { useOnboardingStore } from '../../../stores/onboarding-store';
 import { Loader2, CheckCircle, ArrowUpCircle, RefreshCw, RotateCcw } from 'lucide-react';
@@ -188,15 +188,6 @@ export function GeneralTab() {
           />
         </Row>
         <Row
-          label="Show Review Tab"
-          description="Display the Review mode tab in the title bar"
-        >
-          <Toggle
-            checked={store.showReviewTab}
-            onChange={(v) => store.set('showReviewTab', v)}
-          />
-        </Row>
-        <Row
           label="Show Agent Chat Panel"
           description="Display the agent chat panel on the right side of the editor"
         >
@@ -212,6 +203,19 @@ export function GeneralTab() {
           <Toggle
             checked={store.agentCenterPanelMode === 'terminal'}
             onChange={(v) => store.set('agentCenterPanelMode', v ? 'terminal' : 'chat')}
+          />
+        </Row>
+        <Row
+          label="Activity Bar Position"
+          description="Place sidebar icon tabs on the left or at the top"
+        >
+          <SelectInput<ActivityBarPosition>
+            value={store.activityBarPosition}
+            onChange={(v) => store.set('activityBarPosition', v)}
+            options={[
+              { value: 'left', label: 'Left' },
+              { value: 'top', label: 'Top' },
+            ]}
           />
         </Row>
       </Section>

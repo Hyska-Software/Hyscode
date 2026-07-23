@@ -1,6 +1,6 @@
 {
   "name": "hyscode",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "private": true,
   "packageManager": "npm@11.12.1",
   "workspaces": [

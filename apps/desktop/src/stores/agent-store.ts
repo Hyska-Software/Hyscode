@@ -458,12 +458,15 @@ interface AgentState {
   setSessionsLoading: (loading: boolean) => void;
   setHistoryOpen: (open: boolean) => void;
   deleteSession: (id: string) => void;
+
+  // Turn helpers
+  getLastTurnId: () => string | null;
 }
 
 // ─── Store ──────────────────────────────────────────────────────────────────
 
 export const useAgentStore = create<AgentState>()(
-  immer((set) => ({
+  immer<AgentState>((set, get) => ({
     // Defaults
     mode: 'chat',
     conversationId: null,
@@ -993,6 +996,28 @@ export const useAgentStore = create<AgentState>()(
         state.sessions = state.sessions.filter((s) => s.id !== id);
       }),
 
+    // ─── Turn helpers ───────────────────────────────────────────────────
+
+    getLastTurnId: () => {
+      const state = get();
+      // Prefer the turn summary of the most recent assistant message, since it
+      // survives restore from DB and reflects the conversation history.
+      for (let i = state.messages.length - 1; i >= 0; i--) {
+        const msg = state.messages[i];
+        if (msg.role === 'assistant' && msg.turnSummary?.turnId) {
+          return msg.turnSummary.turnId;
+        }
+      }
+      // Fallback: most recent agent edit session still in memory.
+      let latest: AgentEditSession | null = null;
+      for (const session of state.agentEditSessions) {
+        if (!latest || session.createdAt > latest.createdAt) {
+          latest = session;
+        }
+      }
+      return latest?.turnId ?? null;
+    },
+
     // ─── Multi-tab Actions ────────────────────────────────────────────
 
     openNewTab: (mode = 'chat') => {
@@ -1100,8 +1125,7 @@ export const useAgentStore = create<AgentState>()(
 // ─── Tab helpers (used inside immer set() callbacks) ────────────────────────
 
 /** Snapshot the flat per-conversation fields into a PerTabState object. */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function _extractTab(s: any): PerTabState {
+function _extractTab(s: AgentState): PerTabState {
   return {
     mode: s.mode,
     conversationId: s.conversationId,
@@ -1138,8 +1162,7 @@ function _extractTab(s: any): PerTabState {
 }
 
 /** Apply a PerTabState snapshot to the flat fields of an immer draft. */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function _applyTab(s: any, ps: PerTabState): void {
+function _applyTab(s: AgentState, ps: PerTabState): void {
   s.mode = ps.mode;
   s.conversationId = ps.conversationId;
   s.messages = ps.messages;

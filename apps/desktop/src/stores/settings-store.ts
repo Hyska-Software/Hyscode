@@ -76,6 +76,8 @@ export interface CustomApprovalRules {
   toolRules: Record<string, boolean>;
 }
 
+export type ActivityBarPosition = 'left' | 'top';
+
 // ── State ────────────────────────────────────────────────────────────────────
 
 interface SettingsState {
@@ -210,8 +212,8 @@ interface SettingsState {
   subAgentAutoApprove: boolean;
 
   // ─ Layout tabs ─
+  activityBarPosition: ActivityBarPosition;
   showAgentTab: boolean;
-  showReviewTab: boolean;
   showAgentChatPanel: boolean;
   agentCenterPanelMode: 'chat' | 'terminal';
   /** Which builtin sidebar tabs are visible in the ActivityBar */

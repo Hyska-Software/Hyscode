@@ -276,7 +276,6 @@ function FileTreeNode({
   const agentPreviewFile = useLayoutStore((s) => s.agentPreviewFile);
   const setAgentPreviewFile = useLayoutStore((s) => s.setAgentPreviewFile);
 
-  const isFocused = focusedPath === node.path;
   const isCut = cutPaths.has(node.path);
 
   const relPath = useMemo(() => {
@@ -406,7 +405,7 @@ function FileTreeNode({
             : isActive ? 'bg-accent-muted' : 'hover:bg-surface-raised'
         } ${nameColorClass || 'text-foreground'} ${isHidden ? 'opacity-60' : ''} ${
           isDragging || isCut ? 'opacity-30' : ''
-        } ${isFocused ? 'outline outline-1 outline-accent/40' : ''}`}
+        }`}
         style={{ paddingLeft: `${depth * 12 + 4}px` }}
       >
         {node.isDir ? (

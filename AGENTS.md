@@ -51,6 +51,29 @@ documentado em [`docs/WORKFLOW.md`](docs/WORKFLOW.md) e operacionalizado em
 - **Sempre** atualizar `AGENTS.md` ou `docs/WORKFLOW.md` se a convenção mudar.
 - **Sempre** referenciar este `AGENTS.md` em qualquer resposta sobre workflow.
 
+## Commit & PR — apenas sob pedido explícito
+
+Por padrão, após concluir o trabalho o agente **para** e **não** commita,
+push, nem abre PR sozinho. O usuário decide o momento do commit/PR.
+
+- **Nunca** rodar `git commit`, `git push`, `gh pr create` (ou equivalentes)
+  sem que o usuário tenha pedido explicitamente nessa conversa
+  (ex.: "faça commit", "commita isso", "abre o PR", "pode commitar e abrir PR").
+- Quando o trabalho estiver pronto, **resumir** as mudanças (arquivos,
+  diff resumido, comandos que *seriam* executados) e **perguntar** se o
+  usuário quer que o agente prossiga com commit/PR.
+- "Implementar X" / "faça Y" / "corrija Z" **não** são pedidos de commit.
+  São pedidos de mudança de código; commit/PR continuam sendo decisão
+  separada do usuário.
+- Se o usuário disser "como sempre" / "do mesmo jeito de antes" / "segue o
+  fluxo", vale como pedido explícito *somente* se já houver um padrão
+  claro e recente na conversa; em dúvida, confirmar antes de commitar.
+- Exceção: chores triviais autocontidos (ex.: correção de typo num único
+  arquivo, ajuste de formatação) podem ser commitados sob pedido, mas
+  mesmo assim **somente após confirmação**.
+- Lint/typecheck/preflight podem ser rodados a qualquer momento para
+  *verificar* o trabalho — isso não é commit.
+
 Em caso de dúvida: `docs/WORKFLOW.md` é a fonte de verdade.
 
 ## URL Canônico
