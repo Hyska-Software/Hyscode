@@ -355,18 +355,53 @@ pub fn git_diff_file(repo_path: String, file_path: String, staged: bool) -> Resu
 }
 
 #[tauri::command]
-pub fn git_file_content(repo_path: String, file_path: String) -> Result<GitFileContent, String> {
+pub fn git_file_content(
+    repo_path: String,
+    file_path: String,
+    original_ref: Option<String>,
+    modified_ref: Option<String>,
+    base_branch: Option<String>,
+) -> Result<GitFileContent, String> {
     let repo = open_repo(&repo_path)?;
 
-    // Get original content from HEAD
-    let original = get_head_content(&repo, &file_path).unwrap_or_default();
+    // Resolve the original reference. If it is the literal string "merge-base",
+    // compute the merge-base between HEAD and the provided (or default) base branch.
+    let original = match original_ref.as_deref() {
+        Some("merge-base") => {
+            let base_name = base_branch.unwrap_or_else(|| "origin/main".to_string());
+            let mb = resolve_merge_base(&repo, &base_name)?;
+            get_commit_content(&repo, mb, &file_path).unwrap_or_default()
+        }
+        Some(r) => get_ref_content(&repo, r, &file_path).unwrap_or_default(),
+        None => get_head_content(&repo, &file_path).unwrap_or_default(),
+    };
 
-    // Get modified content from working directory
-    let workdir = repo.workdir().ok_or("No working directory")?;
-    let full_path = workdir.join(&file_path);
-    let modified = std::fs::read_to_string(&full_path).unwrap_or_default();
+    // Resolve the modified reference. Defaults to the working directory.
+    let modified = match modified_ref.as_deref() {
+        Some(r) => get_ref_content(&repo, r, &file_path).unwrap_or_default(),
+        None => {
+            let workdir = repo.workdir().ok_or("No working directory")?;
+            let full_path = workdir.join(&file_path);
+            std::fs::read_to_string(&full_path).unwrap_or_default()
+        }
+    };
 
     Ok(GitFileContent { original, modified })
+}
+
+fn resolve_merge_base(repo: &Repository, base_branch: &str) -> Result<git2::Oid, String> {
+    let head = repo.head().map_err(|e| format!("HEAD error: {}", e))?;
+    let head_commit = head
+        .peel_to_commit()
+        .map_err(|e| format!("HEAD peel error: {}", e))?;
+    let base_obj = repo
+        .revparse_single(base_branch)
+        .map_err(|e| format!("Base branch '{}': {}", base_branch, e))?;
+    let base_commit = base_obj
+        .peel_to_commit()
+        .map_err(|e| format!("Base peel error: {}", e))?;
+    repo.merge_base(head_commit.id(), base_commit.id())
+        .map_err(|e| format!("Merge base error: {}", e))
 }
 
 fn get_head_content(repo: &Repository, file_path: &str) -> Result<String, String> {
@@ -374,6 +409,36 @@ fn get_head_content(repo: &Repository, file_path: &str) -> Result<String, String
     let tree = head
         .peel_to_tree()
         .map_err(|e| format!("Tree error: {}", e))?;
+    get_tree_content(repo, &tree, file_path)
+}
+
+fn get_ref_content(repo: &Repository, reference: &str, file_path: &str) -> Result<String, String> {
+    let obj = repo
+        .revparse_single(reference)
+        .map_err(|e| format!("Ref '{}' error: {}", reference, e))?;
+    let tree = obj
+        .peel_to_tree()
+        .map_err(|e| format!("Tree error: {}", e))?;
+    get_tree_content(repo, &tree, file_path)
+}
+
+fn get_commit_content(
+    repo: &Repository,
+    oid: git2::Oid,
+    file_path: &str,
+) -> Result<String, String> {
+    let commit = repo
+        .find_commit(oid)
+        .map_err(|e| format!("Commit error: {}", e))?;
+    let tree = commit.tree().map_err(|e| format!("Tree error: {}", e))?;
+    get_tree_content(repo, &tree, file_path)
+}
+
+fn get_tree_content(
+    repo: &Repository,
+    tree: &git2::Tree,
+    file_path: &str,
+) -> Result<String, String> {
     let entry = tree
         .get_path(Path::new(file_path))
         .map_err(|e| format!("Entry error: {}", e))?;
@@ -1285,4 +1350,112 @@ pub fn git_tag_create(
     }
 
     Ok(())
+}
+
+#[tauri::command]
+pub fn git_branch_changes(
+    repo_path: String,
+    base_branch: Option<String>,
+) -> Result<Vec<GitFile>, String> {
+    let repo = open_repo(&repo_path)?;
+    let head = repo.head().map_err(|e| format!("HEAD error: {}", e))?;
+    let head_commit = head
+        .peel_to_commit()
+        .map_err(|e| format!("HEAD peel error: {}", e))?;
+
+    // Resolve the base reference. If none is provided, try common upstream/base
+    // branch names in order of preference.
+    let base_name = match base_branch {
+        Some(name) => name,
+        None => {
+            let candidates = ["origin/main", "origin/master", "main", "master"];
+            let mut found = None;
+            for c in &candidates {
+                if repo.revparse_single(c).is_ok() {
+                    found = Some(c.to_string());
+                    break;
+                }
+            }
+            found.ok_or(
+                "Could not determine base branch. Provide one or ensure main/master exists.",
+            )?
+        }
+    };
+
+    let base_obj = repo
+        .revparse_single(&base_name)
+        .map_err(|e| format!("Base branch '{}': {}", base_name, e))?;
+    let base_commit = base_obj
+        .peel_to_commit()
+        .map_err(|e| format!("Base peel error: {}", e))?;
+
+    let merge_base = repo
+        .merge_base(head_commit.id(), base_commit.id())
+        .map_err(|e| format!("Merge base error: {}", e))?;
+
+    if merge_base == head_commit.id() {
+        return Ok(Vec::new());
+    }
+
+    let mb_commit = repo
+        .find_commit(merge_base)
+        .map_err(|e| format!("Find merge-base commit: {}", e))?;
+
+    let mb_tree = mb_commit
+        .tree()
+        .map_err(|e| format!("Merge-base tree: {}", e))?;
+    let head_tree = head_commit
+        .tree()
+        .map_err(|e| format!("HEAD tree: {}", e))?;
+
+    let mut diff_opts = DiffOptions::new();
+    let diff = repo
+        .diff_tree_to_tree(Some(&mb_tree), Some(&head_tree), Some(&mut diff_opts))
+        .map_err(|e| format!("Diff error: {}", e))?;
+
+    let mut files = Vec::new();
+    diff.foreach(
+        &mut |delta, _| {
+            let status = delta_to_status(delta.status()).to_string();
+            let (path, old_path) = match delta.status() {
+                Delta::Renamed | Delta::Copied => {
+                    let old = delta
+                        .old_file()
+                        .path()
+                        .and_then(|p| p.to_str())
+                        .map(|s| s.to_string());
+                    let new = delta
+                        .new_file()
+                        .path()
+                        .and_then(|p| p.to_str())
+                        .map(|s| s.to_string())
+                        .unwrap_or_default();
+                    (new, old)
+                }
+                _ => {
+                    let path = delta
+                        .new_file()
+                        .path()
+                        .and_then(|p| p.to_str())
+                        .map(|s| s.to_string())
+                        .unwrap_or_default();
+                    (path, None)
+                }
+            };
+            if !path.is_empty() {
+                files.push(GitFile {
+                    path,
+                    status,
+                    old_path,
+                });
+            }
+            true
+        },
+        None,
+        None,
+        None,
+    )
+    .map_err(|e| format!("Diff foreach error: {}", e))?;
+
+    Ok(files)
 }

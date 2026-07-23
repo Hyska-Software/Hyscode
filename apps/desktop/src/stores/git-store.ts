@@ -100,6 +100,7 @@ interface GitState {
   unstaged: GitFile[];
   untracked: GitFile[];
   conflicts: GitFile[];
+  branchChanges: GitFile[];
   ahead: number;
   behind: number;
 
@@ -154,6 +155,7 @@ interface GitState {
   getCommitDetail: (hash: string) => Promise<CommitDetail>;
   getCommitFileDiff: (hash: string, filePath: string) => Promise<string>;
   getBlame: (filePath: string, line?: number) => Promise<GitBlameHunk[]>;
+  fetchBranchChanges: (baseBranch?: string) => Promise<void>;
   // Pull Request
   createPullRequest: (opts: {
     title: string;
@@ -179,6 +181,7 @@ export const useGitStore = create<GitState>()(
     unstaged: [],
     untracked: [],
     conflicts: [],
+    branchChanges: [],
     ahead: 0,
     behind: 0,
     branches: [],
@@ -193,7 +196,9 @@ export const useGitStore = create<GitState>()(
       const rootPath = getRootPath();
       if (!rootPath) return;
 
-      set((s) => { s.isLoading = true; });
+      set((s) => {
+        s.isLoading = true;
+      });
 
       try {
         const isRepo = await invoke<boolean>('git_is_repo', { path: rootPath });
@@ -216,7 +221,9 @@ export const useGitStore = create<GitState>()(
         const [status, branch, aheadBehind] = await Promise.all([
           invoke<GitStatusResult>('git_status', { repoPath: rootPath }),
           invoke<string>('git_branch_current', { repoPath: rootPath }),
-          invoke<{ ahead: number; behind: number }>('git_ahead_behind', { repoPath: rootPath }).catch(() => ({ ahead: 0, behind: 0 })),
+          invoke<{ ahead: number; behind: number }>('git_ahead_behind', {
+            repoPath: rootPath,
+          }).catch(() => ({ ahead: 0, behind: 0 })),
         ]);
 
         set((s) => {
@@ -273,12 +280,17 @@ export const useGitStore = create<GitState>()(
       if (!msg) throw new Error('Commit message is empty');
 
       const hash = await invoke<string>('git_commit', { repoPath: rootPath, message: msg });
-      set((s) => { s.commitMessage = ''; });
+      set((s) => {
+        s.commitMessage = '';
+      });
       await get().refresh();
       return hash;
     },
 
-    setCommitMessage: (msg) => set((s) => { s.commitMessage = msg; }),
+    setCommitMessage: (msg) =>
+      set((s) => {
+        s.commitMessage = msg;
+      }),
 
     checkoutBranch: async (name) => {
       const rootPath = getRootPath();
@@ -325,7 +337,9 @@ export const useGitStore = create<GitState>()(
       if (!rootPath) return;
       try {
         const log = await invoke<GitCommitInfo[]>('git_log', { repoPath: rootPath, limit });
-        set((s) => { s.log = log as GitCommitInfo[]; });
+        set((s) => {
+          s.log = log as GitCommitInfo[];
+        });
       } catch {
         // No log if no commits
       }
@@ -336,7 +350,9 @@ export const useGitStore = create<GitState>()(
       if (!rootPath) return;
       try {
         const graph = await invoke<GraphCommit[]>('git_log_graph', { repoPath: rootPath, limit });
-        set((s) => { s.graphLog = graph as GraphCommit[]; });
+        set((s) => {
+          s.graphLog = graph as GraphCommit[];
+        });
       } catch {
         // ignore
       }
@@ -347,7 +363,9 @@ export const useGitStore = create<GitState>()(
       if (!rootPath) return;
       try {
         const stashes = await invoke<GitStashEntry[]>('git_stash_list', { repoPath: rootPath });
-        set((s) => { s.stashes = stashes as GitStashEntry[]; });
+        set((s) => {
+          s.stashes = stashes as GitStashEntry[];
+        });
       } catch {
         // ignore
       }
@@ -379,7 +397,13 @@ export const useGitStore = create<GitState>()(
     getFileContent: async (filePath: string) => {
       const rootPath = getRootPath();
       if (!rootPath) throw new Error('No project open');
-      return invoke<GitFileContent>('git_file_content', { repoPath: rootPath, filePath });
+      return invoke<GitFileContent>('git_file_content', {
+        repoPath: rootPath,
+        filePath,
+        originalRef: undefined,
+        modifiedRef: undefined,
+        baseBranch: undefined,
+      });
     },
 
     getDiff: async (filePath: string, staged: boolean) => {
@@ -480,7 +504,29 @@ export const useGitStore = create<GitState>()(
     getBlame: async (filePath: string, line?: number) => {
       const rootPath = getRootPath();
       if (!rootPath) throw new Error('No project open');
-      return invoke<GitBlameHunk[]>('git_blame', { repoPath: rootPath, filePath, line: line ?? null });
+      return invoke<GitBlameHunk[]>('git_blame', {
+        repoPath: rootPath,
+        filePath,
+        line: line ?? null,
+      });
+    },
+
+    fetchBranchChanges: async (baseBranch?: string) => {
+      const rootPath = getRootPath();
+      if (!rootPath) return;
+      try {
+        const files = await invoke<GitFile[]>('git_branch_changes', {
+          repoPath: rootPath,
+          baseBranch: baseBranch ?? null,
+        });
+        set((s) => {
+          s.branchChanges = files as GitFile[];
+        });
+      } catch {
+        set((s) => {
+          s.branchChanges = [];
+        });
+      }
     },
 
     createPullRequest: async (opts) => {

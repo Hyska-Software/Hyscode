@@ -102,7 +102,12 @@ function DiffLine({ row }: { row: DiffRow }) {
   const marker = row.type === 'deleted' ? '-' : row.type === 'added' ? '+' : ' ';
 
   return (
-    <div className={cn('grid grid-cols-[2.5rem_2.5rem_1fr] items-start', bgClass)}>
+    <div
+      className={cn(
+        'grid grid-cols-[2.5rem_2.5rem_1fr] items-start transition-colors duration-150 hover:bg-accent/5',
+        bgClass,
+      )}
+    >
       <LineNumber value={row.oldLine} />
       <LineNumber value={row.newLine} />
       <span
@@ -149,14 +154,14 @@ export function DiffViewer({ original, modified, hunks, className }: DiffViewerP
   return (
     <div
       className={cn(
-        'h-full overflow-auto bg-surface font-mono text-[12px] leading-relaxed',
+        'h-full overflow-auto bg-surface font-mono text-[12px] leading-relaxed animate-in fade-in slide-in-from-top-1 duration-300',
         className,
       )}
     >
       {views.map((view, index) => (
         <div key={index}>
           {view.collapsedBefore > 0 && (
-            <div className="sticky top-0 z-10 border-y border-border/30 bg-surface-raised px-3 py-0.5 text-[10px] text-muted-foreground">
+            <div className="sticky top-0 z-10 border-y border-border/30 bg-surface-raised px-3 py-0.5 text-[10px] text-muted-foreground transition-colors hover:bg-muted/30">
               {view.collapsedBefore} unmodified {view.collapsedBefore === 1 ? 'line' : 'lines'}
             </div>
           )}

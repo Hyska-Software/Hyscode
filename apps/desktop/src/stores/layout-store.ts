@@ -62,7 +62,7 @@ function normalizePrefs(prefs: AgentRightTabPrefs | undefined): AgentRightTabPre
 }
 
 /** Builtin sidebar views exposed in ActivityBar and View menu */
-export type AgentChangesFilter = 'session' | 'last-turn' | 'staged' | 'working';
+export type AgentChangesFilter = 'session' | 'last-turn' | 'staged' | 'working' | 'branch';
 
 export type SidebarViewId =
   | 'files'

@@ -88,7 +88,13 @@ interface TauriCommands {
     ret: Array<{ new_start: number; new_lines: number; old_lines: number }>;
   };
   git_file_content: {
-    args: { repoPath: string; filePath: string };
+    args: {
+      repoPath: string;
+      filePath: string;
+      originalRef?: string;
+      modifiedRef?: string;
+      baseBranch?: string;
+    };
     ret: { original: string; modified: string };
   };
   git_init: { args: { path: string }; ret: void };
@@ -112,6 +118,10 @@ interface TauriCommands {
   git_fetch: { args: { repoPath: string; remote?: string }; ret: string };
   git_merge: { args: { repoPath: string; branch: string }; ret: string };
   git_tag_create: { args: { repoPath: string; name: string; message?: string }; ret: void };
+  git_branch_changes: {
+    args: { repoPath: string; baseBranch?: string };
+    ret: Array<{ path: string; status: string; old_path: string | null }>;
+  };
 
   // PTY — spawn returns the pty_id; output arrives via 'pty:data' events
   pty_spawn: { args: { shell?: string; cwd?: string; env?: Record<string, string> }; ret: string };

@@ -7,7 +7,7 @@ import type { GitFile } from '@/stores/git-store';
 import { countDiffLines } from './compute-diff';
 import { tauriInvoke } from './tauri-invoke';
 
-export type ChangeFilter = 'session' | 'last-turn' | 'staged' | 'working';
+export type ChangeFilter = 'session' | 'last-turn' | 'staged' | 'working' | 'branch';
 export type ChangeKind = 'added' | 'modified' | 'deleted' | 'renamed';
 export type ChangeSource = 'agent' | 'git' | 'both';
 
@@ -121,6 +121,7 @@ export interface BuildSessionChangesInput {
     unstaged: GitFile[];
     untracked: GitFile[];
     conflicts: GitFile[];
+    branchChanges: GitFile[];
   };
   rootPath: string | null;
 }
@@ -193,7 +194,7 @@ export function buildSessionChanges(input: BuildSessionChangesInput): SessionCha
     }
   }
 
-  // Overlay git status (staged, unstaged, untracked, conflicts).
+  // Overlay git status (staged, unstaged, untracked, conflicts, branch).
   for (const file of git.staged) mergeGitFile(file, true);
   for (const file of git.unstaged) mergeGitFile(file, false);
   for (const file of git.untracked) mergeGitFile(file, false);
@@ -216,6 +217,23 @@ export function buildSessionChanges(input: BuildSessionChangesInput): SessionCha
       break;
     case 'working':
       entries = entries.filter((e) => e.gitFile && !e.staged && e.gitFile.status !== 'U');
+      break;
+    case 'branch':
+      // Branch filter: all files changed between the branch start (merge-base)
+      // and HEAD. These are git-only entries.
+      entries = git.branchChanges.map((file) => {
+        const key = normalizePathKey(file.path, rootPath);
+        return {
+          key,
+          filePath: absoluteFromRel(file.path, rootPath),
+          relPath: key,
+          kind: gitStatusKind(file.status),
+          source: 'git' as const,
+          added: 0,
+          removed: 0,
+          gitFile: file,
+        };
+      });
       break;
   }
 
@@ -251,10 +269,14 @@ export async function buildGitDiffContent(
   relPath: string,
   rootPath: string,
   kind: ChangeKind,
+  opts?: { originalRef?: string; modifiedRef?: string; baseBranch?: string },
 ): Promise<DiffContent> {
   const content = await tauriInvoke('git_file_content', {
     repoPath: rootPath,
     filePath: relPath,
+    originalRef: opts?.originalRef,
+    modifiedRef: opts?.modifiedRef,
+    baseBranch: opts?.baseBranch,
   });
 
   return {
@@ -301,6 +323,8 @@ export function filterLabel(filter: ChangeFilter): string {
       return 'Staged';
     case 'working':
       return 'Working';
+    case 'branch':
+      return 'Branch';
   }
 }
 

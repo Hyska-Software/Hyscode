@@ -93,6 +93,7 @@ function ChangesTab() {
   const gitUnstaged = useGitStore((s) => s.unstaged);
   const gitUntracked = useGitStore((s) => s.untracked);
   const gitConflicts = useGitStore((s) => s.conflicts);
+  const gitBranchChanges = useGitStore((s) => s.branchChanges);
   const rootPath = useFileStore((s) => s.rootPath);
 
   const agentCount = useMemo(
@@ -106,6 +107,7 @@ function ChangesTab() {
           unstaged: gitUnstaged,
           untracked: gitUntracked,
           conflicts: gitConflicts,
+          branchChanges: gitBranchChanges,
         },
         rootPath,
       }).length,
@@ -117,6 +119,7 @@ function ChangesTab() {
       gitUnstaged,
       gitUntracked,
       gitConflicts,
+      gitBranchChanges,
       rootPath,
     ],
   );
@@ -175,7 +178,7 @@ function ChangesTab() {
 
 // ─── Agent Changes Content ──────────────────────────────────────────────────
 
-const FILTER_OPTIONS: ChangeFilter[] = ['session', 'last-turn', 'staged', 'working'];
+const FILTER_OPTIONS: ChangeFilter[] = ['session', 'last-turn', 'staged', 'working', 'branch'];
 
 function useGitChangeCounts(
   entries: SessionChangeEntry[],
@@ -189,6 +192,13 @@ function useGitChangeCounts(
 
   useEffect(() => {
     if (!rootPath) return;
+
+    // Branch changes are diffed against the merge base, not the working tree,
+    // so the working-tree hunk count helper does not apply here.
+    if (filter === 'branch') {
+      setCounts(new Map());
+      return;
+    }
 
     // Reset cache when switching projects or filters so counts stay fresh.
     if (prevFilterRef.current !== filter || prevRootPathRef.current !== rootPath) {
@@ -227,7 +237,11 @@ function useGitChangeCounts(
   return counts;
 }
 
-function useDiffContent(entry: SessionChangeEntry | null, rootPath: string | null) {
+function useDiffContent(
+  entry: SessionChangeEntry | null,
+  rootPath: string | null,
+  filter: ChangeFilter,
+) {
   const [content, setContent] = useState<DiffContent | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -250,7 +264,10 @@ function useDiffContent(entry: SessionChangeEntry | null, rootPath: string | nul
     let cancelled = false;
     setLoading(true);
 
-    buildGitDiffContent(entry.relPath, rootPath, entry.kind)
+    const opts =
+      filter === 'branch' ? { originalRef: 'merge-base', modifiedRef: 'HEAD' } : undefined;
+
+    buildGitDiffContent(entry.relPath, rootPath, entry.kind, opts)
       .then((c) => {
         if (!cancelled) setContent(c);
       })
@@ -265,7 +282,7 @@ function useDiffContent(entry: SessionChangeEntry | null, rootPath: string | nul
     return () => {
       cancelled = true;
     };
-  }, [entry, rootPath]);
+  }, [entry, rootPath, filter]);
 
   return { content, loading };
 }
@@ -351,6 +368,8 @@ function AgentChangesContent() {
   const gitUnstaged = useGitStore((s) => s.unstaged);
   const gitUntracked = useGitStore((s) => s.untracked);
   const gitConflicts = useGitStore((s) => s.conflicts);
+  const gitBranchChanges = useGitStore((s) => s.branchChanges);
+  const fetchBranchChanges = useGitStore((s) => s.fetchBranchChanges);
 
   const rootPath = useFileStore((s) => s.rootPath);
 
@@ -365,6 +384,7 @@ function AgentChangesContent() {
           unstaged: gitUnstaged,
           untracked: gitUntracked,
           conflicts: gitConflicts,
+          branchChanges: gitBranchChanges,
         },
         rootPath,
       }),
@@ -376,9 +396,16 @@ function AgentChangesContent() {
       gitUnstaged,
       gitUntracked,
       gitConflicts,
+      gitBranchChanges,
       rootPath,
     ],
   );
+
+  // Ensure branch changes are loaded when the branch filter is active.
+  useEffect(() => {
+    if (filter !== 'branch') return;
+    void fetchBranchChanges();
+  }, [filter, fetchBranchChanges, rootPath]);
 
   const gitCounts = useGitChangeCounts(entries, rootPath, filter);
 
@@ -482,7 +509,14 @@ function AgentChangesContent() {
                   )}
                 </button>
 
-                {isExpanded && <ExpandedDiff entry={entry} rootPath={rootPath} />}
+                <div
+                  className={cn(
+                    'overflow-hidden transition-all duration-300 ease-out',
+                    isExpanded ? 'max-h-[320px] opacity-100' : 'max-h-0 opacity-0',
+                  )}
+                >
+                  {isExpanded && <ExpandedDiff entry={entry} rootPath={rootPath} filter={filter} />}
+                </div>
               </div>
             );
           })}
@@ -492,8 +526,16 @@ function AgentChangesContent() {
   );
 }
 
-function ExpandedDiff({ entry, rootPath }: { entry: SessionChangeEntry; rootPath: string | null }) {
-  const { content, loading } = useDiffContent(entry, rootPath);
+function ExpandedDiff({
+  entry,
+  rootPath,
+  filter,
+}: {
+  entry: SessionChangeEntry;
+  rootPath: string | null;
+  filter: ChangeFilter;
+}) {
+  const { content, loading } = useDiffContent(entry, rootPath, filter);
 
   if (loading) {
     return (
@@ -580,9 +622,17 @@ function AgentChangesToolbar() {
   const gitUnstaged = useGitStore((s) => s.unstaged);
   const gitUntracked = useGitStore((s) => s.untracked);
   const gitConflicts = useGitStore((s) => s.conflicts);
+  const gitBranchChanges = useGitStore((s) => s.branchChanges);
   const gitRefresh = useGitStore((s) => s.refresh);
+  const fetchBranchChanges = useGitStore((s) => s.fetchBranchChanges);
 
   const rootPath = useFileStore((s) => s.rootPath);
+
+  // Ensure branch changes are loaded when the toolbar is visible with the branch filter.
+  useEffect(() => {
+    if (filter !== 'branch') return;
+    void fetchBranchChanges();
+  }, [filter, fetchBranchChanges, rootPath]);
 
   const entries = useMemo(
     () =>
@@ -595,6 +645,7 @@ function AgentChangesToolbar() {
           unstaged: gitUnstaged,
           untracked: gitUntracked,
           conflicts: gitConflicts,
+          branchChanges: gitBranchChanges,
         },
         rootPath,
       }),
@@ -606,6 +657,7 @@ function AgentChangesToolbar() {
       gitUnstaged,
       gitUntracked,
       gitConflicts,
+      gitBranchChanges,
       rootPath,
     ],
   );
@@ -689,6 +741,10 @@ function EmptyChangesState({ filter }: { filter: ChangeFilter }) {
     working: {
       title: 'No working tree changes',
       subtitle: 'Modified and untracked files will appear here',
+    },
+    branch: {
+      title: 'No branch changes',
+      subtitle: 'No files differ between this branch and its base',
     },
   };
   const { title, subtitle } = messages[filter];
