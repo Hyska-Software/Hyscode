@@ -10,6 +10,7 @@ import {
   Loader2,
   RefreshCw,
   ChevronDown,
+  ChevronRight,
   PanelRightClose,
   Folder,
 } from 'lucide-react';
@@ -48,9 +49,7 @@ import {
 } from '@/lib/session-changes';
 
 const MonacoEditor = lazy(() => import('@monaco-editor/react'));
-const MonacoDiffEditor = lazy(() =>
-  import('@monaco-editor/react').then((mod) => ({ default: mod.DiffEditor })),
-);
+import { DiffViewer } from '@/components/diff-viewer';
 
 // ─── Language detection ─────────────────────────────────────────────────────
 
@@ -341,8 +340,6 @@ function CountBadge({ added, removed }: { added: number; removed: number }) {
 }
 
 function AgentChangesContent() {
-  const selectedFile = useLayoutStore((s) => s.agentSelectedChangeFile);
-  const setSelectedFile = useLayoutStore((s) => s.setAgentSelectedChangeFile);
   const filter = useLayoutStore((s) => s.agentChangesFilter);
 
   const agentEditSessions = useAgentStore((s) => s.agentEditSessions);
@@ -356,8 +353,6 @@ function AgentChangesContent() {
   const gitConflicts = useGitStore((s) => s.conflicts);
 
   const rootPath = useFileStore((s) => s.rootPath);
-  const themeId = useSettingsStore((s) => s.themeId);
-  const monacoTheme = getMonacoThemeName(themeId);
 
   const entries = useMemo(
     () =>
@@ -387,21 +382,27 @@ function AgentChangesContent() {
 
   const gitCounts = useGitChangeCounts(entries, rootPath, filter);
 
-  const selectedEntry = useMemo(
-    () => entries.find((e) => e.filePath === selectedFile) ?? entries[0] ?? null,
-    [entries, selectedFile],
-  );
+  const [expandedKeys, setExpandedKeys] = useState<Set<string>>(() => new Set());
 
-  // Sync selected file with current entry.
+  // Expand the first entry by default when the list becomes non-empty.
   useEffect(() => {
-    if (selectedEntry && selectedEntry.filePath !== selectedFile) {
-      setSelectedFile(selectedEntry.filePath);
-    } else if (!selectedEntry) {
-      setSelectedFile(null);
-    }
-  }, [selectedEntry, selectedFile, setSelectedFile]);
+    setExpandedKeys((prev) => {
+      if (prev.size > 0 || entries.length === 0) return prev;
+      return new Set([entries[0].key]);
+    });
+  }, [entries]);
 
-  const { content: diffContent, loading: diffLoading } = useDiffContent(selectedEntry, rootPath);
+  const toggleExpanded = (key: string) => {
+    setExpandedKeys((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) {
+        next.delete(key);
+      } else {
+        next.add(key);
+      }
+      return next;
+    });
+  };
 
   const handleAcceptOne = (id: string) => {
     HarnessBridge.get().resolveEditSession(id, true);
@@ -411,40 +412,37 @@ function AgentChangesContent() {
     HarnessBridge.get().resolveEditSession(id, false);
   };
 
-  const selectedGitCount = selectedEntry ? gitCounts.get(selectedEntry.key) : undefined;
-  const selectedAdded = selectedGitCount ? selectedGitCount.added : (selectedEntry?.added ?? 0);
-  const selectedRemoved = selectedGitCount
-    ? selectedGitCount.removed
-    : (selectedEntry?.removed ?? 0);
-
   return (
     <div className="flex h-full flex-col">
       {entries.length === 0 ? (
         <EmptyChangesState filter={filter} />
       ) : (
-        <>
-          {/* File list */}
-          <div className="flex shrink-0 flex-col border-b border-border/30 max-h-[35%] overflow-auto">
-            {entries.map((entry) => {
-              const gitCount = gitCounts.get(entry.key);
-              const added = gitCount ? gitCount.added : entry.added;
-              const removed = gitCount ? gitCount.removed : entry.removed;
-              const isSelected = entry.filePath === selectedFile;
-              const isPending =
-                entry.agentSession?.phase === 'streaming' ||
-                entry.agentSession?.phase === 'pending_review';
+        <div className="flex-1 overflow-auto">
+          {entries.map((entry) => {
+            const gitCount = gitCounts.get(entry.key);
+            const added = gitCount ? gitCount.added : entry.added;
+            const removed = gitCount ? gitCount.removed : entry.removed;
+            const isExpanded = expandedKeys.has(entry.key);
+            const isPending =
+              entry.agentSession?.phase === 'streaming' ||
+              entry.agentSession?.phase === 'pending_review';
 
-              return (
+            return (
+              <div key={entry.key} className="border-b border-border/30 last:border-b-0">
                 <button
-                  key={entry.key}
-                  onClick={() => setSelectedFile(entry.filePath)}
+                  onClick={() => toggleExpanded(entry.key)}
                   className={cn(
-                    'group flex items-center gap-2 px-2 py-1 text-left transition-colors',
-                    isSelected
+                    'group flex w-full items-center gap-2 px-2 py-1 text-left transition-colors',
+                    isExpanded
                       ? 'bg-accent/10 text-foreground'
                       : 'text-muted-foreground hover:bg-muted/50 hover:text-foreground',
                   )}
                 >
+                  {isExpanded ? (
+                    <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                  ) : (
+                    <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                  )}
                   <StatusBadge entry={entry} />
                   <FilePath relPath={entry.relPath} />
                   {entry.gitFile?.old_path && (
@@ -483,58 +481,43 @@ function AgentChangesContent() {
                     </div>
                   )}
                 </button>
-              );
-            })}
-          </div>
 
-          {/* Diff viewer */}
-          <div className="flex min-h-0 flex-1 flex-col">
-            {selectedEntry && (
-              <div className="flex shrink-0 items-center justify-between border-b border-border/30 px-3 py-1.5">
-                <span className="min-w-0 truncate text-[11px] font-medium text-foreground">
-                  {selectedEntry.relPath}
-                </span>
-                <div className="flex shrink-0 items-center gap-1.5">
-                  <StatusBadge entry={selectedEntry} />
-                  <CountBadge added={selectedAdded} removed={selectedRemoved} />
-                </div>
+                {isExpanded && <ExpandedDiff entry={entry} rootPath={rootPath} />}
               </div>
-            )}
-            <div className="flex-1 overflow-hidden">
-              {diffLoading ? (
-                <LoadingSpinner />
-              ) : diffContent ? (
-                <Suspense fallback={<LoadingSpinner />}>
-                  <MonacoDiffEditor
-                    original={diffContent.original}
-                    modified={diffContent.modified}
-                    language={diffContent.language}
-                    theme={monacoTheme}
-                    beforeMount={defineAllMonacoThemes}
-                    options={{
-                      fontFamily: "'Geist Mono', 'JetBrains Mono', 'Fira Code', monospace",
-                      fontSize: 13,
-                      lineHeight: 1.6,
-                      readOnly: true,
-                      renderSideBySide: false,
-                      scrollBeyondLastLine: false,
-                      smoothScrolling: true,
-                      minimap: { enabled: false },
-                      padding: { top: 8 },
-                      overviewRulerLanes: 0,
-                      overviewRulerBorder: false,
-                    }}
-                  />
-                </Suspense>
-              ) : (
-                <div className="flex h-full items-center justify-center text-[10px] text-muted-foreground">
-                  Select a file to view changes
-                </div>
-              )}
-            </div>
-          </div>
-        </>
+            );
+          })}
+        </div>
       )}
+    </div>
+  );
+}
+
+function ExpandedDiff({ entry, rootPath }: { entry: SessionChangeEntry; rootPath: string | null }) {
+  const { content, loading } = useDiffContent(entry, rootPath);
+
+  if (loading) {
+    return (
+      <div className="h-32">
+        <LoadingSpinner />
+      </div>
+    );
+  }
+
+  if (!content) {
+    return (
+      <div className="flex h-32 items-center justify-center text-[10px] text-muted-foreground">
+        Unable to load diff
+      </div>
+    );
+  }
+
+  return (
+    <div className="max-h-[320px] overflow-auto bg-surface">
+      <DiffViewer
+        original={content.original}
+        modified={content.modified}
+        hunks={entry.agentSession?.hunks}
+      />
     </div>
   );
 }
