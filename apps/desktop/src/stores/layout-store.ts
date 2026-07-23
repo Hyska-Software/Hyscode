@@ -62,6 +62,8 @@ function normalizePrefs(prefs: AgentRightTabPrefs | undefined): AgentRightTabPre
 }
 
 /** Builtin sidebar views exposed in ActivityBar and View menu */
+export type AgentChangesFilter = 'session' | 'last-turn' | 'staged' | 'working';
+
 export type SidebarViewId =
   | 'files'
   | 'search'
@@ -93,6 +95,8 @@ interface LayoutState {
   agentPreviewFile: string | null;
   /** File path selected in the agent changes panel */
   agentSelectedChangeFile: string | null;
+  /** Active filter in the agent changes panel */
+  agentChangesFilter: AgentChangesFilter;
   /** Whether the rules panel popup is open in the agent panel */
   rulesPanelOpen: boolean;
   /** Whether the left sidebar is visible */
@@ -117,6 +121,7 @@ interface LayoutState {
   resetAgentRightTabs: () => void;
   setAgentPreviewFile: (filePath: string | null) => void;
   setAgentSelectedChangeFile: (filePath: string | null) => void;
+  setAgentChangesFilter: (filter: AgentChangesFilter) => void;
   setRulesPanelOpen: (open: boolean) => void;
   setSidebarVisible: (visible: boolean) => void;
   setSidebarActiveView: (view: SidebarView) => void;
@@ -140,6 +145,7 @@ export const useLayoutStore = create<LayoutState>()(
       agentRightTabPrefs: {},
       agentPreviewFile: null,
       agentSelectedChangeFile: null,
+      agentChangesFilter: 'session',
       rulesPanelOpen: false,
       sidebarVisible: true,
       sidebarActiveView: 'files',
