@@ -683,7 +683,7 @@ export class HarnessBridge {
 
       dbg(`Enviando para LLM (${history.length} msgs no histórico)...`);
 
-      const { response, turnRecord, status } = await this.harness.run(
+      const { turnId, response, turnRecord, status } = await this.harness.run(
         userMessage,
         history,
         imageContent.length > 0 ? imageContent : undefined,
@@ -708,8 +708,12 @@ export class HarnessBridge {
       else if (status !== 'recoverable_error')
         useAgentStore.getState().updateLastAssistantContent(response);
 
-      const summary = buildTurnSummary(turnRecord, useAgentStore.getState().agentEditSessions);
-      useAgentStore.getState().setTurnSummary(turnRecord.id, summary);
+      const summary = buildTurnSummary(
+        turnId,
+        turnRecord,
+        useAgentStore.getState().agentEditSessions,
+      );
+      useAgentStore.getState().setTurnSummary(turnId, summary);
       await this.commitTurn(userMessage, turnRecord);
       await this.persistTurnRecord(turnRecord, true);
       await this.refreshSessionUsage();

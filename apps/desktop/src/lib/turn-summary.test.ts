@@ -42,12 +42,13 @@ function session(
 }
 
 describe('buildTurnSummary', () => {
-  it('isolates files by turn and counts actual replacement lines', () => {
-    const summary = buildTurnSummary(record('turn-a'), [
+  it('uses the canonical turn id when the persisted record has a different id', () => {
+    const summary = buildTurnSummary('turn-a', record('record-a'), [
       session('turn-a', 'one\ntwo', 'one\nchanged'),
       session('turn-b', null, 'unrelated'),
     ]);
 
+    expect(summary.turnId).toBe('turn-a');
     expect(summary.files).toHaveLength(1);
     expect(summary.files[0]).toMatchObject({
       kind: 'edited',
@@ -58,6 +59,6 @@ describe('buildTurnSummary', () => {
   });
 
   it('returns a compact summary when no files changed', () => {
-    expect(buildTurnSummary(record('turn-empty'), []).files).toEqual([]);
+    expect(buildTurnSummary('turn-empty', record('record-empty'), []).files).toEqual([]);
   });
 });
