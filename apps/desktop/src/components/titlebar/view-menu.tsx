@@ -46,6 +46,7 @@ export function ViewMenu() {
   const wordWrap = useSettingsStore((s) => s.wordWrap);
   const lineNumbers = useSettingsStore((s) => s.lineNumbers);
   const visibleSidebarTabs = useSettingsStore((s) => s.visibleSidebarTabs);
+  const activityBarPosition = useSettingsStore((s) => s.activityBarPosition);
 
   const executeCommand = useCommandStore((s) => s.executeCommand);
 
@@ -115,6 +116,24 @@ export function ViewMenu() {
         <DropdownMenuSeparator />
 
         {/* ── Sidebar Tabs ── */}
+        <DropdownMenuSub>
+          <DropdownMenuSubTrigger>Activity Bar Position</DropdownMenuSubTrigger>
+          <DropdownMenuSubContent className="w-44">
+            <DropdownMenuCheckboxItem
+              checked={activityBarPosition === 'left'}
+              onCheckedChange={() => setSettings('activityBarPosition', 'left')}
+            >
+              Left
+            </DropdownMenuCheckboxItem>
+            <DropdownMenuCheckboxItem
+              checked={activityBarPosition === 'top'}
+              onCheckedChange={() => setSettings('activityBarPosition', 'top')}
+            >
+              Top
+            </DropdownMenuCheckboxItem>
+          </DropdownMenuSubContent>
+        </DropdownMenuSub>
+
         <DropdownMenuSub>
           <DropdownMenuSubTrigger>Sidebar Tabs</DropdownMenuSubTrigger>
           <DropdownMenuSubContent className="w-48">

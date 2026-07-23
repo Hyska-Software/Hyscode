@@ -129,6 +129,7 @@ export const SETTINGS_DEFAULTS = {
   subAgentAutoApprove: false,
 
   // ─ Layout tabs ─
+  activityBarPosition: 'left',
   showAgentTab: true,
   showAgentChatPanel: true,
   agentCenterPanelMode: 'chat',

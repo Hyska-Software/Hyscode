@@ -269,7 +269,7 @@ export const TAB_DEFAULT_KEYS: Record<BuiltinTabId, readonly SettingsKey[]> = {
     'commitAiProviderId',
     'commitAiModelId',
   ],
-  general: ['confirmOnClose', 'showWelcomeOnStartup', 'reducedMotion', 'updateChannel', 'checkForUpdatesOnStartup', 'autoDownload'],
+  general: ['confirmOnClose', 'showWelcomeOnStartup', 'reducedMotion', 'updateChannel', 'checkForUpdatesOnStartup', 'autoDownload', 'activityBarPosition'],
   ai: [
     'activeProviderId',
     'activeModelId',

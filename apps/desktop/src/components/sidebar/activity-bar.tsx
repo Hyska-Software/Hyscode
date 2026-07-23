@@ -1,3 +1,4 @@
+import { useCallback, useRef } from 'react';
 import { Files, Search, GitBranch, Settings, Bot, Puzzle, Blocks, Smartphone, Container, CheckSquare, FolderKanban, LayoutList, BrainCircuit, type LucideIcon } from 'lucide-react';
 import { useSettingsStore } from '../../stores';
 import { useGitStore } from '../../stores/git-store';
@@ -26,6 +27,7 @@ const builtinItems: { id: BuiltinSidebarView; icon: LucideIcon; label: string }[
 ];
 
 interface ActivityBarProps {
+  orientation: 'vertical' | 'horizontal';
   active: SidebarView;
   onSelect: (view: SidebarView) => void;
 }
@@ -41,7 +43,7 @@ function ActivityBadge({ count }: { count: number }) {
   );
 }
 
-export function ActivityBar({ active, onSelect }: ActivityBarProps) {
+export function ActivityBar({ orientation, active, onSelect }: ActivityBarProps) {
   const openSettings = useSettingsStore((s) => s.openSettings);
   const visibleSidebarTabs = useSettingsStore((s) => s.visibleSidebarTabs);
   const visibleExtensionViews = useSettingsStore((s) => s.visibleExtensionViews);
@@ -79,63 +81,97 @@ export function ActivityBar({ active, onSelect }: ActivityBarProps) {
       label: v.name,
     }));
 
-  return (
-    <div className="flex w-11 flex-col items-center gap-1 bg-sidebar py-2">
-      {builtinItems.filter((item) => visibleSidebarTabs[item.id]).map((item) => {
-        const Icon = item.icon;
-        const isActive = active === item.id;
-        const badge = badges[item.id];
-        return (
-          <button
-            key={item.id}
-            onClick={() => onSelect(item.id)}
-            className={`relative flex h-9 w-9 items-center justify-center rounded-md transition-colors ${
-              isActive
-                ? 'bg-surface-raised text-foreground'
-                : 'text-muted-foreground hover:text-foreground hover:bg-surface-raised/50'
-            }`}
-            title={item.label}
-          >
-            <Icon className="h-[18px] w-[18px]" />
-            {badge !== undefined && <ActivityBadge count={badge} />}
-          </button>
-        );
-      })}
+  const isVertical = orientation === 'vertical';
 
-      {/* Extension-contributed views */}
+  const buttonSize = isVertical ? 'h-9 w-9' : 'h-7 w-7';
+  const iconSize = isVertical ? 'h-[18px] w-[18px]' : 'h-3.5 w-3.5';
+
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const handleWheel = useCallback((e: React.WheelEvent) => {
+    if (!scrollRef.current) return;
+    e.preventDefault();
+    scrollRef.current.scrollBy({
+      left: e.deltaY || e.deltaX,
+      behavior: 'smooth',
+    });
+  }, []);
+
+  const renderItem = (
+    item: { id: string; icon: LucideIcon; label: string },
+    badge?: number,
+    tooltip?: string,
+  ) => {
+    const Icon = item.icon;
+    const isActive = active === item.id;
+    return (
+      <button
+        key={item.id}
+        onClick={() => onSelect(item.id)}
+        className={`relative flex ${buttonSize} shrink-0 items-center justify-center rounded-md transition-colors ${
+          isActive
+            ? 'bg-surface-raised text-foreground'
+            : 'text-muted-foreground hover:text-foreground hover:bg-surface-raised/50'
+        }`}
+        title={tooltip || item.label}
+      >
+        <Icon className={iconSize} />
+        {badge !== undefined && badge > 0 && <ActivityBadge count={badge} />}
+      </button>
+    );
+  };
+
+  const items = (
+    <>
+      {builtinItems
+        .filter((item) => visibleSidebarTabs[item.id])
+        .map((item) => renderItem(item, badges[item.id]))}
+
       {dynamicItems.length > 0 && (
-        <div className="mx-auto my-1 h-px w-5 bg-border" />
+        <div
+          className={
+            isVertical
+              ? 'mx-auto my-1 h-px w-5 shrink-0 bg-border'
+              : 'mx-1 my-auto h-5 w-px shrink-0 bg-border'
+          }
+        />
       )}
-      {dynamicItems.map((item) => {
-        const Icon = item.icon;
-        const isActive = active === item.id;
-        const viewBadge = viewBadges[item.id];
-        return (
-          <button
-            key={item.id}
-            onClick={() => onSelect(item.id)}
-            className={`relative flex h-9 w-9 items-center justify-center rounded-md transition-colors ${
-              isActive
-                ? 'bg-surface-raised text-foreground'
-                : 'text-muted-foreground hover:text-foreground hover:bg-surface-raised/50'
-            }`}
-            title={viewBadge?.tooltip || item.label}
-          >
-            <Icon className="h-[18px] w-[18px]" />
-            {viewBadge && <ActivityBadge count={viewBadge.count} />}
-          </button>
-        );
-      })}
 
-      <div className="mt-auto">
-        <button
-          onClick={openSettings}
-          className="flex h-9 w-9 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-surface-raised/50 transition-colors"
-          title="Settings"
-        >
-          <Settings className="h-[18px] w-[18px]" />
-        </button>
+      {dynamicItems.map((item) => {
+        const viewBadge = viewBadges[item.id];
+        return renderItem(item, viewBadge?.count, viewBadge?.tooltip);
+      })}
+    </>
+  );
+
+  const settingsButton = (
+    <button
+      onClick={openSettings}
+      className={`flex ${buttonSize} shrink-0 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-surface-raised/50 transition-colors`}
+      title="Settings"
+    >
+      <Settings className={iconSize} />
+    </button>
+  );
+
+  if (isVertical) {
+    return (
+      <div className="flex w-11 flex-col items-center gap-1 bg-sidebar py-2">
+        {items}
+        <div className="mt-auto">{settingsButton}</div>
       </div>
+    );
+  }
+
+  return (
+    <div className="flex h-10 flex-row items-center gap-1 bg-sidebar px-2">
+      <div
+        ref={scrollRef}
+        onWheel={handleWheel}
+        className="flex flex-1 items-center gap-1 overflow-x-auto scrollbar-hide scroll-smooth"
+      >
+        {items}
+      </div>
+      {settingsButton}
     </div>
   );
 }

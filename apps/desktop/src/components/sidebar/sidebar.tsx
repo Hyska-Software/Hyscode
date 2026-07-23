@@ -30,6 +30,7 @@ export function Sidebar() {
   const extensionViews = useExtensionStore((s) => s.contributions.views);
   const visibleSidebarTabs = useSettingsStore((s) => s.visibleSidebarTabs);
   const visibleExtensionViews = useSettingsStore((s) => s.visibleExtensionViews);
+  const activityBarPosition = useSettingsStore((s) => s.activityBarPosition);
 
   // If active view gets hidden, fall back to first visible one
   useEffect(() => {
@@ -55,9 +56,15 @@ export function Sidebar() {
     return extView?.name ?? view;
   };
 
+  const isTop = activityBarPosition === 'top';
+
   return (
-    <div className="flex h-full">
-      <ActivityBar active={activeView} onSelect={setActiveView} />
+    <div className={isTop ? 'flex h-full flex-col' : 'flex h-full'}>
+      <ActivityBar
+        orientation={isTop ? 'horizontal' : 'vertical'}
+        active={activeView}
+        onSelect={setActiveView}
+      />
       <div className="flex flex-1 flex-col overflow-hidden">
         <div className="flex h-8 items-center px-3 text-[10px] font-medium uppercase tracking-widest text-muted-foreground">
           {getViewLabel(activeView)}

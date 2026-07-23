@@ -1,5 +1,5 @@
 import { useSettingsStore } from '../../../stores';
-import type { ApprovalMode, UpdateChannel } from '../../../stores/settings-store';
+import type { ActivityBarPosition, ApprovalMode, UpdateChannel } from '../../../stores/settings-store';
 import { useUpdateStore } from '../../../stores/update-store';
 import { useOnboardingStore } from '../../../stores/onboarding-store';
 import { Loader2, CheckCircle, ArrowUpCircle, RefreshCw, RotateCcw } from 'lucide-react';
@@ -203,6 +203,19 @@ export function GeneralTab() {
           <Toggle
             checked={store.agentCenterPanelMode === 'terminal'}
             onChange={(v) => store.set('agentCenterPanelMode', v ? 'terminal' : 'chat')}
+          />
+        </Row>
+        <Row
+          label="Activity Bar Position"
+          description="Place sidebar icon tabs on the left or at the top"
+        >
+          <SelectInput<ActivityBarPosition>
+            value={store.activityBarPosition}
+            onChange={(v) => store.set('activityBarPosition', v)}
+            options={[
+              { value: 'left', label: 'Left' },
+              { value: 'top', label: 'Top' },
+            ]}
           />
         </Row>
       </Section>
