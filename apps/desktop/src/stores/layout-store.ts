@@ -219,29 +219,27 @@ export const useLayoutStore = create<LayoutState>()(
             : DEFAULT_RIGHT_TAB_ORDER[0];
           return { agentRightTab, agentRightTabPrefs: rest };
         }),
-      setAgentPreviewFile: (filePath) => set({ agentPreviewFile: filePath, agentRightTab: 'preview' }),
+      setAgentPreviewFile: (filePath) =>
+        set({ agentPreviewFile: filePath, agentRightTab: 'preview' }),
       setAgentSelectedChangeFile: (filePath) =>
         set({ agentSelectedChangeFile: filePath, agentRightTab: 'changes' }),
+      setAgentChangesFilter: (filter) => set({ agentChangesFilter: filter }),
       setRulesPanelOpen: (open) => set({ rulesPanelOpen: open }),
       setSidebarVisible: (visible) => set({ sidebarVisible: visible }),
       setSidebarActiveView: (view) => set({ sidebarActiveView: view }),
       setAgentLeftCollapsed: (collapsed) => set({ agentLeftCollapsed: collapsed }),
       setAgentRightCollapsed: (collapsed) => set({ agentRightCollapsed: collapsed }),
 
-      toggleTerminal: () =>
-        set((state) => ({ terminalVisible: !state.terminalVisible })),
+      toggleTerminal: () => set((state) => ({ terminalVisible: !state.terminalVisible })),
 
-      toggleSidebar: () =>
-        set((state) => ({ sidebarVisible: !state.sidebarVisible })),
+      toggleSidebar: () => set((state) => ({ sidebarVisible: !state.sidebarVisible })),
 
-      focusSidebarView: (view) =>
-        set({ sidebarActiveView: view, sidebarVisible: true }),
+      focusSidebarView: (view) => set({ sidebarActiveView: view, sidebarVisible: true }),
 
       moveTerminalToSidebar: () =>
         set({ terminalLocation: 'sidebar', sidebarActiveTab: 'terminal', terminalVisible: true }),
 
-      moveTerminalToBottom: () =>
-        set({ terminalLocation: 'bottom', terminalVisible: true }),
+      moveTerminalToBottom: () => set({ terminalLocation: 'bottom', terminalVisible: true }),
     }),
     {
       name: 'hyscode-layout',
@@ -254,6 +252,7 @@ export const useLayoutStore = create<LayoutState>()(
         agentLeftCollapsed: state.agentLeftCollapsed,
         agentRightCollapsed: state.agentRightCollapsed,
         agentRightTabPrefs: state.agentRightTabPrefs,
+        agentChangesFilter: state.agentChangesFilter,
       }),
     },
   ),
