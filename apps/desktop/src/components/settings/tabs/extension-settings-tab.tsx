@@ -105,11 +105,8 @@ function ConfigProperty({
             <SettingSelect
               value={String(currentValue ?? prop.default ?? '')}
               onChange={(v) => handleChange(v)}
-            >
-              {prop.enum.map((opt) => (
-                <option key={opt} value={opt}>{opt}</option>
-              ))}
-            </SettingSelect>
+              options={prop.enum.map((v) => ({ value: v, label: v }))}
+            />
           ) : prop.type === 'boolean' ? (
             <SettingToggle
               checked={!!(currentValue ?? prop.default)}

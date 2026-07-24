@@ -159,10 +159,11 @@ export function RuleEditorDialog({ open, onClose, existingRule, initialScope = '
               value={scope}
               onChange={(v) => setScope(v as RuleScope)}
               disabled={!!existingRule}
-            >
-              <option value="global">Global</option>
-              <option value="workspace">Workspace</option>
-            </SettingSelect>
+              options={[
+                { value: 'global' as RuleScope, label: 'Global' },
+                { value: 'workspace' as RuleScope, label: 'Workspace' },
+              ]}
+            />
           </div>
           {scope === 'workspace' && !projectPath && (
             <span className="text-[10px] text-destructive">No workspace open</span>

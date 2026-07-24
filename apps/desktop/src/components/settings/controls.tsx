@@ -1,5 +1,6 @@
-import type { ReactNode } from 'react';
-import { Button, Input, type InputProps, Select, Slider, Switch } from '@hyscode/ui';
+import { useState, type ReactNode } from 'react';
+import { ChevronDown } from 'lucide-react';
+import { Button, cn, Input, type InputProps, Popover, PopoverContent, PopoverTrigger, Slider, Switch } from '@hyscode/ui';
 
 /**
  * Aurora-styled settings controls.
@@ -96,38 +97,107 @@ export function SettingSelect<T extends string>({
   value,
   onChange,
   options,
+  groups,
   size = 'sm',
   className,
   id,
   disabled,
-  children,
+  maxHeight = 'max-h-64',
 }: {
   value: T;
   onChange: (v: T) => void;
   options?: { value: T; label: string }[];
+  groups?: { label: string; options: { value: T; label: string }[] }[];
   size?: 'sm' | 'md' | 'lg';
   className?: string;
   id?: string;
   disabled?: boolean;
-  children?: ReactNode;
+  maxHeight?: string;
 }) {
+  const [open, setOpen] = useState(false);
+
+  let displayLabel: string | undefined;
+  for (const opt of options ?? []) {
+    if (opt.value === value) { displayLabel = opt.label; break; }
+  }
+  if (displayLabel === undefined && groups) {
+    for (const grp of groups) {
+      for (const opt of grp.options) {
+        if (opt.value === value) { displayLabel = opt.label; break; }
+      }
+      if (displayLabel !== undefined) break;
+    }
+  }
+
   return (
-    <Select
-      value={value}
-      onChange={(e) => onChange((e.target as HTMLSelectElement).value as T)}
-      size={size}
-      className={className}
-      id={id}
-      disabled={disabled}
-    >
-      {options
-        ? options.map((opt) => (
-            <option key={opt.value} value={opt.value}>
-              {opt.label}
-            </option>
-          ))
-        : children}
-    </Select>
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          id={id}
+          disabled={disabled}
+          className={cn(
+            'flex w-full max-w-52 items-center justify-between gap-2 rounded-md bg-card text-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-50',
+            size === 'sm' && 'h-8 px-2.5 text-sm',
+            size === 'md' && 'h-9 px-3 text-sm',
+            size === 'lg' && 'h-11 px-4 text-base',
+            className,
+          )}
+        >
+          <span className={cn('truncate', !displayLabel && !value && 'text-muted-foreground')}>
+            {displayLabel ?? (value || 'Select...')}
+          </span>
+          <ChevronDown
+            className={cn(
+              'size-4 shrink-0 text-muted-foreground transition-transform',
+              open && 'rotate-180',
+            )}
+          />
+        </button>
+      </PopoverTrigger>
+      <PopoverContent
+        className={cn('p-1 overflow-y-auto', maxHeight)}
+        align="start"
+        sideOffset={4}
+        style={{ width: 'var(--radix-popover-trigger-width)' }}
+      >
+        {options
+          ? options.map((opt) => (
+              <button
+                key={opt.value}
+                type="button"
+                onClick={() => { onChange(opt.value); setOpen(false); }}
+                className={cn(
+                  'flex w-full items-center rounded-md px-2 py-1.5 text-sm transition-colors',
+                  opt.value === value ? 'bg-primary/10 text-primary' : 'text-foreground hover:bg-muted',
+                )}
+              >
+                <span className="truncate">{opt.label}</span>
+              </button>
+            ))
+          : null}
+        {groups?.map((grp) => (
+          <div key={grp.label}>
+            <div className="px-2 pt-2 pb-0.5 text-[10px] font-medium uppercase tracking-widest text-muted-foreground first:pt-0.5">
+              {grp.label}
+            </div>
+            {grp.options.map((opt) => (
+              <button
+                key={opt.value}
+                type="button"
+                onClick={() => { onChange(opt.value); setOpen(false); }}
+                className={cn(
+                  'flex w-full items-center rounded-md px-2 py-1.5 text-sm transition-colors',
+                  opt.value === value ? 'bg-primary/10 text-primary' : 'text-foreground hover:bg-muted',
+                )}
+              >
+                <span className="truncate">{opt.label}</span>
+              </button>
+            ))}
+          </div>
+        ))}
+      </PopoverContent>
+    </Popover>
   );
 }
 

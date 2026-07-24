@@ -128,14 +128,9 @@ function SelectItem({ item, extensionName }: { item: SettingsSelectItem; extensi
       <SettingSelect
         value={value}
         onChange={(v) => setValue(key, v)}
+        options={item.options}
         className="min-w-[120px]"
-      >
-        {item.options.map((opt) => (
-          <option key={opt.value} value={opt.value}>
-            {opt.label}
-          </option>
-        ))}
-      </SettingSelect>
+      />
     </div>
   );
 }

@@ -91,18 +91,15 @@ export function GitTab() {
               <SettingSelect
                 value={currentAiValue}
                 onChange={(v) => handleAiModelChange(v)}
-              >
-                <option value="">Use active agent model</option>
-                {grouped.map(({ provider, models }) => (
-                  <optgroup key={provider.id} label={provider.name}>
-                    {models.map((m) => (
-                      <option key={m.id} value={`${provider.id}::${m.id}`}>
-                        {m.name}
-                      </option>
-                    ))}
-                  </optgroup>
-                ))}
-              </SettingSelect>
+                options={[{ value: '' as string, label: 'Use active agent model' }]}
+                groups={grouped.map(({ provider, models }) => ({
+                  label: provider.name,
+                  options: models.map((m) => ({
+                    value: `${provider.id}::${m.id}` as string,
+                    label: m.name,
+                  })),
+                }))}
+              />
           )}
         </SettingRow>
         {store.commitAiProviderId && (

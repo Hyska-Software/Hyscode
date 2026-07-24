@@ -141,19 +141,16 @@ export function AiTab() {
                   const [providerId, modelId] = v.split('::');
                   store.setActiveProvider(providerId, modelId);
                 }}
-              >
-              {getAllEnabledModelsGrouped(store.enabledModels, store.customModels).map(
-                ({ provider, models }) => (
-                  <optgroup key={provider.id} label={provider.name}>
-                    {models.map((m) => (
-                      <option key={m.id} value={`${provider.id}::${m.id}`}>
-                        {m.name}
-                      </option>
-                    ))}
-                  </optgroup>
-                ),
-              )}
-              </SettingSelect>
+                groups={getAllEnabledModelsGrouped(store.enabledModels, store.customModels).map(
+                  ({ provider, models }) => ({
+                    label: provider.name,
+                    options: models.map((m) => ({
+                      value: `${provider.id}::${m.id}`,
+                      label: m.name,
+                    })),
+                  }),
+                )}
+              />
           </SettingRow>
         )}
       </SettingSection>
