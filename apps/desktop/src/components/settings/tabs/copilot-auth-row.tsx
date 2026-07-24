@@ -172,7 +172,7 @@ export function CopilotAuthRow({ className }: CopilotAuthRowProps) {
             </code>
             <button
               onClick={() => copyCode(authState.userCode)}
-              className="text-muted-foreground hover:text-foreground transition-colors"
+              className="rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
             >
               {copied ? <Check className="h-3.5 w-3.5 text-success" /> : <Copy className="h-3.5 w-3.5" />}
             </button>

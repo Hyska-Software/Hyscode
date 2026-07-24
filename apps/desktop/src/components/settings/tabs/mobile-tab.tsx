@@ -1,8 +1,9 @@
 import { useState } from 'react';
-import { CheckCircle2, FolderOpen, Loader2, Search, XCircle } from 'lucide-react';
+import { CheckCircle2, Loader2, Search, XCircle } from 'lucide-react';
 import { useSettingsStore } from '../../../stores';
 import { pickFolder } from '../../../lib/tauri-dialog';
 import { useDeviceStore, type SdkPaths } from '../../../stores/device-store';
+import { SettingRow, SettingSection, SettingPathInput, SettingToggle } from '../controls';
 
 export function MobileTab() {
   const store = useSettingsStore();
@@ -27,23 +28,23 @@ export function MobileTab() {
 
   return (
     <div className="flex flex-col gap-6">
-      <Section title="Flutter / Dart">
-        <Row label="Flutter SDK Path">
-          <PathInput
+      <SettingSection title="Flutter / Dart">
+        <SettingRow label="Flutter SDK Path">
+          <SettingPathInput
             value={store.flutterSdkPath}
             onChange={(v) => store.set('flutterSdkPath', v)}
             placeholder="Auto-detect (leave empty)"
             onBrowse={() => browse('flutterSdkPath')}
           />
-        </Row>
-        <Row label="Android SDK Path">
-          <PathInput
+        </SettingRow>
+        <SettingRow label="Android SDK Path">
+          <SettingPathInput
             value={store.androidSdkPath}
             onChange={(v) => store.set('androidSdkPath', v)}
             placeholder="Auto-detect (leave empty)"
             onBrowse={() => browse('androidSdkPath')}
           />
-        </Row>
+        </SettingRow>
         <div className="flex justify-end px-1">
           <button
             onClick={detect}
@@ -59,18 +60,18 @@ export function MobileTab() {
           </button>
         </div>
         {detected && <SdkResults paths={detected} />}
-      </Section>
+      </SettingSection>
 
-      <Section title="React Native">
-        <Row label="Auto-detect Projects">
-          <Toggle
+      <SettingSection title="React Native">
+        <SettingRow label="Auto-detect Projects">
+          <SettingToggle
             checked={store.reactNativeAutoDetect}
             onChange={(v) => store.set('reactNativeAutoDetect', v)}
           />
-        </Row>
-      </Section>
+        </SettingRow>
+      </SettingSection>
 
-      <Section title="Info">
+      <SettingSection title="Info">
         <div className="rounded-lg bg-surface-raised px-3 py-3 text-[11px] text-muted-foreground leading-relaxed">
           <p className="mb-2">
             <strong className="text-foreground">Flutter / Dart:</strong> If the SDK path is left
@@ -84,7 +85,7 @@ export function MobileTab() {
             common install locations automatically.
           </p>
         </div>
-      </Section>
+      </SettingSection>
     </div>
   );
 }
@@ -159,81 +160,5 @@ function SdkRow({
         )}
       </div>
     </div>
-  );
-}
-
-// ── Shared atoms ─────────────────────────────────────────────────────────────
-
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <div>
-      <h3 className="mb-3 text-[10px] font-medium uppercase tracking-widest text-muted-foreground">
-        {title}
-      </h3>
-      <div className="flex flex-col gap-2">{children}</div>
-    </div>
-  );
-}
-
-function Row({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div className="flex items-center justify-between gap-4 rounded-lg bg-surface-raised px-3 py-2.5">
-      <span className="text-[12px] text-foreground">{label}</span>
-      {children}
-    </div>
-  );
-}
-
-function PathInput({
-  value,
-  onChange,
-  placeholder,
-  onBrowse,
-}: {
-  value: string;
-  onChange: (v: string) => void;
-  placeholder?: string;
-  onBrowse: () => void;
-}) {
-  return (
-    <div className="flex items-center gap-1.5">
-      <input
-        type="text"
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        placeholder={placeholder}
-        className="h-7 w-44 rounded-md bg-muted px-2 text-[12px] text-foreground outline-none placeholder:text-muted-foreground"
-      />
-      <button
-        onClick={onBrowse}
-        className="flex h-7 w-7 items-center justify-center rounded-md bg-muted text-muted-foreground transition-colors hover:bg-surface-raised hover:text-foreground"
-        title="Browse folder"
-      >
-        <FolderOpen className="h-3.5 w-3.5" />
-      </button>
-    </div>
-  );
-}
-
-function Toggle({
-  checked,
-  onChange,
-}: {
-  checked: boolean;
-  onChange: (v: boolean) => void;
-}) {
-  return (
-    <button
-      onClick={() => onChange(!checked)}
-      className={`relative h-5 w-9 rounded-full transition-colors ${
-        checked ? 'bg-primary' : 'bg-muted'
-      }`}
-    >
-      <span
-        className={`absolute top-0.5 left-0.5 h-4 w-4 rounded-full bg-foreground transition-transform ${
-          checked ? 'translate-x-4' : 'translate-x-0'
-        }`}
-      />
-    </button>
   );
 }

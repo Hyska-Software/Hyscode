@@ -37,7 +37,7 @@ export function ProviderSetupGuide({ guide, open, onClose }: ProviderSetupGuideP
       }}
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm"
     >
-      <div className="relative w-full max-w-[520px] max-h-[80vh] overflow-y-auto rounded-xl border border-border bg-background shadow-2xl">
+      <div       className="relative w-full max-w-[520px] max-h-[80vh] overflow-y-auto rounded-xl border border-border bg-card shadow-2xl">
         {/* Header */}
         <div className="sticky top-0 z-10 flex items-center justify-between border-b border-border bg-background/95 backdrop-blur-sm px-5 py-3.5">
           <h2 className="text-[13px] font-semibold text-foreground tracking-tight">
@@ -45,7 +45,7 @@ export function ProviderSetupGuide({ guide, open, onClose }: ProviderSetupGuideP
           </h2>
           <button
             onClick={onClose}
-            className="rounded-md p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            className="rounded-md p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
           >
             <X className="h-4 w-4" />
           </button>
@@ -253,7 +253,7 @@ function ExternalLinkButton({ href, label }: { href: string; label: string }) {
       href={href}
       target="_blank"
       rel="noopener noreferrer"
-      className="inline-flex items-center gap-1.5 rounded-md border border-border bg-muted/50 px-2.5 py-1.5 text-[11px] text-foreground transition-colors hover:bg-muted w-fit mt-1"
+      className="inline-flex items-center gap-1.5 rounded-md border border-border bg-card px-2.5 py-1.5 text-[11px] font-medium text-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background w-fit mt-1"
     >
       <ExternalLink className="h-3 w-3 text-muted-foreground" />
       {label}

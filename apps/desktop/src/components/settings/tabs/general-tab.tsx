@@ -3,6 +3,7 @@ import type { ActivityBarPosition, ApprovalMode, UpdateChannel } from '../../../
 import { useUpdateStore } from '../../../stores/update-store';
 import { useOnboardingStore } from '../../../stores/onboarding-store';
 import { Loader2, CheckCircle, ArrowUpCircle, RefreshCw, RotateCcw } from 'lucide-react';
+import { SettingRow, SettingSection, SettingSelect, SettingSlider, SettingToggle } from '../controls';
 
 export function GeneralTab() {
   const store = useSettingsStore();
@@ -14,42 +15,42 @@ export function GeneralTab() {
 
   return (
     <div className="flex flex-col gap-6">
-      <Section title="Application">
-        <Row
+      <SettingSection title="Application">
+        <SettingRow
           label="Confirm Before Close"
           description="Show a confirmation dialog when closing the application"
         >
-          <Toggle
+          <SettingToggle
             checked={store.confirmOnClose}
             onChange={(v) => store.set('confirmOnClose', v)}
           />
-        </Row>
-        <Row
+        </SettingRow>
+        <SettingRow
           label="Show Welcome on Startup"
           description="Display welcome page when no project is open"
         >
-          <Toggle
+          <SettingToggle
             checked={store.showWelcomeOnStartup}
             onChange={(v) => store.set('showWelcomeOnStartup', v)}
           />
-        </Row>
-        <Row
+        </SettingRow>
+        <SettingRow
           label="Reduced Motion"
           description="Minimize animations across the application"
         >
-          <Toggle
+          <SettingToggle
             checked={store.reducedMotion}
             onChange={(v) => store.set('reducedMotion', v)}
           />
-        </Row>
-      </Section>
+        </SettingRow>
+      </SettingSection>
 
-      <Section title="Updates">
-        <Row
+      <SettingSection title="Updates">
+        <SettingRow
           label="Update Channel"
           description="Stable receives tested releases; Pre-release gets latest builds"
         >
-          <SelectInput<UpdateChannel>
+          <SettingSelect<UpdateChannel>
             value={store.updateChannel}
             onChange={(v) => store.set('updateChannel', v)}
             options={[
@@ -57,25 +58,25 @@ export function GeneralTab() {
               { value: 'pre-release', label: 'Pre-release' },
             ]}
           />
-        </Row>
-        <Row
+        </SettingRow>
+        <SettingRow
           label="Check on Startup"
           description="Automatically check for updates when the app launches"
         >
-          <Toggle
+          <SettingToggle
             checked={store.checkForUpdatesOnStartup}
             onChange={(v) => store.set('checkForUpdatesOnStartup', v)}
           />
-        </Row>
-        <Row
+        </SettingRow>
+        <SettingRow
           label="Auto-download"
           description="Download available updates automatically in the background"
         >
-          <Toggle
+          <SettingToggle
             checked={store.autoDownload}
             onChange={(v) => store.set('autoDownload', v)}
           />
-        </Row>
+        </SettingRow>
         <div className="flex items-center justify-between rounded-lg bg-surface-raised px-3 py-2.5">
           <div className="flex flex-col gap-0.5">
             <span className="text-[12px] text-foreground">Current status</span>
@@ -121,11 +122,11 @@ export function GeneralTab() {
             </button>
           </div>
         </div>
-      </Section>
+      </SettingSection>
 
-      <Section title="Agent">
-        <Row label="Approval Mode">
-          <SelectInput<ApprovalMode>
+      <SettingSection title="Agent">
+        <SettingRow label="Approval Mode">
+          <SettingSelect<ApprovalMode>
             value={store.approvalMode}
             onChange={(v) => store.set('approvalMode', v)}
             options={[
@@ -137,79 +138,79 @@ export function GeneralTab() {
               { value: 'custom',        label: 'Custom Rules – per-category config' },
             ]}
           />
-        </Row>
-        <Row
+        </SettingRow>
+        <SettingRow
           label="Limit Interactions"
           description="Off by default. Loop detection, cancellation, and request timeouts remain active."
         >
-          <Toggle
+          <SettingToggle
             checked={store.interactionLimitEnabled}
             onChange={(v) => store.set('interactionLimitEnabled', v)}
           />
-        </Row>
+        </SettingRow>
         {store.interactionLimitEnabled && (
-          <Row label="Max Interactions">
-            <NumberInput
+          <SettingRow label="Max Interactions">
+            <SettingSlider
               value={store.maxIterations}
               onChange={(v) => store.set('maxIterations', v)}
               min={1}
               max={500}
             />
-          </Row>
+          </SettingRow>
         )}
-        <Row label="Temperature">
-          <NumberInput
+        <SettingRow label="Temperature">
+          <SettingSlider
             value={store.temperature}
             onChange={(v) => store.set('temperature', v)}
             min={0}
             max={2}
             step={0.1}
           />
-        </Row>
-        <Row label="Max Output Tokens">
-          <NumberInput
+        </SettingRow>
+        <SettingRow label="Max Output Tokens">
+          <SettingSlider
             value={store.maxTokens}
             onChange={(v) => store.set('maxTokens', v)}
             min={256}
             max={32768}
             step={256}
           />
-        </Row>
-      </Section>
+        </SettingRow>
+      </SettingSection>
 
-      <Section title="Layout">
-        <Row
+      <SettingSection title="Layout">
+        <SettingRow
           label="Show Agent Tab"
           description="Display the Agent mode tab in the title bar"
         >
-          <Toggle
+          <SettingToggle
             checked={store.showAgentTab}
             onChange={(v) => store.set('showAgentTab', v)}
           />
-        </Row>
-        <Row
+        </SettingRow>
+        <SettingRow
           label="Show Agent Chat Panel"
           description="Display the agent chat panel on the right side of the editor"
         >
-          <Toggle
+          <SettingToggle
             checked={store.showAgentChatPanel}
             onChange={(v) => store.set('showAgentChatPanel', v)}
           />
-        </Row>
-        <Row
+        </SettingRow>
+        <SettingRow
           label="Terminal in Agent Center"
           description="Replace chat with terminal tabs in the agent layout center panel"
         >
-          <Toggle
+          <SettingToggle
             checked={store.agentCenterPanelMode === 'terminal'}
             onChange={(v) => store.set('agentCenterPanelMode', v ? 'terminal' : 'chat')}
           />
-        </Row>
-        <Row
+        </SettingRow>
+        <SettingRow
           label="Activity Bar Position"
           description="Place sidebar icon tabs on the left or at the top"
         >
-          <SelectInput<ActivityBarPosition>
+          <SettingSelect<ActivityBarPosition>
             value={store.activityBarPosition}
             onChange={(v) => store.set('activityBarPosition', v)}
             options={[
@@ -217,10 +218,10 @@ export function GeneralTab() {
               { value: 'top', label: 'Top' },
             ]}
           />
-        </Row>
-      </Section>
+        </SettingRow>
+      </SettingSection>
 
-      <Section title="Onboarding">
+      <SettingSection title="Onboarding">
         <div className="flex items-center justify-between rounded-lg bg-surface-raised px-3 py-2.5">
           <div className="flex flex-col gap-0.5">
             <span className="text-[12px] text-foreground">Restart Setup Wizard</span>
@@ -236,120 +237,7 @@ export function GeneralTab() {
             Redo Onboarding
           </button>
         </div>
-      </Section>
+      </SettingSection>
     </div>
-  );
-}
-
-// ── Shared atoms ─────────────────────────────────────────────────────────────
-
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <div>
-      <h3 className="mb-3 text-[10px] font-medium uppercase tracking-widest text-muted-foreground">
-        {title}
-      </h3>
-      <div className="flex flex-col gap-2">{children}</div>
-    </div>
-  );
-}
-
-function Row({
-  label,
-  description,
-  children,
-}: {
-  label: string;
-  description?: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="flex items-center justify-between gap-4 rounded-lg bg-surface-raised px-3 py-2.5">
-      <div className="flex flex-col">
-        <span className="text-[12px] text-foreground">{label}</span>
-        {description && (
-          <span className="text-[10px] text-muted-foreground">{description}</span>
-        )}
-      </div>
-      {children}
-    </div>
-  );
-}
-
-function NumberInput({
-  value,
-  onChange,
-  min,
-  max,
-  step = 1,
-}: {
-  value: number;
-  onChange: (v: number) => void;
-  min: number;
-  max: number;
-  step?: number;
-}) {
-  return (
-    <div className="flex items-center gap-2">
-      <input
-        type="range"
-        min={min}
-        max={max}
-        step={step}
-        value={value}
-        onChange={(e) => onChange(Number(e.target.value))}
-        className="h-1 w-24 cursor-pointer appearance-none rounded-full bg-muted primary-primary"
-      />
-      <span className="w-12 text-right text-[11px] tabular-nums text-muted-foreground">
-        {step < 1 ? value.toFixed(1) : value}
-      </span>
-    </div>
-  );
-}
-
-function SelectInput<T extends string>({
-  value,
-  onChange,
-  options,
-}: {
-  value: T;
-  onChange: (v: T) => void;
-  options: { value: T; label: string }[];
-}) {
-  return (
-    <select
-      value={value}
-      onChange={(e) => onChange(e.target.value as T)}
-      className="h-7 rounded-md bg-muted px-2 text-[12px] text-foreground outline-none"
-    >
-      {options.map((opt) => (
-        <option key={opt.value} value={opt.value}>
-          {opt.label}
-        </option>
-      ))}
-    </select>
-  );
-}
-
-function Toggle({
-  checked,
-  onChange,
-}: {
-  checked: boolean;
-  onChange: (v: boolean) => void;
-}) {
-  return (
-    <button
-      onClick={() => onChange(!checked)}
-      className={`relative h-5 w-9 rounded-full transition-colors ${
-        checked ? 'bg-primary' : 'bg-muted'
-      }`}
-    >
-      <span
-        className={`absolute top-0.5 left-0.5 h-4 w-4 rounded-full bg-foreground transition-transform ${
-          checked ? 'translate-x-4' : 'translate-x-0'
-        }`}
-      />
-    </button>
   );
 }

@@ -1,5 +1,6 @@
 import { Check } from 'lucide-react';
 import { useSettingsStore } from '../../../stores';
+import { SettingToggle } from '../controls';
 import { useExtensionStore } from '../../../stores/extension-store';
 import { getCustomThemeMetas } from '../../../lib/monaco-themes';
 import {
@@ -27,27 +28,27 @@ const THEMES: ThemeOption[] = [
   {
     id: 'hyscode-dark',
     name: 'HysCode Dark',
-    description: 'Default dark theme with purple primarys',
+    description: 'Dark theme with teal accent — cool neutrals',
     colors: {
-      bg: '#0d0d0d',
-      surface: '#181818',
-      sidebar: '#111111',
-      accent: '#a855f7',
-      fg: '#e8e8e8',
-      muted: '#888888',
+      bg: '#202123',
+      surface: '#2a2b32',
+      sidebar: '#202123',
+      accent: '#10a37f',
+      fg: '#ececf1',
+      muted: '#8e8ea0',
     },
   },
   {
     id: 'hyscode-light',
     name: 'HysCode Light',
-    description: 'Clean light theme for daytime work',
+    description: 'Light theme with teal accent — cool neutrals',
     colors: {
-      bg: '#f5f5f5',
+      bg: '#f7f7f8',
       surface: '#ffffff',
-      sidebar: '#eaeaea',
-      accent: '#7c3aed',
-      fg: '#1a1a1a',
-      muted: '#666666',
+      sidebar: '#f7f7f8',
+      accent: '#0d8a6c',
+      fg: '#0d0d0f',
+      muted: '#6e6e80',
     },
   },
   {
@@ -330,18 +331,10 @@ export function ThemeTab() {
             Remove all rounded corners for a sharper, squared-off UI
           </span>
         </div>
-        <button
-          onClick={() => store.set('disableRoundedBorders', !store.disableRoundedBorders)}
-          className={`relative h-5 w-9 shrink-0 rounded-full transition-colors ${
-            store.disableRoundedBorders ? 'bg-primary' : 'bg-muted'
-          }`}
-        >
-          <span
-            className={`absolute top-0.5 left-0.5 h-4 w-4 rounded-full bg-foreground transition-transform ${
-              store.disableRoundedBorders ? 'translate-x-4' : 'translate-x-0'
-            }`}
-          />
-        </button>
+        <SettingToggle
+          checked={store.disableRoundedBorders}
+          onChange={(v) => store.set('disableRoundedBorders', v)}
+        />
       </div>
 
       <div className="grid grid-cols-2 gap-3">

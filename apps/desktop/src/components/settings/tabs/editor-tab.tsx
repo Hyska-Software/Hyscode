@@ -8,6 +8,7 @@ import type {
   AutoClosingBrackets,
   AutoClosingQuotes,
 } from '../../../stores/settings-store';
+import { SettingRow, SettingSection, SettingSelect, SettingSlider, SettingTextInput, SettingToggle } from '../controls';
 
 export function EditorTab() {
   const store = useSettingsStore();
@@ -15,51 +16,51 @@ export function EditorTab() {
   return (
     <div className="flex flex-col gap-6">
       {/* Font */}
-      <Section title="Font">
-        <Row label="Font Family">
-          <TextInput
+      <SettingSection title="Font">
+        <SettingRow label="Font Family">
+          <SettingTextInput
             value={store.fontFamily}
             onChange={(v) => store.set('fontFamily', v)}
             placeholder="Geist Mono"
           />
-        </Row>
-        <Row label="Font Size">
-          <NumberInput
+        </SettingRow>
+        <SettingRow label="Font Size">
+          <SettingSlider
             value={store.fontSize}
             onChange={(v) => store.set('fontSize', v)}
             min={8}
             max={32}
           />
-        </Row>
-        <Row label="Line Height">
-          <NumberInput
+        </SettingRow>
+        <SettingRow label="Line Height">
+          <SettingSlider
             value={store.lineHeight}
             onChange={(v) => store.set('lineHeight', v)}
             min={1}
             max={3}
             step={0.1}
           />
-        </Row>
-      </Section>
+        </SettingRow>
+      </SettingSection>
 
       {/* Editing */}
-      <Section title="Editing">
-        <Row label="Tab Size">
-          <NumberInput
+      <SettingSection title="Editing">
+        <SettingRow label="Tab Size">
+          <SettingSlider
             value={store.tabSize}
             onChange={(v) => store.set('tabSize', v)}
             min={1}
             max={8}
           />
-        </Row>
-        <Row label="Insert Spaces">
-          <Toggle
+        </SettingRow>
+        <SettingRow label="Insert Spaces">
+          <SettingToggle
             checked={store.insertSpaces}
             onChange={(v) => store.set('insertSpaces', v)}
           />
-        </Row>
-        <Row label="Word Wrap">
-          <SelectInput<WordWrap>
+        </SettingRow>
+        <SettingRow label="Word Wrap">
+          <SettingSelect<WordWrap>
             value={store.wordWrap}
             onChange={(v) => store.set('wordWrap', v)}
             options={[
@@ -68,9 +69,9 @@ export function EditorTab() {
               { value: 'wordWrapColumn', label: 'Word Wrap Column' },
             ]}
           />
-        </Row>
-        <Row label="Cursor Style">
-          <SelectInput<CursorStyle>
+        </SettingRow>
+        <SettingRow label="Cursor Style">
+          <SettingSelect<CursorStyle>
             value={store.cursorStyle}
             onChange={(v) => store.set('cursorStyle', v)}
             options={[
@@ -79,9 +80,9 @@ export function EditorTab() {
               { value: 'underline', label: 'Underline' },
             ]}
           />
-        </Row>
-        <Row label="Render Whitespace">
-          <SelectInput<RenderWhitespace>
+        </SettingRow>
+        <SettingRow label="Render Whitespace">
+          <SettingSelect<RenderWhitespace>
             value={store.renderWhitespace}
             onChange={(v) => store.set('renderWhitespace', v)}
             options={[
@@ -90,9 +91,9 @@ export function EditorTab() {
               { value: 'all', label: 'All' },
             ]}
           />
-        </Row>
-        <Row label="Auto Save">
-          <SelectInput<AutoSave>
+        </SettingRow>
+        <SettingRow label="Auto Save">
+          <SettingSelect<AutoSave>
             value={store.autoSave}
             onChange={(v) => store.set('autoSave', v)}
             options={[
@@ -101,24 +102,24 @@ export function EditorTab() {
               { value: 'onFocusChange', label: 'On Focus Change' },
             ]}
           />
-        </Row>
+        </SettingRow>
         {store.autoSave === 'afterDelay' && (
-          <Row label="Auto Save Delay (ms)">
-            <NumberInput
+          <SettingRow label="Auto Save Delay (ms)">
+            <SettingSlider
               value={store.autoSaveDelay}
               onChange={(v) => store.set('autoSaveDelay', v)}
               min={100}
               max={10000}
               step={100}
             />
-          </Row>
+          </SettingRow>
         )}
-      </Section>
+      </SettingSection>
 
       {/* Display */}
-      <Section title="Display">
-        <Row label="Line Numbers">
-          <SelectInput<LineNumbers>
+      <SettingSection title="Display">
+        <SettingRow label="Line Numbers">
+          <SettingSelect<LineNumbers>
             value={store.lineNumbers}
             onChange={(v) => store.set('lineNumbers', v)}
             options={[
@@ -127,43 +128,43 @@ export function EditorTab() {
               { value: 'relative', label: 'Relative' },
             ]}
           />
-        </Row>
-        <Row label="Minimap">
-          <Toggle
+        </SettingRow>
+        <SettingRow label="Minimap">
+          <SettingToggle
             checked={store.minimap}
             onChange={(v) => store.set('minimap', v)}
           />
-        </Row>
-        <Row label="Bracket Pair Colorization">
-          <Toggle
+        </SettingRow>
+        <SettingRow label="Bracket Pair Colorization">
+          <SettingToggle
             checked={store.bracketPairColorization}
             onChange={(v) => store.set('bracketPairColorization', v)}
           />
-        </Row>
-        <Row label="Scroll Beyond Last Line">
-          <Toggle
+        </SettingRow>
+        <SettingRow label="Scroll Beyond Last Line">
+          <SettingToggle
             checked={store.scrollBeyondLastLine}
             onChange={(v) => store.set('scrollBeyondLastLine', v)}
           />
-        </Row>
-        <Row label="Smooth Scrolling">
-          <Toggle
+        </SettingRow>
+        <SettingRow label="Smooth Scrolling">
+          <SettingToggle
             checked={store.smoothScrolling}
             onChange={(v) => store.set('smoothScrolling', v)}
           />
-        </Row>
-        <Row label="Git Blame Inline">
-          <Toggle
+        </SettingRow>
+        <SettingRow label="Git Blame Inline">
+          <SettingToggle
             checked={store.gitBlameInline}
             onChange={(v) => store.set('gitBlameInline', v)}
           />
-        </Row>
-      </Section>
+        </SettingRow>
+      </SettingSection>
 
       {/* Advanced */}
-      <Section title="Advanced">
-        <Row label="Auto Close Brackets">
-          <SelectInput<AutoClosingBrackets>
+      <SettingSection title="Advanced">
+        <SettingRow label="Auto Close Brackets">
+          <SettingSelect<AutoClosingBrackets>
             value={store.autoClosingBrackets}
             onChange={(v) => store.set('autoClosingBrackets', v)}
             options={[
@@ -173,9 +174,9 @@ export function EditorTab() {
               { value: 'never', label: 'Never' },
             ]}
           />
-        </Row>
-        <Row label="Auto Close Quotes">
-          <SelectInput<AutoClosingQuotes>
+        </SettingRow>
+        <SettingRow label="Auto Close Quotes">
+          <SettingSelect<AutoClosingQuotes>
             value={store.autoClosingQuotes}
             onChange={(v) => store.set('autoClosingQuotes', v)}
             options={[
@@ -185,140 +186,20 @@ export function EditorTab() {
               { value: 'never', label: 'Never' },
             ]}
           />
-        </Row>
-        <Row label="Format on Paste">
-          <Toggle
+        </SettingRow>
+        <SettingRow label="Format on Paste">
+          <SettingToggle
             checked={store.formatOnPaste}
             onChange={(v) => store.set('formatOnPaste', v)}
           />
-        </Row>
-        <Row label="Format on Type">
-          <Toggle
+        </SettingRow>
+        <SettingRow label="Format on Type">
+          <SettingToggle
             checked={store.formatOnType}
             onChange={(v) => store.set('formatOnType', v)}
           />
-        </Row>
-      </Section>
+        </SettingRow>
+      </SettingSection>
     </div>
-  );
-}
-
-// ── Shared atoms ─────────────────────────────────────────────────────────────
-
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <div>
-      <h3 className="mb-3 text-[10px] font-medium uppercase tracking-widest text-muted-foreground">
-        {title}
-      </h3>
-      <div className="flex flex-col gap-2">{children}</div>
-    </div>
-  );
-}
-
-function Row({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div className="flex items-center justify-between gap-4 rounded-lg bg-surface-raised px-3 py-2.5">
-      <span className="text-[12px] text-foreground">{label}</span>
-      {children}
-    </div>
-  );
-}
-
-function TextInput({
-  value,
-  onChange,
-  placeholder,
-}: {
-  value: string;
-  onChange: (v: string) => void;
-  placeholder?: string;
-}) {
-  return (
-    <input
-      type="text"
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-      placeholder={placeholder}
-      className="h-7 w-44 rounded-md bg-muted px-2 text-[12px] text-foreground outline-none placeholder:text-muted-foreground"
-    />
-  );
-}
-
-function NumberInput({
-  value,
-  onChange,
-  min,
-  max,
-  step = 1,
-}: {
-  value: number;
-  onChange: (v: number) => void;
-  min: number;
-  max: number;
-  step?: number;
-}) {
-  return (
-    <div className="flex items-center gap-2">
-      <input
-        type="range"
-        min={min}
-        max={max}
-        step={step}
-        value={value}
-        onChange={(e) => onChange(Number(e.target.value))}
-        className="h-1 w-24 cursor-pointer appearance-none rounded-full bg-muted primary-primary"
-      />
-      <span className="w-10 text-right text-[11px] tabular-nums text-muted-foreground">
-        {step < 1 ? value.toFixed(1) : value}
-      </span>
-    </div>
-  );
-}
-
-function SelectInput<T extends string>({
-  value,
-  onChange,
-  options,
-}: {
-  value: T;
-  onChange: (v: T) => void;
-  options: { value: T; label: string }[];
-}) {
-  return (
-    <select
-      value={value}
-      onChange={(e) => onChange(e.target.value as T)}
-      className="h-7 rounded-md bg-muted px-2 text-[12px] text-foreground outline-none"
-    >
-      {options.map((opt) => (
-        <option key={opt.value} value={opt.value}>
-          {opt.label}
-        </option>
-      ))}
-    </select>
-  );
-}
-
-function Toggle({
-  checked,
-  onChange,
-}: {
-  checked: boolean;
-  onChange: (v: boolean) => void;
-}) {
-  return (
-    <button
-      onClick={() => onChange(!checked)}
-      className={`relative h-5 w-9 rounded-full transition-colors ${
-        checked ? 'bg-primary' : 'bg-muted'
-      }`}
-    >
-      <span
-        className={`absolute top-0.5 left-0.5 h-4 w-4 rounded-full bg-foreground transition-transform ${
-          checked ? 'translate-x-4' : 'translate-x-0'
-        }`}
-      />
-    </button>
   );
 }

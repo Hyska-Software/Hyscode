@@ -3,6 +3,7 @@ import { ChevronDown, ChevronRight, Blocks, Eye, EyeOff } from 'lucide-react';
 import { useExtensionStore } from '../../../stores/extension-store';
 import { useSettingsStore } from '../../../stores';
 import type { ConfigurationContribution } from '@hyscode/extension-api';
+import { SettingInput, SettingSelect, SettingSlider, SettingToggle } from '../controls';
 
 interface ExtConfigEntry {
   extensionName: string;
@@ -101,59 +102,48 @@ function ConfigProperty({
         </div>
         <div className="shrink-0">
           {prop.enum ? (
-            <select
+            <SettingSelect
               value={String(currentValue ?? prop.default ?? '')}
-              onChange={(e) => handleChange(e.target.value)}
-              className="h-7 rounded-md bg-muted px-2 text-[11px] text-foreground outline-none"
+              onChange={(v) => handleChange(v)}
             >
               {prop.enum.map((opt) => (
                 <option key={opt} value={opt}>{opt}</option>
               ))}
-            </select>
+            </SettingSelect>
           ) : prop.type === 'boolean' ? (
-            <button
-              onClick={() => handleChange(!(currentValue ?? prop.default))}
-              className={`relative h-5 w-9 rounded-full transition-colors ${
-                (currentValue ?? prop.default) ? 'bg-primary' : 'bg-muted'
-              }`}
-            >
-              <span
-                className={`absolute top-0.5 left-0.5 h-4 w-4 rounded-full bg-foreground transition-transform ${
-                  (currentValue ?? prop.default) ? 'translate-x-4' : 'translate-x-0'
-                }`}
-              />
-            </button>
+            <SettingToggle
+              checked={!!(currentValue ?? prop.default)}
+              onChange={(v) => handleChange(v)}
+            />
           ) : prop.type === 'number' || prop.type === 'integer' ? (
             <div className="flex items-center gap-2">
-              <input
-                type="range"
+              <SettingSlider
+                value={Number(currentValue ?? prop.default ?? 0)}
+                onChange={(v) => handleChange(v)}
                 min={prop.minimum ?? 0}
                 max={prop.maximum ?? 100}
                 step={1}
-                value={Number(currentValue ?? prop.default ?? 0)}
-                onChange={(e) => handleChange(Number(e.target.value))}
-                className="h-1 w-20 cursor-pointer appearance-none rounded-full bg-muted primary-primary"
               />
               <span className="w-8 text-right text-[10px] tabular-nums text-muted-foreground">
                 {Number(currentValue ?? prop.default ?? 0)}
               </span>
             </div>
           ) : prop.type === 'array' ? (
-            <input
+            <SettingInput
               type="text"
               value={Array.isArray(currentValue) ? currentValue.join(', ') : String(currentValue ?? prop.default ?? '')}
               onChange={(e) => handleChange(e.target.value.split(',').map((s) => s.trim()).filter(Boolean))}
               placeholder="comma-separated values"
-              className="h-7 w-44 rounded-md bg-muted px-2 text-[11px] text-foreground outline-none placeholder:text-muted-foreground/40"
+              className="h-7 w-44"
             />
           ) : prop.type === 'object' ? (
             <span className="text-[10px] text-muted-foreground/60 italic">JSON object</span>
           ) : (
-            <input
+            <SettingInput
               type="text"
               value={String(currentValue ?? prop.default ?? '')}
               onChange={(e) => handleChange(e.target.value)}
-              className="h-7 w-44 rounded-md bg-muted px-2 text-[11px] text-foreground outline-none placeholder:text-muted-foreground/40"
+              className="h-7 w-44"
             />
           )}
         </div>

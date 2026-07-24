@@ -1,5 +1,6 @@
 import { useState, useCallback, useEffect, Suspense, lazy } from 'react';
 import { X, Save, Loader2 } from 'lucide-react';
+import { Button } from '@/components/ui/button';
 import { useSettingsStore } from '../../../stores';
 import { useRulesStore } from '../../../stores/rules-store';
 import { useProjectStore } from '../../../stores/project-store';
@@ -7,6 +8,7 @@ import { defineAllMonacoThemes, getMonacoThemeName } from '../../../lib/monaco-t
 import { tauriFs } from '../../../lib/tauri-fs';
 import { HarnessBridge } from '../../../lib/harness-bridge';
 import type { RuleScope } from '@hyscode/agent-harness';
+import { SettingInput, SettingSelect } from '../controls';
 
 const MonacoEditor = lazy(() => import('@monaco-editor/react'));
 
@@ -124,44 +126,43 @@ export function RuleEditorDialog({ open, onClose, existingRule, initialScope = '
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm">
-      <div className="flex h-[520px] w-[680px] flex-col overflow-hidden rounded-xl bg-surface shadow-2xl">
+      <div className="flex h-[520px] w-[680px] flex-col overflow-hidden rounded-xl bg-card shadow-2xl">
         {/* Header */}
-        <div className="flex h-10 shrink-0 items-center justify-between border-b border-border/40 bg-surface-raised px-4">
+          <div className="flex h-10 shrink-0 items-center justify-between border-b border-border bg-surface-raised px-4">
           <span className="text-[13px] font-semibold text-foreground">
             {existingRule ? 'Edit Rule' : 'New Rule'}
           </span>
           <button
             onClick={onClose}
-            className="flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            className="flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
           >
             <X className="h-3.5 w-3.5" />
           </button>
         </div>
 
         {/* Form */}
-        <div className="flex shrink-0 items-center gap-3 border-b border-border/40 bg-surface-raised px-4 py-2.5">
+        <div className="flex shrink-0 items-center gap-3 border-b border-border bg-surface-raised px-4 py-2.5">
           <div className="flex items-center gap-2">
             <label className="text-[11px] text-muted-foreground">Name</label>
-            <input
+            <SettingInput
               type="text"
               value={name}
               onChange={(e) => setName(e.target.value)}
               disabled={!!existingRule}
               placeholder="my-rule"
-              className="h-7 w-40 rounded-md bg-muted px-2 text-[12px] text-foreground outline-none placeholder:text-muted-foreground/40 disabled:opacity-60"
+              className="h-7 w-40"
             />
           </div>
           <div className="flex items-center gap-2">
             <label className="text-[11px] text-muted-foreground">Scope</label>
-            <select
+            <SettingSelect
               value={scope}
-              onChange={(e) => setScope(e.target.value as RuleScope)}
+              onChange={(v) => setScope(v as RuleScope)}
               disabled={!!existingRule}
-              className="h-7 rounded-md bg-muted px-2 text-[12px] text-foreground outline-none disabled:opacity-60"
             >
               <option value="global">Global</option>
               <option value="workspace">Workspace</option>
-            </select>
+            </SettingSelect>
           </div>
           {scope === 'workspace' && !projectPath && (
             <span className="text-[10px] text-destructive">No workspace open</span>
@@ -200,7 +201,7 @@ export function RuleEditorDialog({ open, onClose, existingRule, initialScope = '
         </div>
 
         {/* Footer */}
-        <div className="flex shrink-0 items-center justify-between border-t border-border/40 bg-surface-raised px-4 py-3">
+        <div className="flex shrink-0 items-center justify-between border-t border-border bg-surface-raised px-4 py-3">
           {error ? (
             <span className="text-[11px] text-destructive">{error}</span>
           ) : (
@@ -209,20 +210,13 @@ export function RuleEditorDialog({ open, onClose, existingRule, initialScope = '
             </span>
           )}
           <div className="flex items-center gap-2">
-            <button
-              onClick={onClose}
-              className="rounded-md bg-muted px-3 py-1.5 text-[11px] font-medium text-foreground hover:bg-muted/80 transition-colors"
-            >
+            <Button variant="ghost" size="sm" onClick={onClose}>
               Cancel
-            </button>
-            <button
-              onClick={() => void handleSave()}
-              disabled={saving}
-              className="flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-[11px] font-medium text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50"
-            >
+            </Button>
+            <Button size="sm" onClick={() => void handleSave()} disabled={saving}>
               {saving ? <Loader2 className="h-3 w-3 animate-spin" /> : <Save className="h-3 w-3" />}
               Save
-            </button>
+            </Button>
           </div>
         </div>
       </div>

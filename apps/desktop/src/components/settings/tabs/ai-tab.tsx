@@ -33,6 +33,7 @@ import {
 } from '@/lib/provider-catalog';
 import type { ProviderInfo, ModelInfo } from '@/lib/provider-catalog';
 import type { ToolCategory } from '@hyscode/agent-harness';
+import { SettingRow, SettingSection, SettingSelect, SettingSlider, SettingToggle } from '../controls';
 
 function getActiveModelInfo(providerId: string | null, modelId: string | null): ModelInfo | null {
   if (!providerId || !modelId) return null;
@@ -74,9 +75,9 @@ export function AiTab() {
   return (
     <div className="flex flex-col gap-6">
       {/* ─── Active Provider & Model ────────────────────────────────── */}
-      <Section title="Active Provider & Model">
+      <SettingSection title="Active Provider & Model">
         {/* Use all providers toggle */}
-        <Row
+        <SettingRow
           label="Use all providers"
           description="Show models from every provider in the selector"
         >
@@ -91,13 +92,13 @@ export function AiTab() {
               <ToggleLeft className="h-5 w-5 text-muted-foreground opacity-50" />
             )}
           </button>
-        </Row>
+        </SettingRow>
 
         {/* Single-provider mode */}
         {!store.useAllProviders && (
           <>
-            <Row label="Provider">
-              <SelectInput
+            <SettingRow label="Provider">
+              <SettingSelect
                 value={store.activeProviderId ?? ''}
                 onChange={(v) => {
                   const enabled = enabledForProvider(v);
@@ -105,8 +106,8 @@ export function AiTab() {
                 }}
                 options={PROVIDERS.map((p) => ({ value: p.id, label: p.name }))}
               />
-            </Row>
-            <Row label="Model">
+            </SettingRow>
+            <SettingRow label="Model">
               {store.activeProviderId === 'openrouter' ? (
                 <div className="flex items-center gap-1.5">
                   <input
@@ -118,7 +119,7 @@ export function AiTab() {
                   />
                 </div>
               ) : (
-                <SelectInput
+                <SettingSelect
                   value={store.activeModelId ?? ''}
                   onChange={(v) => store.set('activeModelId', v)}
                   options={enabledForProvider(store.activeProviderId ?? '').map((m) => ({
@@ -127,21 +128,20 @@ export function AiTab() {
                   }))}
                 />
               )}
-            </Row>
+            </SettingRow>
           </>
         )}
 
         {/* All-providers mode: grouped model selector */}
         {store.useAllProviders && (
-          <Row label="Model">
-            <select
-              value={`${store.activeProviderId ?? ''}::${store.activeModelId ?? ''}`}
-              onChange={(e) => {
-                const [providerId, modelId] = e.target.value.split('::');
-                store.setActiveProvider(providerId, modelId);
-              }}
-              className="h-7 rounded-md bg-muted px-2 text-[11px] text-foreground outline-none"
-            >
+          <SettingRow label="Model">
+              <SettingSelect
+                value={`${store.activeProviderId ?? ''}::${store.activeModelId ?? ''}`}
+                onChange={(v) => {
+                  const [providerId, modelId] = v.split('::');
+                  store.setActiveProvider(providerId, modelId);
+                }}
+              >
               {getAllEnabledModelsGrouped(store.enabledModels, store.customModels).map(
                 ({ provider, models }) => (
                   <optgroup key={provider.id} label={provider.name}>
@@ -153,13 +153,13 @@ export function AiTab() {
                   </optgroup>
                 ),
               )}
-            </select>
-          </Row>
+              </SettingSelect>
+          </SettingRow>
         )}
-      </Section>
+      </SettingSection>
 
       {/* ─── Models per Provider ────────────────────────────────────── */}
-      <Section title="Models">
+      <SettingSection title="Models">
         <p className="text-[10px] text-muted-foreground -mt-1 mb-1">
           Enable or disable models for each provider. Enabled models appear in the model selector.
         </p>
@@ -257,10 +257,10 @@ export function AiTab() {
             </div>
           );
         })}
-      </Section>
+      </SettingSection>
 
       {/* ─── API Keys ──────────────────────────────────────────────── */}
-      <Section title="API Keys">
+      <SettingSection title="API Keys">
         {PROVIDERS.filter((p) => p.needsKey).map((provider) => (
           <ApiKeyRow key={provider.id} providerId={provider.id} providerName={provider.name} />
         ))}
@@ -297,61 +297,61 @@ export function AiTab() {
           <CopilotAuthRow />
           <CopilotBillingInfo />
         </div>
-      </Section>
+      </SettingSection>
 
       {/* ─── Generation Settings ───────────────────────────────────── */}
-      <Section title="Generation">
-        <Row
+      <SettingSection title="Generation">
+        <SettingRow
           label="Temperature"
           description="Controls creativity: 0.0 = deterministic, 1.0 = balanced, 2.0 = highly creative. Lower values produce consistent code; higher values produce varied responses."
         >
-          <NumberInput
+          <SettingSlider
             value={store.temperature}
             onChange={(v) => store.set('temperature', v)}
             min={0}
             max={2}
             step={0.1}
           />
-        </Row>
-        <Row label="Max Output Tokens">
-          <NumberInput
+        </SettingRow>
+        <SettingRow label="Max Output Tokens">
+          <SettingSlider
             value={store.maxTokens}
             onChange={(v) => store.set('maxTokens', v)}
             min={256}
             max={32768}
             step={256}
           />
-        </Row>
-        <Row label="Top P" description="Nucleus sampling (leave empty for default)">
-          <NumberInput
+        </SettingRow>
+        <SettingRow label="Top P" description="Nucleus sampling (leave empty for default)">
+          <SettingSlider
             value={store.topP ?? 1}
             onChange={(v) => store.set('topP', v)}
             min={0}
             max={1}
             step={0.05}
           />
-        </Row>
-        <Row
+        </SettingRow>
+        <SettingRow
           label="Limit Interactions"
           description="Off by default. GitHub Copilot retains provider cost caps."
         >
-          <Toggle
+          <SettingToggle
             checked={store.interactionLimitEnabled}
             onChange={(v) => store.set('interactionLimitEnabled', v)}
           />
-        </Row>
+        </SettingRow>
         {store.interactionLimitEnabled && (
-          <Row label="Max Interactions">
-            <NumberInput
+          <SettingRow label="Max Interactions">
+            <SettingSlider
               value={store.maxIterations}
               onChange={(v) => store.set('maxIterations', v)}
               min={1}
               max={500}
             />
-          </Row>
+          </SettingRow>
         )}
-        <Row label="Approval Mode" description="Controls when the agent asks before running tools">
-          <SelectInput
+        <SettingRow label="Approval Mode" description="Controls when the agent asks before running tools">
+          <SettingSelect
             value={store.approvalMode}
             onChange={(v) => store.set('approvalMode', v)}
             options={[
@@ -363,57 +363,57 @@ export function AiTab() {
               { value: 'custom', label: 'Custom Rules' },
             ]}
           />
-        </Row>
-      </Section>
+        </SettingRow>
+      </SettingSection>
 
-      <Section title="Advanced resilience">
-        <Row
+      <SettingSection title="Advanced resilience">
+        <SettingRow
           label="Automatic retries"
           description="Only applies before the provider returns useful content."
         >
-          <NumberInput
+          <SettingSlider
             value={store.agentMaxRetries}
             onChange={(v) => store.set('agentMaxRetries', v)}
             min={0}
             max={10}
           />
-        </Row>
-        <Row label="Initial retry delay (ms)">
-          <NumberInput
+        </SettingRow>
+        <SettingRow label="Initial retry delay (ms)">
+          <SettingSlider
             value={store.agentRetryBaseDelayMs}
             onChange={(v) => store.set('agentRetryBaseDelayMs', v)}
             min={100}
             max={30000}
             step={100}
           />
-        </Row>
-        <Row label="Maximum retry delay (ms)">
-          <NumberInput
+        </SettingRow>
+        <SettingRow label="Maximum retry delay (ms)">
+          <SettingSlider
             value={store.agentRetryMaxDelayMs}
             onChange={(v) => store.set('agentRetryMaxDelayMs', v)}
             min={1000}
             max={120000}
             step={1000}
           />
-        </Row>
-        <Row label="Request timeout (ms)">
-          <NumberInput
+        </SettingRow>
+        <SettingRow label="Request timeout (ms)">
+          <SettingSlider
             value={store.agentRequestTimeoutMs}
             onChange={(v) => store.set('agentRequestTimeoutMs', v)}
             min={10000}
             max={600000}
             step={5000}
           />
-        </Row>
-        <Row label="Stream inactivity timeout (ms)">
-          <NumberInput
+        </SettingRow>
+        <SettingRow label="Stream inactivity timeout (ms)">
+          <SettingSlider
             value={store.agentStreamIdleTimeoutMs}
             onChange={(v) => store.set('agentStreamIdleTimeoutMs', v)}
             min={10000}
             max={600000}
             step={5000}
           />
-        </Row>
+        </SettingRow>
         <div className="flex justify-end">
           <Button
             variant="outline"
@@ -429,7 +429,7 @@ export function AiTab() {
             Restore defaults
           </Button>
         </div>
-      </Section>
+      </SettingSection>
 
       {/* ─── Thinking / Reasoning ─────────────────────────────────── */}
       {(() => {
@@ -439,12 +439,12 @@ export function AiTab() {
         const thinkingConfig = store.thinkingSettings[thinkingKey] ?? { enabled: false };
         const levels = activeModel.thinkingLevels ?? ['low', 'medium', 'high'];
         return (
-          <Section title="Thinking & Reasoning">
-            <Row
+          <SettingSection title="Thinking & Reasoning">
+            <SettingRow
               label="Enable thinking"
               description="Allow the model to use extended reasoning before responding"
             >
-              <Toggle
+              <SettingToggle
                 checked={thinkingConfig.enabled}
                 onChange={(v) =>
                   store.setThinkingConfig(store.activeProviderId!, store.activeModelId!, {
@@ -452,11 +452,11 @@ export function AiTab() {
                   })
                 }
               />
-            </Row>
+            </SettingRow>
             {thinkingConfig.enabled && (
               <>
-                <Row label="Thinking level" description="Control how deeply the model reasons">
-                  <SelectInput
+                <SettingRow label="Thinking level" description="Control how deeply the model reasons">
+                  <SettingSelect
                     value={thinkingConfig.level ?? levels[0]}
                     onChange={(v) =>
                       store.setThinkingConfig(store.activeProviderId!, store.activeModelId!, {
@@ -468,13 +468,13 @@ export function AiTab() {
                       label: lvl.charAt(0).toUpperCase() + lvl.slice(1),
                     }))}
                   />
-                </Row>
+                </SettingRow>
                 {activeModel.thinkingType === 'anthropic' && (
-                  <Row
+                  <SettingRow
                     label="Budget tokens"
                     description="Max tokens for reasoning (leave empty for default)"
                   >
-                    <NumberInput
+                    <SettingSlider
                       value={thinkingConfig.budgetTokens ?? 0}
                       onChange={(v) =>
                         store.setThinkingConfig(store.activeProviderId!, store.activeModelId!, {
@@ -485,11 +485,11 @@ export function AiTab() {
                       max={32000}
                       step={1024}
                     />
-                  </Row>
+                  </SettingRow>
                 )}
                 {activeModel.thinkingType === 'anthropic' && (
-                  <Row label="Display mode" description="How thinking content is shown">
-                    <SelectInput
+                  <SettingRow label="Display mode" description="How thinking content is shown">
+                    <SettingSelect
                       value={thinkingConfig.display ?? 'summarized'}
                       onChange={(v) =>
                         store.setThinkingConfig(store.activeProviderId!, store.activeModelId!, {
@@ -501,30 +501,30 @@ export function AiTab() {
                         { value: 'omitted', label: 'Omitted' },
                       ]}
                     />
-                  </Row>
+                  </SettingRow>
                 )}
               </>
             )}
-          </Section>
+          </SettingSection>
         );
       })()}
 
       {/* ─── Inline Completion ─────────────────────────────────────── */}
-      <Section title="Inline Completion">
-        <Row
+      <SettingSection title="Inline Completion">
+        <SettingRow
           label="Enable AI autocomplete"
           description="Show ghost-text suggestions powered by AI while typing"
         >
-          <Toggle
+          <SettingToggle
             checked={store.inlineCompletionEnabled}
             onChange={(v) => store.set('inlineCompletionEnabled', v)}
           />
-        </Row>
+        </SettingRow>
 
         {store.inlineCompletionEnabled && (
           <>
-            <Row label="Provider" description="Leave on Active to use the provider selected above">
-              <SelectInput
+            <SettingRow label="Provider" description="Leave on Active to use the provider selected above">
+              <SettingSelect
                 value={store.inlineCompletionProviderId ?? '__active__'}
                 onChange={(v) =>
                   store.set('inlineCompletionProviderId', v === '__active__' ? null : v)
@@ -534,9 +534,9 @@ export function AiTab() {
                   ...PROVIDERS.map((p) => ({ value: p.id, label: p.name })),
                 ]}
               />
-            </Row>
+            </SettingRow>
 
-            <Row label="Model" description="Leave on Active to use the model selected above">
+            <SettingRow label="Model" description="Leave on Active to use the model selected above">
               {store.inlineCompletionProviderId === 'openrouter' ? (
                 <div className="flex items-center gap-1.5">
                   <input
@@ -548,7 +548,7 @@ export function AiTab() {
                   />
                 </div>
               ) : (
-                <SelectInput
+                <SettingSelect
                   value={store.inlineCompletionModelId ?? '__active__'}
                   onChange={(v) =>
                     store.set('inlineCompletionModelId', v === '__active__' ? null : v)
@@ -567,55 +567,55 @@ export function AiTab() {
                   ]}
                 />
               )}
-            </Row>
+            </SettingRow>
 
-            <Row
+            <SettingRow
               label="Debounce delay"
               description="Milliseconds to wait after typing before requesting a completion"
             >
-              <NumberInput
+              <SettingSlider
                 value={store.inlineCompletionDelay}
                 onChange={(v) => store.set('inlineCompletionDelay', v)}
                 min={0}
                 max={2000}
                 step={50}
               />
-            </Row>
+            </SettingRow>
 
-            <Row
+            <SettingRow
               label="Max completion tokens"
               description="Maximum length of a single completion suggestion"
             >
-              <NumberInput
+              <SettingSlider
                 value={store.inlineCompletionMaxTokens}
                 onChange={(v) => store.set('inlineCompletionMaxTokens', v)}
                 min={16}
                 max={512}
                 step={16}
               />
-            </Row>
+            </SettingRow>
 
-            <Row
+            <SettingRow
               label="Temperature"
               description="Lower = more deterministic completions, higher = more creative"
             >
-              <NumberInput
+              <SettingSlider
                 value={store.inlineCompletionTemperature}
                 onChange={(v) => store.set('inlineCompletionTemperature', v)}
                 min={0}
                 max={1}
                 step={0.05}
               />
-            </Row>
+            </SettingRow>
           </>
         )}
-      </Section>
+      </SettingSection>
 
       {/* ─── Custom Approval Rules ─────────────────────────────────── */}
       {store.approvalMode === 'custom' && <CustomApprovalRulesSection />}
 
       {/* ─── MCP Servers ───────────────────────────────────────────────── */}
-      <Section title="MCP Servers">
+      <SettingSection title="MCP Servers">
         {store.mcpServers.map((server) => (
           <div
             key={server.id}
@@ -628,7 +628,7 @@ export function AiTab() {
               </span>
             </div>
             <div className="flex items-center gap-1">
-              <Toggle
+              <SettingToggle
                 checked={server.enabled}
                 onChange={(v) => store.updateMcpServer(server.id, { enabled: v })}
               />
@@ -660,7 +660,7 @@ export function AiTab() {
             Add MCP Server
           </Button>
         )}
-      </Section>
+      </SettingSection>
 
       {/* ─── Setup Guide Modal ──────────────────────────────────────── */}
       <ProviderSetupGuide
@@ -727,7 +727,7 @@ function CustomApprovalRulesSection() {
   const toolOverrides = Object.entries(rules.toolRules);
 
   return (
-    <Section title="Custom Approval Rules">
+    <SettingSection title="Custom Approval Rules">
       <p className="text-[10px] text-muted-foreground -mt-1 mb-1">
         Define approval behavior per tool category. Tool-level overrides take highest priority.
       </p>
@@ -849,7 +849,7 @@ function CustomApprovalRulesSection() {
           </Button>
         </div>
       </div>
-    </Section>
+    </SettingSection>
   );
 }
 
@@ -922,111 +922,5 @@ function ApiKeyRow({ providerId, providerName }: { providerId: string; providerN
         </Button>
       </div>
     </div>
-  );
-}
-
-// ── Shared atoms ─────────────────────────────────────────────────────────────
-
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <div>
-      <h3 className="mb-3 text-[10px] font-medium uppercase tracking-widest text-muted-foreground">
-        {title}
-      </h3>
-      <div className="flex flex-col gap-2">{children}</div>
-    </div>
-  );
-}
-
-function Row({
-  label,
-  description,
-  children,
-}: {
-  label: string;
-  description?: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="flex items-center justify-between gap-4 rounded-lg bg-surface-raised px-3 py-2.5">
-      <div className="flex flex-col">
-        <span className="text-[12px] text-foreground">{label}</span>
-        {description && <span className="text-[10px] text-muted-foreground">{description}</span>}
-      </div>
-      {children}
-    </div>
-  );
-}
-
-function NumberInput({
-  value,
-  onChange,
-  min,
-  max,
-  step = 1,
-}: {
-  value: number;
-  onChange: (v: number) => void;
-  min: number;
-  max: number;
-  step?: number;
-}) {
-  return (
-    <div className="flex items-center gap-2">
-      <input
-        type="range"
-        min={min}
-        max={max}
-        step={step}
-        value={value}
-        onChange={(e) => onChange(Number(e.target.value))}
-        className="h-1 w-24 cursor-pointer appearance-none rounded-full bg-muted primary-primary"
-      />
-      <span className="w-12 text-right text-[11px] tabular-nums text-muted-foreground">
-        {step < 1 ? value.toFixed(1) : value}
-      </span>
-    </div>
-  );
-}
-
-function SelectInput<T extends string>({
-  value,
-  onChange,
-  options,
-}: {
-  value: T;
-  onChange: (v: T) => void;
-  options: { value: T; label: string }[];
-}) {
-  return (
-    <select
-      value={value}
-      onChange={(e) => onChange(e.target.value as T)}
-      className="h-7 rounded-md bg-muted px-2 text-[12px] text-foreground outline-none"
-    >
-      {options.length === 0 && <option value="">Select...</option>}
-      {options.map((opt) => (
-        <option key={opt.value} value={opt.value}>
-          {opt.label}
-        </option>
-      ))}
-    </select>
-  );
-}
-
-function Toggle({ checked, onChange }: { checked: boolean; onChange: (v: boolean) => void }) {
-  return (
-    <button
-      onClick={() => onChange(!checked)}
-      className={`relative h-5 w-9 rounded-full transition-colors ${
-        checked ? 'bg-primary' : 'bg-muted'
-      }`}
-    >
-      <span
-        className={`absolute top-0.5 left-0.5 h-4 w-4 rounded-full bg-foreground transition-transform ${
-          checked ? 'translate-x-4' : 'translate-x-0'
-        }`}
-      />
-    </button>
   );
 }

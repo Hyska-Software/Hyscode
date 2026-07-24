@@ -117,7 +117,7 @@ export function CopilotBillingInfo() {
               {PLANS.map((plan) => (
                 <div
                   key={plan.name}
-                  className="flex flex-col items-center rounded bg-muted/60 px-1 py-1.5 gap-0.5"
+                  className="flex flex-col items-center rounded-lg bg-card px-1 py-1.5 gap-0.5"
                 >
                   <span className="text-[9px] font-medium text-foreground">{plan.name}</span>
                   <span className="text-[12px] font-bold text-foreground tabular-nums">
