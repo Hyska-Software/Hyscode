@@ -42,7 +42,7 @@ export function CodeBlock({
   if (isInline) {
     return (
       <code
-        className="rounded-[3px] bg-accent/8 px-1.5 py-[1px] font-mono text-[11.5px] text-accent select-text cursor-text"
+        className="rounded-[3px] bg-primary/8 px-1.5 py-[1px] font-mono text-[11.5px] text-primary select-text cursor-text"
         {...props}
       >
         {children}
@@ -104,8 +104,8 @@ export function CodeBlock({
         >
           {copied ? (
             <>
-              <Check className="h-3 w-3 text-green-400" />
-              <span className="text-green-400">Copied!</span>
+              <Check className="h-3 w-3 text-success" />
+              <span className="text-success">Copied!</span>
             </>
           ) : (
             <>
@@ -156,13 +156,13 @@ export const MARKDOWN_COMPONENTS = {
   // Headings
   h1: ({ children }: { children?: React.ReactNode }) => (
     <h1 className="mb-2 mt-5 flex items-center gap-2 text-[15px] font-semibold text-foreground">
-      <span className="inline-block h-4 w-[3px] rounded-full bg-accent/70" />
+      <span className="inline-block h-4 w-[3px] rounded-full bg-primary/70" />
       {children}
     </h1>
   ),
   h2: ({ children }: { children?: React.ReactNode }) => (
     <h2 className="mb-1.5 mt-4 flex items-center gap-2 text-[14px] font-semibold text-foreground">
-      <span className="inline-block h-3.5 w-[2px] rounded-full bg-accent/50" />
+      <span className="inline-block h-3.5 w-[2px] rounded-full bg-primary/50" />
       {children}
     </h2>
   ),
@@ -209,7 +209,7 @@ export const MARKDOWN_COMPONENTS = {
           checked={checked}
           readOnly
           disabled={disabled}
-          className="h-3.5 w-3.5 shrink-0 cursor-default rounded border border-border/50 accent-accent"
+          className="h-3.5 w-3.5 shrink-0 cursor-default rounded border border-border/50 primary-primary"
           {...props}
         />
       );
@@ -221,7 +221,7 @@ export const MARKDOWN_COMPONENTS = {
   a: ({ href, children }: { href?: string; children?: React.ReactNode }) => (
     <a
       href={href}
-      className="text-accent underline decoration-accent/30 underline-offset-2 transition-colors hover:text-accent/90 hover:decoration-accent"
+      className="text-primary underline decoration-primary/30 underline-offset-2 transition-colors hover:text-primary/90 hover:decoration-primary"
       target="_blank"
       rel="noopener noreferrer"
     >
@@ -239,7 +239,7 @@ export const MARKDOWN_COMPONENTS = {
 
   // Block elements
   blockquote: ({ children }: { children?: React.ReactNode }) => (
-    <blockquote className="my-2.5 rounded-r-md border-l-[3px] border-accent/40 bg-accent/[0.03] py-1 pl-3 pr-2 italic text-muted-foreground">
+    <blockquote className="my-2.5 rounded-r-md border-l-[3px] border-primary/40 bg-primary/[0.03] py-1 pl-3 pr-2 italic text-muted-foreground">
       {children}
     </blockquote>
   ),
@@ -265,7 +265,7 @@ export const MARKDOWN_COMPONENTS = {
 
   // Footnotes / superscript / subscript
   sup: ({ children }: { children?: React.ReactNode }) => (
-    <sup className="text-[9px] text-accent/80">{children}</sup>
+    <sup className="text-[9px] text-primary/80">{children}</sup>
   ),
   sub: ({ children }: { children?: React.ReactNode }) => (
     <sub className="text-[9px] text-muted-foreground/70">{children}</sub>

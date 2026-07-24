@@ -151,7 +151,7 @@ export function BranchPicker({ open, onClose, anchorRef }: BranchPickerProps) {
       {!creating && (
         <button
           onClick={() => { setCreating(true); setNewBranchName(search); }}
-          className="flex items-center gap-1.5 px-2 py-1.5 text-[11px] text-accent hover:bg-surface-raised transition-colors"
+          className="flex items-center gap-1.5 px-2 py-1.5 text-[11px] text-primary hover:bg-surface-raised transition-colors"
         >
           <Plus className="h-3 w-3" />
           Create new branch{search ? `: ${search}` : ''}
@@ -163,7 +163,7 @@ export function BranchPicker({ open, onClose, anchorRef }: BranchPickerProps) {
           <button
             onClick={handleCreate}
             disabled={!newBranchName.trim() || isLoading}
-            className="rounded-sm bg-accent px-2 py-0.5 text-[10px] text-white hover:bg-accent/80 disabled:opacity-50 transition-colors"
+            className="rounded-sm bg-primary px-2 py-0.5 text-[10px] text-white hover:bg-primary/80 disabled:opacity-50 transition-colors"
           >
             Create & Checkout
           </button>
@@ -239,12 +239,12 @@ function BranchRow({
   return (
     <div
       className={`group flex items-center gap-1.5 px-2 py-[3px] text-[11px] transition-colors cursor-pointer ${
-        isCurrent ? 'text-accent bg-accent/5' : 'text-foreground hover:bg-surface-raised'
+        isCurrent ? 'text-primary bg-primary/5' : 'text-foreground hover:bg-surface-raised'
       }`}
       onClick={isCurrent ? undefined : onCheckout}
     >
       {isCurrent ? (
-        <Check className="h-3 w-3 shrink-0 text-accent" />
+        <Check className="h-3 w-3 shrink-0 text-primary" />
       ) : (
         <GitBranch className="h-3 w-3 shrink-0 text-muted-foreground" />
       )}
@@ -255,7 +255,7 @@ function BranchRow({
       {onDelete && (
         <button
           onClick={(e) => { e.stopPropagation(); onDelete(); }}
-          className="ml-auto opacity-0 group-hover:opacity-100 flex h-4 w-4 items-center justify-center rounded-sm text-muted-foreground hover:text-red-400 transition-all"
+          className="ml-auto opacity-0 group-hover:opacity-100 flex h-4 w-4 items-center justify-center rounded-sm text-muted-foreground hover:text-destructive transition-all"
           title="Delete branch"
         >
           <Trash2 className="h-3 w-3" />

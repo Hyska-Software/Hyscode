@@ -131,7 +131,7 @@ export function ExtensionInputBox() {
             if (e.key === 'Enter') resolveInputBox(value);
           }}
           placeholder={placeholder}
-          className="w-full rounded-lg border border-border bg-background px-3 py-2 text-[12px] text-foreground outline-none focus:border-accent transition-colors"
+          className="w-full rounded-lg border border-border bg-background px-3 py-2 text-[12px] text-foreground outline-none focus:border-primary transition-colors"
         />
         <div className="flex justify-end gap-2 mt-3">
           <button
@@ -142,7 +142,7 @@ export function ExtensionInputBox() {
           </button>
           <button
             onClick={() => resolveInputBox(value)}
-            className="rounded-lg bg-accent px-3 py-1.5 text-[11px] font-medium text-white hover:bg-accent/90 transition-colors"
+            className="rounded-lg bg-primary px-3 py-1.5 text-[11px] font-medium text-white hover:bg-primary/90 transition-colors"
           >
             Confirm
           </button>
@@ -173,13 +173,13 @@ function Toast({ notification }: { notification: ExtensionNotification }) {
 
   const icons = {
     info: <Terminal className="h-3.5 w-3.5 text-blue-400 shrink-0" />,
-    warning: <AlertTriangle className="h-3.5 w-3.5 text-yellow-400 shrink-0" />,
-    error: <AlertCircle className="h-3.5 w-3.5 text-red-400 shrink-0" />,
+    warning: <AlertTriangle className="h-3.5 w-3.5 text-warning shrink-0" />,
+    error: <AlertCircle className="h-3.5 w-3.5 text-destructive shrink-0" />,
   };
   const borders = {
     info: 'border-blue-500/30',
-    warning: 'border-yellow-500/30',
-    error: 'border-red-500/30',
+    warning: 'border-warning/30',
+    error: 'border-destructive/30',
   };
 
   return (

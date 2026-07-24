@@ -37,8 +37,8 @@ export function DockerTab() {
           <div
             className={`rounded-md px-3 py-2 text-[11px] ${
               testResult === 'ok'
-                ? 'bg-green-500/10 text-green-400'
-                : 'bg-red-500/10 text-red-400'
+                ? 'bg-success/10 text-success'
+                : 'bg-destructive/10 text-destructive'
             }`}
           >
             {testResult === 'ok'
@@ -143,7 +143,7 @@ function NumberInput({
         step={1}
         value={value}
         onChange={(e) => onChange(Number(e.target.value))}
-        className="h-1 w-24 cursor-pointer appearance-none rounded-full bg-muted accent-accent"
+        className="h-1 w-24 cursor-pointer appearance-none rounded-full bg-muted primary-primary"
       />
       <span className="w-8 text-right text-[11px] tabular-nums text-muted-foreground">
         {value}
@@ -163,7 +163,7 @@ function Toggle({
     <button
       onClick={() => onChange(!checked)}
       className={`relative h-5 w-9 rounded-full transition-colors ${
-        checked ? 'bg-accent' : 'bg-muted'
+        checked ? 'bg-primary' : 'bg-muted'
       }`}
     >
       <span

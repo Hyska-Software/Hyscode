@@ -162,7 +162,7 @@ function FileBrowser({ mode, rootPath, onSelect, onBack, searchQuery }: FileBrow
         {mode === 'directories' && currentDir !== rootPath && (
           <button
             onClick={handleAttachDir}
-            className="ml-auto shrink-0 rounded bg-accent/20 px-2 py-0.5 text-[9px] font-medium text-accent hover:bg-accent/30"
+            className="ml-auto shrink-0 rounded bg-primary/20 px-2 py-0.5 text-[9px] font-medium text-primary hover:bg-primary/30"
           >
             Attach this dir
           </button>
@@ -192,7 +192,7 @@ function FileBrowser({ mode, rootPath, onSelect, onBack, searchQuery }: FileBrow
                 className={cn(
                   'flex w-full items-center gap-2 px-2.5 py-1.5 text-left transition-colors',
                   idx === selectedIdx
-                    ? 'bg-accent/10 text-foreground'
+                    ? 'bg-primary/10 text-foreground'
                     : 'text-foreground/80 hover:bg-muted/50',
                 )}
                 onMouseEnter={() => setSelectedIdx(idx)}
@@ -371,7 +371,7 @@ export function ContextMentionPicker({ open, onClose, onSelect }: ContextMention
                 className={cn(
                   'flex w-full items-center gap-2.5 px-2.5 py-2 text-left transition-colors',
                   idx === selectedIdx
-                    ? 'bg-accent/10 text-foreground'
+                    ? 'bg-primary/10 text-foreground'
                     : 'text-foreground/80 hover:bg-muted/50',
                 )}
               >

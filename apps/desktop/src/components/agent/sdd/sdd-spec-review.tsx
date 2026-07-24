@@ -14,10 +14,10 @@ export function SddSpecReview({ onApprove, onReject }: SddSpecReviewProps) {
   if (!sddSpec) return null;
 
   return (
-    <div className="mx-4 my-3 border-l-2 border-accent/30 pl-3">
+    <div className="mx-4 my-3 border-l-2 border-primary/30 pl-3">
       {/* Header */}
       <div className="mb-2 flex items-center gap-2">
-        <FileText className="h-3.5 w-3.5 text-accent/80" />
+        <FileText className="h-3.5 w-3.5 text-primary/80" />
         <span className="text-[12px] font-medium text-foreground/90">Specification Review</span>
       </div>
 
@@ -31,7 +31,7 @@ export function SddSpecReview({ onApprove, onReject }: SddSpecReviewProps) {
         <Button
           size="sm"
           onClick={onApprove}
-          className="h-7 gap-1.5 bg-green-600 px-3 text-[11px] hover:bg-green-500"
+          className="h-7 gap-1.5 bg-green-600 px-3 text-[11px] hover:bg-success"
         >
           <Check className="h-3 w-3" />
           Approve & Build

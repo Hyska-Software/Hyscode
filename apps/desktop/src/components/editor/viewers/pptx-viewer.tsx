@@ -108,7 +108,7 @@ export function PptxViewer({ filePath }: PptxViewerProps) {
             >
               {/* Slide header */}
               <div className="flex items-center gap-2 border-b border-border/30 bg-surface-raised px-4 py-2">
-                <span className="flex h-5 w-5 items-center justify-center rounded bg-accent/20 text-[10px] font-bold text-accent">
+                <span className="flex h-5 w-5 items-center justify-center rounded bg-primary/20 text-[10px] font-bold text-primary">
                   {slide.index}
                 </span>
                 <span className="text-[11px] font-medium text-foreground">{slide.title}</span>

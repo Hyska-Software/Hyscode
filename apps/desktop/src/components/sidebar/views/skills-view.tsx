@@ -89,11 +89,11 @@ interface ContextMenuState {
 function getScopeColor(scope: SkillScope): string {
   switch (scope) {
     case 'built-in':
-      return 'text-accent';
+      return 'text-primary';
     case 'global':
       return 'text-blue-400';
     case 'workspace':
-      return 'text-green-400';
+      return 'text-success';
     default:
       return 'text-muted-foreground';
   }
@@ -102,11 +102,11 @@ function getScopeColor(scope: SkillScope): string {
 function getScopeBg(scope: SkillScope): string {
   switch (scope) {
     case 'built-in':
-      return 'bg-accent/10';
+      return 'bg-primary/10';
     case 'global':
       return 'bg-blue-500/10';
     case 'workspace':
-      return 'bg-green-500/10';
+      return 'bg-success/10';
     default:
       return 'bg-muted';
   }
@@ -380,7 +380,7 @@ export function SkillsView() {
       <div className="flex flex-col gap-1.5 border-b border-border bg-surface-raised px-2 py-2">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-1.5">
-            <Zap className="h-3.5 w-3.5 text-accent" />
+            <Zap className="h-3.5 w-3.5 text-primary" />
             <span className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
               Skills
             </span>
@@ -410,7 +410,7 @@ export function SkillsView() {
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder="Filter skills..."
-            className="w-full rounded-md border border-border bg-background py-1 pl-6 pr-6 text-[11px] text-foreground outline-none placeholder:text-muted-foreground/60 focus:border-accent/40 focus:ring-1 focus:ring-accent/20"
+            className="w-full rounded-md border border-border bg-background py-1 pl-6 pr-6 text-[11px] text-foreground outline-none placeholder:text-muted-foreground/60 focus:border-primary/40 focus:ring-1 focus:ring-primary/20"
           />
           {searchQuery && (
             <button
@@ -617,10 +617,10 @@ function SkillItem({
           disabled={isMissing}
         >
           {isMissing ? (
-            <AlertTriangle className="h-3.5 w-3.5 text-yellow-500/70" />
+            <AlertTriangle className="h-3.5 w-3.5 text-warning/70" />
           ) : skill.enabled ? (
-            <div className="flex h-3.5 w-3.5 items-center justify-center rounded-full bg-accent/20">
-              <Check className="h-2.5 w-2.5 text-accent" />
+            <div className="flex h-3.5 w-3.5 items-center justify-center rounded-full bg-primary/20">
+              <Check className="h-2.5 w-2.5 text-primary" />
             </div>
           ) : (
             <div className="h-3.5 w-3.5 rounded-full border border-muted-foreground/30" />
@@ -635,7 +635,7 @@ function SkillItem({
           <div className="flex items-center gap-1">
             <span className="truncate text-[12px] font-medium text-foreground">{skill.name}</span>
             {skill.enabled && !isMissing && (
-              <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-accent/60" />
+              <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-primary/60" />
             )}
           </div>
           <div className="truncate text-[11px] text-muted-foreground">
@@ -647,7 +647,7 @@ function SkillItem({
               {skill.modes.map((m) => (
                 <span
                   key={m}
-                  className="rounded bg-accent/10 px-1 py-0 text-[9px] font-medium text-accent"
+                  className="rounded bg-primary/10 px-1 py-0 text-[9px] font-medium text-primary"
                 >
                   {m}
                 </span>
@@ -694,7 +694,7 @@ function SkillItem({
                   onClick={() => onModeToggle(value)}
                   className={`rounded-md px-2 py-0.5 text-[10px] font-medium transition-colors ${
                     active
-                      ? 'bg-accent/15 text-accent hover:bg-accent/25'
+                      ? 'bg-primary/15 text-primary hover:bg-primary/25'
                       : 'bg-muted text-muted-foreground hover:bg-muted/80'
                   }`}
                 >
@@ -764,7 +764,7 @@ function ContextMenuItem({
     <button
       onClick={onClick}
       className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-[11px] transition-colors ${
-        danger ? 'text-red-400 hover:bg-red-500/10' : 'text-foreground hover:bg-surface-raised'
+        danger ? 'text-destructive hover:bg-destructive/10' : 'text-foreground hover:bg-surface-raised'
       }`}
     >
       <Icon className="h-3.5 w-3.5 shrink-0" />

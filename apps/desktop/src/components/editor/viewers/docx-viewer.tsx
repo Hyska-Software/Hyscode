@@ -94,7 +94,7 @@ export function DocxViewer({ filePath }: DocxViewerProps) {
 
       {/* Document content */}
       <div className="flex-1 overflow-auto p-6">
-        <article className="docx-content prose prose-invert prose-sm max-w-none prose-headings:text-foreground prose-p:text-foreground/90 prose-a:text-accent prose-strong:text-foreground prose-table:text-foreground/80">
+        <article className="docx-content prose prose-invert prose-sm max-w-none prose-headings:text-foreground prose-p:text-foreground/90 prose-a:text-primary prose-strong:text-foreground prose-table:text-foreground/80">
           <div dangerouslySetInnerHTML={{ __html: html }} />
         </article>
       </div>

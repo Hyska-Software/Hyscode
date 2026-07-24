@@ -70,15 +70,15 @@ export function FileActivity({ toolCalls }: { toolCalls: ToolCallDisplay[] }) {
       aria-atomic="false"
       aria-live="polite"
       aria-label="Agent file activity"
-      className="agent-fade-in my-3 overflow-hidden rounded-lg border border-accent/20 bg-accent/[0.035] shadow-sm"
+      className="agent-fade-in my-3 overflow-hidden rounded-lg border border-primary/20 bg-primary/[0.035] shadow-sm"
     >
       <div className="relative flex items-center gap-2 border-b border-border/40 px-3 py-2">
         {activeCount > 0 && (
-          <div className="absolute inset-x-0 bottom-0 h-px overflow-hidden bg-accent/10">
+          <div className="absolute inset-x-0 bottom-0 h-px overflow-hidden bg-primary/10">
             <div className="agent-shimmer-bar h-full w-full motion-reduce:hidden" />
           </div>
         )}
-        <span className="agent-breathe h-1.5 w-1.5 rounded-full bg-accent motion-reduce:animate-none" />
+        <span className="agent-breathe h-1.5 w-1.5 rounded-full bg-primary motion-reduce:animate-none" />
         <span className="text-[10px] font-medium text-foreground/75">
           {activeCount > 0 ? 'Updating workspace' : 'Workspace updated'}
         </span>

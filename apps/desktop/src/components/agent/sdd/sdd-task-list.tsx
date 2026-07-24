@@ -21,10 +21,10 @@ const STATUS_ICONS: Record<
   { icon: typeof Check; color: string; animate?: boolean }
 > = {
   pending: { icon: Circle, color: 'text-muted-foreground/35' },
-  in_progress: { icon: Loader2, color: 'text-accent', animate: true },
-  completed: { icon: Check, color: 'text-green-400/80' },
-  skipped: { icon: SkipForward, color: 'text-yellow-400/80' },
-  failed: { icon: AlertCircle, color: 'text-red-400/80' },
+  in_progress: { icon: Loader2, color: 'text-primary', animate: true },
+  completed: { icon: Check, color: 'text-success/80' },
+  skipped: { icon: SkipForward, color: 'text-warning/80' },
+  failed: { icon: AlertCircle, color: 'text-destructive/80' },
 };
 
 export function SddTaskList() {
@@ -128,7 +128,7 @@ export function SddTaskList() {
       {isExecuting && (
         <div className="mt-1.5 h-1 w-full rounded-full bg-foreground/[0.06]">
           <div
-            className="h-full rounded-full bg-accent transition-all duration-300"
+            className="h-full rounded-full bg-primary transition-all duration-300"
             style={{ width: `${sddProgress}%` }}
           />
         </div>
@@ -183,7 +183,7 @@ export function SddTaskList() {
                         variant="ghost"
                         size="icon-xs"
                         onClick={() => handleRetryTask(task.id)}
-                        className="h-5 w-5 text-muted-foreground/60 opacity-0 transition-opacity hover:text-accent group-hover:opacity-100"
+                        className="h-5 w-5 text-muted-foreground/60 opacity-0 transition-opacity hover:text-primary group-hover:opacity-100"
                       />
                     }
                   >
@@ -200,7 +200,7 @@ export function SddTaskList() {
                         variant="ghost"
                         size="icon-xs"
                         onClick={() => handleSkipTask(task.id)}
-                        className="h-5 w-5 text-muted-foreground/60 opacity-0 transition-opacity hover:text-yellow-400 group-hover:opacity-100"
+                        className="h-5 w-5 text-muted-foreground/60 opacity-0 transition-opacity hover:text-warning group-hover:opacity-100"
                       />
                     }
                   >

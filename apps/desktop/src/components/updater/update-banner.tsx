@@ -22,7 +22,7 @@ export function UpdateBanner() {
       {/* Update available */}
       {status === 'available' && releaseInfo && (
         <>
-          <ArrowUpCircle className="h-3.5 w-3.5 text-accent" />
+          <ArrowUpCircle className="h-3.5 w-3.5 text-primary" />
           <span className="text-[11px] text-foreground">
             <span className="font-medium">HysCode {releaseInfo.version}</span> is available
           </span>
@@ -31,7 +31,7 @@ export function UpdateBanner() {
               openDialog();
               void startDownload();
             }}
-            className="ml-1 rounded-md bg-accent px-2.5 py-0.5 text-[10px] font-medium text-accent-foreground hover:bg-accent/90 transition-colors"
+            className="ml-1 rounded-md bg-primary px-2.5 py-0.5 text-[10px] font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
           >
             <Download className="mr-1 inline-block h-3 w-3" />
             Install
@@ -48,14 +48,14 @@ export function UpdateBanner() {
       {/* Downloading */}
       {status === 'downloading' && downloadProgress && (
         <>
-          <Loader2 className="h-3.5 w-3.5 animate-spin text-accent" />
+          <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
           <span className="text-[11px] text-foreground">
             Downloading update...
           </span>
           <div className="flex items-center gap-2 ml-1">
             <div className="h-1.5 w-32 rounded-full bg-muted overflow-hidden">
               <div
-                className="h-full rounded-full bg-accent transition-all duration-300"
+                className="h-full rounded-full bg-primary transition-all duration-300"
                 style={{ width: `${Math.min(downloadProgress.percent, 100)}%` }}
               />
             </div>
@@ -69,13 +69,13 @@ export function UpdateBanner() {
       {/* Ready to install */}
       {status === 'ready' && (
         <>
-          <ArrowUpCircle className="h-3.5 w-3.5 text-green-400" />
+          <ArrowUpCircle className="h-3.5 w-3.5 text-success" />
           <span className="text-[11px] text-foreground">
             Update downloaded — restart to finish installing
           </span>
           <button
             onClick={() => void installUpdate()}
-            className="ml-1 rounded-md bg-green-600 px-2.5 py-0.5 text-[10px] font-medium text-white hover:bg-green-500 transition-colors"
+            className="ml-1 rounded-md bg-green-600 px-2.5 py-0.5 text-[10px] font-medium text-white hover:bg-success transition-colors"
           >
             <RefreshCw className="mr-1 inline-block h-3 w-3" />
             Restart Now
@@ -86,8 +86,8 @@ export function UpdateBanner() {
       {/* Error */}
       {status === 'error' && (
         <>
-          <X className="h-3.5 w-3.5 text-red-400" />
-          <span className="text-[11px] text-red-400 truncate max-w-xs">
+          <X className="h-3.5 w-3.5 text-destructive" />
+          <span className="text-[11px] text-destructive truncate max-w-xs">
             Update failed: {error}
           </span>
           <button

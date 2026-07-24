@@ -66,7 +66,7 @@ export function TerminalTab() {
           <div className="text-muted-foreground">
             <span className="text-success">user@machine</span>
             <span className="text-muted-foreground">:</span>
-            <span className="text-accent">~/project</span>
+            <span className="text-primary">~/project</span>
             <span className="text-muted-foreground">$ </span>
             <span className="text-foreground">echo "Hello World"</span>
           </div>
@@ -74,7 +74,7 @@ export function TerminalTab() {
           <div className="text-muted-foreground">
             <span className="text-success">user@machine</span>
             <span className="text-muted-foreground">:</span>
-            <span className="text-accent">~/project</span>
+            <span className="text-primary">~/project</span>
             <span className="text-muted-foreground">$ </span>
             <span
               className={`inline-block ${
@@ -158,7 +158,7 @@ function NumberInput({
         step={step}
         value={value}
         onChange={(e) => onChange(Number(e.target.value))}
-        className="h-1 w-24 cursor-pointer appearance-none rounded-full bg-muted accent-accent"
+        className="h-1 w-24 cursor-pointer appearance-none rounded-full bg-muted primary-primary"
       />
       <span className="w-12 text-right text-[11px] tabular-nums text-muted-foreground">
         {value}

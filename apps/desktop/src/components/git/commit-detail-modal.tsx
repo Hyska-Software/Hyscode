@@ -59,9 +59,9 @@ function parseDiff(raw: string): DiffLine[] {
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 const STATUS_COLORS: Record<string, string> = {
-  M: 'text-yellow-400',
-  A: 'text-green-400',
-  D: 'text-red-400',
+  M: 'text-warning',
+  A: 'text-success',
+  D: 'text-destructive',
   R: 'text-blue-400',
   C: 'text-blue-400',
   T: 'text-purple-400',
@@ -174,7 +174,7 @@ export function CommitDetailModal({ hash, onClose }: CommitDetailModalProps) {
         {/* Header */}
         <div className="flex items-center justify-between border-b border-border px-4 py-3">
           <div className="flex items-center gap-2">
-            <GitCommit className="h-4 w-4 text-accent" />
+            <GitCommit className="h-4 w-4 text-primary" />
             <span className="text-[13px] font-semibold text-foreground">Commit Detail</span>
           </div>
           <div className="flex items-center gap-1">
@@ -206,7 +206,7 @@ export function CommitDetailModal({ hash, onClose }: CommitDetailModalProps) {
           )}
 
           {error && (
-            <div className="px-4 py-8 text-center text-[11px] text-red-400">{error}</div>
+            <div className="px-4 py-8 text-center text-[11px] text-destructive">{error}</div>
           )}
 
           {detail && !loading && (
@@ -216,7 +216,7 @@ export function CommitDetailModal({ hash, onClose }: CommitDetailModalProps) {
                 <div className="flex items-center gap-2 mb-1.5">
                   <button
                     onClick={copyHash}
-                    className="flex items-center gap-1 rounded bg-accent/10 px-1.5 py-0.5 font-mono text-[11px] text-accent hover:bg-accent/20 transition-colors"
+                    className="flex items-center gap-1 rounded bg-primary/10 px-1.5 py-0.5 font-mono text-[11px] text-primary hover:bg-primary/20 transition-colors"
                     title="Copy full hash"
                   >
                     {detail.short_hash}
@@ -244,12 +244,12 @@ export function CommitDetailModal({ hash, onClose }: CommitDetailModalProps) {
                     {detail.files.length} file{detail.files.length !== 1 ? 's' : ''} changed
                   </span>
                   {detail.total_insertions > 0 && (
-                    <span className="flex items-center gap-0.5 text-green-400">
+                    <span className="flex items-center gap-0.5 text-success">
                       <Plus className="h-3 w-3" />{detail.total_insertions}
                     </span>
                   )}
                   {detail.total_deletions > 0 && (
-                    <span className="flex items-center gap-0.5 text-red-400">
+                    <span className="flex items-center gap-0.5 text-destructive">
                       <Minus className="h-3 w-3" />{detail.total_deletions}
                     </span>
                   )}
@@ -316,10 +316,10 @@ function FileChangeRow({
         )}
         <span className="ml-auto flex items-center gap-1.5 shrink-0 text-[10px]">
           {file.insertions > 0 && (
-            <span className="text-green-400">+{file.insertions}</span>
+            <span className="text-success">+{file.insertions}</span>
           )}
           {file.deletions > 0 && (
-            <span className="text-red-400">-{file.deletions}</span>
+            <span className="text-destructive">-{file.deletions}</span>
           )}
         </span>
       </button>
@@ -359,8 +359,8 @@ function DiffView({ content }: { content: string }) {
         {lines.map((line, i) => {
           if (line.type === 'hunk') {
             return (
-              <tr key={i} className="bg-accent/5">
-                <td colSpan={3} className="px-2 py-0.5 text-accent/70 select-none">
+              <tr key={i} className="bg-primary/5">
+                <td colSpan={3} className="px-2 py-0.5 text-primary/70 select-none">
                   {line.content}
                 </td>
               </tr>
@@ -369,16 +369,16 @@ function DiffView({ content }: { content: string }) {
 
           const bg =
             line.type === 'add'
-              ? 'bg-green-500/8'
+              ? 'bg-success/8'
               : line.type === 'del'
-                ? 'bg-red-500/8'
+                ? 'bg-destructive/8'
                 : '';
 
           const textColor =
             line.type === 'add'
-              ? 'text-green-300'
+              ? 'text-success'
               : line.type === 'del'
-                ? 'text-red-300'
+                ? 'text-destructive'
                 : 'text-foreground/70';
 
           return (

@@ -52,7 +52,7 @@ function FileRow({ file }: { file: TurnSummaryFile }) {
       </span>
       <span className="flex shrink-0 gap-1 text-[10px] tabular-nums">
         {file.added > 0 && <span className="text-emerald-400">+{file.added}</span>}
-        {file.removed > 0 && <span className="text-red-400">-{file.removed}</span>}
+        {file.removed > 0 && <span className="text-destructive">-{file.removed}</span>}
       </span>
       {file.resolution !== 'pending' && (
         <span className="text-[9px] text-muted-foreground/55">
@@ -177,7 +177,7 @@ export function TurnSummaryCard({ summary }: { summary: TurnSummary }) {
             </span>
             <span className="flex gap-1 text-[10px] tabular-nums">
               {totals.added > 0 && <span className="text-emerald-400">+{totals.added}</span>}
-              {totals.removed > 0 && <span className="text-red-400">-{totals.removed}</span>}
+              {totals.removed > 0 && <span className="text-destructive">-{totals.removed}</span>}
             </span>
             {hasPending && (
               <div className="ml-auto flex items-center gap-1">

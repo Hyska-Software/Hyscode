@@ -50,8 +50,8 @@ export function TerminalDropZone({ onDrop, label, className, children }: Termina
     >
       {children}
       {dragOver && (
-        <div className="absolute inset-0 z-50 flex items-center justify-center rounded-lg border-2 border-dashed border-accent bg-accent/10 backdrop-blur-sm pointer-events-none">
-          <span className="rounded-md bg-accent/20 px-3 py-1.5 text-[11px] font-medium text-accent">
+        <div className="absolute inset-0 z-50 flex items-center justify-center rounded-lg border-2 border-dashed border-primary bg-primary/10 backdrop-blur-sm pointer-events-none">
+          <span className="rounded-md bg-primary/20 px-3 py-1.5 text-[11px] font-medium text-primary">
             {label}
           </span>
         </div>

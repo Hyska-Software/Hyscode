@@ -23,9 +23,9 @@ const STATUS_LABELS: Record<string, string> = {
 };
 
 const STATUS_COLORS: Record<string, string> = {
-  M: 'text-yellow-400',
-  A: 'text-green-400',
-  D: 'text-red-400',
+  M: 'text-warning',
+  A: 'text-success',
+  D: 'text-destructive',
   R: 'text-blue-400',
   C: 'text-blue-400',
   T: 'text-purple-400',
@@ -216,7 +216,7 @@ function CtxItem({
       onClick={onClick}
       className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-[11px] transition-colors ${
         danger
-          ? 'text-red-400 hover:bg-red-500/10'
+          ? 'text-destructive hover:bg-destructive/10'
           : 'text-foreground hover:bg-surface-raised'
       }`}
     >

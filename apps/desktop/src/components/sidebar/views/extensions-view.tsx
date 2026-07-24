@@ -199,7 +199,7 @@ function ExtensionDetail({
             onClick={() => toggleExtension(ext.name)}
             className={`flex-1 flex items-center justify-center gap-1.5 rounded-md py-1.5 text-[10px] font-medium transition-colors ${
               ext.enabled
-                ? 'bg-accent/10 text-accent hover:bg-accent/20'
+                ? 'bg-primary/10 text-primary hover:bg-primary/20'
                 : 'bg-muted text-muted-foreground hover:bg-muted/80'
             }`}
           >
@@ -230,14 +230,14 @@ function ExtensionDetail({
           {!confirmUninstall ? (
             <button
               onClick={() => setConfirmUninstall(true)}
-              className="flex items-center justify-center gap-1 rounded-md bg-muted px-3 py-1.5 text-[10px] text-muted-foreground hover:text-red-400 hover:bg-red-500/10 transition-colors"
+              className="flex items-center justify-center gap-1 rounded-md bg-muted px-3 py-1.5 text-[10px] text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
             >
               <Trash2 className="h-3 w-3" />
             </button>
           ) : (
             <button
               onClick={() => uninstallExtension(ext.name)}
-              className="flex items-center justify-center gap-1 rounded-md bg-red-500/10 px-3 py-1.5 text-[10px] text-red-400 hover:bg-red-500/20 transition-colors"
+              className="flex items-center justify-center gap-1 rounded-md bg-destructive/10 px-3 py-1.5 text-[10px] text-destructive hover:bg-destructive/20 transition-colors"
             >
               <Trash2 className="h-3 w-3" />
               Confirm
@@ -509,7 +509,7 @@ function ExtensionRow({
           }}
           className={`shrink-0 rounded-full p-1 transition-colors ${
             ext.enabled
-              ? 'text-accent hover:bg-accent/10'
+              ? 'text-primary hover:bg-primary/10'
               : 'text-muted-foreground/40 hover:bg-muted'
           }`}
           title={ext.enabled ? 'Disable' : 'Enable'}
@@ -586,7 +586,7 @@ function StoreRow({
             {item.displayName}
           </span>
           {isInstalled && !hasUpdate && (
-            <span className="shrink-0 flex items-center gap-0.5 rounded-full bg-accent/15 px-1.5 py-px text-[8px] font-medium text-accent">
+            <span className="shrink-0 flex items-center gap-0.5 rounded-full bg-primary/15 px-1.5 py-px text-[8px] font-medium text-primary">
               <CheckCircle2 className="h-2 w-2" />
               Installed
             </span>
@@ -625,10 +625,10 @@ function StoreRow({
           disabled={isInstalled || isInstalling}
           className={`shrink-0 flex items-center gap-1 rounded-md px-2 py-0.5 text-[9px] font-medium transition-colors ${
             isInstalled
-              ? 'text-accent/50 cursor-default'
+              ? 'text-primary/50 cursor-default'
               : isInstalling
-                ? 'bg-accent/10 text-accent/60 cursor-not-allowed'
-                : 'bg-muted text-muted-foreground hover:bg-accent/10 hover:text-accent'
+                ? 'bg-primary/10 text-primary/60 cursor-not-allowed'
+                : 'bg-muted text-muted-foreground hover:bg-primary/10 hover:text-primary'
           }`}
           title={isInstalled ? 'Already installed' : `Install ${item.displayName}`}
         >
@@ -726,7 +726,7 @@ function StoreView() {
 
       {/* Install error */}
       {error && (
-        <div className="flex items-start gap-1.5 px-2 py-1.5 text-[10px] text-red-400 bg-red-500/5 border-b border-red-500/10">
+        <div className="flex items-start gap-1.5 px-2 py-1.5 text-[10px] text-destructive bg-destructive/5 border-b border-destructive/10">
           <AlertCircle className="h-3 w-3 shrink-0 mt-0.5" />
           <span className="break-words">{error}</span>
         </div>
@@ -734,7 +734,7 @@ function StoreView() {
 
       {/* Store error */}
       {storeError && !storeLoading && (
-        <div className="flex items-center gap-1.5 px-2 py-1.5 text-[10px] text-red-400 bg-red-500/5 border-b border-red-500/10">
+        <div className="flex items-center gap-1.5 px-2 py-1.5 text-[10px] text-destructive bg-destructive/5 border-b border-destructive/10">
           <AlertCircle className="h-3 w-3 shrink-0" />
           <span className="truncate">{storeError}</span>
         </div>
@@ -742,7 +742,7 @@ function StoreView() {
 
       {/* Installing indicator */}
       {installingFromStore && (
-        <div className="flex items-center gap-1.5 px-2 py-1.5 text-[10px] text-accent bg-accent/5 border-b border-accent/10">
+        <div className="flex items-center gap-1.5 px-2 py-1.5 text-[10px] text-primary bg-primary/5 border-b border-primary/10">
           <Loader2 className="h-3 w-3 animate-spin shrink-0" />
           <span className="truncate">Installing…</span>
         </div>
@@ -920,7 +920,7 @@ export function ExtensionsView() {
           onClick={() => setViewMode('installed')}
           className={`flex items-center gap-1.5 px-2 py-1.5 text-[10px] font-medium border-b-2 -mb-px transition-colors ${
             viewMode === 'installed'
-              ? 'border-accent text-accent'
+              ? 'border-primary text-primary'
               : 'border-transparent text-muted-foreground/60 hover:text-muted-foreground'
           }`}
         >
@@ -928,7 +928,7 @@ export function ExtensionsView() {
           Installed
           {extensions.length > 0 && (
             <span className={`rounded-full px-1 py-px text-[8px] ${
-              viewMode === 'installed' ? 'bg-accent/20 text-accent' : 'bg-muted text-muted-foreground/60'
+              viewMode === 'installed' ? 'bg-primary/20 text-primary' : 'bg-muted text-muted-foreground/60'
             }`}>
               {extensions.length}
             </span>
@@ -938,7 +938,7 @@ export function ExtensionsView() {
           onClick={() => setViewMode('store')}
           className={`flex items-center gap-1.5 px-2 py-1.5 text-[10px] font-medium border-b-2 -mb-px transition-colors ${
             viewMode === 'store'
-              ? 'border-accent text-accent'
+              ? 'border-primary text-primary'
               : 'border-transparent text-muted-foreground/60 hover:text-muted-foreground'
           }`}
         >
@@ -982,7 +982,7 @@ export function ExtensionsView() {
             onClick={() => setFilter(opt.value)}
             className={`flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[9px] font-medium transition-colors whitespace-nowrap ${
               filter === opt.value
-                ? 'bg-accent/10 text-accent'
+                ? 'bg-primary/10 text-primary'
                 : 'text-muted-foreground/60 hover:text-muted-foreground hover:bg-muted/50'
             }`}
           >
@@ -1014,7 +1014,7 @@ export function ExtensionsView() {
             onClick={() => { setShowGitForm((v) => !v); }}
             className={`rounded p-0.5 transition-colors ${
               showGitForm
-                ? 'text-accent bg-accent/10'
+                ? 'text-primary bg-primary/10'
                 : 'text-muted-foreground/50 hover:text-foreground hover:bg-muted'
             }`}
             title="Install from Git repository"
@@ -1083,7 +1083,7 @@ export function ExtensionsView() {
               <button
                 onClick={() => void handleInstallGit()}
                 disabled={!gitUrl.trim() || installingFromGit}
-                className="flex items-center gap-1 rounded px-2 py-0.5 text-[10px] font-medium bg-accent/10 text-accent hover:bg-accent/20 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                className="flex items-center gap-1 rounded px-2 py-0.5 text-[10px] font-medium bg-primary/10 text-primary hover:bg-primary/20 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 {installingFromGit ? <Loader2 className="h-2.5 w-2.5 animate-spin" /> : <GitFork className="h-2.5 w-2.5" />}
                 Install
@@ -1095,7 +1095,7 @@ export function ExtensionsView() {
 
       {/* Error */}
       {error && (
-        <div className="flex items-center gap-1.5 px-2 py-1.5 text-[10px] text-red-400 bg-red-500/5 border-b border-red-500/10">
+        <div className="flex items-center gap-1.5 px-2 py-1.5 text-[10px] text-destructive bg-destructive/5 border-b border-destructive/10">
           <AlertCircle className="h-3 w-3 shrink-0" />
           <span className="truncate">{error}</span>
         </div>
@@ -1103,7 +1103,7 @@ export function ExtensionsView() {
 
       {/* Installing indicator */}
       {(installing || installingFromGit) && (
-        <div className="flex items-center gap-1.5 px-2 py-1.5 text-[10px] text-accent bg-accent/5 border-b border-accent/10">
+        <div className="flex items-center gap-1.5 px-2 py-1.5 text-[10px] text-primary bg-primary/5 border-b border-primary/10">
           <Loader2 className="h-3 w-3 animate-spin shrink-0" />
           <span>{installingFromGit ? 'Cloning and installing from git…' : 'Installing extension...'}</span>
         </div>
@@ -1137,7 +1137,7 @@ export function ExtensionsView() {
             <div className="mt-3 flex flex-wrap justify-center gap-2">
               <button
                 onClick={() => setShowGitForm(true)}
-                className="flex items-center gap-1.5 rounded-md bg-accent/10 px-3 py-1.5 text-[10px] font-medium text-accent hover:bg-accent/20 transition-colors"
+                className="flex items-center gap-1.5 rounded-md bg-primary/10 px-3 py-1.5 text-[10px] font-medium text-primary hover:bg-primary/20 transition-colors"
               >
                 <GitFork className="h-3 w-3" />
                 From Git

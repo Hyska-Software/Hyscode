@@ -132,7 +132,7 @@ function StepWelcome({ visible }: { visible: boolean }) {
 
       <div className="flex flex-col gap-2">
         <h1 className="text-2xl font-semibold tracking-tight text-foreground">
-          Welcome to <span className="text-accent">HysCode</span>
+          Welcome to <span className="text-primary">HysCode</span>
         </h1>
         <p className="max-w-xs text-sm text-muted-foreground leading-relaxed">
           AI-powered code editor. Let's configure a few things before you start.
@@ -150,7 +150,7 @@ function StepWelcome({ visible }: { visible: boolean }) {
             key={label}
             className="flex items-center gap-1.5 rounded-md bg-surface-raised border border-border px-2.5 py-1 text-[11px] text-muted-foreground"
           >
-            <Icon className="h-3 w-3 text-accent" />
+            <Icon className="h-3 w-3 text-primary" />
             {label}
           </div>
         ))}
@@ -182,8 +182,8 @@ function StepTheme({ visible }: { visible: boolean }) {
               onClick={() => setThemeId(theme.id)}
               className={`group relative flex flex-col overflow-hidden rounded-lg border transition-all duration-150 ${
                 selected
-                  ? 'border-accent'
-                  : 'border-border hover:border-accent/50'
+                  ? 'border-primary'
+                  : 'border-border hover:border-primary/50'
               }`}
             >
               <div className="flex h-14 flex-col gap-1 p-2" style={{ background: theme.bg }}>
@@ -339,7 +339,7 @@ function CopilotOAuthPanel({ onAuthenticated }: { onAuthenticated: () => void })
       {auth.step === 'idle' && (
         <button
           onClick={startAuth}
-          className="flex items-center justify-center gap-1.5 rounded-md bg-accent px-3 py-2 text-[12px] font-medium text-white hover:bg-accent/90 transition-colors"
+          className="flex items-center justify-center gap-1.5 rounded-md bg-primary px-3 py-2 text-[12px] font-medium text-white hover:bg-primary/90 transition-colors"
         >
           <LogIn className="h-3.5 w-3.5" />
           Sign in with GitHub
@@ -371,7 +371,7 @@ function CopilotOAuthPanel({ onAuthenticated }: { onAuthenticated: () => void })
             href={auth.verificationUri}
             target="_blank"
             rel="noopener noreferrer"
-            className="flex items-center justify-center gap-1 rounded-md border border-border bg-surface px-3 py-1.5 text-[11px] text-accent hover:bg-surface-raised transition-colors"
+            className="flex items-center justify-center gap-1 rounded-md border border-border bg-surface px-3 py-1.5 text-[11px] text-primary hover:bg-surface-raised transition-colors"
           >
             <ExternalLink className="h-3 w-3" />
             {auth.verificationUri}
@@ -391,7 +391,7 @@ function CopilotOAuthPanel({ onAuthenticated }: { onAuthenticated: () => void })
           </div>
           <button
             onClick={disconnect}
-            className="flex items-center gap-1 rounded-md px-2 py-1 text-[10px] text-muted-foreground hover:text-error hover:bg-error/10 transition-colors"
+            className="flex items-center gap-1 rounded-md px-2 py-1 text-[10px] text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
           >
             <LogOut className="h-3 w-3" />
             Disconnect
@@ -401,8 +401,8 @@ function CopilotOAuthPanel({ onAuthenticated }: { onAuthenticated: () => void })
 
       {auth.step === 'error' && (
         <div className="flex items-center justify-between gap-2">
-          <p className="text-[11px] text-error truncate">{auth.message}</p>
-          <button onClick={startAuth} className="shrink-0 text-[11px] text-accent hover:underline">
+          <p className="text-[11px] text-destructive truncate">{auth.message}</p>
+          <button onClick={startAuth} className="shrink-0 text-[11px] text-primary hover:underline">
             Retry
           </button>
         </div>
@@ -461,7 +461,7 @@ function ApiKeyPanel({ providerId, providerName, onSaved }: {
             value={apiKey}
             onChange={(e) => { setApiKey(e.target.value); setSaved(false); }}
             placeholder="Paste your API key…"
-            className="h-7 w-full rounded-md bg-muted px-2.5 pr-7 text-[11px] text-foreground outline-none focus:ring-1 focus:ring-accent placeholder:text-muted-foreground/50 transition-all"
+            className="h-7 w-full rounded-md bg-muted px-2.5 pr-7 text-[11px] text-foreground outline-none focus:ring-1 focus:ring-primary placeholder:text-muted-foreground/50 transition-all"
           />
           <button
             onClick={() => setShowKey(!showKey)}
@@ -476,7 +476,7 @@ function ApiKeyPanel({ providerId, providerName, onSaved }: {
           className={`flex h-7 items-center gap-1 rounded-md px-2.5 text-[11px] font-medium transition-colors ${
             saved
               ? 'bg-success/10 text-success border border-success/30'
-              : 'bg-accent text-white hover:bg-accent/90 disabled:opacity-40 disabled:cursor-not-allowed'
+              : 'bg-primary text-white hover:bg-primary/90 disabled:opacity-40 disabled:cursor-not-allowed'
           }`}
         >
           {saved ? <><Check className="h-3 w-3" />Saved</> : saving ? 'Saving…' : 'Save'}
@@ -528,13 +528,13 @@ function StepAI({ visible }: { visible: boolean }) {
               onClick={() => setSelectedProvider(provider.id)}
               className={`flex items-center gap-2.5 rounded-lg border px-3 py-2 text-left transition-colors ${
                 selected
-                  ? 'border-accent bg-accent/5'
-                  : 'border-border bg-surface-raised hover:border-accent/40'
+                  ? 'border-primary bg-primary/5'
+                  : 'border-border bg-surface-raised hover:border-primary/40'
               }`}
             >
               <div
                 className={`flex h-6 w-6 shrink-0 items-center justify-center rounded text-[9px] font-bold ${
-                  selected ? 'bg-accent text-white' : 'bg-muted text-muted-foreground'
+                  selected ? 'bg-primary text-white' : 'bg-muted text-muted-foreground'
                 }`}
               >
                 {provider.name.slice(0, 2)}
@@ -597,8 +597,8 @@ function StepEditor({ visible }: { visible: boolean }) {
                   onClick={() => store.set('fontFamily', font.id)}
                   className={`flex items-center justify-between rounded-lg border px-2.5 py-2 text-left transition-colors ${
                     selected
-                      ? 'border-accent bg-accent/5'
-                      : 'border-border bg-surface-raised hover:border-accent/30'
+                      ? 'border-primary bg-primary/5'
+                      : 'border-border bg-surface-raised hover:border-primary/30'
                   }`}
                 >
                   <span className="text-[12px] font-medium text-foreground">{font.name}</span>
@@ -606,7 +606,7 @@ function StepEditor({ visible }: { visible: boolean }) {
                     <span className="text-[11px] text-muted-foreground" style={{ fontFamily: font.id }}>
                       {font.preview}
                     </span>
-                    {selected && <Check className="h-3 w-3 shrink-0 text-accent" />}
+                    {selected && <Check className="h-3 w-3 shrink-0 text-primary" />}
                   </div>
                 </button>
               );
@@ -618,7 +618,7 @@ function StepEditor({ visible }: { visible: boolean }) {
         <div className="flex flex-col gap-2">
           <div className="flex items-center justify-between">
             <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">Font Size</p>
-            <span className="text-[11px] text-accent font-mono tabular-nums">{store.fontSize}px</span>
+            <span className="text-[11px] text-primary font-mono tabular-nums">{store.fontSize}px</span>
           </div>
           <div className="flex items-center gap-2">
             <button
@@ -629,7 +629,7 @@ function StepEditor({ visible }: { visible: boolean }) {
             </button>
             <div className="relative flex-1 h-1 bg-surface-raised rounded-full overflow-hidden">
               <div
-                className="absolute left-0 top-0 h-full rounded-full bg-accent transition-all duration-150"
+                className="absolute left-0 top-0 h-full rounded-full bg-primary transition-all duration-150"
                 style={{ width: `${((store.fontSize - 10) / 14) * 100}%` }}
               />
             </div>
@@ -768,7 +768,7 @@ export function OnboardingWizard() {
                   }`}
                 >
                   <div className={`flex h-4 w-4 shrink-0 items-center justify-center rounded ${
-                    isActive ? 'bg-accent' : isDone ? 'bg-success/20' : 'bg-muted'
+                    isActive ? 'bg-primary' : isDone ? 'bg-success/20' : 'bg-muted'
                   }`}>
                     {isDone
                       ? <Check className="h-2.5 w-2.5 text-success" />
@@ -824,7 +824,7 @@ export function OnboardingWizard() {
               className={`flex items-center gap-1.5 rounded-md px-3 py-1 text-[11px] font-medium transition-colors ${
                 isLast
                   ? 'bg-success text-white hover:bg-success/90'
-                  : 'bg-accent text-white hover:bg-accent/90'
+                  : 'bg-primary text-white hover:bg-primary/90'
               }`}
             >
               {isLast ? (

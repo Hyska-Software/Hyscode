@@ -37,7 +37,7 @@ function ToggleItem({ item, extensionName }: { item: SettingsToggleItem; extensi
       <button
         onClick={() => setValue(key, !value)}
         className={`relative mt-0.5 h-5 w-9 shrink-0 rounded-full transition-colors ${
-          value ? 'bg-accent' : 'bg-muted'
+          value ? 'bg-primary' : 'bg-muted'
         }`}
         aria-pressed={value}
       >
@@ -70,7 +70,7 @@ function TextItem({ item, extensionName }: { item: SettingsTextItem; extensionNa
           onChange={(e) => setValue(key, e.target.value)}
           placeholder={item.placeholder}
           rows={3}
-          className="w-full resize-none rounded-md bg-muted px-2.5 py-1.5 text-[12px] text-foreground outline-none placeholder:text-muted-foreground/40 focus:ring-1 focus:ring-accent/50"
+          className="w-full resize-none rounded-md bg-muted px-2.5 py-1.5 text-[12px] text-foreground outline-none placeholder:text-muted-foreground/40 focus:ring-1 focus:ring-primary/50"
         />
       ) : (
         <input
@@ -78,7 +78,7 @@ function TextItem({ item, extensionName }: { item: SettingsTextItem; extensionNa
           value={value}
           onChange={(e) => setValue(key, e.target.value)}
           placeholder={item.placeholder}
-          className="w-full rounded-md bg-muted px-2.5 py-1.5 text-[12px] text-foreground outline-none placeholder:text-muted-foreground/40 focus:ring-1 focus:ring-accent/50"
+          className="w-full rounded-md bg-muted px-2.5 py-1.5 text-[12px] text-foreground outline-none placeholder:text-muted-foreground/40 focus:ring-1 focus:ring-primary/50"
         />
       )}
     </div>
@@ -109,7 +109,7 @@ function NumberItem({ item, extensionName }: { item: SettingsNumberItem; extensi
           max={max}
           step={step}
           onChange={(e) => setValue(key, Number(e.target.value))}
-          className="w-16 rounded-md bg-muted px-2 py-1 text-center text-[12px] text-foreground outline-none focus:ring-1 focus:ring-accent/50"
+          className="w-16 rounded-md bg-muted px-2 py-1 text-center text-[12px] text-foreground outline-none focus:ring-1 focus:ring-primary/50"
         />
       </div>
       <input
@@ -119,7 +119,7 @@ function NumberItem({ item, extensionName }: { item: SettingsNumberItem; extensi
         max={max}
         step={step}
         onChange={(e) => setValue(key, Number(e.target.value))}
-        className="w-full cursor-pointer accent-accent"
+        className="w-full cursor-pointer primary-primary"
       />
     </div>
   );
@@ -141,7 +141,7 @@ function SelectItem({ item, extensionName }: { item: SettingsSelectItem; extensi
       <select
         value={value}
         onChange={(e) => setValue(key, e.target.value)}
-        className="h-7 min-w-[120px] rounded-md bg-muted px-2 text-[12px] text-foreground outline-none focus:ring-1 focus:ring-accent/50"
+        className="h-7 min-w-[120px] rounded-md bg-muted px-2 text-[12px] text-foreground outline-none focus:ring-1 focus:ring-primary/50"
       >
         {item.options.map((opt) => (
           <option key={opt.value} value={opt.value}>
@@ -169,8 +169,8 @@ function ButtonItem({ item }: { item: SettingsButtonItem }) {
         onClick={() => void executeCommand(item.command, ...(item.commandArgs ?? []))}
         className={`shrink-0 rounded-md px-3 py-1.5 text-[12px] font-medium transition-colors ${
           isDanger
-            ? 'bg-red-500/10 text-red-400 hover:bg-red-500/20'
-            : 'bg-accent/10 text-accent hover:bg-accent/20'
+            ? 'bg-destructive/10 text-destructive hover:bg-destructive/20'
+            : 'bg-primary/10 text-primary hover:bg-primary/20'
         }`}
       >
         {item.buttonLabel ?? item.label ?? 'Run'}

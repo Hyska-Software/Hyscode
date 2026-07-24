@@ -65,9 +65,9 @@ export function SubAgentsTab() {
       </Section>
 
       {!store.subAgentEnabled && (
-        <div className="flex items-center gap-2 rounded-lg border border-yellow-500/20 bg-yellow-500/5 px-3 py-2.5">
-          <Bot className="h-4 w-4 shrink-0 text-yellow-400" />
-          <span className="text-[11px] text-yellow-300/80">
+        <div className="flex items-center gap-2 rounded-lg border border-warning/20 bg-warning/5 px-3 py-2.5">
+          <Bot className="h-4 w-4 shrink-0 text-warning" />
+          <span className="text-[11px] text-warning/80">
             Sub-agents are disabled. The <code className="rounded bg-muted px-1">spawn_subagent</code> tool will not be available to the agent.
           </span>
         </div>
@@ -133,7 +133,7 @@ function NumberInput({
         value={value}
         disabled={disabled}
         onChange={(e) => onChange(Number(e.target.value))}
-        className="h-1 w-28 cursor-pointer appearance-none rounded-full bg-muted accent-accent disabled:cursor-not-allowed"
+        className="h-1 w-28 cursor-pointer appearance-none rounded-full bg-muted primary-primary disabled:cursor-not-allowed"
       />
       <span className="w-8 text-right text-[11px] tabular-nums text-muted-foreground">
         {value}
@@ -183,7 +183,7 @@ function Toggle({
       onClick={() => !disabled && onChange(!checked)}
       disabled={disabled}
       className={`relative h-5 w-9 shrink-0 rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
-        checked ? 'bg-accent' : 'bg-muted'
+        checked ? 'bg-primary' : 'bg-muted'
       }`}
     >
       <span

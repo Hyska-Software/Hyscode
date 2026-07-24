@@ -2,7 +2,7 @@ import { FileCode, Brain, Terminal, X } from 'lucide-react';
 import { useAgentStore } from '@/stores/agent-store';
 
 function relevanceColor(relevance: number): string {
-  if (relevance >= 0.8) return 'text-green-400';
+  if (relevance >= 0.8) return 'text-success';
   if (relevance >= 0.5) return 'text-blue-400';
   return 'text-muted-foreground';
 }

@@ -267,7 +267,7 @@ function NumberInput({
         step={step}
         value={value}
         onChange={(e) => onChange(Number(e.target.value))}
-        className="h-1 w-24 cursor-pointer appearance-none rounded-full bg-muted accent-accent"
+        className="h-1 w-24 cursor-pointer appearance-none rounded-full bg-muted primary-primary"
       />
       <span className="w-10 text-right text-[11px] tabular-nums text-muted-foreground">
         {step < 1 ? value.toFixed(1) : value}
@@ -311,7 +311,7 @@ function Toggle({
     <button
       onClick={() => onChange(!checked)}
       className={`relative h-5 w-9 rounded-full transition-colors ${
-        checked ? 'bg-accent' : 'bg-muted'
+        checked ? 'bg-primary' : 'bg-muted'
       }`}
     >
       <span

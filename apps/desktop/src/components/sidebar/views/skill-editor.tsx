@@ -136,7 +136,7 @@ export function SkillEditor({ skill, workspacePath, onBack, onSaved }: SkillEdit
         >
           <ArrowLeft className="h-3.5 w-3.5" />
         </button>
-        <FileCode className="h-3.5 w-3.5 text-accent" />
+        <FileCode className="h-3.5 w-3.5 text-primary" />
         <span className="text-[11px] font-medium text-foreground">
           {isNew ? 'New Skill' : frontmatter.name || skill?.name || 'Skill'}
         </span>
@@ -160,7 +160,7 @@ export function SkillEditor({ skill, workspacePath, onBack, onSaved }: SkillEdit
             </span>
           )}
           {frontmatter.trigger && (
-            <span className="rounded bg-accent/10 px-1.5 py-0.5 text-[9px] text-accent">
+            <span className="rounded bg-primary/10 px-1.5 py-0.5 text-[9px] text-primary">
               {frontmatter.trigger}
             </span>
           )}
@@ -169,7 +169,7 @@ export function SkillEditor({ skill, workspacePath, onBack, onSaved }: SkillEdit
 
       {/* Error */}
       {error && (
-        <div className="border-b border-red-500/20 bg-red-500/10 px-3 py-1.5 text-[10px] text-red-400">
+        <div className="border-b border-destructive/20 bg-destructive/10 px-3 py-1.5 text-[10px] text-destructive">
           {error}
         </div>
       )}
@@ -216,7 +216,7 @@ export function EditSkillButton({ onClick }: { onClick: () => void }) {
         e.stopPropagation();
         onClick();
       }}
-      className="rounded p-0.5 opacity-0 transition-opacity group-hover:opacity-100 hover:bg-muted hover:text-accent"
+      className="rounded p-0.5 opacity-0 transition-opacity group-hover:opacity-100 hover:bg-muted hover:text-primary"
       title="Edit skill"
     >
       <Pencil className="h-3 w-3" />

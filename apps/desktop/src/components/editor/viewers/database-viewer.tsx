@@ -116,7 +116,7 @@ export function DatabaseViewer({ filePath }: DatabaseViewerProps) {
           <span className="text-[11px] text-muted-foreground">{fileName}</span>
         </div>
         <div className="flex flex-1 flex-col items-center justify-center gap-2 text-muted-foreground">
-          <AlertCircle className="h-8 w-8 text-red-500/60" />
+          <AlertCircle className="h-8 w-8 text-destructive/60" />
           <p className="text-xs font-medium">Failed to open database</p>
           <p className="max-w-md text-center text-[10px] opacity-60">{connectionError}</p>
         </div>
@@ -145,7 +145,7 @@ export function DatabaseViewer({ filePath }: DatabaseViewerProps) {
         <Database className="h-3 w-3 text-muted-foreground" />
         <span className="text-[11px] font-medium text-foreground">{fileName}</span>
         {connection && (
-          <span className="rounded bg-green-500/10 px-1.5 py-0.5 text-[10px] font-medium text-green-600">
+          <span className="rounded bg-success/10 px-1.5 py-0.5 text-[10px] font-medium text-green-600">
             {connection.type}
           </span>
         )}
@@ -154,11 +154,11 @@ export function DatabaseViewer({ filePath }: DatabaseViewerProps) {
 
       {/* Error banner */}
       {(error || localError) && (
-        <div className="flex shrink-0 items-center gap-2 border-b border-red-500/20 bg-red-500/5 px-3 py-1.5">
-          <AlertCircle className="h-3 w-3 shrink-0 text-red-500" />
+        <div className="flex shrink-0 items-center gap-2 border-b border-destructive/20 bg-destructive/5 px-3 py-1.5">
+          <AlertCircle className="h-3 w-3 shrink-0 text-destructive" />
           <span className="flex-1 text-[11px] text-red-600">{error || localError}</span>
-          <button onClick={dismissError} className="rounded p-0.5 hover:bg-red-500/10">
-            <X className="h-3 w-3 text-red-500" />
+          <button onClick={dismissError} className="rounded p-0.5 hover:bg-destructive/10">
+            <X className="h-3 w-3 text-destructive" />
           </button>
         </div>
       )}

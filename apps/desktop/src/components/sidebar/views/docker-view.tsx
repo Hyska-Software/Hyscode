@@ -25,13 +25,13 @@ import { TabBadge } from '../../ui/tab-badge';
 function stateColor(state: string): string {
   switch (state.toLowerCase()) {
     case 'running':
-      return 'bg-green-500';
+      return 'bg-success';
     case 'paused':
-      return 'bg-yellow-500';
+      return 'bg-warning';
     case 'restarting':
       return 'bg-blue-500';
     default:
-      return 'bg-red-500/70';
+      return 'bg-destructive/70';
   }
 }
 
@@ -63,7 +63,7 @@ function ContainerRow({ container }: { container: ContainerInfo }) {
       onClick={() => setSelected(isSelected ? null : container.id)}
       className={cn(
         'group flex w-full flex-col rounded-md transition-colors cursor-pointer',
-        isSelected ? 'bg-accent/10' : 'hover:bg-muted/50',
+        isSelected ? 'bg-primary/10' : 'hover:bg-muted/50',
       )}
     >
       <div className="flex items-center gap-2 px-2 py-1.5">
@@ -111,7 +111,7 @@ function ContainerRow({ container }: { container: ContainerInfo }) {
           <ActionBtn
             icon={Trash2}
             title="Remove"
-            className="hover:text-red-400"
+            className="hover:text-destructive"
             onClick={(e) => { e.stopPropagation(); removeContainer(container.id, true); }}
           />
         </div>
@@ -223,12 +223,12 @@ function LogsModal({
               <span>Loading logs…</span>
             </div>
           ) : fetchError ? (
-            <div className="flex h-full items-center justify-center gap-2 text-red-400">
+            <div className="flex h-full items-center justify-center gap-2 text-destructive">
               <AlertCircle className="h-4 w-4 shrink-0" />
               <span className="break-all">{fetchError}</span>
             </div>
           ) : logs ? (
-            <pre className="whitespace-pre-wrap break-all text-green-300/90">{logs}</pre>
+            <pre className="whitespace-pre-wrap break-all text-success/90">{logs}</pre>
           ) : (
             <div className="flex h-full items-center justify-center italic text-muted-foreground">
               No logs available
@@ -280,7 +280,7 @@ function ContainerDetail({ container }: { container: ContainerInfo }) {
 
       <button
         onClick={(e) => { e.stopPropagation(); setShowLogsModal(true); }}
-        className="mt-1.5 flex items-center gap-1 text-[9px] text-accent hover:underline"
+        className="mt-1.5 flex items-center gap-1 text-[9px] text-primary hover:underline"
       >
         <ScrollText className="h-2.5 w-2.5" />
         View Logs
@@ -314,7 +314,7 @@ function ImageRow({ image }: { image: ImageInfo }) {
         <ActionBtn
           icon={Trash2}
           title="Remove image"
-          className="hover:text-red-400"
+          className="hover:text-destructive"
           onClick={() => removeImage(image.id, false)}
         />
       </div>
@@ -496,7 +496,7 @@ export function DockerView() {
           <RefreshCw className={cn('h-3 w-3', loading && 'animate-spin')} />
           {/* Auto-refresh pulse indicator */}
           {watchId && (
-            <span className="absolute -right-0.5 -top-0.5 h-1.5 w-1.5 rounded-full bg-green-500 animate-pulse" />
+            <span className="absolute -right-0.5 -top-0.5 h-1.5 w-1.5 rounded-full bg-success animate-pulse" />
           )}
         </button>
       </div>
@@ -523,7 +523,7 @@ export function DockerView() {
 
       {/* Error banner */}
       {error && (
-        <div className="flex items-start gap-1.5 rounded-md bg-red-500/10 px-2 py-1.5 text-[9px] text-red-400">
+        <div className="flex items-start gap-1.5 rounded-md bg-destructive/10 px-2 py-1.5 text-[9px] text-destructive">
           <AlertCircle className="mt-0.5 h-3 w-3 shrink-0" />
           <span className="break-all">{error}</span>
         </div>

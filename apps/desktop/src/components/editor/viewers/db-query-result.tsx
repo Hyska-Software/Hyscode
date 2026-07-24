@@ -21,7 +21,7 @@ export function DbQueryResult({ result, executeResult }: DbQueryResultProps) {
     return (
       <div className="flex h-full flex-col">
         <div className="flex h-8 shrink-0 items-center gap-2 border-b border-border/40 bg-surface-raised px-3">
-          <CheckCircle2 className="h-3 w-3 text-green-500" />
+          <CheckCircle2 className="h-3 w-3 text-success" />
           <span className="text-[11px] text-foreground">Query executed successfully</span>
           <span className="ml-auto text-[10px] text-muted-foreground">
             {executeResult.rowsAffected} rows affected · {executeResult.durationMs}ms

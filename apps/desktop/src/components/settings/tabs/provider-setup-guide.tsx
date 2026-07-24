@@ -232,7 +232,7 @@ function Step({
     <div className="flex gap-3">
       {/* Step indicator + line */}
       <div className="flex flex-col items-center">
-        <div className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-accent/15 text-[10px] font-semibold text-accent">
+        <div className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary/15 text-[10px] font-semibold text-primary">
           {number}
         </div>
         {!last && <div className="mt-1 w-px flex-1 bg-border" />}
@@ -279,7 +279,7 @@ function CodeSnippet({ text }: { text: string }) {
     >
       {text}
       {copied ? (
-        <Check className="h-2.5 w-2.5 text-green-500" />
+        <Check className="h-2.5 w-2.5 text-success" />
       ) : (
         <Copy className="h-2.5 w-2.5 text-muted-foreground" />
       )}
@@ -310,8 +310,8 @@ function ModelList({ models }: { models: { name: string; desc: string }[] }) {
 
 function InfoBox({ children }: { children: React.ReactNode }) {
   return (
-    <div className="rounded-lg border border-accent/20 bg-accent/5 px-3.5 py-2.5">
-      <p className="text-[11px] leading-relaxed text-accent/90">{children}</p>
+    <div className="rounded-lg border border-primary/20 bg-primary/5 px-3.5 py-2.5">
+      <p className="text-[11px] leading-relaxed text-primary/90">{children}</p>
     </div>
   );
 }

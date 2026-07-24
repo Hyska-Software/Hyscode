@@ -16,9 +16,9 @@ const STATUS_CONFIG: Record<
   { icon: typeof CheckCircle2; color: string; animate?: boolean }
 > = {
   not_started: { icon: Circle, color: 'text-muted-foreground/30' },
-  in_progress: { icon: Loader2, color: 'text-accent', animate: true },
-  completed: { icon: CheckCircle2, color: 'text-green-400/80' },
-  blocked: { icon: AlertTriangle, color: 'text-yellow-400/80' },
+  in_progress: { icon: Loader2, color: 'text-primary', animate: true },
+  completed: { icon: CheckCircle2, color: 'text-success/80' },
+  blocked: { icon: AlertTriangle, color: 'text-warning/80' },
 };
 
 export function AgentTaskList() {
@@ -53,12 +53,12 @@ export function AgentTaskList() {
           {!allDone && (
             <div className="ml-auto h-1 w-16 overflow-hidden rounded-full bg-foreground/[0.08]">
               <div
-                className="h-full rounded-full bg-accent transition-all duration-500"
+                className="h-full rounded-full bg-primary transition-all duration-500"
                 style={{ width: `${Math.round((completed / total) * 100)}%` }}
               />
             </div>
           )}
-          {allDone && <CheckCircle2 className="ml-auto h-3.5 w-3.5 text-green-400/80" />}
+          {allDone && <CheckCircle2 className="ml-auto h-3.5 w-3.5 text-success/80" />}
         </button>
 
         {/* Task items */}

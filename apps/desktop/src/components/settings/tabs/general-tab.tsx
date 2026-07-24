@@ -88,25 +88,25 @@ export function GeneralTab() {
               </span>
             )}
             {updateStatus === 'up-to-date' && (
-              <span className="flex items-center gap-1 text-[10px] text-green-400">
+              <span className="flex items-center gap-1 text-[10px] text-success">
                 <CheckCircle className="h-3 w-3" /> Up to date
               </span>
             )}
             {(updateStatus === 'available' || updateStatus === 'downloading' || updateStatus === 'ready') && releaseInfo && (
-              <span className="flex items-center gap-1 text-[10px] text-accent">
+              <span className="flex items-center gap-1 text-[10px] text-primary">
                 <ArrowUpCircle className="h-3 w-3" />
                 {updateStatus === 'ready' ? 'Ready to install' : `${releaseInfo.version} available`}
               </span>
             )}
             {updateStatus === 'error' && (
-              <span className="text-[10px] text-red-400">Check failed</span>
+              <span className="text-[10px] text-destructive">Check failed</span>
             )}
           </div>
           <div className="flex gap-2">
             {(updateStatus === 'available' || updateStatus === 'downloading' || updateStatus === 'ready') && (
               <button
                 onClick={openDialog}
-                className="flex items-center gap-1.5 rounded-md bg-accent/10 px-2.5 py-1 text-[11px] font-medium text-accent hover:bg-accent/20 transition-colors"
+                className="flex items-center gap-1.5 rounded-md bg-primary/10 px-2.5 py-1 text-[11px] font-medium text-primary hover:bg-primary/20 transition-colors"
               >
                 {updateStatus === 'ready' ? 'Install' : 'View'}
               </button>
@@ -298,7 +298,7 @@ function NumberInput({
         step={step}
         value={value}
         onChange={(e) => onChange(Number(e.target.value))}
-        className="h-1 w-24 cursor-pointer appearance-none rounded-full bg-muted accent-accent"
+        className="h-1 w-24 cursor-pointer appearance-none rounded-full bg-muted primary-primary"
       />
       <span className="w-12 text-right text-[11px] tabular-nums text-muted-foreground">
         {step < 1 ? value.toFixed(1) : value}
@@ -342,7 +342,7 @@ function Toggle({
     <button
       onClick={() => onChange(!checked)}
       className={`relative h-5 w-9 rounded-full transition-colors ${
-        checked ? 'bg-accent' : 'bg-muted'
+        checked ? 'bg-primary' : 'bg-muted'
       }`}
     >
       <span

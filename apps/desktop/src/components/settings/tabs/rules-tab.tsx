@@ -84,7 +84,7 @@ export function RulesTab() {
         </div>
         <button
           onClick={() => openRuleEditor()}
-          className="flex items-center gap-1.5 rounded-md bg-accent px-3 py-1.5 text-[11px] font-medium text-accent-foreground hover:bg-accent/90 transition-colors"
+          className="flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-[11px] font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
         >
           <Plus className="h-3 w-3" />
           New Rule
@@ -223,7 +223,7 @@ function RuleRow({
         <button
           onClick={onDelete}
           disabled={deleting}
-          className="flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-red-500/10 hover:text-red-400 disabled:opacity-40"
+          className="flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive disabled:opacity-40"
           title="Delete"
         >
           {deleting ? <Loader2 className="h-3 w-3 animate-spin" /> : <Trash2 className="h-3 w-3" />}
@@ -244,7 +244,7 @@ function Toggle({
     <button
       onClick={onChange}
       className={`relative h-4 w-7 rounded-full transition-colors ${
-        checked ? 'bg-accent' : 'bg-muted'
+        checked ? 'bg-primary' : 'bg-muted'
       }`}
     >
       <span

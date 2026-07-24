@@ -135,7 +135,7 @@ function SessionRow({
       className={cn(
         'group flex items-start gap-2 rounded-lg px-2.5 py-2 transition-colors',
         isActive
-          ? 'bg-accent/10 text-foreground'
+          ? 'bg-primary/10 text-foreground'
           : 'cursor-pointer text-muted-foreground hover:bg-surface-raised hover:text-foreground',
       )}
     >
@@ -157,7 +157,7 @@ function SessionRow({
             onDelete();
           }}
           title="Delete session"
-          className="rounded p-1 hover:bg-muted hover:text-red-400"
+          className="rounded p-1 hover:bg-muted hover:text-destructive"
         >
           <Trash2 className="h-3 w-3" />
         </button>

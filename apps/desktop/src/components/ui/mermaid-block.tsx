@@ -96,15 +96,15 @@ function MermaidModal({ svg, code, onClose }: { svg: string; code: string; onClo
         <div className="flex items-center gap-1">
           <button
             onClick={copyCode}
-            className="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[11px] text-muted-foreground transition-colors hover:bg-white/5 hover:text-foreground"
+            className="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[11px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
           >
-            {codeCopied ? <Check className="h-3.5 w-3.5 text-green-400" /> : <Copy className="h-3.5 w-3.5" />}
-            <span className={codeCopied ? 'text-green-400' : ''}>{codeCopied ? 'Copied!' : 'Copy code'}</span>
+            {codeCopied ? <Check className="h-3.5 w-3.5 text-success" /> : <Copy className="h-3.5 w-3.5" />}
+            <span className={codeCopied ? 'text-success' : ''}>{codeCopied ? 'Copied!' : 'Copy code'}</span>
           </button>
           <div className="mx-1 h-4 w-px bg-border/30" />
           <button
             onClick={onClose}
-            className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-white/5 hover:text-foreground"
+            className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
             title="Close (Esc)"
           >
             <X className="h-4 w-4" />
@@ -146,21 +146,21 @@ function MermaidModal({ svg, code, onClose }: { svg: string; code: string; onClo
       <div className="flex h-11 shrink-0 items-center justify-center gap-1 border-t border-border/20">
         <button
           onClick={() => setScale((s) => clampScale(s - 0.25))}
-          className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-white/5 hover:text-foreground"
+          className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
           title="Zoom out"
         >
           <ZoomOut className="h-4 w-4" />
         </button>
         <button
           onClick={reset}
-          className="min-w-[52px] rounded-md px-2 py-1 text-center text-[11px] tabular-nums text-muted-foreground transition-colors hover:bg-white/5 hover:text-foreground"
+          className="min-w-[52px] rounded-md px-2 py-1 text-center text-[11px] tabular-nums text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
           title="Reset zoom & pan"
         >
           {Math.round(scale * 100)}%
         </button>
         <button
           onClick={() => setScale((s) => clampScale(s + 0.25))}
-          className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-white/5 hover:text-foreground"
+          className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
           title="Zoom in"
         >
           <ZoomIn className="h-4 w-4" />
@@ -168,7 +168,7 @@ function MermaidModal({ svg, code, onClose }: { svg: string; code: string; onClo
         <div className="mx-2 h-4 w-px bg-border/30" />
         <button
           onClick={reset}
-          className="flex items-center gap-1 rounded-md px-2 py-1 text-[10px] text-muted-foreground transition-colors hover:bg-white/5 hover:text-foreground"
+          className="flex items-center gap-1 rounded-md px-2 py-1 text-[10px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
           title="Reset zoom & pan"
         >
           <RotateCcw className="h-3 w-3" />
@@ -257,11 +257,11 @@ export function MermaidBlock({ code }: { code: string }) {
 
   if (!displaySvg && error && error !== 'Rendering…') {
     return (
-      <div className="my-2.5 overflow-hidden rounded-lg border border-red-500/20 bg-red-500/[0.06]">
-        <div className="flex h-7 items-center gap-1.5 border-b border-red-500/10 px-3">
-          <span className="text-[10px] font-medium uppercase tracking-wider text-red-400/70">Mermaid error</span>
+      <div className="my-2.5 overflow-hidden rounded-lg border border-destructive/20 bg-destructive/[0.06]">
+        <div className="flex h-7 items-center gap-1.5 border-b border-destructive/10 px-3">
+          <span className="text-[10px] font-medium uppercase tracking-wider text-destructive/70">Mermaid error</span>
         </div>
-        <p className="px-3 py-2 text-[11px] text-red-300/80">{error}</p>
+        <p className="px-3 py-2 text-[11px] text-destructive/80">{error}</p>
       </div>
     );
   }
@@ -270,7 +270,7 @@ export function MermaidBlock({ code }: { code: string }) {
     return (
       <div className="my-2.5 flex h-16 items-center justify-center rounded-lg border border-border/20 bg-surface-raised/20">
         <div className="flex items-center gap-2 text-[11px] text-muted-foreground/50">
-          <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-accent/50" />
+           <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-primary/50" />
           Rendering diagram…
         </div>
       </div>
@@ -286,30 +286,30 @@ export function MermaidBlock({ code }: { code: string }) {
           <div className="flex items-center gap-0.5">
             <button
               onClick={copyCode}
-              className="flex items-center gap-1 rounded px-1.5 py-1 text-[10px] text-muted-foreground transition-colors hover:bg-white/5 hover:text-foreground"
+              className="flex items-center gap-1 rounded px-1.5 py-1 text-[10px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
               title="Copy source code"
             >
-              {codeCopied ? <Check className="h-3 w-3 text-green-400" /> : <Copy className="h-3 w-3" />}
-              <span className={codeCopied ? 'text-green-400' : ''}>{codeCopied ? 'Copied!' : 'Copy code'}</span>
+              {codeCopied ? <Check className="h-3 w-3 text-success" /> : <Copy className="h-3 w-3" />}
+              <span className={codeCopied ? 'text-success' : ''}>{codeCopied ? 'Copied!' : 'Copy code'}</span>
             </button>
             <div className="mx-1 h-3.5 w-px bg-border/30" />
             <button
               onClick={() => setScale((s) => clampScale(s - 0.25))}
-              className="rounded p-1 text-muted-foreground transition-colors hover:bg-white/5 hover:text-foreground"
+              className="rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
               title="Zoom out (Ctrl+scroll)"
             >
               <ZoomOut className="h-3 w-3" />
             </button>
             <button
               onClick={() => setScale(1)}
-              className="min-w-[34px] rounded px-1 py-0.5 text-center text-[10px] tabular-nums text-muted-foreground transition-colors hover:bg-white/5 hover:text-foreground"
+              className="min-w-[34px] rounded px-1 py-0.5 text-center text-[10px] tabular-nums text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
               title="Reset zoom"
             >
               {Math.round(scale * 100)}%
             </button>
             <button
               onClick={() => setScale((s) => clampScale(s + 0.25))}
-              className="rounded p-1 text-muted-foreground transition-colors hover:bg-white/5 hover:text-foreground"
+              className="rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
               title="Zoom in (Ctrl+scroll)"
             >
               <ZoomIn className="h-3 w-3" />
@@ -317,7 +317,7 @@ export function MermaidBlock({ code }: { code: string }) {
             <div className="mx-1 h-3.5 w-px bg-border/30" />
             <button
               onClick={() => setShowModal(true)}
-              className="rounded p-1 text-muted-foreground transition-colors hover:bg-white/5 hover:text-foreground"
+              className="rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
               title="Open in fullscreen"
             >
               <Maximize2 className="h-3 w-3" />

@@ -12,7 +12,7 @@ function StatusDot({ status }: { status: string }) {
     case 'ready':
       return <CheckCircle2 className="h-3 w-3 text-success" />;
     case 'starting':
-      return <Circle className="h-3 w-3 animate-pulse text-yellow-400" />;
+      return <Circle className="h-3 w-3 animate-pulse text-warning" />;
     case 'error':
       return <XCircle className="h-3 w-3 text-destructive" />;
     default:
@@ -126,7 +126,7 @@ function ServerRow({ server }: { server: BuiltinServerConfig }) {
 
         <div className="flex items-center gap-2 shrink-0">
           {savedCustomPath && (
-            <span className="text-[10px] text-accent" title={savedCustomPath}>
+            <span className="text-[10px] text-primary" title={savedCustomPath}>
               custom path
             </span>
           )}
@@ -135,7 +135,7 @@ function ServerRow({ server }: { server: BuiltinServerConfig }) {
           ) : installed ? (
             <span className="text-[10px] text-success">Installed</span>
           ) : (
-            <span className="flex items-center gap-1 text-[10px] text-yellow-400">
+            <span className="flex items-center gap-1 text-[10px] text-warning">
               <AlertTriangle className="h-2.5 w-2.5" />
               Not found
             </span>
@@ -148,7 +148,7 @@ function ServerRow({ server }: { server: BuiltinServerConfig }) {
               onChange={() => toggleServer(server.id, !isEnabled)}
               className="sr-only peer"
             />
-            <div className="w-7 h-4 bg-muted rounded-full peer peer-checked:bg-accent transition-colors after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-foreground after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:after:translate-x-full" />
+            <div className="w-7 h-4 bg-muted rounded-full peer peer-checked:bg-primary transition-colors after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-foreground after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:after:translate-x-full" />
           </label>
         </div>
       </button>
@@ -171,7 +171,7 @@ function ServerRow({ server }: { server: BuiltinServerConfig }) {
                 {Object.entries(server.installInstructions).map(([platform, cmd]) => (
                   <React.Fragment key={platform}>
                     <span className="text-muted-foreground capitalize">{platform}:</span>
-                    <CopyCode text={cmd} className="text-accent" />
+                    <CopyCode text={cmd} className="text-primary" />
                   </React.Fragment>
                 ))}
               </>

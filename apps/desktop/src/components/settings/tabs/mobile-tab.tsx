@@ -48,7 +48,7 @@ export function MobileTab() {
           <button
             onClick={detect}
             disabled={detecting}
-            className="flex items-center gap-1.5 rounded-md bg-accent px-3 py-1.5 text-[11px] font-medium text-accent-foreground transition-opacity hover:opacity-80 disabled:opacity-50"
+            className="flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-[11px] font-medium text-primary-foreground transition-opacity hover:opacity-80 disabled:opacity-50"
           >
             {detecting ? (
               <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -75,12 +75,12 @@ export function MobileTab() {
           <p className="mb-2">
             <strong className="text-foreground">Flutter / Dart:</strong> If the SDK path is left
             empty, HysCode will try to find Flutter in your system PATH, then check{' '}
-            <code className="rounded bg-muted px-1 py-0.5 text-accent">FLUTTER_ROOT</code>.
+            <code className="rounded bg-muted px-1 py-0.5 text-primary">FLUTTER_ROOT</code>.
           </p>
           <p>
             <strong className="text-foreground">Android SDK:</strong> Checks{' '}
-            <code className="rounded bg-muted px-1 py-0.5 text-accent">ANDROID_SDK_ROOT</code>,{' '}
-            <code className="rounded bg-muted px-1 py-0.5 text-accent">ANDROID_HOME</code> and
+            <code className="rounded bg-muted px-1 py-0.5 text-primary">ANDROID_SDK_ROOT</code>,{' '}
+            <code className="rounded bg-muted px-1 py-0.5 text-primary">ANDROID_HOME</code> and
             common install locations automatically.
           </p>
         </div>
@@ -134,9 +134,9 @@ function SdkRow({
   return (
     <div className="flex items-start gap-2">
       {found ? (
-        <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-green-400" />
+        <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-success" />
       ) : (
-        <XCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-red-400" />
+        <XCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-destructive" />
       )}
       <div className="flex flex-col gap-0.5">
         <div className="flex items-center gap-2">
@@ -145,13 +145,13 @@ function SdkRow({
             <>
               {version && <span className="text-muted-foreground">v{version}</span>}
               {source && (
-                <span className="rounded bg-muted px-1 py-0.5 text-[9px] font-medium uppercase tracking-wider text-accent">
+                <span className="rounded bg-muted px-1 py-0.5 text-[9px] font-medium uppercase tracking-wider text-primary">
                   {source}
                 </span>
               )}
             </>
           ) : (
-            <span className="text-red-400">Not found</span>
+            <span className="text-destructive">Not found</span>
           )}
         </div>
         {path && (
@@ -226,7 +226,7 @@ function Toggle({
     <button
       onClick={() => onChange(!checked)}
       className={`relative h-5 w-9 rounded-full transition-colors ${
-        checked ? 'bg-accent' : 'bg-muted'
+        checked ? 'bg-primary' : 'bg-muted'
       }`}
     >
       <span

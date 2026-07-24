@@ -27,7 +27,7 @@ const THEMES: ThemeOption[] = [
   {
     id: 'hyscode-dark',
     name: 'HysCode Dark',
-    description: 'Default dark theme with purple accents',
+    description: 'Default dark theme with purple primarys',
     colors: {
       bg: '#0d0d0d',
       surface: '#181818',
@@ -125,7 +125,7 @@ function ThemeCard({
       onClick={onSelect}
       className={`group relative flex flex-col overflow-hidden rounded-lg transition-all ${
         isActive
-          ? 'ring-2 ring-accent ring-offset-1 ring-offset-background'
+          ? 'ring-2 ring-primary ring-offset-1 ring-offset-background'
           : 'hover:ring-1 hover:ring-muted-foreground/30'
       }`}
     >
@@ -253,7 +253,7 @@ function IconThemeCard({
       onClick={onSelect}
       className={`relative flex flex-col gap-2.5 rounded-xl p-3 text-left transition-all ${
         isActive
-          ? 'bg-accent/10 ring-2 ring-accent shadow-sm'
+          ? 'bg-primary/10 ring-2 ring-primary shadow-sm'
           : 'bg-surface-raised/30 ring-1 ring-border/50 hover:bg-surface-raised/60 hover:ring-border'
       }`}
     >
@@ -289,8 +289,8 @@ function IconThemeCard({
       </div>
 
       {isActive && (
-        <div className="absolute right-2.5 top-2.5 flex h-4 w-4 items-center justify-center rounded-full bg-accent">
-          <Check className="h-2.5 w-2.5 text-accent-foreground" />
+        <div className="absolute right-2.5 top-2.5 flex h-4 w-4 items-center justify-center rounded-full bg-primary">
+          <Check className="h-2.5 w-2.5 text-primary-foreground" />
         </div>
       )}
     </button>
@@ -333,7 +333,7 @@ export function ThemeTab() {
         <button
           onClick={() => store.set('disableRoundedBorders', !store.disableRoundedBorders)}
           className={`relative h-5 w-9 shrink-0 rounded-full transition-colors ${
-            store.disableRoundedBorders ? 'bg-accent' : 'bg-muted'
+            store.disableRoundedBorders ? 'bg-primary' : 'bg-muted'
           }`}
         >
           <span

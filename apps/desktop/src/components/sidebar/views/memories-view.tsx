@@ -33,11 +33,11 @@ const TYPE_LABELS: Record<string, string> = {
 };
 
 const TYPE_COLORS: Record<string, string> = {
-  error_solution: 'bg-red-500/15 text-red-400',
+  error_solution: 'bg-destructive/15 text-destructive',
   convention:     'bg-blue-500/15 text-blue-400',
   decision:       'bg-purple-500/15 text-purple-400',
-  workflow:       'bg-green-500/15 text-green-400',
-  fact:           'bg-yellow-500/15 text-yellow-400',
+  workflow:       'bg-success/15 text-success',
+  fact:           'bg-warning/15 text-warning',
   preference:     'bg-orange-500/15 text-orange-400',
 };
 
@@ -112,7 +112,7 @@ function MemoryCard({ memory, expanded, onToggle, onArchive, onDelete, onOpenTab
           </button>
           <button
             onClick={(e) => { e.stopPropagation(); onDelete(memory.id); }}
-            className="h-5 w-5 flex items-center justify-center rounded text-[var(--text-muted)] hover:text-red-400 hover:bg-red-500/10 transition-colors"
+            className="h-5 w-5 flex items-center justify-center rounded text-[var(--text-muted)] hover:text-destructive hover:bg-destructive/10 transition-colors"
             title="Delete memory"
           >
             <Trash2 className="h-3 w-3" />

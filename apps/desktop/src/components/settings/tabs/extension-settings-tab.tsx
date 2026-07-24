@@ -28,7 +28,7 @@ function ConfigSection({ entry }: { entry: ExtConfigEntry }) {
         ) : (
           <ChevronRight className="h-3 w-3 text-muted-foreground shrink-0" />
         )}
-        <Blocks className="h-3.5 w-3.5 text-accent shrink-0" />
+        <Blocks className="h-3.5 w-3.5 text-primary shrink-0" />
         <span className="text-[12px] font-medium text-foreground">{title}</span>
         <span className="ml-auto text-[10px] text-muted-foreground/60">{keys.length} settings</span>
       </button>
@@ -114,7 +114,7 @@ function ConfigProperty({
             <button
               onClick={() => handleChange(!(currentValue ?? prop.default))}
               className={`relative h-5 w-9 rounded-full transition-colors ${
-                (currentValue ?? prop.default) ? 'bg-accent' : 'bg-muted'
+                (currentValue ?? prop.default) ? 'bg-primary' : 'bg-muted'
               }`}
             >
               <span
@@ -132,7 +132,7 @@ function ConfigProperty({
                 step={1}
                 value={Number(currentValue ?? prop.default ?? 0)}
                 onChange={(e) => handleChange(Number(e.target.value))}
-                className="h-1 w-20 cursor-pointer appearance-none rounded-full bg-muted accent-accent"
+                className="h-1 w-20 cursor-pointer appearance-none rounded-full bg-muted primary-primary"
               />
               <span className="w-8 text-right text-[10px] tabular-nums text-muted-foreground">
                 {Number(currentValue ?? prop.default ?? 0)}
@@ -191,7 +191,7 @@ function ViewsSection() {
   return (
     <div className="space-y-3">
       <div className="flex items-center gap-2">
-        <Eye className="h-3.5 w-3.5 text-accent" />
+        <Eye className="h-3.5 w-3.5 text-primary" />
         <h3 className="text-[12px] font-semibold text-foreground">Sidebar Views</h3>
         <span className="text-[10px] text-muted-foreground/60 ml-auto">
           {extensionViews.length} view{extensionViews.length !== 1 ? 's' : ''}
@@ -224,7 +224,7 @@ function ViewsSection() {
                     <button
                       onClick={() => toggleView(view.id, !isVisible)}
                       className={`relative h-4 w-7 rounded-full transition-colors ${
-                        isVisible ? 'bg-accent' : 'bg-muted'
+                        isVisible ? 'bg-primary' : 'bg-muted'
                       }`}
                       title={isVisible ? 'Hide from sidebar' : 'Show in sidebar'}
                     >
@@ -272,7 +272,7 @@ export function ExtensionSettingsTab() {
       {configurations.length > 0 && (
         <div className="space-y-4">
           <div className="flex items-center gap-2">
-            <Blocks className="h-3.5 w-3.5 text-accent" />
+            <Blocks className="h-3.5 w-3.5 text-primary" />
             <h3 className="text-[12px] font-semibold text-foreground">Extension Settings</h3>
           </div>
           <p className="text-[10px] text-muted-foreground/70 -mt-3">

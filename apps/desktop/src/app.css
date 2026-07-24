@@ -2,6 +2,9 @@
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 @import "@fontsource-variable/geist";
+/* @hyscode/ui (Aurora) design tokens: raw color scales, motion easings and
+ * shared animation utilities. The theme-aware semantic layer stays below. */
+@import "../../../packages/ui/src/styles/theme.css";
 /*
    ---break---
    */
@@ -183,6 +186,12 @@ body {
   --sidebar-accent-foreground: oklch(0.205 0 0);
   --sidebar-border: oklch(0.922 0 0);
   --sidebar-ring: oklch(0.708 0 0);
+  /* Aurora semantic fallbacks (overridden per theme where needed) */
+  --destructive-foreground: #ffffff;
+  --editor-bg: #ffffff;
+  --editor-gutter: #f7f7f8;
+  --terminal-bg: #1e1e2e;
+  --terminal-fg: #e4e4e7;
 }
 
 /*
@@ -221,6 +230,12 @@ body {
   --sidebar-accent-foreground: oklch(0.985 0 0);
   --sidebar-border: oklch(1 0 0 / 10%);
   --sidebar-ring: oklch(0.556 0 0);
+  /* Aurora semantic fallbacks (overridden per theme where needed) */
+  --destructive-foreground: #ffffff;
+  --editor-bg: #000000;
+  --editor-gutter: #161619;
+  --terminal-bg: #0a0a0e;
+  --terminal-fg: #e4e4e7;
 }
 
 /*
@@ -391,94 +406,94 @@ body {
 
 /* ── Theme: HysCode Dark (default) ─────────────────────────────────────── */
 .theme-hyscode-dark {
-  /* shadcn bridge vars */
-  --background: #0d0d0d;
-  --foreground: #e8e8e8;
-  --card: #181818;
-  --card-foreground: #e8e8e8;
-  --popover: #202020;
-  --popover-foreground: #e8e8e8;
-  --primary: #a855f7;
+  /* shadcn bridge vars — Aurora dark (cool neutrals + teal) */
+  --background: #202123;
+  --foreground: #ececf1;
+  --card: #2a2b32;
+  --card-foreground: #ececf1;
+  --popover: #2a2b32;
+  --popover-foreground: #ececf1;
+  --primary: #10a37f;
   --primary-foreground: #ffffff;
-  --secondary: #282828;
-  --secondary-foreground: #e8e8e8;
-  --muted: #282828;
-  --muted-foreground: #888888;
-  --accent: #a855f7;
+  --secondary: #35363f;
+  --secondary-foreground: #ececf1;
+  --muted: #2f3037;
+  --muted-foreground: #8e8ea0;
+  --accent: #10a37f;
   --accent-foreground: #ffffff;
-  --destructive: #f87171;
-  --border: transparent;
-  --input: #202020;
-  --ring: #a855f7;
-  --chart-1: #a855f7;
+  --destructive: #ef4444;
+  --border: rgba(255, 255, 255, 0.08);
+  --input: rgba(255, 255, 255, 0.12);
+  --ring: #10a37f;
+  --chart-1: #10a37f;
   --chart-2: #4ade80;
   --chart-3: #facc15;
   --chart-4: #f87171;
-  --chart-5: #888888;
+  --chart-5: #8e8ea0;
   --radius: 0.625rem;
-  --sidebar: #111111;
-  --sidebar-foreground: #e8e8e8;
-  --sidebar-primary: #a855f7;
+  --sidebar: #202123;
+  --sidebar-foreground: #ececf1;
+  --sidebar-primary: #10a37f;
   --sidebar-primary-foreground: #ffffff;
-  --sidebar-accent: #282828;
-  --sidebar-accent-foreground: #e8e8e8;
-  --sidebar-border: transparent;
-  --sidebar-ring: #a855f7;
+  --sidebar-accent: #35363f;
+  --sidebar-accent-foreground: #ececf1;
+  --sidebar-border: rgba(255, 255, 255, 0.08);
+  --sidebar-ring: #10a37f;
   /* HysCode custom tokens */
-  --color-surface: #181818;
-  --color-surface-raised: #202020;
-  --color-accent-muted: rgba(168, 85, 247, 0.10);
+  --color-surface: #2a2b32;
+  --color-surface-raised: #35363f;
+  --color-accent-muted: rgba(16, 163, 127, 0.12);
   --color-success: #4ade80;
   --color-warning: #facc15;
-  --color-error: #f87171;
-  --color-border-hover: transparent;
-  --color-border-active: transparent;
+  --color-error: #ef4444;
+  --color-border-hover: rgba(255, 255, 255, 0.14);
+  --color-border-active: rgba(255, 255, 255, 0.20);
 }
 
 /* ── Theme: HysCode Light ──────────────────────────────────────────────── */
 .theme-hyscode-light {
-  /* shadcn bridge vars */
-  --background: #f5f5f5;
-  --foreground: #1a1a1a;
+  /* shadcn bridge vars — Aurora light (cool neutrals + teal) */
+  --background: #f7f7f8;
+  --foreground: #0d0d0f;
   --card: #ffffff;
-  --card-foreground: #1a1a1a;
+  --card-foreground: #0d0d0f;
   --popover: #ffffff;
-  --popover-foreground: #1a1a1a;
-  --primary: #7c3aed;
+  --popover-foreground: #0d0d0f;
+  --primary: #0d8a6c;
   --primary-foreground: #ffffff;
-  --secondary: #e4e4e4;
-  --secondary-foreground: #1a1a1a;
-  --muted: #e4e4e4;
-  --muted-foreground: #666666;
-  --accent: #7c3aed;
+  --secondary: #f0f0f2;
+  --secondary-foreground: #0d0d0f;
+  --muted: #f0f0f2;
+  --muted-foreground: #6e6e80;
+  --accent: #0d8a6c;
   --accent-foreground: #ffffff;
   --destructive: #ef4444;
-  --border: #e0e0e0;
-  --input: #f0f0f0;
-  --ring: #7c3aed;
-  --chart-1: #7c3aed;
+  --border: rgba(0, 0, 0, 0.08);
+  --input: rgba(0, 0, 0, 0.12);
+  --ring: #0d8a6c;
+  --chart-1: #0d8a6c;
   --chart-2: #22c55e;
   --chart-3: #eab308;
   --chart-4: #ef4444;
-  --chart-5: #666666;
+  --chart-5: #6e6e80;
   --radius: 0.625rem;
-  --sidebar: #eaeaea;
-  --sidebar-foreground: #1a1a1a;
-  --sidebar-primary: #7c3aed;
+  --sidebar: #f7f7f8;
+  --sidebar-foreground: #0d0d0f;
+  --sidebar-primary: #0d8a6c;
   --sidebar-primary-foreground: #ffffff;
-  --sidebar-accent: #e4e4e4;
-  --sidebar-accent-foreground: #1a1a1a;
-  --sidebar-border: #e0e0e0;
-  --sidebar-ring: #7c3aed;
+  --sidebar-accent: #f0f0f2;
+  --sidebar-accent-foreground: #0d0d0f;
+  --sidebar-border: rgba(0, 0, 0, 0.08);
+  --sidebar-ring: #0d8a6c;
   /* HysCode custom tokens */
   --color-surface: #ffffff;
-  --color-surface-raised: #f0f0f0;
-  --color-accent-muted: rgba(124, 58, 237, 0.08);
+  --color-surface-raised: #f0f0f2;
+  --color-accent-muted: rgba(13, 138, 108, 0.10);
   --color-success: #22c55e;
   --color-warning: #eab308;
   --color-error: #ef4444;
-  --color-border-hover: #d4d4d4;
-  --color-border-active: #c0c0c0;
+  --color-border-hover: rgba(0, 0, 0, 0.14);
+  --color-border-active: rgba(0, 0, 0, 0.20);
 }
 
 /* ── Theme: Nord ───────────────────────────────────────────────────────── */
@@ -883,7 +898,7 @@ body {
 
 /* ── HysCode Dark ──────────────────────────────────────────────────────── */
 .theme-hyscode-dark .markdown-preview .hljs-keyword,
-.theme-hyscode-dark .markdown-preview .hljs-selector-tag { color: #c084fc; }
+.theme-hyscode-dark .markdown-preview .hljs-selector-tag { color: #2fb28f; }
 .theme-hyscode-dark .markdown-preview .hljs-string,
 .theme-hyscode-dark .markdown-preview .hljs-addition { color: #86efac; }
 .theme-hyscode-dark .markdown-preview .hljs-number { color: #fbbf24; }
@@ -903,7 +918,7 @@ body {
 
 /* ── HysCode Light ─────────────────────────────────────────────────────── */
 .theme-hyscode-light .markdown-preview .hljs-keyword,
-.theme-hyscode-light .markdown-preview .hljs-selector-tag { color: #7c3aed; }
+.theme-hyscode-light .markdown-preview .hljs-selector-tag { color: #0d8a6c; }
 .theme-hyscode-light .markdown-preview .hljs-string,
 .theme-hyscode-light .markdown-preview .hljs-addition { color: #16a34a; }
 .theme-hyscode-light .markdown-preview .hljs-number { color: #d97706; }

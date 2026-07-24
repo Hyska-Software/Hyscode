@@ -55,7 +55,7 @@ function ExtensionsModal({ onClose }: { onClose: () => void }) {
         {/* Header */}
         <div className="flex shrink-0 items-center justify-between border-b border-border/40 bg-surface-raised px-4 py-2.5">
           <div className="flex items-center gap-2">
-            <Blocks className="h-4 w-4 text-accent" />
+            <Blocks className="h-4 w-4 text-primary" />
             <span className="text-[13px] font-semibold text-foreground">Extensions</span>
           </div>
           <button

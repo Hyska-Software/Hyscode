@@ -21,8 +21,8 @@ import { MarkdownContent } from './markdown-renderer';
 
 const MODE_CONFIG: Record<AgentMode, { label: string; color: string; Icon: React.ElementType }> = {
   build: { label: 'Build', color: 'text-blue-400', Icon: Hammer },
-  review: { label: 'Review', color: 'text-yellow-400', Icon: Search },
-  debug: { label: 'Debug', color: 'text-red-400', Icon: Bug },
+  review: { label: 'Review', color: 'text-warning', Icon: Search },
+  debug: { label: 'Debug', color: 'text-destructive', Icon: Bug },
   plan: { label: 'Plan', color: 'text-purple-400', Icon: Map },
   chat: { label: 'Chat', color: 'text-muted-foreground', Icon: Bot },
 };
@@ -76,8 +76,8 @@ export const SubAgentCard = memo(function SubAgentCard({ input, toolCallId }: Su
       >
         {/* Status icon */}
         <span className="flex-shrink-0">
-          {status === 'running' && <Loader2 className="h-3.5 w-3.5 animate-spin text-accent" />}
-          {status === 'done' && <Check className="h-3.5 w-3.5 text-green-400/80" />}
+          {status === 'running' && <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />}
+          {status === 'done' && <Check className="h-3.5 w-3.5 text-success/80" />}
           {status === 'error' && <X className="h-3.5 w-3.5 text-destructive" />}
         </span>
 
@@ -130,13 +130,13 @@ export const SubAgentCard = memo(function SubAgentCard({ input, toolCallId }: Su
               {isRunning && (
                 <div className="flex items-center gap-1.5 py-1 text-[10px] text-muted-foreground/40">
                   <span className="flex gap-0.5">
-                    <span className="agent-dot-bounce h-1 w-1 rounded-full bg-accent/40" />
+                    <span className="agent-dot-bounce h-1 w-1 rounded-full bg-primary/40" />
                     <span
-                      className="agent-dot-bounce h-1 w-1 rounded-full bg-accent/40"
+                      className="agent-dot-bounce h-1 w-1 rounded-full bg-primary/40"
                       style={{ animationDelay: '0.16s' }}
                     />
                     <span
-                      className="agent-dot-bounce h-1 w-1 rounded-full bg-accent/40"
+                      className="agent-dot-bounce h-1 w-1 rounded-full bg-primary/40"
                       style={{ animationDelay: '0.32s' }}
                     />
                   </span>

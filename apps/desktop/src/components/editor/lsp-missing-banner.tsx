@@ -58,7 +58,7 @@ export function LspMissingBanner() {
 
   return (
     <div className="flex items-center gap-2 border-b border-border bg-surface px-3 py-1.5">
-      <PackageOpen className="h-3.5 w-3.5 shrink-0 text-yellow-400" />
+      <PackageOpen className="h-3.5 w-3.5 shrink-0 text-warning" />
       <span className="text-[11px] text-foreground">
         <span className="font-medium">{server.displayName}</span>
         {' '}not found — install it to enable IntelliSense for{' '}
@@ -71,7 +71,7 @@ export function LspMissingBanner() {
       )}
       <button
         onClick={() => openSettingsOnTab('languages')}
-        className="ml-1 rounded-md bg-accent px-2.5 py-0.5 text-[10px] font-medium text-accent-foreground hover:bg-accent/90 transition-colors"
+        className="ml-1 rounded-md bg-primary px-2.5 py-0.5 text-[10px] font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
       >
         Open Settings
       </button>

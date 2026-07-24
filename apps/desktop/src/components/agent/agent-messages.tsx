@@ -46,17 +46,17 @@ const ThinkingBlock = memo(function ThinkingBlock({
         ) : (
           <ChevronRight className="h-2.5 w-2.5 shrink-0 transition-transform" />
         )}
-        <Brain className="h-2.5 w-2.5 shrink-0 text-accent/60" />
+        <Brain className="h-2.5 w-2.5 shrink-0 text-primary/60" />
         <span className="font-medium">Thinking</span>
         {isStreaming && (
           <span className="ml-0.5 flex items-center gap-[3px]">
-            <span className="agent-dot-bounce h-1 w-1 rounded-full bg-accent/50" />
+            <span className="agent-dot-bounce h-1 w-1 rounded-full bg-primary/50" />
             <span
-              className="agent-dot-bounce h-1 w-1 rounded-full bg-accent/50"
+              className="agent-dot-bounce h-1 w-1 rounded-full bg-primary/50"
               style={{ animationDelay: '0.16s' }}
             />
             <span
-              className="agent-dot-bounce h-1 w-1 rounded-full bg-accent/50"
+              className="agent-dot-bounce h-1 w-1 rounded-full bg-primary/50"
               style={{ animationDelay: '0.32s' }}
             />
           </span>
@@ -83,13 +83,13 @@ const ThinkingBlock = memo(function ThinkingBlock({
 function StreamingIndicator() {
   return (
     <div className="agent-fade-in flex items-center gap-[5px] py-2">
-      <span className="agent-dot-bounce h-[5px] w-[5px] rounded-full bg-accent/60" />
+      <span className="agent-dot-bounce h-[5px] w-[5px] rounded-full bg-primary/60" />
       <span
-        className="agent-dot-bounce h-[5px] w-[5px] rounded-full bg-accent/60"
+        className="agent-dot-bounce h-[5px] w-[5px] rounded-full bg-primary/60"
         style={{ animationDelay: '0.16s' }}
       />
       <span
-        className="agent-dot-bounce h-[5px] w-[5px] rounded-full bg-accent/60"
+        className="agent-dot-bounce h-[5px] w-[5px] rounded-full bg-primary/60"
         style={{ animationDelay: '0.32s' }}
       />
     </div>
@@ -151,7 +151,7 @@ function RecoveryCard() {
           </details>
           <div className="mt-2 flex flex-wrap gap-2">
             <button
-              className="flex items-center gap-1 rounded bg-accent px-2 py-1 text-accent-foreground"
+              className="flex items-center gap-1 rounded bg-primary px-2 py-1 text-primary-foreground"
               onClick={handleAction}
             >
               <RotateCw className="h-3 w-3" />
@@ -247,8 +247,8 @@ const MessageItem = memo(function MessageItem({
             <div className="flex gap-3">
               {/* Icon column — shows avatar for first in group, spacer for consecutive */}
               {!isConsecutiveAssistant ? (
-                <div className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-accent/10">
-                  <Sparkles className="h-2.5 w-2.5 text-accent" />
+                <div className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary/10">
+                  <Sparkles className="h-2.5 w-2.5 text-primary" />
                 </div>
               ) : (
                 <div className="w-5 shrink-0" />
@@ -261,7 +261,7 @@ const MessageItem = memo(function MessageItem({
                   <div className="mb-0.5 flex items-center gap-1.5">
                     <span className="text-[10px] font-medium text-muted-foreground/55">Agent</span>
                     {isActivelyStreaming && (
-                      <span className="agent-breathe h-1.5 w-1.5 rounded-full bg-accent/70" />
+                      <span className="agent-breathe h-1.5 w-1.5 rounded-full bg-primary/70" />
                     )}
                   </div>
                 )}
@@ -352,8 +352,8 @@ export function AgentMessages() {
         <ScrollArea className="h-full">
           <div className="flex min-h-[200px] items-center justify-center p-4">
             <div className="flex flex-col items-center gap-3 text-center">
-              <div className="flex h-9 w-9 items-center justify-center rounded-full bg-accent/8">
-                <Sparkles className="h-4 w-4 text-accent/70" />
+              <div className="flex h-9 w-9 items-center justify-center rounded-full bg-primary/8">
+                <Sparkles className="h-4 w-4 text-primary/70" />
               </div>
               <p className="text-xs font-medium text-foreground/80">How can I help?</p>
               <p className="max-w-[220px] text-[11px] leading-relaxed text-muted-foreground/60">
@@ -402,7 +402,7 @@ export function AgentMessages() {
           <ModeSwitchDialog />
 
           {isStreaming && connectionState !== 'connected' && connectionState !== 'idle' && (
-            <div className="mt-2 rounded-md border border-yellow-500/25 bg-yellow-500/5 px-3 py-2 text-[10px] text-yellow-300">
+            <div className="mt-2 rounded-md border border-warning/25 bg-warning/5 px-3 py-2 text-[10px] text-warning">
               {connectionMessage ??
                 (connectionState === 'connecting'
                   ? 'Connecting to provider…'

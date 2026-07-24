@@ -99,8 +99,8 @@ export function ExtensionReadmeViewer({
               [&_ul]:text-[12px] [&_ul]:text-foreground/80 [&_ul]:my-2 [&_ul]:pl-5
               [&_ol]:text-[12px] [&_ol]:text-foreground/80 [&_ol]:my-2 [&_ol]:pl-5
               [&_li]:my-0.5
-              [&_a]:text-accent [&_a]:no-underline [&_a:hover]:underline
-              [&_blockquote]:border-l-2 [&_blockquote]:border-accent/40 [&_blockquote]:pl-3 [&_blockquote]:text-muted-foreground [&_blockquote]:italic
+              [&_a]:text-primary [&_a]:no-underline [&_a:hover]:underline
+              [&_blockquote]:border-l-2 [&_blockquote]:border-primary/40 [&_blockquote]:pl-3 [&_blockquote]:text-muted-foreground [&_blockquote]:italic
               [&_table]:w-full [&_table]:text-[11px] [&_table]:border-collapse
               [&_th]:border [&_th]:border-border [&_th]:px-2.5 [&_th]:py-1.5 [&_th]:text-left [&_th]:bg-muted/50 [&_th]:font-medium
               [&_td]:border [&_td]:border-border [&_td]:px-2.5 [&_td]:py-1.5
@@ -134,7 +134,7 @@ export function ExtensionReadmeViewer({
               <div className="flex flex-col gap-2">
                 <div className="flex items-center gap-2">
                   {isEnabled ? (
-                    <span className="inline-flex items-center gap-1.5 rounded-full bg-accent/15 px-2.5 py-1 text-[11px] font-medium text-accent">
+                    <span className="inline-flex items-center gap-1.5 rounded-full bg-primary/15 px-2.5 py-1 text-[11px] font-medium text-primary">
                       <CheckCircle2 className="h-3 w-3" />
                       Enabled
                     </span>

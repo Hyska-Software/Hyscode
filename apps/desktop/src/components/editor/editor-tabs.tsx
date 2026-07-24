@@ -175,21 +175,21 @@ export function EditorTabs() {
               isActive
                 ? 'bg-muted text-foreground'
                 : 'text-muted-foreground hover:text-foreground hover:bg-surface-raised'
-            } ${isDragOver ? 'border-l-2 border-accent' : ''}`}
+            } ${isDragOver ? 'border-l-2 border-primary' : ''}`}
             onClick={() => setActiveTab(tab.id)}
             onContextMenu={(e) => handleContextMenu(e, tab)}
           >
             {tab.isPinned && (
-              <Pin className="h-2.5 w-2.5 shrink-0 text-accent opacity-60" />
+              <Pin className="h-2.5 w-2.5 shrink-0 text-primary opacity-60" />
             )}
             {isDiff ? (
-              <GitCompare className="h-3 w-3 shrink-0 text-accent" />
+              <GitCompare className="h-3 w-3 shrink-0 text-primary" />
             ) : isTerminal ? (
-              <Terminal className="h-3 w-3 shrink-0 text-green-400" />
+              <Terminal className="h-3 w-3 shrink-0 text-success" />
             ) : isCommit ? (
-              <GitCommit className="h-3 w-3 shrink-0 text-accent" />
+              <GitCommit className="h-3 w-3 shrink-0 text-primary" />
             ) : isExtReadme ? (
-              <Blocks className="h-3 w-3 shrink-0 text-accent" />
+              <Blocks className="h-3 w-3 shrink-0 text-primary" />
             ) : isStreaming ? (
               <Loader2 className="h-3 w-3 shrink-0 text-purple-400 animate-spin" />
             ) : isPendingReview ? (
@@ -199,7 +199,7 @@ export function EditorTabs() {
             )}
             <span className={`truncate max-w-[120px] ${tab.isPreview ? 'italic' : ''}`}>{tab.fileName}</span>
             {tab.isDirty && (
-              <Circle className="h-2 w-2 shrink-0 fill-accent text-accent" />
+              <Circle className="h-2 w-2 shrink-0 fill-primary text-primary" />
             )}
             <button
               className="ml-0.5 flex h-4 w-4 items-center justify-center rounded-sm opacity-0 group-hover:opacity-100 hover:bg-muted transition-all"

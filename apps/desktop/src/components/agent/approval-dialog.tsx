@@ -21,18 +21,18 @@ type RiskLevel = 'safe' | 'moderate' | 'destructive';
 const RISK_DISPLAY: Record<RiskLevel, { label: string; color: string; borderColor: string }> = {
   safe: {
     label: 'safe',
-    color: 'text-green-400/90',
-    borderColor: 'border-green-500/25',
+    color: 'text-success/90',
+    borderColor: 'border-success/25',
   },
   moderate: {
     label: 'moderate',
-    color: 'text-yellow-400/90',
-    borderColor: 'border-yellow-500/25',
+    color: 'text-warning/90',
+    borderColor: 'border-warning/25',
   },
   destructive: {
     label: 'destructive',
-    color: 'text-red-400/90',
-    borderColor: 'border-red-500/25',
+    color: 'text-destructive/90',
+    borderColor: 'border-destructive/25',
   },
 };
 
@@ -111,14 +111,14 @@ export function ApprovalDialog({ approval }: ApprovalDialogProps) {
           <div
             className={`flex h-5 w-5 items-center justify-center rounded-full ${
               risk === 'destructive'
-                ? 'bg-red-500/10'
+                ? 'bg-destructive/10'
                 : risk === 'safe'
-                  ? 'bg-green-500/10'
-                  : 'bg-yellow-500/10'
+                  ? 'bg-success/10'
+                  : 'bg-warning/10'
             }`}
           >
             {risk === 'destructive' ? (
-              <AlertTriangle className="h-3 w-3 text-red-400" />
+              <AlertTriangle className="h-3 w-3 text-destructive" />
             ) : (
               <ShieldAlert className={`h-3 w-3 ${riskDisplay.color}`} />
             )}
@@ -128,10 +128,10 @@ export function ApprovalDialog({ approval }: ApprovalDialogProps) {
               <span
                 className={`text-[11px] font-medium ${
                   risk === 'destructive'
-                    ? 'text-red-300/90'
+                    ? 'text-destructive/90'
                     : risk === 'safe'
-                      ? 'text-green-300/90'
-                      : 'text-yellow-300/90'
+                      ? 'text-success/90'
+                      : 'text-warning/90'
                 }`}
               >
                 Approval Required
@@ -145,10 +145,10 @@ export function ApprovalDialog({ approval }: ApprovalDialogProps) {
             <span
               className={`text-[10px] ${
                 risk === 'destructive'
-                  ? 'text-red-400/50'
+                  ? 'text-destructive/50'
                   : risk === 'safe'
-                    ? 'text-green-400/50'
-                    : 'text-yellow-400/50'
+                    ? 'text-success/50'
+                    : 'text-warning/50'
               }`}
             >
               {approval.toolName}
@@ -187,7 +187,7 @@ export function ApprovalDialog({ approval }: ApprovalDialogProps) {
           <Button
             size="sm"
             onClick={handleApprove}
-            className="h-7 gap-1.5 rounded-md bg-green-600 px-3.5 text-[11px] font-medium hover:bg-green-500 transition-colors"
+            className="h-7 gap-1.5 rounded-md bg-green-600 px-3.5 text-[11px] font-medium hover:bg-success transition-colors"
           >
             <Check className="h-3 w-3" />
             Approve
@@ -217,7 +217,7 @@ export function ApprovalDialog({ approval }: ApprovalDialogProps) {
             size="sm"
             variant="ghost"
             onClick={handleDeny}
-            className="h-7 gap-1.5 rounded-md px-3.5 text-[11px] text-red-400/80 hover:bg-red-500/10 hover:text-red-300 transition-colors"
+            className="h-7 gap-1.5 rounded-md px-3.5 text-[11px] text-destructive/80 hover:bg-destructive/10 hover:text-destructive transition-colors"
           >
             <X className="h-3 w-3" />
             Deny

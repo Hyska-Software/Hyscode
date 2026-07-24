@@ -1,0 +1,97 @@
+/* ============================================================================
+ * @hyscode/ui — Design Tokens (Tailwind v4)
+ *
+ * This file owns the *theme-independent* primitives of the design system:
+ *   - Raw color scales (neutral / accent / semantic status)
+ *   - Motion easings
+ *   - Shared keyframes + animation utilities
+ *
+ * The semantic, theme-aware layer (--background, --primary, the six
+ * `.theme-*` palettes, the shadcn `@theme inline` bridge) lives in the
+ * consuming app's stylesheet (apps/desktop/src/app.css), so the multi-theme
+ * system stays the single source of truth.
+ *
+ * `@import "tailwindcss"` and `@custom-variant dark` are intentionally NOT
+ * declared here — the app declares them once before importing this file.
+ * ==========================================================================*/
+
+/* Ensure Tailwind scans the library source for utility classes regardless of
+ * the consuming project's Vite root (path is relative to this file: src/). */
+@source "../";
+
+@theme {
+  /* Radius is owned by the app (apps/desktop/src/app.css @theme inline),
+   * derived from --radius so the "disable rounded borders" toggle works. */
+
+  /* ---- Neutral scale (cool gray, OpenAI-like) -------------------------- */
+  --color-neutral-50: #f7f7f8;
+  --color-neutral-100: #ececf1;
+  --color-neutral-200: #d9d9e3;
+  --color-neutral-300: #c5c5d2;
+  --color-neutral-400: #acacbe;
+  --color-neutral-500: #8e8ea0;
+  --color-neutral-600: #6e6e80;
+  --color-neutral-700: #565869;
+  --color-neutral-800: #40414f;
+  --color-neutral-900: #2a2b32;
+  --color-neutral-950: #202123;
+  --color-ink: #050509;
+
+  /* ---- Accent scale (OpenAI teal/green) --------------------------------
+   * Kept for standalone/demo use. In HysCode the brand accent follows the
+   * active theme via the semantic `--primary` token, so components use
+   * `bg-primary` / `text-primary` rather than these fixed values. */
+  --color-accent-50: #e6f7f2;
+  --color-accent-100: #c3ece0;
+  --color-accent-200: #8fd9c4;
+  --color-accent-300: #5cc6a8;
+  --color-accent-400: #2fb28f;
+  --color-accent-500: #10a37f;
+  --color-accent-600: #0d8a6c;
+  --color-accent-700: #0a6f57;
+  --color-accent-800: #085643;
+  --color-accent-900: #063d31;
+
+  /* ---- Semantic status scales (theme-independent) --------------------- */
+  --color-success-500: #16a34a;
+  --color-success-600: #15803d;
+  --color-warning-400: #f59e0b;
+  --color-warning-500: #d97706;
+  --color-warning-600: #b45309;
+  --color-warning-700: #92400e;
+  --color-danger-400: #ef4444;
+  --color-danger-500: #dc2626;
+  --color-danger-600: #b91c1c;
+  --color-info-400: #3b82f6;
+  --color-info-500: #2563eb;
+  --color-info-600: #1d4ed8;
+
+  /* ---- Motion --------------------------------------------------------- */
+  --ease-out-soft: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in-out-soft: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* ============================================================================
+ * Shared keyframes + animation utilities used by @hyscode/ui components.
+ * ==========================================================================*/
+@layer utilities {
+  @keyframes aurora-fade-in {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+  @keyframes aurora-scale-in {
+    from { opacity: 0; transform: scale(0.96); }
+    to { opacity: 1; transform: scale(1); }
+  }
+  @keyframes aurora-slide-up {
+    from { opacity: 0; transform: translateY(6px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  @keyframes aurora-shimmer {
+    100% { transform: translateX(100%); }
+  }
+
+  .animate-fade-in { animation: aurora-fade-in 0.15s var(--ease-out-soft); }
+  .animate-scale-in { animation: aurora-scale-in 0.15s var(--ease-out-soft); }
+  .animate-slide-up { animation: aurora-slide-up 0.2s var(--ease-out-soft); }
+}

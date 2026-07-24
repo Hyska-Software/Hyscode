@@ -62,7 +62,7 @@ export function McpServerForm({ onSave, onCancel }: McpServerFormProps) {
                 onClick={() => setTransport(t)}
                 className={`rounded-md px-3 py-1 text-[11px] font-medium transition-colors ${
                   transport === t
-                    ? 'bg-accent/15 text-accent'
+                    ? 'bg-primary/15 text-primary'
                     : 'bg-muted text-muted-foreground hover:text-foreground'
                 }`}
               >

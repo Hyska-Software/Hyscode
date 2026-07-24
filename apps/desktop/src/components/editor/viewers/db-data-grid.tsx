@@ -181,7 +181,7 @@ export function DbDataGrid() {
               <button
                 onClick={handleSaveChanges}
                 disabled={isSaving}
-                className="flex items-center gap-1 rounded bg-green-500/10 px-2 py-0.5 text-[10px] font-medium text-green-600 hover:bg-green-500/20 disabled:opacity-40 transition-colors"
+                className="flex items-center gap-1 rounded bg-success/10 px-2 py-0.5 text-[10px] font-medium text-green-600 hover:bg-success/20 disabled:opacity-40 transition-colors"
               >
                 {isSaving ? <Loader2 className="h-3 w-3 animate-spin" /> : <Save className="h-3 w-3" />}
                 Save
@@ -219,7 +219,7 @@ export function DbDataGrid() {
                     <div className="flex items-center gap-1">
                       {col.name}
                       <span className="text-[10px] text-muted-foreground/60">{col.type}</span>
-                      {col.notNull && <span className="text-red-400">*</span>}
+                      {col.notNull && <span className="text-destructive">*</span>}
                     </div>
                   </th>
                 ))}

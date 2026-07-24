@@ -64,7 +64,7 @@ export function TerminalPanel() {
                 className={`group flex h-8 items-center gap-1.5 px-3 text-[11px] transition-colors ${
                   session.id === activeSessionId
                     ? isAgent
-                      ? 'bg-surface text-accent-foreground'
+                      ? 'bg-surface text-primary-foreground'
                       : 'bg-surface text-foreground'
                     : 'text-muted-foreground hover:text-foreground hover:bg-muted'
                 }`}
@@ -73,7 +73,7 @@ export function TerminalPanel() {
                 <span className="truncate max-w-[100px]">{session.name}</span>
                 {session.activeToolCallId && (
                   <span
-                    className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-accent motion-reduce:animate-none"
+                    className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-primary motion-reduce:animate-none"
                     title="Agent command running"
                   />
                 )}

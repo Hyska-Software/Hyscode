@@ -61,13 +61,13 @@ interface ContextItemProps {
   shortcut?: string;
   onClick: () => void;
   disabled?: boolean;
-  accent?: boolean;
+  primary?: boolean;
   submenu?: boolean;
 }
 
 // ── Sub-components ───────────────────────────────────────────────────────────
 
-function ContextItem({ icon: Icon, label, shortcut, onClick, disabled, accent, submenu }: ContextItemProps) {
+function ContextItem({ icon: Icon, label, shortcut, onClick, disabled, primary, submenu }: ContextItemProps) {
   return (
     <button
       onClick={disabled ? undefined : onClick}
@@ -75,8 +75,8 @@ function ContextItem({ icon: Icon, label, shortcut, onClick, disabled, accent, s
       className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-[11px] transition-colors ${
         disabled
           ? 'text-muted-foreground/50 cursor-not-allowed'
-          : accent
-            ? 'text-accent hover:bg-accent/10 hover:text-accent'
+          : primary
+            ? 'text-primary hover:bg-primary/10 hover:text-primary'
             : 'text-foreground hover:bg-surface-raised'
       }`}
     >
@@ -113,7 +113,7 @@ function FormatSubmenu({
           onClick={() => onSelect(f.item.id)}
           className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-[11px] text-foreground hover:bg-surface-raised transition-colors"
         >
-          <Sparkles className="h-3.5 w-3.5 shrink-0 text-accent" />
+          <Sparkles className="h-3.5 w-3.5 shrink-0 text-primary" />
           <span>{f.item.displayName}</span>
           <span className="ml-auto text-[9px] text-muted-foreground">{f.extensionName}</span>
         </button>
@@ -394,7 +394,7 @@ export function EditorContextMenu({ x, y, editorInstance, onClose }: EditorConte
               label={`Format with ${availableFormatters[0].item.displayName}`}
               shortcut="Shift+Alt+F"
               onClick={() => handleFormat(availableFormatters[0].item.id)}
-              accent
+              primary
             />
           ) : (
             <div className="relative">
@@ -403,7 +403,7 @@ export function EditorContextMenu({ x, y, editorInstance, onClose }: EditorConte
                 label="Format Document..."
                 shortcut="Shift+Alt+F"
                 onClick={() => setShowFormatSubmenu(!showFormatSubmenu)}
-                accent
+                primary
                 submenu
               />
               {showFormatSubmenu && (

@@ -192,8 +192,8 @@ function InlineDiff({
                 <tr
                   key={idx}
                   className={cn(
-                    l.type === 'add' && 'bg-green-500/[0.06]',
-                    l.type === 'del' && 'bg-red-500/[0.06]',
+                    l.type === 'add' && 'bg-success/[0.06]',
+                    l.type === 'del' && 'bg-destructive/[0.06]',
                   )}
                 >
                   <td className="w-8 select-none pr-2 text-right text-muted-foreground/25">
@@ -208,8 +208,8 @@ function InlineDiff({
                   <td className="pr-4">
                     <span
                       className={cn(
-                        l.type === 'add' && 'text-green-400/85',
-                        l.type === 'del' && 'text-red-400/85',
+                        l.type === 'add' && 'text-success/85',
+                        l.type === 'del' && 'text-destructive/85',
                         l.type === 'ctx' && 'text-foreground/50',
                       )}
                       dangerouslySetInnerHTML={{
@@ -272,7 +272,7 @@ function FileEditCard({ toolCall }: { toolCall: ToolCallDisplay }) {
           {path}
         </span>
         {isCreate && (
-          <span className="shrink-0 rounded px-1 py-[1px] text-[9px] font-medium text-green-400/80">
+          <span className="shrink-0 rounded px-1 py-[1px] text-[9px] font-medium text-success/80">
             NEW
           </span>
         )}
@@ -350,9 +350,9 @@ function FileReferenceRow({ toolCall }: { toolCall: ToolCallDisplay }) {
         ) : isError ? (
           <X className="h-3 w-3 shrink-0 text-destructive" />
         ) : isDone ? (
-          <CheckCircle2 className="h-3 w-3 shrink-0 text-green-400/70" />
+          <CheckCircle2 className="h-3 w-3 shrink-0 text-success/70" />
         ) : (
-          <Clock className="h-3 w-3 shrink-0 text-yellow-400/40" />
+          <Clock className="h-3 w-3 shrink-0 text-warning/40" />
         )}
         {isReadFile ? (
           <FileText className="h-3 w-3 shrink-0 text-muted-foreground/35" />
@@ -710,11 +710,11 @@ function GenericToolRow({ toolCall }: { toolCall: ToolCallDisplay }) {
         {isRunning ? (
           <Loader2 className="h-3 w-3 shrink-0 animate-spin text-muted-foreground/40" />
         ) : isDone ? (
-          <Check className="h-3 w-3 shrink-0 text-green-400/70" />
+          <Check className="h-3 w-3 shrink-0 text-success/70" />
         ) : isError ? (
           <X className="h-3 w-3 shrink-0 text-destructive" />
         ) : (
-          <Clock className="h-3 w-3 shrink-0 text-yellow-400/40" />
+          <Clock className="h-3 w-3 shrink-0 text-warning/40" />
         )}
         <ToolIcon className="h-3 w-3 shrink-0 text-muted-foreground/35" />
         <span className="text-[11px] text-foreground/60">{getGenericLabel(toolCall.name)}</span>
@@ -866,11 +866,11 @@ export function CompactToolCallRow({ toolCall }: { toolCall: ToolCallDisplay }) 
         {isRunning ? (
           <Loader2 className="h-3 w-3 shrink-0 animate-spin text-muted-foreground/40" />
         ) : isDone ? (
-          <Check className="h-3 w-3 shrink-0 text-green-400/70" />
+          <Check className="h-3 w-3 shrink-0 text-success/70" />
         ) : isError ? (
           <X className="h-3 w-3 shrink-0 text-destructive" />
         ) : (
-          <Clock className="h-3 w-3 shrink-0 text-yellow-400/40" />
+          <Clock className="h-3 w-3 shrink-0 text-warning/40" />
         )}
 
         {/* Tool icon */}
@@ -898,13 +898,13 @@ export function CompactToolCallRow({ toolCall }: { toolCall: ToolCallDisplay }) 
         {/* Diff counts */}
         {(added > 0 || removed > 0) && (
           <span className="ml-auto flex shrink-0 items-center gap-1 text-[10px] tabular-nums">
-            {added > 0 && <span className="text-green-400/80">+{added}</span>}
-            {removed > 0 && <span className="text-red-400/80">-{removed}</span>}
+            {added > 0 && <span className="text-success/80">+{added}</span>}
+            {removed > 0 && <span className="text-destructive/80">-{removed}</span>}
           </span>
         )}
 
         {isFileEdit && !added && !removed && isDone && (
-          <span className="ml-auto shrink-0 text-[9px] text-green-400/60">applied</span>
+          <span className="ml-auto shrink-0 text-[9px] text-success/60">applied</span>
         )}
       </button>
 

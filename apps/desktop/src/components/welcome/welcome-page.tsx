@@ -61,8 +61,8 @@ export function WelcomePage() {
     <div className="flex h-screen w-screen bg-background relative overflow-hidden">
       {/* Ambient glow */}
       <div className="pointer-events-none absolute inset-0">
-        <div className="absolute top-0 left-1/2 -translate-x-1/2 h-72 w-96 rounded-full bg-accent/5 blur-3xl" />
-        <div className="absolute bottom-0 right-1/4 h-56 w-72 rounded-full bg-accent/3 blur-3xl" />
+        <div className="absolute top-0 left-1/2 -translate-x-1/2 h-72 w-96 rounded-full bg-primary/5 blur-3xl" />
+        <div className="absolute bottom-0 right-1/4 h-56 w-72 rounded-full bg-primary/3 blur-3xl" />
       </div>
 
       {/* Top-right actions */}
@@ -99,7 +99,7 @@ export function WelcomePage() {
               }`}
             >
               <div className="relative">
-                <div className="absolute inset-0 rounded-3xl bg-accent/10 blur-2xl scale-150" />
+                <div className="absolute inset-0 rounded-3xl bg-primary/10 blur-2xl scale-150" />
                 <div
                   className="relative flex h-16 w-16 items-center justify-center rounded-2xl shadow-xl"
                   style={{ background: 'linear-gradient(135deg, #1a1a1a 0%, #2a1a3a 100%)' }}
@@ -112,7 +112,7 @@ export function WelcomePage() {
                   HysCode
                 </h1>
                 <p className="mt-1 text-sm text-muted-foreground flex items-center gap-1.5 justify-center">
-                  <Sparkles className="h-3.5 w-3.5 text-accent" />
+                  <Sparkles className="h-3.5 w-3.5 text-primary" />
                   AI-powered code editor
                 </p>
               </div>
@@ -127,11 +127,11 @@ export function WelcomePage() {
               {/* Open folder CTA */}
               <button
                 onClick={handleOpenFolder}
-                className="group relative flex w-full items-center gap-4 overflow-hidden rounded-xl border border-border bg-surface-raised px-5 py-4 text-left transition-all duration-200 hover:border-accent/40 hover:bg-muted hover:shadow-lg hover:shadow-accent/5"
+                className="group relative flex w-full items-center gap-4 overflow-hidden rounded-xl border border-border bg-surface-raised px-5 py-4 text-left transition-all duration-200 hover:border-primary/40 hover:bg-muted hover:shadow-lg hover:shadow-primary/5"
               >
-                <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-300 bg-gradient-to-r from-accent/5 to-transparent" />
-                <div className="relative flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-accent-muted">
-                  <FolderOpen className="h-5 w-5 text-accent" />
+                <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-300 bg-gradient-to-r from-primary/5 to-transparent" />
+                  <div className="relative flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary/15">
+                   <FolderOpen className="h-5 w-5 text-primary" />
                 </div>
                 <div className="relative flex-1">
                   <p className="font-medium text-foreground">Open Folder</p>
@@ -165,7 +165,7 @@ export function WelcomePage() {
                       style={{ animationDelay: `${(i + 4) * 80}ms` }}
                       onClick={() => handleOpenRecent(project)}
                     >
-                      <FolderOpen className="h-3.5 w-3.5 shrink-0 text-accent opacity-60" />
+                      <FolderOpen className="h-3.5 w-3.5 shrink-0 text-primary opacity-60" />
                       <div className="flex-1 min-w-0">
                         <p className="text-sm font-medium text-foreground truncate">
                           {project.name}
@@ -178,7 +178,7 @@ export function WelcomePage() {
                         {formatDate(project.lastOpened)}
                       </span>
                       <button
-                        className="flex h-5 w-5 shrink-0 items-center justify-center rounded opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-error transition-all"
+                         className="flex h-5 w-5 shrink-0 items-center justify-center rounded opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive transition-all"
                         title="Remove from recent"
                         onClick={(e) => {
                           e.stopPropagation();

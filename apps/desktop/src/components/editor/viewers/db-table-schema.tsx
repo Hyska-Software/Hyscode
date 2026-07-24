@@ -46,7 +46,7 @@ export function DbTableSchema({ tableInfo }: DbTableSchemaProps) {
                   </td>
                   <td className="px-3 py-1.5 text-center">
                     {col.notNull ? (
-                      <span className="inline-flex h-4 items-center rounded bg-red-500/10 px-1.5 text-[10px] font-medium text-red-600">
+                      <span className="inline-flex h-4 items-center rounded bg-destructive/10 px-1.5 text-[10px] font-medium text-red-600">
                         NN
                       </span>
                     ) : (
@@ -117,7 +117,7 @@ export function DbTableSchema({ tableInfo }: DbTableSchemaProps) {
                     <td className="px-3 py-1.5 text-muted-foreground">{idx.columns.join(', ')}</td>
                     <td className="px-3 py-1.5 text-center">
                       {idx.unique ? (
-                        <span className="inline-flex h-4 items-center rounded bg-green-500/10 px-1.5 text-[10px] font-medium text-green-600">
+                        <span className="inline-flex h-4 items-center rounded bg-success/10 px-1.5 text-[10px] font-medium text-green-600">
                           Yes
                         </span>
                       ) : (

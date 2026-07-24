@@ -98,8 +98,8 @@ export function PullRequestDialog({ open, onClose }: PullRequestDialogProps) {
         {/* Header */}
         <div className="flex items-center justify-between border-b border-border px-4 py-3">
           <div className="flex items-center gap-2.5">
-            <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-accent/10">
-              <GitPullRequest className="h-4 w-4 text-accent" />
+            <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-primary/10">
+              <GitPullRequest className="h-4 w-4 text-primary" />
             </div>
             <div className="flex flex-col">
               <span className="text-[12px] font-semibold text-foreground">Create Pull Request</span>
@@ -127,7 +127,7 @@ export function PullRequestDialog({ open, onClose }: PullRequestDialogProps) {
               <select
                 value={baseBranch}
                 onChange={(e) => setBaseBranch(e.target.value)}
-                className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-[11px] text-foreground outline-none focus:border-accent/40"
+                className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-[11px] text-foreground outline-none focus:border-primary/40"
               >
                 <option value="">Select base…</option>
                 {localBranches.map((b) => (
@@ -144,7 +144,7 @@ export function PullRequestDialog({ open, onClose }: PullRequestDialogProps) {
               <select
                 value={headBranch}
                 onChange={(e) => setHeadBranch(e.target.value)}
-                className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-[11px] text-foreground outline-none focus:border-accent/40"
+                className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-[11px] text-foreground outline-none focus:border-primary/40"
               >
                 <option value="">Select head…</option>
                 {localBranches.map((b) => (
@@ -173,7 +173,7 @@ export function PullRequestDialog({ open, onClose }: PullRequestDialogProps) {
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               placeholder="PR title…"
-              className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-[11px] text-foreground placeholder:text-muted-foreground outline-none focus:border-accent/40"
+              className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-[11px] text-foreground placeholder:text-muted-foreground outline-none focus:border-primary/40"
             />
           </div>
 
@@ -201,7 +201,7 @@ export function PullRequestDialog({ open, onClose }: PullRequestDialogProps) {
                 onChange={(e) => setBody(e.target.value)}
                 placeholder="Describe your changes…"
                 rows={4}
-                className="w-full resize-none rounded-md border border-border bg-background px-2 py-1.5 text-[11px] text-foreground placeholder:text-muted-foreground outline-none focus:border-accent/40"
+                className="w-full resize-none rounded-md border border-border bg-background px-2 py-1.5 text-[11px] text-foreground placeholder:text-muted-foreground outline-none focus:border-primary/40"
               />
             )}
           </div>
@@ -212,14 +212,14 @@ export function PullRequestDialog({ open, onClose }: PullRequestDialogProps) {
               type="checkbox"
               checked={isDraft}
               onChange={(e) => setIsDraft(e.target.checked)}
-              className="h-3 w-3 rounded border-border accent-accent"
+              className="h-3 w-3 rounded border-border primary-primary"
             />
             <span className="text-[11px] text-foreground">Create as draft</span>
           </label>
 
           {/* Ahead warning */}
           {ahead === 0 && headBranch === currentBranch && (
-            <div className="flex items-center gap-1.5 rounded-md border border-yellow-500/20 bg-yellow-500/5 px-2 py-1.5 text-[10px] text-yellow-400">
+            <div className="flex items-center gap-1.5 rounded-md border border-warning/20 bg-warning/5 px-2 py-1.5 text-[10px] text-warning">
               <AlertCircle className="h-3 w-3 shrink-0" />
               <span>Current branch has no commits ahead of base. Push your commits first.</span>
             </div>
@@ -230,8 +230,8 @@ export function PullRequestDialog({ open, onClose }: PullRequestDialogProps) {
             <div
               className={`flex items-center gap-1.5 rounded-md border px-2 py-1.5 text-[11px] ${
                 result.type === 'success'
-                  ? 'border-green-500/20 bg-green-500/5 text-green-400'
-                  : 'border-red-500/20 bg-red-500/5 text-red-400'
+                  ? 'border-success/20 bg-success/5 text-success'
+                  : 'border-destructive/20 bg-destructive/5 text-destructive'
               }`}
             >
               {result.type === 'success' ? (
@@ -255,7 +255,7 @@ export function PullRequestDialog({ open, onClose }: PullRequestDialogProps) {
           <button
             onClick={() => void handleSubmit()}
             disabled={!canSubmit}
-            className="flex items-center gap-1.5 rounded-md bg-accent px-4 py-1.5 text-[11px] font-medium text-accent-foreground hover:bg-accent/90 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            className="flex items-center gap-1.5 rounded-md bg-primary px-4 py-1.5 text-[11px] font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
           >
             {isSubmitting ? (
               <Loader2 className="h-3.5 w-3.5 animate-spin" />

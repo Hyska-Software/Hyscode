@@ -305,7 +305,7 @@ export function GitGraphView({ onClose }: GitGraphViewProps) {
       {/* Header */}
       <div className="flex items-center justify-between border-b border-border px-2 py-1.5 shrink-0">
         <div className="flex items-center gap-1.5">
-          <GitBranch className="h-3 w-3 text-accent" />
+          <GitBranch className="h-3 w-3 text-primary" />
           <span className="text-[11px] font-medium text-foreground">Git Graph</span>
           <span className="text-[10px] text-muted-foreground">({graphLog.length})</span>
         </div>
@@ -392,7 +392,7 @@ function ModeBtn({
     <button
       onClick={onClick}
       className={`flex h-5 w-5 items-center justify-center rounded-sm transition-colors ${
-        active ? 'bg-accent text-white' : 'text-muted-foreground hover:text-foreground hover:bg-muted'
+        active ? 'bg-primary text-white' : 'text-muted-foreground hover:text-foreground hover:bg-muted'
       }`}
       title={title}
     >
@@ -468,7 +468,7 @@ function TreeView({
               style={{ height: ROW_H }}
             >
               <GraphSvg row={row} />
-              <span className="shrink-0 rounded bg-accent/10 px-1 py-0.5 font-mono text-[10px] text-accent mr-1.5">
+              <span className="shrink-0 rounded bg-primary/10 px-1 py-0.5 font-mono text-[10px] text-primary mr-1.5">
                 {commit.short_hash}
               </span>
               <span className="truncate text-[11px] text-foreground">
@@ -481,7 +481,7 @@ function TreeView({
                     const label = isTag ? ref.slice(4) : ref;
                     return (
                       <span key={ref} className={`rounded px-1 py-0.5 text-[9px] font-medium ${
-                        isTag ? 'bg-yellow-500/10 text-yellow-400' : 'bg-blue-500/10 text-blue-400'
+                        isTag ? 'bg-warning/10 text-warning' : 'bg-blue-500/10 text-blue-400'
                       }`}>
                         {isTag
                           ? <span className="flex items-center gap-0.5"><Tag className="h-2 w-2" />{label}</span>
@@ -540,10 +540,10 @@ function CompactView({
                 {isMerge ? (
                   <GitMerge className="h-3 w-3 text-purple-400" />
                 ) : (
-                  <GitCommit className="h-3 w-3 text-accent" />
+                  <GitCommit className="h-3 w-3 text-primary" />
                 )}
               </div>
-              <span className="shrink-0 rounded bg-accent/10 px-1 py-0.5 font-mono text-[10px] text-accent">
+              <span className="shrink-0 rounded bg-primary/10 px-1 py-0.5 font-mono text-[10px] text-primary">
                 {commit.short_hash}
               </span>
               <span className="truncate text-[11px] text-foreground">
@@ -558,7 +558,7 @@ function CompactView({
                       key={ref}
                       className={`rounded px-1 py-0.5 text-[9px] font-medium ${
                         isTag
-                          ? 'bg-yellow-500/10 text-yellow-400'
+                          ? 'bg-warning/10 text-warning'
                           : 'bg-blue-500/10 text-blue-400'
                       }`}
                     >
@@ -625,7 +625,7 @@ function GridView({
                 onClick={() => onToggleExpand(expandedCommit === commit.hash ? null : commit.hash)}
                 className="hover:bg-surface-raised transition-colors cursor-pointer"
               >
-                <td className="px-3 py-1.5 font-mono text-[10px] text-accent">
+                <td className="px-3 py-1.5 font-mono text-[10px] text-primary">
                   {commit.short_hash}
                 </td>
                 <td className="px-3 py-1.5 text-[11px] text-foreground truncate max-w-[300px]">
@@ -642,7 +642,7 @@ function GridView({
                       </span>
                     ))}
                     {commit.refs.filter((r) => r.startsWith('tag:')).slice(0, 1).map((r) => (
-                      <span key={r} className="rounded bg-yellow-500/10 px-1 py-0.5 text-[9px] text-yellow-400">
+                      <span key={r} className="rounded bg-warning/10 px-1 py-0.5 text-[9px] text-warning">
                         {r.slice(4)}
                       </span>
                     ))}
@@ -688,7 +688,7 @@ function MermaidView({ commits }: { commits: GraphCommit[] }) {
       <div className="mb-2 flex items-center justify-between">
         <span className="text-[10px] text-muted-foreground">
           Mermaid gitGraph ({capped ? `${MERMAID_MAX} of ${commits.length}` : commits.length} commits
-          {capped && <span className="ml-1 text-yellow-400/70">· capped for legibility</span>})
+          {capped && <span className="ml-1 text-warning/70">· capped for legibility</span>})
         </span>
         <button
           onClick={() => setRawMode(!rawMode)}
@@ -727,7 +727,7 @@ function CommitDetailRow({
           <div className="flex flex-wrap items-center gap-1.5 mb-1">
             <button
               onClick={() => onCopyHash(commit.hash)}
-              className="inline-flex items-center gap-1 rounded bg-accent/10 px-1.5 py-0.5 font-mono text-[10px] text-accent hover:bg-accent/20 transition-colors"
+              className="inline-flex items-center gap-1 rounded bg-primary/10 px-1.5 py-0.5 font-mono text-[10px] text-primary hover:bg-primary/20 transition-colors"
               title="Copy hash"
             >
               {commit.short_hash}
@@ -741,7 +741,7 @@ function CommitDetailRow({
                   key={ref}
                   className={`rounded px-1 py-0.5 text-[9px] font-medium ${
                     isTag
-                      ? 'bg-yellow-500/10 text-yellow-400'
+                      ? 'bg-warning/10 text-warning'
                       : 'bg-blue-500/10 text-blue-400'
                   }`}
                 >

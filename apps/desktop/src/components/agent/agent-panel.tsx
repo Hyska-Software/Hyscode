@@ -58,7 +58,7 @@ function fmtCost(dollars: number): string {
 function PieChart({
   pct,
   size = 14,
-  color = 'var(--color-accent)',
+  color = 'var(--color-primary)',
 }: {
   pct: number;
   size?: number;
@@ -177,7 +177,7 @@ function ContextPieButton({
       ? '#f87171'
       : pct > 0.6
         ? '#fb923c'
-        : 'var(--color-accent)';
+        : 'var(--color-primary)';
 
   const cacheRead = usage?.cacheReadTokens ?? 0;
   const cacheWrite = usage?.cacheWriteTokens ?? 0;
@@ -238,7 +238,7 @@ function ContextPieButton({
                 )}
                 <StatRow label="Input tokens" value={usage.inputTokens.toLocaleString()} />
                 <StatRow label="Output tokens" value={usage.outputTokens.toLocaleString()} />
-                <StatRow label="Total tokens" value={usage.totalTokens.toLocaleString()} accent />
+                <StatRow label="Total tokens" value={usage.totalTokens.toLocaleString()} primary />
                 {(usage.reasoningTokens ?? 0) > 0 && (
                   <StatRow
                     label="Reasoning tokens"
@@ -266,7 +266,7 @@ function ContextPieButton({
                 <div className="my-1 border-t border-foreground/[0.06]" />
                 <StatRow label="Input cost" value={fmtCost(inputCost!)} />
                 <StatRow label="Output cost" value={fmtCost(outputCost!)} />
-                <StatRow label="Est. total cost" value={fmtCost(totalCost)} accent />
+                <StatRow label="Est. total cost" value={fmtCost(totalCost)} primary />
               </>
             )}
             <StatRow label="Messages" value={String(messageCount)} />
@@ -283,7 +283,7 @@ function ContextPieButton({
               <StatRow
                 label="Total tokens"
                 value={sessionUsage.totalTokens.toLocaleString()}
-                accent
+                primary
               />
               {(sessionUsage.cacheReadTokens ?? 0) > 0 && (
                 <StatRow
@@ -317,14 +317,14 @@ function ContextPieButton({
   );
 }
 
-function StatRow({ label, value, accent }: { label: string; value: string; accent?: boolean }) {
+function StatRow({ label, value, primary }: { label: string; value: string; primary?: boolean }) {
   return (
     <div className="flex items-center justify-between py-[3px]">
       <span className="text-[10px] text-muted-foreground">{label}</span>
       <span
         className={cn(
           'text-[10px] tabular-nums',
-          accent ? 'font-semibold text-foreground' : 'text-foreground/80',
+          primary ? 'font-semibold text-foreground' : 'text-foreground/80',
         )}
       >
         {value}
@@ -349,7 +349,7 @@ function CreditUsageIndicator() {
         className={cn(
           'flex items-center gap-1 rounded-full border border-foreground/[0.08] px-1.5 py-0.5 text-[10px] tabular-nums transition-colors',
           isStreaming
-            ? 'border-accent/20 bg-accent/[0.06] text-accent/80'
+            ? 'border-primary/20 bg-primary/[0.06] text-primary/80'
             : 'text-muted-foreground/50',
         )}
       >
@@ -357,7 +357,7 @@ function CreditUsageIndicator() {
         <span>
           {apiRequestCount} {apiRequestCount === 1 ? 'request' : 'requests'}
         </span>
-        {isStreaming && <span className="agent-breathe h-1.5 w-1.5 rounded-full bg-accent/70" />}
+        {isStreaming && <span className="agent-breathe h-1.5 w-1.5 rounded-full bg-primary/70" />}
       </div>
     </div>
   );
@@ -470,7 +470,7 @@ export function AgentPanel() {
                     size="icon-xs"
                     onClick={() => setRulesOpen(!rulesOpen)}
                     className={
-                      rulesOpen ? 'text-accent' : 'text-muted-foreground/60 hover:text-foreground'
+                      rulesOpen ? 'text-primary' : 'text-muted-foreground/60 hover:text-foreground'
                     }
                   />
                 }
@@ -538,7 +538,7 @@ export function AgentPanel() {
                   size="icon-xs"
                   onClick={() => setHistoryOpen(!historyOpen)}
                   className={
-                    historyOpen ? 'text-accent' : 'text-muted-foreground/60 hover:text-foreground'
+                    historyOpen ? 'text-primary' : 'text-muted-foreground/60 hover:text-foreground'
                   }
                 />
               }

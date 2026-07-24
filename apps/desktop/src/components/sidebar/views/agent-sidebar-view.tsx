@@ -47,9 +47,9 @@ const MODE_ICONS: Record<AgentMode, typeof MessageSquare> = {
 
 const MODE_COLORS: Record<AgentMode, string> = {
   chat: 'text-blue-400',
-  build: 'text-accent',
+  build: 'text-primary',
   review: 'text-purple-400',
-  debug: 'text-red-400',
+  debug: 'text-destructive',
   plan: 'text-amber-400',
 };
 
@@ -214,7 +214,7 @@ function ModeSection() {
         {AGENT_DEFS.map((agent) => {
           const mode = agent.type as AgentMode;
           const Icon = MODE_ICONS[mode] ?? MessageSquare;
-          const color = MODE_COLORS[mode] ?? 'text-accent';
+          const color = MODE_COLORS[mode] ?? 'text-primary';
           const isActive = mode === currentMode;
           const policy = getModePolicy(mode);
           const approvalLabel = policy.approvalMode === 'yolo' ? 'auto' : policy.approvalMode;
@@ -226,7 +226,7 @@ function ModeSection() {
               className={cn(
                 'flex items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors',
                 isActive
-                  ? 'bg-accent/10 text-foreground'
+                  ? 'bg-primary/10 text-foreground'
                   : 'text-muted-foreground hover:bg-muted/50 hover:text-foreground',
               )}
             >
@@ -240,7 +240,7 @@ function ModeSection() {
               <span
                 className={cn(
                   'shrink-0 rounded px-1 py-px text-[8px] font-medium uppercase',
-                  isActive ? 'bg-accent/20 text-accent' : 'bg-muted text-muted-foreground',
+                  isActive ? 'bg-primary/20 text-primary' : 'bg-muted text-muted-foreground',
                 )}
               >
                 {approvalLabel}
@@ -334,7 +334,7 @@ function SessionsSection() {
                 className={cn(
                   'group flex items-start gap-1.5 rounded-md px-1.5 py-1 transition-colors',
                   isActive
-                    ? 'bg-accent/10 text-foreground'
+                    ? 'bg-primary/10 text-foreground'
                     : 'cursor-pointer text-muted-foreground hover:bg-muted/50 hover:text-foreground',
                 )}
               >
@@ -356,7 +356,7 @@ function SessionsSection() {
                       deleteSession(session.id);
                     }}
                     title="Delete"
-                    className="rounded p-0.5 hover:bg-muted hover:text-red-400"
+                    className="rounded p-0.5 hover:bg-muted hover:text-destructive"
                   >
                     <Trash2 className="h-2.5 w-2.5" />
                   </button>
@@ -367,7 +367,7 @@ function SessionsSection() {
           {sessions.length > 5 && (
             <button
               onClick={() => setHistoryOpen(true)}
-              className="mt-1 text-[9px] text-accent hover:underline text-left px-1.5"
+              className="mt-1 text-[9px] text-primary hover:underline text-left px-1.5"
             >
               View all {sessions.length} sessions →
             </button>
@@ -437,7 +437,7 @@ function QuickSettingsSection() {
       <div className="mb-2">
         <div className="flex items-center justify-between">
           <span className="text-[9px] text-muted-foreground">Provider / Model</span>
-          <button onClick={openSettings} className="text-[9px] text-accent hover:underline">
+          <button onClick={openSettings} className="text-[9px] text-primary hover:underline">
             Change
           </button>
         </div>
@@ -458,7 +458,7 @@ function QuickSettingsSection() {
               className={cn(
                 'flex items-center justify-center gap-1 rounded-md px-1.5 py-1 text-[9px] font-medium transition-colors',
                 approvalMode === value
-                  ? `bg-accent/15 ${color ?? 'text-accent'}`
+                  ? `bg-primary/15 ${color ?? 'text-primary'}`
                   : 'bg-muted/50 text-muted-foreground hover:text-foreground hover:bg-muted',
               )}
             >
@@ -503,7 +503,7 @@ function QuickSettingsSection() {
           step={0.05}
           value={temperature}
           onChange={(e) => setSetting('temperature', parseFloat(e.target.value))}
-          className="mt-1 h-1 w-full cursor-pointer appearance-none rounded-full bg-muted accent-accent [&::-webkit-slider-thumb]:h-2.5 [&::-webkit-slider-thumb]:w-2.5 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-accent"
+          className="mt-1 h-1 w-full cursor-pointer appearance-none rounded-full bg-muted primary-primary [&::-webkit-slider-thumb]:h-2.5 [&::-webkit-slider-thumb]:w-2.5 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-primary"
         />
       </div>
 
@@ -513,7 +513,7 @@ function QuickSettingsSection() {
           <span className="text-[9px] text-muted-foreground">Interaction Limit</span>
           <button
             onClick={openSettings}
-            className="rounded bg-muted px-1.5 py-px text-[9px] tabular-nums text-foreground transition-colors hover:text-accent"
+            className="rounded bg-muted px-1.5 py-px text-[9px] tabular-nums text-foreground transition-colors hover:text-primary"
             title="Configure interaction limit in Settings"
           >
             {interactionLimitEnabled ? maxIterations : 'Infinite'}
@@ -548,7 +548,7 @@ function McpStatusSection() {
         <div className="flex flex-col items-center gap-1 py-2">
           <Server className="h-4 w-4 text-muted-foreground/30" />
           <p className="text-[9px] text-muted-foreground opacity-50">No servers configured</p>
-          <button onClick={openSettings} className="text-[9px] text-accent hover:underline">
+          <button onClick={openSettings} className="text-[9px] text-primary hover:underline">
             Configure in Settings
           </button>
         </div>
@@ -585,7 +585,7 @@ function McpStatusSection() {
 export function AgentSidebarView() {
   const mode = useAgentStore((s) => s.mode);
   const openSettings = useSettingsStore((s) => s.openSettings);
-  const modeColor = MODE_COLORS[mode] ?? 'text-accent';
+  const modeColor = MODE_COLORS[mode] ?? 'text-primary';
   const ModeIcon = MODE_ICONS[mode] ?? MessageSquare;
 
   return (

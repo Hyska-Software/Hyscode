@@ -132,7 +132,7 @@ const AGENT_CAPABILITIES: Record<AgentMode, AgentCapability> = {
     label: 'Build',
     description: 'Implements features, writes code, creates files, runs commands.',
     badge: 'full access',
-    color: 'text-accent',
+    color: 'text-primary',
     placeholder: 'Describe what to build...',
   },
   review: {
@@ -148,7 +148,7 @@ const AGENT_CAPABILITIES: Record<AgentMode, AgentCapability> = {
     label: 'Debug',
     description: 'Diagnoses and fixes bugs, errors, and unexpected behavior.',
     badge: 'full access',
-    color: 'text-red-400',
+    color: 'text-destructive',
     placeholder: 'Describe the bug or error...',
   },
   plan: {
@@ -443,7 +443,7 @@ export function AgentInput() {
           'bg-foreground/[0.025]',
           'border border-foreground/[0.06]',
           'focus-within:border-foreground/[0.1]',
-          isDragOver && 'border-accent/40',
+          isDragOver && 'border-primary/40',
           'mx-auto max-w-4xl',
         )}
         onDragOver={handleDragOver}
@@ -452,8 +452,8 @@ export function AgentInput() {
       >
         {/* Drag-to-drop overlay */}
         {isDragOver && (
-          <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center bg-accent/5">
-            <div className="flex items-center gap-1.5 text-[11px] font-medium text-accent">
+          <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center bg-primary/5">
+            <div className="flex items-center gap-1.5 text-[11px] font-medium text-primary">
               <ImageIcon className="h-4 w-4" />
               Drop images here
             </div>
@@ -564,7 +564,7 @@ export function AgentInput() {
                         <DropdownMenuItem
                           key={m}
                           onClick={() => handleModeChange(m)}
-                          className={cn(isActive && 'bg-accent/10')}
+                          className={cn(isActive && 'bg-primary/10')}
                         >
                           <div className="flex w-full items-center gap-2">
                             <Icon className={cn('h-3.5 w-3.5 shrink-0', c.color)} />
@@ -577,7 +577,7 @@ export function AgentInput() {
                             <span className={cn('shrink-0 text-[9px] font-medium', c.color)}>
                               {c.badge}
                             </span>
-                            {isActive && <Check className="h-3 w-3 shrink-0 text-accent" />}
+                            {isActive && <Check className="h-3 w-3 shrink-0 text-primary" />}
                           </div>
                         </DropdownMenuItem>
                       );
@@ -618,7 +618,7 @@ export function AgentInput() {
                             className={cn(
                               activeModelId === m.id &&
                                 activeProviderId === provider.id &&
-                                'bg-accent/10 text-accent',
+                                'bg-primary/10 text-primary',
                             )}
                           >
                             <div className="flex flex-col">
@@ -655,7 +655,7 @@ export function AgentInput() {
                       <DropdownMenuItem
                         key={m.id}
                         onClick={() => handleModelChange(m.id)}
-                        className={cn(activeModelId === m.id && 'bg-accent/10 text-accent')}
+                        className={cn(activeModelId === m.id && 'bg-primary/10 text-primary')}
                       >
                         <div className="flex flex-col">
                           <span className="text-[11px]">{m.name}</span>
@@ -724,14 +724,14 @@ export function AgentInput() {
                         enabled: !currentThinking.enabled,
                       });
                     }}
-                    className={cn(!currentThinking.enabled && 'bg-accent/10')}
+                    className={cn(!currentThinking.enabled && 'bg-primary/10')}
                   >
                     <div className="flex w-full items-center justify-between">
                       <span className="text-[11px]">
                         {currentThinking.enabled ? 'Disable thinking' : 'Enable thinking'}
                       </span>
                       {!currentThinking.enabled && (
-                        <Check className="h-3 w-3 shrink-0 text-accent" />
+                        <Check className="h-3 w-3 shrink-0 text-primary" />
                       )}
                     </div>
                   </DropdownMenuItem>
@@ -753,12 +753,12 @@ export function AgentInput() {
                                 lvl as import('@/stores/settings-store').ModelThinkingConfig['level'],
                             });
                           }}
-                          className={cn(currentThinking.level === lvl && 'bg-accent/10')}
+                          className={cn(currentThinking.level === lvl && 'bg-primary/10')}
                         >
                           <div className="flex w-full items-center justify-between">
                             <span className="text-[11px] capitalize">{lvl}</span>
                             {currentThinking.level === lvl && (
-                              <Check className="h-3 w-3 shrink-0 text-accent" />
+                              <Check className="h-3 w-3 shrink-0 text-primary" />
                             )}
                           </div>
                         </DropdownMenuItem>
@@ -804,7 +804,7 @@ export function AgentInput() {
                         <DropdownMenuItem
                           key={m}
                           onClick={() => handleApprovalChange(m)}
-                          className={cn(isActive && 'bg-accent/10')}
+                          className={cn(isActive && 'bg-primary/10')}
                         >
                           <div className="flex w-full items-center gap-2">
                             <Icon className={cn('h-3.5 w-3.5 shrink-0', c.color)} />
@@ -826,7 +826,7 @@ export function AgentInput() {
                                   {c.badge}
                                 </span>
                               )}
-                              {isActive && <Check className="h-3 w-3 shrink-0 text-accent" />}
+                              {isActive && <Check className="h-3 w-3 shrink-0 text-primary" />}
                             </div>
                           </div>
                         </DropdownMenuItem>
@@ -880,7 +880,7 @@ export function AgentInput() {
                     size="icon-sm"
                     className={cn(
                       'text-muted-foreground/60 hover:bg-foreground/[0.04] hover:text-foreground',
-                      attachedImages.length > 0 && 'text-accent',
+                      attachedImages.length > 0 && 'text-primary',
                     )}
                     onClick={() => fileInputRef.current?.click()}
                   />

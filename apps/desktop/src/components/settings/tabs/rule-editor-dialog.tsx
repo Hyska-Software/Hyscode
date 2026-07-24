@@ -164,7 +164,7 @@ export function RuleEditorDialog({ open, onClose, existingRule, initialScope = '
             </select>
           </div>
           {scope === 'workspace' && !projectPath && (
-            <span className="text-[10px] text-red-400">No workspace open</span>
+            <span className="text-[10px] text-destructive">No workspace open</span>
           )}
         </div>
 
@@ -202,7 +202,7 @@ export function RuleEditorDialog({ open, onClose, existingRule, initialScope = '
         {/* Footer */}
         <div className="flex shrink-0 items-center justify-between border-t border-border/40 bg-surface-raised px-4 py-3">
           {error ? (
-            <span className="text-[11px] text-red-400">{error}</span>
+            <span className="text-[11px] text-destructive">{error}</span>
           ) : (
             <span className="text-[10px] text-muted-foreground">
               Rules are injected into the agent system prompt before each turn.
@@ -218,7 +218,7 @@ export function RuleEditorDialog({ open, onClose, existingRule, initialScope = '
             <button
               onClick={() => void handleSave()}
               disabled={saving}
-              className="flex items-center gap-1.5 rounded-md bg-accent px-3 py-1.5 text-[11px] font-medium text-accent-foreground hover:bg-accent/90 transition-colors disabled:opacity-50"
+              className="flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-[11px] font-medium text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50"
             >
               {saving ? <Loader2 className="h-3 w-3 animate-spin" /> : <Save className="h-3 w-3" />}
               Save

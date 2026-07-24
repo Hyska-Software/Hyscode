@@ -86,7 +86,7 @@ export function AiTab() {
             aria-pressed={store.useAllProviders}
           >
             {store.useAllProviders ? (
-              <ToggleRight className="h-5 w-5 text-accent" />
+              <ToggleRight className="h-5 w-5 text-primary" />
             ) : (
               <ToggleLeft className="h-5 w-5 text-muted-foreground opacity-50" />
             )}
@@ -202,7 +202,7 @@ export function AiTab() {
                           {isCustom && (
                             <button
                               onClick={() => store.removeCustomModel(provider.id, model.id)}
-                              className="rounded p-0.5 text-muted-foreground hover:text-red-400"
+                              className="rounded p-0.5 text-muted-foreground hover:text-destructive"
                               title="Remove custom model"
                             >
                               <X className="h-3 w-3" />
@@ -213,7 +213,7 @@ export function AiTab() {
                             className="shrink-0"
                           >
                             {enabled ? (
-                              <ToggleRight className="h-4 w-4 text-accent" />
+                              <ToggleRight className="h-4 w-4 text-primary" />
                             ) : (
                               <ToggleLeft className="h-4 w-4 text-muted-foreground opacity-50" />
                             )}
@@ -634,7 +634,7 @@ export function AiTab() {
               />
               <button
                 onClick={() => store.removeMcpServer(server.id)}
-                className="ml-1 rounded p-1 text-muted-foreground hover:bg-muted hover:text-red-400"
+                className="ml-1 rounded p-1 text-muted-foreground hover:bg-muted hover:text-destructive"
               >
                 <Trash2 className="h-3 w-3" />
               </button>
@@ -757,7 +757,7 @@ function CustomApprovalRulesSection() {
                   onClick={() => setCategoryState(id, 'auto')}
                   className={`rounded-md px-2.5 py-1 text-[10px] font-medium transition-colors ${
                     state === 'auto'
-                      ? 'bg-accent/20 text-accent shadow-sm'
+                      ? 'bg-primary/20 text-primary shadow-sm'
                       : 'text-muted-foreground hover:text-foreground'
                   }`}
                 >
@@ -782,7 +782,7 @@ function CustomApprovalRulesSection() {
                 <span className="font-mono text-[11px] text-foreground">{toolName}</span>
                 <div className="flex shrink-0 items-center gap-2">
                   <span
-                    className={`text-[10px] font-medium ${autoApprove ? 'text-accent' : 'text-muted-foreground'}`}
+                    className={`text-[10px] font-medium ${autoApprove ? 'text-primary' : 'text-muted-foreground'}`}
                   >
                     {autoApprove ? 'Auto' : 'Ask'}
                   </span>
@@ -792,14 +792,14 @@ function CustomApprovalRulesSection() {
                     title="Toggle"
                   >
                     {autoApprove ? (
-                      <ToggleRight className="h-4 w-4 text-accent" />
+                      <ToggleRight className="h-4 w-4 text-primary" />
                     ) : (
                       <ToggleLeft className="h-4 w-4 text-muted-foreground opacity-50" />
                     )}
                   </button>
                   <button
                     onClick={() => store.setCustomToolRule(toolName, undefined)}
-                    className="rounded p-0.5 text-muted-foreground hover:text-red-400"
+                    className="rounded p-0.5 text-muted-foreground hover:text-destructive"
                     title="Remove override"
                   >
                     <X className="h-3 w-3" />
@@ -825,7 +825,7 @@ function CustomApprovalRulesSection() {
           <button
             onClick={() => setNewToolAuto((v) => !v)}
             className={`flex h-7 items-center gap-1 rounded-md px-2.5 text-[10px] font-medium transition-colors ${
-              newToolAuto ? 'bg-accent/15 text-accent' : 'bg-muted text-muted-foreground'
+              newToolAuto ? 'bg-primary/15 text-primary' : 'bg-muted text-muted-foreground'
             }`}
             title="Toggle auto/ask for new rule"
           >
@@ -891,7 +891,7 @@ function ApiKeyRow({ providerId, providerName }: { providerId: string; providerN
       <div className="flex items-center gap-2">
         <Key className="h-3.5 w-3.5 text-muted-foreground" />
         <span className="text-[12px] text-foreground">{providerName}</span>
-        {hasExisting && !saved && <span className="text-[9px] text-accent">● configured</span>}
+        {hasExisting && !saved && <span className="text-[9px] text-primary">● configured</span>}
       </div>
       <div className="flex items-center gap-1.5">
         <div className="relative">
@@ -980,7 +980,7 @@ function NumberInput({
         step={step}
         value={value}
         onChange={(e) => onChange(Number(e.target.value))}
-        className="h-1 w-24 cursor-pointer appearance-none rounded-full bg-muted accent-accent"
+        className="h-1 w-24 cursor-pointer appearance-none rounded-full bg-muted primary-primary"
       />
       <span className="w-12 text-right text-[11px] tabular-nums text-muted-foreground">
         {step < 1 ? value.toFixed(1) : value}
@@ -1019,7 +1019,7 @@ function Toggle({ checked, onChange }: { checked: boolean; onChange: (v: boolean
     <button
       onClick={() => onChange(!checked)}
       className={`relative h-5 w-9 rounded-full transition-colors ${
-        checked ? 'bg-accent' : 'bg-muted'
+        checked ? 'bg-primary' : 'bg-muted'
       }`}
     >
       <span

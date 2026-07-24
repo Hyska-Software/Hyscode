@@ -113,7 +113,7 @@ export function DbSqlEditor() {
               <span className="text-[10px] text-muted-foreground">Recent queries</span>
               <button
                 onClick={clearHistory}
-                className="flex items-center gap-1 rounded p-0.5 text-[10px] text-muted-foreground hover:bg-muted hover:text-red-500 transition-colors"
+                className="flex items-center gap-1 rounded p-0.5 text-[10px] text-muted-foreground hover:bg-muted hover:text-destructive transition-colors"
               >
                 <Trash2 className="h-3 w-3" />
                 Clear

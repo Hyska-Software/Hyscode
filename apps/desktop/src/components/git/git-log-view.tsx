@@ -60,7 +60,7 @@ export function GitLogView({ onClose }: GitLogViewProps) {
             className="w-full border-b border-border/50 px-2 py-1.5 text-left hover:bg-surface-raised transition-colors cursor-pointer"
           >
             <div className="flex items-center gap-1.5">
-              <span className="shrink-0 rounded bg-accent/10 px-1 py-0.5 font-mono text-[10px] text-accent">
+              <span className="shrink-0 rounded bg-primary/10 px-1 py-0.5 font-mono text-[10px] text-primary">
                 {commit.short_hash}
               </span>
               <span className="truncate text-[11px] text-foreground">
