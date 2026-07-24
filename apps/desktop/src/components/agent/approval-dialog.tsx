@@ -164,7 +164,7 @@ export function ApprovalDialog({ approval }: ApprovalDialogProps) {
         {/* Collapsible details */}
         <button
           onClick={() => setDetailOpen(!detailOpen)}
-          className="mb-3 flex items-center gap-1.5 rounded-md px-1.5 py-1 text-[10px] text-muted-foreground/50 transition-colors hover:bg-foreground/[0.02] hover:text-muted-foreground/80"
+          className="mb-3 flex items-center gap-1.5 rounded-md px-1.5 py-1 text-[10px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
         >
           {detailOpen ? (
             <ChevronDown className="h-2.5 w-2.5" />
@@ -217,7 +217,7 @@ export function ApprovalDialog({ approval }: ApprovalDialogProps) {
             size="sm"
             variant="ghost"
             onClick={handleDeny}
-            className="h-7 gap-1.5 rounded-md px-3.5 text-[11px] text-destructive/80 hover:bg-destructive/10 hover:text-destructive transition-colors"
+            className="h-7 gap-1.5 rounded-md px-3.5 text-[11px] text-destructive hover:bg-destructive/10 hover:text-destructive transition-colors"
           >
             <X className="h-3 w-3" />
             Deny

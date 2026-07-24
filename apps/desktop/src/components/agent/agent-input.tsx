@@ -423,7 +423,7 @@ export function AgentInput() {
         type="file"
         accept="image/png,image/jpeg,image/gif,image/webp"
         multiple
-        className="hidden"
+        className="sr-only"
         onChange={handleFileInputChange}
       />
 
@@ -439,11 +439,11 @@ export function AgentInput() {
       <div
         ref={inputWrapperRef}
         className={cn(
-          'group/input relative flex flex-col overflow-hidden rounded-xl transition-all',
-          'bg-foreground/[0.025]',
-          'border border-foreground/[0.06]',
-          'focus-within:border-foreground/[0.1]',
-          isDragOver && 'border-primary/40',
+          'group/input relative flex flex-col overflow-hidden rounded-lg transition-all',
+          'bg-card',
+          'border border-border/50',
+          'focus-within:border-border focus-within:ring-2 focus-within:ring-ring',
+          isDragOver && 'border-primary/50 ring-2 ring-primary/30',
           'mx-auto max-w-4xl',
         )}
         onDragOver={handleDragOver}
@@ -540,8 +540,8 @@ export function AgentInput() {
                       render={
                         <DropdownMenuTrigger
                           className={cn(
-                            'flex h-8 w-8 cursor-pointer items-center justify-center rounded-lg border border-foreground/[0.07] bg-transparent transition-all focus:outline-none',
-                            'hover:border-foreground/[0.14] hover:bg-foreground/[0.03]',
+                            'flex h-8 w-8 cursor-pointer items-center justify-center rounded-lg border border-border/50 bg-card transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1',
+                            'hover:border-border hover:bg-muted',
                             cap.color,
                           )}
                         />
@@ -597,7 +597,7 @@ export function AgentInput() {
 
             {/* Model selector */}
             <DropdownMenu>
-              <DropdownMenuTrigger className="flex h-8 max-w-[180px] cursor-pointer items-center gap-1 rounded-lg border border-foreground/[0.07] bg-transparent px-2.5 text-[11px] text-foreground/75 transition-colors hover:border-foreground/[0.14] hover:bg-foreground/[0.03] hover:text-foreground focus:outline-none">
+              <DropdownMenuTrigger className="flex h-8 max-w-[180px] cursor-pointer items-center gap-1 rounded-lg border border-border/50 bg-card px-2.5 text-[11px] text-foreground transition-colors hover:border-border hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1">
                 <span className="truncate">{activeModelLabel}</span>
                 <ChevronDown className="h-3 w-3 shrink-0 opacity-50" />
               </DropdownMenuTrigger>
@@ -697,9 +697,9 @@ export function AgentInput() {
                       <DropdownMenuTrigger
                         className={cn(
                           'flex h-8 w-8 cursor-pointer items-center justify-center rounded-lg border transition-all focus:outline-none',
-                          currentThinking.enabled
-                            ? 'border-amber-500/30 bg-amber-500/[0.06] text-amber-400 hover:border-amber-500/50 hover:bg-amber-500/[0.1]'
-                            : 'border-foreground/[0.07] text-foreground/60 hover:border-foreground/[0.14] hover:bg-foreground/[0.03] hover:text-foreground',
+                            currentThinking.enabled
+                              ? 'border-amber-500/30 bg-amber-500/10 text-amber-400 hover:border-amber-500/50 hover:bg-amber-500/20'
+                              : 'text-foreground/60 hover:text-foreground',
                         )}
                       />
                     }
@@ -780,8 +780,8 @@ export function AgentInput() {
                       render={
                         <DropdownMenuTrigger
                           className={cn(
-                            'flex h-8 w-8 cursor-pointer items-center justify-center rounded-lg border border-foreground/[0.07] bg-transparent transition-all focus:outline-none',
-                            'hover:border-foreground/[0.14] hover:bg-foreground/[0.03]',
+                            'flex h-8 w-8 cursor-pointer items-center justify-center rounded-lg border border-border/50 bg-card transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1',
+                            'hover:border-border hover:bg-muted',
                             cfg.color,
                           )}
                         />
@@ -847,7 +847,7 @@ export function AgentInput() {
                     variant="ghost"
                     size="icon-sm"
                     onClick={openSettings}
-                    className="text-muted-foreground/60 hover:bg-foreground/[0.04] hover:text-foreground"
+                    className="text-muted-foreground hover:bg-muted hover:text-foreground"
                   />
                 }
               >
@@ -860,9 +860,10 @@ export function AgentInput() {
               <TooltipTrigger
                 render={
                   <Button
+                    type="button"
                     variant="ghost"
                     size="icon-sm"
-                    className="text-muted-foreground/60 hover:bg-foreground/[0.04] hover:text-foreground"
+                    className="text-muted-foreground hover:bg-muted hover:text-foreground"
                     onClick={() => setMentionPickerOpen((v) => !v)}
                   />
                 }
@@ -879,7 +880,7 @@ export function AgentInput() {
                     variant="ghost"
                     size="icon-sm"
                     className={cn(
-                      'text-muted-foreground/60 hover:bg-foreground/[0.04] hover:text-foreground',
+                      'text-muted-foreground hover:bg-muted hover:text-foreground',
                       attachedImages.length > 0 && 'text-primary',
                     )}
                     onClick={() => fileInputRef.current?.click()}

@@ -70,9 +70,9 @@ export function FileActivity({ toolCalls }: { toolCalls: ToolCallDisplay[] }) {
       aria-atomic="false"
       aria-live="polite"
       aria-label="Agent file activity"
-      className="agent-fade-in my-3 overflow-hidden rounded-lg border border-primary/20 bg-primary/[0.035] shadow-sm"
+      className="agent-fade-in my-3 overflow-hidden rounded-lg border border-primary/20 bg-primary/5 shadow-sm"
     >
-      <div className="relative flex items-center gap-2 border-b border-border/40 px-3 py-2">
+      <div className="relative flex items-center gap-2 border-b border-border/50 px-3 py-2">
         {activeCount > 0 && (
           <div className="absolute inset-x-0 bottom-0 h-px overflow-hidden bg-primary/10">
             <div className="agent-shimmer-bar h-full w-full motion-reduce:hidden" />

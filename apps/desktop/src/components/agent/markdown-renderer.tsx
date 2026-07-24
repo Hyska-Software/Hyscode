@@ -42,7 +42,7 @@ export function CodeBlock({
   if (isInline) {
     return (
       <code
-        className="rounded-[3px] bg-primary/8 px-1.5 py-[1px] font-mono text-[11.5px] text-primary select-text cursor-text"
+        className="rounded bg-primary/10 px-1.5 py-[1px] font-mono text-[11.5px] text-primary select-text cursor-text"
         {...props}
       >
         {children}
@@ -74,9 +74,9 @@ export function CodeBlock({
   }
 
   return (
-    <div className="group/code relative my-2.5 overflow-hidden rounded-lg bg-[var(--color-surface)]">
+    <div className="group/code relative my-2.5 overflow-hidden rounded-lg bg-card">
       {/* Header bar */}
-      <div className="flex h-7 items-center justify-between border-b border-foreground/[0.06] bg-[var(--color-surface-raised)]/60 px-3">
+      <div className="flex h-7 items-center justify-between border-b border-border/50 bg-muted/50 px-3">
         <div className="flex min-w-0 items-center gap-1.5">
           {filePath ? (
             <>
@@ -118,9 +118,9 @@ export function CodeBlock({
 
       {/* Status badge */}
       {statusBadge && (
-        <div className="flex items-center gap-1.5 border-b border-foreground/[0.06] bg-[var(--color-success)]/[0.06] px-3 py-1">
-          <Check className="h-3 w-3 text-[var(--color-success)]" />
-          <span className="text-[10px] font-medium text-[var(--color-success)]">{statusBadge}</span>
+        <div className="flex items-center gap-1.5 border-b border-border/50 bg-success/5 px-3 py-1">
+          <Check className="h-3 w-3 text-success" />
+          <span className="text-[10px] font-medium text-success">{statusBadge}</span>
         </div>
       )}
 
@@ -209,7 +209,7 @@ export const MARKDOWN_COMPONENTS = {
           checked={checked}
           readOnly
           disabled={disabled}
-          className="h-3.5 w-3.5 shrink-0 cursor-default rounded border border-border/50 primary-primary"
+          className="h-3.5 w-3.5 shrink-0 cursor-default rounded border border-border/50 accent-primary"
           {...props}
         />
       );
@@ -239,28 +239,28 @@ export const MARKDOWN_COMPONENTS = {
 
   // Block elements
   blockquote: ({ children }: { children?: React.ReactNode }) => (
-    <blockquote className="my-2.5 rounded-r-md border-l-[3px] border-primary/40 bg-primary/[0.03] py-1 pl-3 pr-2 italic text-muted-foreground">
+    <blockquote className="my-2.5 rounded-r-md border-l-[3px] border-primary/40 bg-primary/5 py-1 pl-3 pr-2 italic text-muted-foreground">
       {children}
     </blockquote>
   ),
-  hr: () => <hr className="my-4 h-px border-0 bg-foreground/[0.08]" />,
+  hr: () => <hr className="my-4 border-border" />,
 
   // Tables
   table: ({ children }: { children?: React.ReactNode }) => (
-    <div className="my-2.5 overflow-x-auto rounded-lg border border-foreground/[0.08]">
+    <div className="my-2.5 overflow-x-auto rounded-lg border border-border/50">
       <table className="w-full text-[11px]">{children}</table>
     </div>
   ),
   thead: ({ children }: { children?: React.ReactNode }) => (
-    <thead className="bg-surface-raised/40">{children}</thead>
+    <thead className="bg-muted/40">{children}</thead>
   ),
   th: ({ children }: { children?: React.ReactNode }) => (
-    <th className="border-b border-foreground/[0.08] px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+    <th className="border-b border-border/50 px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
       {children}
     </th>
   ),
   td: ({ children }: { children?: React.ReactNode }) => (
-    <td className="border-b border-foreground/[0.05] px-3 py-1.5 text-foreground/80">{children}</td>
+    <td className="border-b border-border/30 px-3 py-1.5 text-foreground/80">{children}</td>
   ),
 
   // Footnotes / superscript / subscript

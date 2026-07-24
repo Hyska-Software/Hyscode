@@ -204,9 +204,9 @@ function ContextPieButton({
       </Tooltip>
 
       {open && (
-        <div className="absolute right-0 top-7 z-50 w-60 rounded-lg border border-foreground/[0.08] bg-popover shadow-sm backdrop-blur-sm">
+        <div className="absolute right-0 top-7 z-50 w-60 rounded-lg border border-border bg-card shadow-sm">
           {/* Header */}
-          <div className="flex items-center gap-2 border-b border-foreground/[0.06] px-3 py-2">
+          <div className="flex items-center gap-2 border-b border-border px-3 py-2">
             <PieChart pct={hasContextWindow ? pct : 0} size={32} color={pieColor} />
             <div className="flex flex-col">
               <span className="text-[11px] font-semibold text-foreground">
@@ -263,7 +263,7 @@ function ContextPieButton({
             )}
             {totalCost != null && (
               <>
-                <div className="my-1 border-t border-foreground/[0.06]" />
+                <div className="my-1 border-t border-border" />
                 <StatRow label="Input cost" value={fmtCost(inputCost!)} />
                 <StatRow label="Output cost" value={fmtCost(outputCost!)} />
                 <StatRow label="Est. total cost" value={fmtCost(totalCost)} primary />
@@ -274,7 +274,7 @@ function ContextPieButton({
 
           {/* Session totals */}
           {sessionUsage && (sessionUsage.inputTokens > 0 || sessionUsage.outputTokens > 0) && (
-            <div className="mt-1 border-t border-foreground/[0.06] px-3 py-2">
+            <div className="mt-1 border-t border-border px-3 py-2">
               <span className="text-[9px] font-semibold uppercase tracking-wider text-muted-foreground/80">
                 Session totals
               </span>
@@ -303,7 +303,7 @@ function ContextPieButton({
           {/* Progress bar */}
           {hasContextWindow && (
             <div className="px-3 pb-2.5 pt-2">
-              <div className="h-1 w-full overflow-hidden rounded-full bg-foreground/[0.08]">
+              <div className="h-1 w-full overflow-hidden rounded-full bg-muted">
                 <div
                   className="h-full rounded-full transition-all"
                   style={{ width: `${Math.min(pctDisplay, 100)}%`, background: pieColor }}
@@ -347,10 +347,10 @@ function CreditUsageIndicator() {
     <div className="flex items-center">
       <div
         className={cn(
-          'flex items-center gap-1 rounded-full border border-foreground/[0.08] px-1.5 py-0.5 text-[10px] tabular-nums transition-colors',
+          'flex items-center gap-1 rounded-full border border-border/50 px-1.5 py-0.5 text-[10px] tabular-nums transition-colors',
           isStreaming
-            ? 'border-primary/20 bg-primary/[0.06] text-primary/80'
-            : 'text-muted-foreground/50',
+            ? 'border-primary/30 bg-primary/10 text-primary'
+            : 'text-muted-foreground',
         )}
       >
         <Zap className="h-3 w-3" />
@@ -407,7 +407,7 @@ export function AgentPanel() {
     <div className="flex h-full flex-col">
       {/* Tab bar — shown when more than one tab is open */}
       {openTabs.length > 1 && (
-        <div className="scrollbar-none flex h-7 shrink-0 items-center gap-0 overflow-x-auto border-b border-foreground/[0.06] px-1">
+        <div className="scrollbar-none flex h-7 shrink-0 items-center gap-0 overflow-x-auto border-b border-border/50 px-1">
           {openTabs.map((tab) => (
             <div
               key={tab.id}
@@ -445,7 +445,7 @@ export function AgentPanel() {
       )}
 
       {/* Header */}
-      <div className="flex h-8 shrink-0 items-center justify-between border-b border-foreground/[0.06] px-3">
+      <div className="flex h-8 shrink-0 items-center justify-between border-b border-border/50 px-3">
         <div className="flex items-center gap-2">
           {leftCollapsed && (
             <button
