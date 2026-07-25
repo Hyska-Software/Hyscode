@@ -295,8 +295,6 @@ export function AgentMessages() {
   const isStreaming = useAgentStore((s) => s.isStreaming);
   const pendingApprovals = useAgentStore((s) => s.pendingApprovals);
   const terminalStatus = useAgentStore((s) => s.terminalStatus);
-  const connectionState = useAgentStore((s) => s.connectionState);
-  const connectionMessage = useAgentStore((s) => s.connectionMessage);
   const bottomRef = useRef<HTMLDivElement>(null);
   const liveFileOperations = useMemo(() => {
     let lastUserMessageIndex = -1;
@@ -380,15 +378,6 @@ export function AgentMessages() {
 
           {/* Pending mode switch delegation */}
           <ModeSwitchDialog />
-
-          {isStreaming && connectionState !== 'connected' && connectionState !== 'idle' && (
-            <div className="mt-2 rounded-md border border-warning/25 bg-warning/5 px-3 py-2 text-[10px] text-warning">
-              {connectionMessage ??
-                (connectionState === 'connecting'
-                  ? 'Connecting to provider…'
-                  : 'Connection degraded')}
-            </div>
-          )}
 
           <RecoveryCard />
 

@@ -2,7 +2,6 @@ import {
   Send,
   Square,
   ChevronDown,
-  Settings,
   MessageSquare,
   Hammer,
   Search,
@@ -252,7 +251,6 @@ export function AgentInput() {
   const enabledModels = useSettingsStore((s) => s.enabledModels);
   const customModels = useSettingsStore((s) => s.customModels);
   const useAllProviders = useSettingsStore((s) => s.useAllProviders);
-  const openSettings = useSettingsStore((s) => s.openSettings);
   const approvalMode = useSettingsStore((s) => s.approvalMode);
 
   const activeModel = useActiveModel();
@@ -437,19 +435,30 @@ export function AgentInput() {
 
       {/* ── Minimal input frame ── */}
       <div
-        ref={inputWrapperRef}
         className={cn(
-          'group/input relative flex flex-col overflow-hidden rounded-lg transition-all',
-          'bg-card',
-          'border border-border/50',
-          'focus-within:border-border focus-within:ring-2 focus-within:ring-ring',
-          isDragOver && 'border-primary/50 ring-2 ring-primary/30',
-          'mx-auto max-w-4xl',
+          'relative mx-auto max-w-4xl rounded-lg',
+          isStreaming && 'p-[1px]',
         )}
-        onDragOver={handleDragOver}
-        onDragLeave={handleDragLeave}
-        onDrop={handleDrop}
       >
+        {isStreaming && (
+          <div className="pointer-events-none absolute inset-0 z-0 overflow-hidden rounded-lg">
+            <div className="h-full w-full origin-center animate-[spin_10s_linear_infinite] bg-[conic-gradient(from_0deg_at_50%_50%,transparent_0deg,transparent_180deg,var(--color-primary)_240deg,var(--color-primary)_300deg,transparent_360deg)]" />
+          </div>
+        )}
+        <div
+          ref={inputWrapperRef}
+          className={cn(
+            'group/input relative flex flex-col overflow-hidden rounded-lg transition-all',
+            'bg-card',
+            !isStreaming && 'border border-border/50',
+            !isStreaming && 'focus-within:border-border focus-within:ring-2 focus-within:ring-ring',
+            isStreaming && 'border border-transparent',
+            isDragOver && !isStreaming && 'border-primary/50 ring-2 ring-primary/30',
+          )}
+          onDragOver={handleDragOver}
+          onDragLeave={handleDragLeave}
+          onDrop={handleDrop}
+        >
         {/* Drag-to-drop overlay */}
         {isDragOver && (
           <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center bg-primary/5">
@@ -540,9 +549,7 @@ export function AgentInput() {
                       render={
                         <DropdownMenuTrigger
                           className={cn(
-                            'flex h-8 w-8 cursor-pointer items-center justify-center rounded-lg border border-border/50 bg-card transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1',
-                            'hover:border-border hover:bg-muted',
-                            cap.color,
+                            'flex h-8 w-8 cursor-pointer items-center justify-center rounded-lg text-muted-foreground transition-all hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1',
                           )}
                         />
                       }
@@ -567,14 +574,14 @@ export function AgentInput() {
                           className={cn(isActive && 'bg-primary/10')}
                         >
                           <div className="flex w-full items-center gap-2">
-                            <Icon className={cn('h-3.5 w-3.5 shrink-0', c.color)} />
+                            <Icon className={cn('h-3.5 w-3.5 shrink-0 text-muted-foreground', isActive && 'text-foreground')} />
                             <div className="flex min-w-0 flex-1 flex-col">
                               <span className="text-[11px] font-medium">{c.label}</span>
                               <span className="text-[9px] leading-tight text-muted-foreground">
                                 {c.description}
                               </span>
                             </div>
-                            <span className={cn('shrink-0 text-[9px] font-medium', c.color)}>
+                            <span className={cn('shrink-0 text-[9px] font-medium text-muted-foreground')}>
                               {c.badge}
                             </span>
                             {isActive && <Check className="h-3 w-3 shrink-0 text-primary" />}
@@ -597,7 +604,7 @@ export function AgentInput() {
 
             {/* Model selector */}
             <DropdownMenu>
-              <DropdownMenuTrigger className="flex h-8 max-w-[180px] cursor-pointer items-center gap-1 rounded-lg border border-border/50 bg-card px-2.5 text-[11px] text-foreground transition-colors hover:border-border hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1">
+              <DropdownMenuTrigger className="flex h-8 max-w-[180px] cursor-pointer items-center gap-1 rounded-lg px-2.5 text-[11px] text-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1">
                 <span className="truncate">{activeModelLabel}</span>
                 <ChevronDown className="h-3 w-3 shrink-0 opacity-50" />
               </DropdownMenuTrigger>
@@ -696,10 +703,8 @@ export function AgentInput() {
                     render={
                       <DropdownMenuTrigger
                         className={cn(
-                          'flex h-8 w-8 cursor-pointer items-center justify-center rounded-lg border transition-all focus:outline-none',
-                            currentThinking.enabled
-                              ? 'border-amber-500/30 bg-amber-500/10 text-amber-400 hover:border-amber-500/50 hover:bg-amber-500/20'
-                              : 'text-foreground/60 hover:text-foreground',
+                          'flex h-8 w-8 cursor-pointer items-center justify-center rounded-lg text-muted-foreground transition-all hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1',
+                          currentThinking.enabled && 'text-foreground',
                         )}
                       />
                     }
@@ -780,9 +785,7 @@ export function AgentInput() {
                       render={
                         <DropdownMenuTrigger
                           className={cn(
-                            'flex h-8 w-8 cursor-pointer items-center justify-center rounded-lg border border-border/50 bg-card transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1',
-                            'hover:border-border hover:bg-muted',
-                            cfg.color,
+                            'flex h-8 w-8 cursor-pointer items-center justify-center rounded-lg text-muted-foreground transition-all hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1',
                           )}
                         />
                       }
@@ -807,7 +810,7 @@ export function AgentInput() {
                           className={cn(isActive && 'bg-primary/10')}
                         >
                           <div className="flex w-full items-center gap-2">
-                            <Icon className={cn('h-3.5 w-3.5 shrink-0', c.color)} />
+                            <Icon className={cn('h-3.5 w-3.5 shrink-0 text-muted-foreground', isActive && 'text-foreground')} />
                             <div className="flex min-w-0 flex-1 flex-col">
                               <span className="text-[11px] font-medium">{c.label}</span>
                               <span className="text-[9px] leading-tight text-muted-foreground">
@@ -816,13 +819,7 @@ export function AgentInput() {
                             </div>
                             <div className="flex shrink-0 items-center gap-1.5">
                               {c.badge && (
-                                <span
-                                  className={cn(
-                                    'rounded-full px-1.5 py-0.5 text-[8px] font-medium',
-                                    c.color,
-                                    'bg-current/10',
-                                  )}
-                                >
+                                <span className="rounded-full bg-muted px-1.5 py-0.5 text-[8px] font-medium text-muted-foreground">
                                   {c.badge}
                                 </span>
                               )}
@@ -840,22 +837,6 @@ export function AgentInput() {
 
           {/* Actions */}
           <div className="flex shrink-0 items-center gap-1">
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <Button
-                    variant="ghost"
-                    size="icon-sm"
-                    onClick={openSettings}
-                    className="text-muted-foreground hover:bg-muted hover:text-foreground"
-                  />
-                }
-              >
-                <Settings className="h-4 w-4" />
-              </TooltipTrigger>
-              <TooltipContent side="top">Settings</TooltipContent>
-            </Tooltip>
-
             <Tooltip>
               <TooltipTrigger
                 render={
@@ -895,7 +876,7 @@ export function AgentInput() {
             {isStreaming ? (
               <Tooltip>
                 <TooltipTrigger
-                  render={<Button size="icon-sm" onClick={handleStop} variant="destructive" />}
+                  render={<Button size="icon-sm" onClick={handleStop} variant="ghost" className="text-muted-foreground hover:text-foreground" />}
                 >
                   <Square className="h-3.5 w-3.5 fill-current" />
                 </TooltipTrigger>
@@ -910,7 +891,7 @@ export function AgentInput() {
                       size="icon-sm"
                       disabled={!input.trim() && attachedImages.length === 0}
                       onClick={handleSend}
-                      className="disabled:opacity-30"
+                      className="shadow-none disabled:opacity-30"
                     />
                   }
                 >
@@ -923,5 +904,8 @@ export function AgentInput() {
         </div>
       </div>
     </div>
+  </div>
   );
 }
+
+
