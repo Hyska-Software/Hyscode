@@ -25,6 +25,7 @@ import {
   CheckCircle2,
   Maximize2,
   Minimize2,
+  Copy,
   type LucideIcon,
 } from 'lucide-react';
 import { useEffect, useRef, useState, memo, useMemo } from 'react';
@@ -285,11 +286,19 @@ function TerminalCard({ toolCall }: { toolCall: ToolCallDisplay }) {
   const duration = formatDuration(toolCall.startedAt, toolCall.completedAt);
   const [showOutput, setShowOutput] = useState(true);
   const [isExpanded, setIsExpanded] = useState(false);
+  const [commandCopied, setCommandCopied] = useState(false);
   const outputRef = useRef<HTMLPreElement>(null);
   const rawVisibleOutput = isRunning ? toolCall.liveOutput : toolCall.output;
   const visibleOutput = sanitizeTerminalOutput(rawVisibleOutput);
   const outputVisible = Boolean((isRunning || isWaiting || showOutput) && visibleOutput);
   const lineCount = visibleOutput ? visibleOutput.split('\n').length : 0;
+
+  const handleCopyCommand = () => {
+    navigator.clipboard.writeText(command).then(() => {
+      setCommandCopied(true);
+      setTimeout(() => setCommandCopied(false), 2000);
+    });
+  };
 
   useEffect(() => {
     if (!isRunning || !outputRef.current) return;
@@ -309,6 +318,19 @@ function TerminalCard({ toolCall }: { toolCall: ToolCallDisplay }) {
       <div className="flex items-center gap-2 py-1.5">
         <Terminal className={cn('h-3.5 w-3.5 shrink-0', isRunning ? 'text-emerald-400' : 'text-muted-foreground')} />
         <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-foreground">{command}</span>
+        {command && (
+          <button
+            onClick={handleCopyCommand}
+            className="shrink-0 rounded p-0.5 text-muted-foreground transition-colors hover:text-foreground"
+            title="Copy command"
+          >
+            {commandCopied ? (
+              <Check className="h-2.5 w-2.5 text-success" />
+            ) : (
+              <Copy className="h-2.5 w-2.5" />
+            )}
+          </button>
+        )}
         {duration && <span className="shrink-0 text-[9px] tabular-nums text-muted-foreground">{duration}</span>}
         {isRunning && (
           <span className="flex shrink-0 items-center gap-1.5 text-[9px] font-medium text-emerald-400">

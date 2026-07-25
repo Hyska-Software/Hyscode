@@ -5,7 +5,6 @@ import {
   BookText,
   Terminal,
   MessageSquare,
-  Zap,
   Plus,
   X,
   PanelLeftOpen,
@@ -25,7 +24,6 @@ import { RulesPanelDialog } from './rules-panel-dialog';
 import { useAgentStore } from '@/stores/agent-store';
 import { useLayoutStore } from '@/stores/layout-store';
 import { HarnessBridge } from '@/lib/harness-bridge';
-import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import type { TokenUsage } from '@/stores/agent-store';
@@ -149,7 +147,6 @@ function ContextPieButton({
   const pctDisplay = Math.round(pct * 100);
   const hasContextWindow = contextWindow != null;
 
-  // Cost estimation
   const inputCost =
     usage && model?.inputPricePerMToken
       ? (usage.inputTokens / 1_000_000) * model.inputPricePerMToken
@@ -204,15 +201,15 @@ function ContextPieButton({
       </Tooltip>
 
       {open && (
-        <div className="absolute right-0 top-7 z-50 w-60 rounded-lg border border-border bg-card shadow-sm">
+        <div className="absolute right-0 top-7 z-50 w-80 overflow-hidden rounded-lg border border-border/50 bg-card shadow-sm">
           {/* Header */}
-          <div className="flex items-center gap-2 border-b border-border px-3 py-2">
-            <PieChart pct={hasContextWindow ? pct : 0} size={32} color={pieColor} />
+          <div className="flex items-center gap-3 border-b border-border/50 px-3 py-2.5">
+            <PieChart pct={hasContextWindow ? pct : 0} size={36} color={pieColor} />
             <div className="flex flex-col">
-              <span className="text-[11px] font-semibold text-foreground">
+              <span className="text-xs font-semibold text-foreground">
                 {hasContextWindow ? `${pctDisplay}% used` : 'Context unknown'}
               </span>
-              <span className="text-[9px] text-muted-foreground">
+              <span className="text-[10px] text-muted-foreground">
                 {hasContextWindow
                   ? `of ~${(contextWindow! / 1000).toFixed(0)}k context window`
                   : 'Model context window not registered'}
@@ -220,90 +217,86 @@ function ContextPieButton({
             </div>
           </div>
 
-          {/* This turn */}
-          <div className="flex flex-col gap-0 px-3 pt-2">
-            <span className="text-[9px] font-semibold uppercase tracking-wider text-muted-foreground/80">
-              This turn
-            </span>
-            {usage ? (
-              <>
-                {(usage.requestCount ?? 0) > 0 && (
-                  <StatRow label="API requests" value={String(usage.requestCount)} />
-                )}
-                {(usage.peakInputTokens ?? usage.lastInputTokens) !== undefined && (
-                  <StatRow
-                    label="Peak request input"
-                    value={metrics.contextInputTokens.toLocaleString()}
-                  />
-                )}
-                <StatRow label="Input tokens" value={usage.inputTokens.toLocaleString()} />
-                <StatRow label="Output tokens" value={usage.outputTokens.toLocaleString()} />
-                <StatRow label="Total tokens" value={usage.totalTokens.toLocaleString()} primary />
-                {(usage.reasoningTokens ?? 0) > 0 && (
-                  <StatRow
-                    label="Reasoning tokens"
-                    value={(usage.reasoningTokens ?? 0).toLocaleString()}
-                  />
-                )}
-                {(usage.retryCount ?? 0) > 0 && (
-                  <StatRow label="Retries" value={String(usage.retryCount)} />
-                )}
-                {hasCache && (
+          {/* Two-column body */}
+          <div className="grid grid-cols-2 divide-x divide-border/50">
+            {/* Left: This turn */}
+            <div className="px-3 py-2">
+              <span className="text-[9px] font-semibold uppercase tracking-wider text-muted-foreground/70">
+                This turn
+              </span>
+              <div className="mt-1 space-y-px">
+                {usage ? (
                   <>
-                    <StatRow label="  └ Cache read" value={cacheRead.toLocaleString()} />
-                    {cacheWrite > 0 && (
-                      <StatRow label="  └ Cache write" value={cacheWrite.toLocaleString()} />
+                    <StatRow label="Input" value={usage.inputTokens.toLocaleString()} />
+                    <StatRow label="Output" value={usage.outputTokens.toLocaleString()} />
+                    <StatRow label="Total" value={usage.totalTokens.toLocaleString()} primary />
+                    {(usage.reasoningTokens ?? 0) > 0 && (
+                      <StatRow label="Reasoning" value={(usage.reasoningTokens ?? 0).toLocaleString()} />
                     )}
-                    <StatRow label="Effective input" value={effectiveInput.toLocaleString()} />
+                    {(usage.requestCount ?? 0) > 0 && (
+                      <StatRow label="Requests" value={String(usage.requestCount)} />
+                    )}
+                    {(usage.retryCount ?? 0) > 0 && (
+                      <StatRow label="Retries" value={String(usage.retryCount)} />
+                    )}
+                    <StatRow label="Messages" value={String(messageCount)} />
+                    {hasCache && (
+                      <>
+                        <div className="my-1 border-t border-border/30" />
+                        <StatRow label="Cache read" value={cacheRead.toLocaleString()} />
+                        {cacheWrite > 0 && (
+                          <StatRow label="Cache write" value={cacheWrite.toLocaleString()} />
+                        )}
+                        <StatRow label="Effect. input" value={effectiveInput.toLocaleString()} />
+                      </>
+                    )}
+                  </>
+                ) : (
+                  <span className="text-[10px] text-muted-foreground">No data yet</span>
+                )}
+                {totalCost != null && (
+                  <>
+                    <div className="my-1 border-t border-border/30" />
+                    <StatRow label="Est. cost" value={fmtCost(totalCost)} primary />
                   </>
                 )}
-              </>
-            ) : (
-              <span className="py-1 text-[10px] text-muted-foreground">No data yet</span>
-            )}
-            {totalCost != null && (
-              <>
-                <div className="my-1 border-t border-border" />
-                <StatRow label="Input cost" value={fmtCost(inputCost!)} />
-                <StatRow label="Output cost" value={fmtCost(outputCost!)} />
-                <StatRow label="Est. total cost" value={fmtCost(totalCost)} primary />
-              </>
-            )}
-            <StatRow label="Messages" value={String(messageCount)} />
-          </div>
-
-          {/* Session totals */}
-          {sessionUsage && (sessionUsage.inputTokens > 0 || sessionUsage.outputTokens > 0) && (
-            <div className="mt-1 border-t border-border px-3 py-2">
-              <span className="text-[9px] font-semibold uppercase tracking-wider text-muted-foreground/80">
-                Session totals
-              </span>
-              <StatRow label="Input tokens" value={sessionUsage.inputTokens.toLocaleString()} />
-              <StatRow label="Output tokens" value={sessionUsage.outputTokens.toLocaleString()} />
-              <StatRow
-                label="Total tokens"
-                value={sessionUsage.totalTokens.toLocaleString()}
-                primary
-              />
-              {(sessionUsage.cacheReadTokens ?? 0) > 0 && (
-                <StatRow
-                  label="Cache read"
-                  value={(sessionUsage.cacheReadTokens ?? 0).toLocaleString()}
-                />
-              )}
-              {(sessionUsage.cacheWriteTokens ?? 0) > 0 && (
-                <StatRow
-                  label="Cache write"
-                  value={(sessionUsage.cacheWriteTokens ?? 0).toLocaleString()}
-                />
-              )}
+              </div>
             </div>
-          )}
+
+            {/* Right: Session totals */}
+            <div className="px-3 py-2">
+              <span className="text-[9px] font-semibold uppercase tracking-wider text-muted-foreground/70">
+                Session
+              </span>
+              <div className="mt-1 space-y-px">
+                {sessionUsage && (sessionUsage.inputTokens > 0 || sessionUsage.outputTokens > 0) ? (
+                  <>
+                    <StatRow label="Input" value={sessionUsage.inputTokens.toLocaleString()} />
+                    <StatRow label="Output" value={sessionUsage.outputTokens.toLocaleString()} />
+                    <StatRow label="Total" value={sessionUsage.totalTokens.toLocaleString()} primary />
+                    {(sessionUsage.cacheReadTokens ?? 0) > 0 && (
+                      <StatRow label="Cache read" value={(sessionUsage.cacheReadTokens ?? 0).toLocaleString()} />
+                    )}
+                    {(sessionUsage.cacheWriteTokens ?? 0) > 0 && (
+                      <StatRow label="Cache write" value={(sessionUsage.cacheWriteTokens ?? 0).toLocaleString()} />
+                    )}
+                  </>
+                ) : (
+                  <span className="text-[10px] text-muted-foreground">No data yet</span>
+                )}
+              </div>
+            </div>
+          </div>
 
           {/* Progress bar */}
           {hasContextWindow && (
-            <div className="px-3 pb-2.5 pt-2">
-              <div className="h-1 w-full overflow-hidden rounded-full bg-muted">
+            <div className="border-t border-border/50 px-3 py-2">
+              <div className="flex items-center justify-between text-[9px] text-muted-foreground">
+                <span>0</span>
+                <span>{pctDisplay}%</span>
+                <span>{(contextWindow! / 1000).toFixed(0)}k</span>
+              </div>
+              <div className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-muted">
                 <div
                   className="h-full rounded-full transition-all"
                   style={{ width: `${Math.min(pctDisplay, 100)}%`, background: pieColor }}
@@ -333,35 +326,7 @@ function StatRow({ label, value, primary }: { label: string; value: string; prim
   );
 }
 
-// ─── Credit Usage Indicator ───────────────────────────────────────────────────
-// Shows the number of API requests made in the current turn.
-// Particularly useful for per-request-cost providers (e.g. GitHub Copilot).
-
-function CreditUsageIndicator() {
-  const apiRequestCount = useAgentStore((s) => s.apiRequestCount);
-  const isStreaming = useAgentStore((s) => s.isStreaming);
-
-  if (apiRequestCount === 0) return null;
-
-  return (
-    <div className="flex items-center">
-      <div
-        className={cn(
-          'flex items-center gap-1 rounded-full border border-border/50 px-1.5 py-0.5 text-[10px] tabular-nums transition-colors',
-          isStreaming
-            ? 'border-primary/30 bg-primary/10 text-primary'
-            : 'text-muted-foreground',
-        )}
-      >
-        <Zap className="h-3 w-3" />
-        <span>
-          {apiRequestCount} {apiRequestCount === 1 ? 'request' : 'requests'}
-        </span>
-        {isStreaming && <span className="agent-breathe h-1.5 w-1.5 rounded-full bg-primary/70" />}
-      </div>
-    </div>
-  );
-}
+// ─── Topbar ───────────────────────────────────────────────────────────────────
 
 export function AgentPanel() {
   const sddPhase = useAgentStore((s) => s.sddPhase);
@@ -465,13 +430,12 @@ export function AgentPanel() {
             <Tooltip>
               <TooltipTrigger
                 render={
-                  <Button
-                    variant="ghost"
-                    size="icon-xs"
+                  <button
                     onClick={() => setRulesOpen(!rulesOpen)}
-                    className={
-                      rulesOpen ? 'text-primary' : 'text-muted-foreground/60 hover:text-foreground'
-                    }
+                    className={cn(
+                      'rounded-md p-1 transition-colors hover:bg-muted hover:text-foreground',
+                      rulesOpen ? 'text-primary' : 'text-muted-foreground/60',
+                    )}
                   />
                 }
               >
@@ -484,9 +448,7 @@ export function AgentPanel() {
           <Tooltip>
             <TooltipTrigger
               render={
-                <Button
-                  variant="ghost"
-                  size="icon-xs"
+                <button
                   onClick={() =>
                     useSettingsStore
                       .getState()
@@ -495,7 +457,7 @@ export function AgentPanel() {
                         agentCenterPanelMode === 'terminal' ? 'chat' : 'terminal',
                       )
                   }
-                  className="text-muted-foreground/60 hover:text-foreground"
+                  className="rounded-md p-1 text-muted-foreground/60 transition-colors hover:bg-muted hover:text-foreground"
                 />
               }
             >
@@ -509,7 +471,6 @@ export function AgentPanel() {
               {agentCenterPanelMode === 'terminal' ? 'Show Chat' : 'Show Terminal'}
             </TooltipContent>
           </Tooltip>
-          <CreditUsageIndicator />
           <ContextPieButton
             usage={tokenUsage}
             sessionUsage={sessionTokenUsage}
@@ -518,11 +479,9 @@ export function AgentPanel() {
           <Tooltip>
             <TooltipTrigger
               render={
-                <Button
-                  variant="ghost"
-                  size="icon-xs"
+                <button
                   onClick={() => openNewTab()}
-                  className="text-muted-foreground/60 hover:text-foreground"
+                  className="rounded-md p-1 text-muted-foreground/60 transition-colors hover:bg-muted hover:text-foreground"
                 />
               }
             >
@@ -533,13 +492,12 @@ export function AgentPanel() {
           <Tooltip>
             <TooltipTrigger
               render={
-                <Button
-                  variant="ghost"
-                  size="icon-xs"
+                <button
                   onClick={() => setHistoryOpen(!historyOpen)}
-                  className={
-                    historyOpen ? 'text-primary' : 'text-muted-foreground/60 hover:text-foreground'
-                  }
+                  className={cn(
+                    'rounded-md p-1 transition-colors hover:bg-muted hover:text-foreground',
+                    historyOpen ? 'text-primary' : 'text-muted-foreground/60',
+                  )}
                 />
               }
             >
@@ -551,11 +509,9 @@ export function AgentPanel() {
             <Tooltip>
               <TooltipTrigger
                 render={
-                  <Button
-                    variant="ghost"
-                    size="icon-xs"
+                  <button
                     onClick={clearConversation}
-                    className="text-muted-foreground/60 hover:text-foreground"
+                    className="rounded-md p-1 text-muted-foreground/60 transition-colors hover:bg-muted hover:text-foreground"
                   />
                 }
               >
