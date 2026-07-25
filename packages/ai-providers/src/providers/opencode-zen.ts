@@ -148,11 +148,11 @@ const THINKING_KIMI: ThinkingVariants = {
   defaultLevel: 'enabled',
 };
 
-/** Qwen toggle thinking (Anthropic wire format): qwen3.7-plus, 3.6, 3.5 */
+/** Qwen: reasoning effort default/high/max */
 const THINKING_QWEN_ANTHROPIC: ThinkingVariants = {
-  kind: 'anthropic',
-  levels: ['enabled', 'disabled'],
-  defaultLevel: 'enabled',
+  kind: 'openai',
+  levels: ['default', 'high', 'max'],
+  defaultLevel: 'max',
 };
 
 /** DeepSeek V4 reasoning: high/max effort */
@@ -169,10 +169,17 @@ const THINKING_GROK: ThinkingVariants = {
   defaultLevel: 'medium',
 };
 
-/** Kimi K3: reasoning_effort low/high/max (default max), always on */
+/** Kimi K3: reasoning_effort default/max (default max), always on */
 const THINKING_KIMI_K3: ThinkingVariants = {
   kind: 'openai',
-  levels: ['low', 'high', 'max'],
+  levels: ['default', 'max'],
+  defaultLevel: 'max',
+};
+
+/** GLM-5.2: reasoning effort default/high/max */
+const THINKING_GLM: ThinkingVariants = {
+  kind: 'openai',
+  levels: ['default', 'high', 'max'],
   defaultLevel: 'max',
 };
 
@@ -718,7 +725,7 @@ const ZEN_MODELS: AIModel[] = [
     inputPricePerMToken: 1.4,
     outputPricePerMToken: 4.4,
     cachedInputPricePerMToken: 0.26,
-    thinkingVariants: THINKING_KIMI,
+    thinkingVariants: THINKING_GLM,
   },
   {
     id: 'glm-5.1',

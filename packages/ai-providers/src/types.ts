@@ -102,7 +102,7 @@ export interface ThinkingConfig {
   /** Whether thinking is enabled */
   enabled: boolean;
   /** Effort/level for providers that support it (OpenAI: none/low/medium/high/xhigh/max, Anthropic adaptive: low/medium/high/xhigh/max, Anthropic budget: low/medium/high/max, Kimi: enabled/disabled) */
-  level?: 'low' | 'medium' | 'high' | 'enabled' | 'disabled' | 'none' | 'minimal' | 'xhigh' | 'max';
+  level?: 'low' | 'medium' | 'high' | 'enabled' | 'disabled' | 'none' | 'minimal' | 'xhigh' | 'max' | 'adaptive' | 'default';
   /** Reasoning mode for models that support it (GPT-5.6 family: standard | pro) */
   mode?: 'standard' | 'pro';
   /** Budget tokens for providers that support it (Anthropic manual mode) */
@@ -165,10 +165,10 @@ export interface ThinkingVariants {
   kind: ThinkingKind;
   /** Levels accepted by the model — undefined for kimi/deepseek (binary enabled/disabled) */
   levels?: ReadonlyArray<
-    'low' | 'medium' | 'high' | 'enabled' | 'disabled' | 'none' | 'minimal' | 'xhigh' | 'max' | 'adaptive'
+    'low' | 'medium' | 'high' | 'enabled' | 'disabled' | 'none' | 'minimal' | 'xhigh' | 'max' | 'adaptive' | 'default'
   >;
   /** Default level when thinking is enabled without an explicit value */
-  defaultLevel?: 'low' | 'medium' | 'high' | 'enabled' | 'disabled' | 'none' | 'minimal' | 'xhigh' | 'max' | 'adaptive';
+  defaultLevel?: 'low' | 'medium' | 'high' | 'enabled' | 'disabled' | 'none' | 'minimal' | 'xhigh' | 'max' | 'adaptive' | 'default';
   /** True for Anthropic models that accept the 'adaptive' type (opus 4.5+, sonnet 4.6+, fable 5) */
   supportsAdaptive?: boolean;
   /** Reasoning modes accepted by the model (GPT-5.6 family: standard | pro) */

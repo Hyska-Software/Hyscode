@@ -70,10 +70,10 @@ const OR_QWEN_TOGGLE: ThinkingVariants = {
   levels: ['enabled', 'disabled'],
   defaultLevel: 'enabled',
 };
-/** Kimi K3: reasoning_effort low/high/max (default max), always on */
+/** Kimi K3: reasoning_effort default/max (default max), always on */
 const OR_KIMI_K3: ThinkingVariants = {
   kind: 'openai',
-  levels: ['low', 'high', 'max'],
+  levels: ['default', 'max'],
   defaultLevel: 'max',
 };
 /** MiniMax M3: thinking.type adaptive/disabled */

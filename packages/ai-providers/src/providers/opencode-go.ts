@@ -34,11 +34,11 @@ const THINKING_DEEPSEEK_TOGGLE: ThinkingVariants = {
   defaultLevel: 'max',
 };
 
-/** Qwen hybrid thinking (Anthropic wire format): enable_thinking toggle */
+/** Qwen hybrid thinking: reasoning effort default/high/max */
 const THINKING_QWEN: ThinkingVariants = {
-  kind: 'anthropic',
-  levels: ['enabled', 'disabled'],
-  defaultLevel: 'enabled',
+  kind: 'openai',
+  levels: ['default', 'high', 'max'],
+  defaultLevel: 'max',
 };
 
 /** Reasoning models with low/medium/high effort: grok-4.5 (xAI) */
@@ -51,7 +51,14 @@ const THINKING_REASONING_LMH: ThinkingVariants = {
 /** Kimi K3: reasoning_effort low/high/max (default max), cannot disable */
 const THINKING_KIMI_K3: ThinkingVariants = {
   kind: 'openai',
-  levels: ['low', 'high', 'max'],
+  levels: ['default', 'max'],
+  defaultLevel: 'max',
+};
+
+/** GLM-5.2: reasoning effort default/high/max */
+const THINKING_GLM: ThinkingVariants = {
+  kind: 'openai',
+  levels: ['default', 'high', 'max'],
   defaultLevel: 'max',
 };
 
@@ -103,7 +110,7 @@ const GO_MODELS: AIModel[] = [
     supportsTools: true,
     supportsStreaming: true,
     supportsVision: false,
-    thinkingVariants: THINKING_KIMI,
+    thinkingVariants: THINKING_GLM,
   },
   {
     id: 'glm-5.1',
