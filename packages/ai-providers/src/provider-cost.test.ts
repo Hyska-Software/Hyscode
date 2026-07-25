@@ -63,7 +63,7 @@ describe('provider cost metadata', () => {
     const provider = new GeminiProvider('key', undefined, fetchMock);
     const chunks = await collect(
       provider.chat({
-        model: 'gemini-2.5-pro',
+        model: 'gemini-3.1-pro',
         messages: [{ role: 'user', content: [{ type: 'text', text: 'hello' }] }],
       }),
     );

@@ -228,12 +228,13 @@ function parseAnthropicEvent(
 }
 
 // ─── Thinking variant presets ────────────────────────────────────────────────
-// Aligned with the official OpenCode built-in variants
-// (https://dev.opencode.ai/docs/models/#variants):
-//   Anthropic: high (default), max
-// For adaptive models (opus 4.6+, sonnet 4.6, fable 5) the level maps to
-// thinking.effort (low/medium/high; "max" → effort "high"). For budget models
-// (opus ≤4-5, opus-4-1, sonnet 4, sonnet 4-5) the level maps to a
+// Aligned with docs/MODELS_REFERENCE.md §4 (effort parameter):
+//   low / medium / high (default) on all adaptive models,
+//   xhigh only on Fable 5, Mythos 5, Opus 5, Opus 4.8, Opus 4.7, Sonnet 5,
+//   max on Fable 5, Mythos 5, Opus 5, Opus 4.8, Opus 4.7, Opus 4.6,
+//   Sonnet 5, Sonnet 4.6.
+// For adaptive models the level maps directly to thinking.effort. For budget
+// models (sonnet 4.5, haiku 4.5 — "extended thinking") the level maps to a
 // thinking.budget_tokens preset.
 
 /** Map an OpenCode thinking level to a budget_tokens preset for non-adaptive
@@ -246,6 +247,7 @@ function budgetTokensForLevel(level?: string): number {
       return 16_000;
     case 'high':
       return 24_000;
+    case 'xhigh':
     case 'max':
       return 32_000;
     default:
@@ -253,6 +255,16 @@ function budgetTokensForLevel(level?: string): number {
   }
 }
 
+/** Adaptive models with the full effort ladder (fable 5, mythos 5, opus 5,
+ *  opus 4.8, opus 4.7, sonnet 5). */
+export const ADAPTIVE_CLAUDE_XHIGH_VARIANTS: ThinkingVariants = {
+  kind: 'anthropic',
+  levels: ['low', 'medium', 'high', 'xhigh', 'max'],
+  defaultLevel: 'high',
+  supportsAdaptive: true,
+};
+
+/** Adaptive models that support max but not xhigh (opus 4.6, sonnet 4.6). */
 export const ADAPTIVE_CLAUDE_VARIANTS: ThinkingVariants = {
   kind: 'anthropic',
   levels: ['low', 'medium', 'high', 'max'],
@@ -260,6 +272,15 @@ export const ADAPTIVE_CLAUDE_VARIANTS: ThinkingVariants = {
   supportsAdaptive: true,
 };
 
+/** Adaptive models limited to low/medium/high (opus 4.5). */
+export const ADAPTIVE_CLAUDE_BASIC_VARIANTS: ThinkingVariants = {
+  kind: 'anthropic',
+  levels: ['low', 'medium', 'high'],
+  defaultLevel: 'high',
+  supportsAdaptive: true,
+};
+
+/** Extended-thinking (budget_tokens) models: sonnet 4.5, haiku 4.5. */
 export const BUDGET_CLAUDE_VARIANTS: ThinkingVariants = {
   kind: 'anthropic',
   levels: ['low', 'medium', 'high', 'max'],
@@ -281,7 +302,20 @@ const ANTHROPIC_MODELS: AIModel[] = [
     supportsVision: true,
     inputPricePerMToken: 10,
     outputPricePerMToken: 50,
-    thinkingVariants: ADAPTIVE_CLAUDE_VARIANTS,
+    thinkingVariants: ADAPTIVE_CLAUDE_XHIGH_VARIANTS,
+  },
+  {
+    id: 'claude-opus-5',
+    name: 'Claude Opus 5',
+    provider: 'anthropic',
+    contextWindow: 1_000_000,
+    maxOutputTokens: 128_000,
+    supportsTools: true,
+    supportsStreaming: true,
+    supportsVision: true,
+    inputPricePerMToken: 5,
+    outputPricePerMToken: 25,
+    thinkingVariants: ADAPTIVE_CLAUDE_XHIGH_VARIANTS,
   },
   {
     id: 'claude-opus-4-8',
@@ -294,7 +328,59 @@ const ANTHROPIC_MODELS: AIModel[] = [
     supportsVision: true,
     inputPricePerMToken: 5,
     outputPricePerMToken: 25,
+    thinkingVariants: ADAPTIVE_CLAUDE_XHIGH_VARIANTS,
+  },
+  {
+    id: 'claude-opus-4-7',
+    name: 'Claude Opus 4.7',
+    provider: 'anthropic',
+    contextWindow: 1_000_000,
+    maxOutputTokens: 128_000,
+    supportsTools: true,
+    supportsStreaming: true,
+    supportsVision: true,
+    inputPricePerMToken: 5,
+    outputPricePerMToken: 25,
+    thinkingVariants: ADAPTIVE_CLAUDE_XHIGH_VARIANTS,
+  },
+  {
+    id: 'claude-opus-4-6',
+    name: 'Claude Opus 4.6',
+    provider: 'anthropic',
+    contextWindow: 1_000_000,
+    maxOutputTokens: 128_000,
+    supportsTools: true,
+    supportsStreaming: true,
+    supportsVision: true,
+    inputPricePerMToken: 5,
+    outputPricePerMToken: 25,
     thinkingVariants: ADAPTIVE_CLAUDE_VARIANTS,
+  },
+  {
+    id: 'claude-opus-4-5',
+    name: 'Claude Opus 4.5',
+    provider: 'anthropic',
+    contextWindow: 1_000_000,
+    maxOutputTokens: 128_000,
+    supportsTools: true,
+    supportsStreaming: true,
+    supportsVision: true,
+    inputPricePerMToken: 5,
+    outputPricePerMToken: 25,
+    thinkingVariants: ADAPTIVE_CLAUDE_BASIC_VARIANTS,
+  },
+  {
+    id: 'claude-sonnet-5',
+    name: 'Claude Sonnet 5',
+    provider: 'anthropic',
+    contextWindow: 1_000_000,
+    maxOutputTokens: 128_000,
+    supportsTools: true,
+    supportsStreaming: true,
+    supportsVision: true,
+    inputPricePerMToken: 2,
+    outputPricePerMToken: 10,
+    thinkingVariants: ADAPTIVE_CLAUDE_XHIGH_VARIANTS,
   },
   {
     id: 'claude-sonnet-4-6',
@@ -310,7 +396,20 @@ const ANTHROPIC_MODELS: AIModel[] = [
     thinkingVariants: ADAPTIVE_CLAUDE_VARIANTS,
   },
   {
-    id: 'claude-haiku-4-5',
+    id: 'claude-sonnet-4-5-20250929',
+    name: 'Claude Sonnet 4.5',
+    provider: 'anthropic',
+    contextWindow: 200_000,
+    maxOutputTokens: 64_000,
+    supportsTools: true,
+    supportsStreaming: true,
+    supportsVision: true,
+    inputPricePerMToken: 3,
+    outputPricePerMToken: 15,
+    thinkingVariants: BUDGET_CLAUDE_VARIANTS,
+  },
+  {
+    id: 'claude-haiku-4-5-20251001',
     name: 'Claude Haiku 4.5',
     provider: 'anthropic',
     contextWindow: 200_000,
@@ -320,6 +419,7 @@ const ANTHROPIC_MODELS: AIModel[] = [
     supportsVision: true,
     inputPricePerMToken: 1,
     outputPricePerMToken: 5,
+    thinkingVariants: BUDGET_CLAUDE_VARIANTS,
   },
 ];
 
@@ -387,17 +487,19 @@ export class AnthropicProvider implements AIProvider {
       body.stop_sequences = params.stopSequences;
     }
     if (params.thinking?.enabled) {
-      const usesAdaptiveThinking = /claude-(?:fable-5|opus-4-[6-9]|sonnet-4-6)/.test(params.model);
+      const usesAdaptiveThinking =
+        /claude-(?:fable-5|mythos-5|opus-5|opus-4-[5-9]|sonnet-5|sonnet-4-6)/.test(params.model);
       const thinkingConfig: Record<string, unknown> = {};
 
       if (usesAdaptiveThinking) {
         // Adaptive models accept thinking.type = 'adaptive' + an effort level.
-        // The official OpenCode Anthropic variants are high (default) and max;
-        // low/medium are also accepted by the API. "max" maps to effort "high"
-        // (the strongest adaptive effort) since adaptive has no discrete "max".
+        // Per docs/MODELS_REFERENCE.md §4 the effort parameter accepts
+        // low/medium/high (all adaptive models), xhigh (fable 5, mythos 5,
+        // opus 5, opus 4.8, opus 4.7, sonnet 5) and max — pass it through
+        // unchanged so each model gets its exact supported level.
         thinkingConfig.type = 'adaptive';
-        const effort = params.thinking.level === 'max' ? 'high' : (params.thinking.level ?? 'high');
-        thinkingConfig.effort = effort;
+        const level = params.thinking.level;
+        thinkingConfig.effort = !level || level === 'enabled' ? 'high' : level;
       } else {
         // Budget models accept thinking.type = 'enabled' + budget_tokens.
         // Sending "effort" here is invalid, so derive budget_tokens from the

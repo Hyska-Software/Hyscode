@@ -101,8 +101,10 @@ export type StopReason = 'end_turn' | 'tool_use' | 'max_tokens' | 'stop_sequence
 export interface ThinkingConfig {
   /** Whether thinking is enabled */
   enabled: boolean;
-  /** Effort/level for providers that support it (OpenAI: low/medium/high/xhigh, Anthropic adaptive: low/medium/high, Anthropic budget: low/medium/high/max, Kimi: enabled/disabled) */
+  /** Effort/level for providers that support it (OpenAI: none/low/medium/high/xhigh/max, Anthropic adaptive: low/medium/high/xhigh/max, Anthropic budget: low/medium/high/max, Kimi: enabled/disabled) */
   level?: 'low' | 'medium' | 'high' | 'enabled' | 'disabled' | 'none' | 'minimal' | 'xhigh' | 'max';
+  /** Reasoning mode for models that support it (GPT-5.6 family: standard | pro) */
+  mode?: 'standard' | 'pro';
   /** Budget tokens for providers that support it (Anthropic manual mode) */
   budgetTokens?: number;
   /** Provider-native thinking type override */
@@ -163,12 +165,16 @@ export interface ThinkingVariants {
   kind: ThinkingKind;
   /** Levels accepted by the model — undefined for kimi/deepseek (binary enabled/disabled) */
   levels?: ReadonlyArray<
-    'low' | 'medium' | 'high' | 'enabled' | 'disabled' | 'none' | 'minimal' | 'xhigh' | 'max'
+    'low' | 'medium' | 'high' | 'enabled' | 'disabled' | 'none' | 'minimal' | 'xhigh' | 'max' | 'adaptive'
   >;
   /** Default level when thinking is enabled without an explicit value */
-  defaultLevel?: 'low' | 'medium' | 'high' | 'enabled';
-  /** True for Anthropic models that accept the 'adaptive' type (opus 4.6+, sonnet 4.6, fable 5) */
+  defaultLevel?: 'low' | 'medium' | 'high' | 'enabled' | 'disabled' | 'none' | 'minimal' | 'xhigh' | 'max' | 'adaptive';
+  /** True for Anthropic models that accept the 'adaptive' type (opus 4.5+, sonnet 4.6+, fable 5) */
   supportsAdaptive?: boolean;
+  /** Reasoning modes accepted by the model (GPT-5.6 family: standard | pro) */
+  modes?: ReadonlyArray<'standard' | 'pro'>;
+  /** Default reasoning mode when none is specified */
+  defaultMode?: 'standard' | 'pro';
 }
 
 export interface AIModel {
