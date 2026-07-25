@@ -14,6 +14,7 @@ import {
   Zap,
   SlidersHorizontal,
   Check,
+  Clock,
 } from 'lucide-react';
 import { useSettingsStore } from '@/stores/settings-store';
 import type { McpServerConfig } from '@/stores/settings-store';
@@ -22,7 +23,6 @@ import { tauriInvoke } from '@/lib/tauri-invoke';
 import { reinitProvider } from '@/lib/init-providers';
 import { McpServerForm } from './mcp-server-form';
 import { CopilotAuthRow } from './copilot-auth-row';
-import { CopilotBillingInfo } from './copilot-billing-info';
 import { ProviderSetupGuide } from './provider-setup-guide';
 import {
   PROVIDERS,
@@ -292,7 +292,17 @@ export function AiTab() {
             </button>
           </div>
           <CopilotAuthRow />
-          <CopilotBillingInfo />
+        </div>
+
+        {/* Codex — coming soon */}
+        <div className="rounded-lg bg-surface-raised px-3 py-2.5 opacity-70">
+          <div className="flex items-center gap-2">
+            <Clock className="h-3.5 w-3.5 text-amber-400" />
+            <span className="text-[12px] text-foreground">Codex</span>
+            <span className="ml-auto rounded-full bg-amber-400/10 px-2 py-0.5 text-[9px] font-medium text-amber-400">
+              Under development
+            </span>
+          </div>
         </div>
       </SettingSection>
 
