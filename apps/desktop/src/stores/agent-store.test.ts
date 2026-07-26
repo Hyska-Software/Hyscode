@@ -123,4 +123,112 @@ describe('agent tab turn ownership', () => {
     ]);
     expect(useAgentStore.getState().messages[0].turnSummary?.files[0].resolution).toBe('undone');
   });
+
+  it('does not duplicate streamed assistant text when a tool message becomes last', () => {
+    useAgentStore.getState().beginAssistantMessage({
+      id: 'assistant-1',
+      role: 'assistant',
+      content: '',
+      timestamp: 0,
+    });
+    useAgentStore.getState().appendStreamingText('Inspecting the project.');
+    useAgentStore.getState().addMessage({
+      id: 'tool-1',
+      role: 'tool',
+      content: '',
+      blocks: [{ type: 'tool_result', toolCallId: 'call-1', output: 'result' }],
+      timestamp: 1,
+    });
+
+    useAgentStore.getState().flushStreamingText();
+
+    const state = useAgentStore.getState();
+    expect(state.messages.map((message) => message.role)).toEqual(['assistant', 'tool']);
+    expect(state.messages[0].content).toBe('Inspecting the project.');
+    expect(state.streamingText).toBe('');
+  });
+
+  it('keeps text, thinking, blocks, and tool calls bound to their assistant iteration', () => {
+    useAgentStore.getState().beginAssistantMessage({
+      id: 'assistant-1',
+      role: 'assistant',
+      content: '',
+      timestamp: 0,
+    });
+    useAgentStore.getState().appendStreamingText('First iteration.');
+    useAgentStore.getState().addToolCall({
+      id: 'call-1',
+      name: 'read_file',
+      input: { path: 'src/app.ts' },
+      status: 'running',
+    });
+    useAgentStore.getState().setStreamingAssistantBlocks([
+      { type: 'text', text: 'First iteration.' },
+      { type: 'tool_call', id: 'call-1', name: 'read_file', input: { path: 'src/app.ts' } },
+    ]);
+    useAgentStore.getState().addMessage({
+      id: 'tool-1',
+      role: 'tool',
+      content: '',
+      blocks: [{ type: 'tool_result', toolCallId: 'call-1', output: 'result' }],
+      timestamp: 1,
+    });
+    useAgentStore.getState().flushStreamingText();
+    useAgentStore.getState().beginAssistantMessage({
+      id: 'assistant-2',
+      role: 'assistant',
+      content: '',
+      timestamp: 2,
+    });
+    useAgentStore.getState().appendThinkingText('New reasoning.');
+    useAgentStore.getState().appendStreamingText('Final response.');
+    useAgentStore
+      .getState()
+      .setStreamingAssistantBlocks([{ type: 'text', text: 'Final response.' }]);
+
+    const assistants = useAgentStore
+      .getState()
+      .messages.filter((message) => message.role === 'assistant');
+    expect(assistants).toHaveLength(2);
+    expect(assistants[0]).toMatchObject({
+      id: 'assistant-1',
+      content: 'First iteration.',
+      toolCalls: [{ id: 'call-1' }],
+    });
+    expect(assistants[0].blocks).toHaveLength(2);
+    expect(assistants[1]).toMatchObject({
+      id: 'assistant-2',
+      content: 'Final response.',
+      thinking: 'New reasoning.',
+      blocks: [{ type: 'text', text: 'Final response.' }],
+    });
+  });
+
+  it('reconciles terminal content with the active assistant when a tool message is last', () => {
+    useAgentStore.getState().beginAssistantMessage({
+      id: 'assistant-1',
+      role: 'assistant',
+      content: '',
+      timestamp: 0,
+    });
+    useAgentStore.getState().appendStreamingText('Partial response.');
+    useAgentStore.getState().addMessage({
+      id: 'tool-1',
+      role: 'tool',
+      content: '',
+      blocks: [{ type: 'tool_result', toolCallId: 'call-1', output: 'result' }],
+      timestamp: 1,
+    });
+    useAgentStore.getState().flushStreamingText();
+    useAgentStore.getState().updateLastAssistantContent('Iteration limit reached.');
+
+    const state = useAgentStore.getState();
+    expect(state.messages).toHaveLength(2);
+    expect(state.messages[0]).toMatchObject({
+      id: 'assistant-1',
+      content: 'Iteration limit reached.',
+      isError: false,
+    });
+    expect(state.messages[1].role).toBe('tool');
+  });
 });

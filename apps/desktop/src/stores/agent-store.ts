@@ -52,6 +52,7 @@ export interface PerTabState {
   messages: ChatMessage[];
   isStreaming: boolean;
   streamingText: string;
+  streamingAssistantMessageId: string | null;
   contextFiles: string[];
   attachedImages: AttachedImage[];
   attachedTerminal: TerminalAttachment | null;
@@ -93,6 +94,7 @@ export function defaultPerTabState(mode: AgentMode = 'chat'): PerTabState {
     messages: [],
     isStreaming: false,
     streamingText: '',
+    streamingAssistantMessageId: null,
     contextFiles: [],
     attachedImages: [],
     attachedTerminal: null,
@@ -283,6 +285,7 @@ interface AgentState {
   messages: ChatMessage[];
   isStreaming: boolean;
   streamingText: string;
+  streamingAssistantMessageId: string | null;
   contextFiles: string[];
   attachedImages: AttachedImage[];
   attachedTerminal: TerminalAttachment | null;
@@ -375,6 +378,8 @@ interface AgentState {
   setAgentType: (type: AgentType) => void;
   setConversationId: (id: string) => void;
   addMessage: (message: ChatMessage) => void;
+  beginAssistantMessage: (message: ChatMessage) => void;
+  setStreamingAssistantBlocks: (blocks: MessageContent[]) => void;
   updateLastAssistantContent: (content: string) => void;
   updateLastAssistantError: (errorMessage: string) => void;
   appendStreamingText: (text: string) => void;
@@ -473,6 +478,7 @@ export const useAgentStore = create<AgentState>()(
     messages: [],
     isStreaming: false,
     streamingText: '',
+    streamingAssistantMessageId: null,
     pendingToolCalls: [],
     pendingApprovals: [],
     pendingFileChanges: [],
@@ -534,56 +540,75 @@ export const useAgentStore = create<AgentState>()(
         state.messages.push(message);
       }),
 
+    beginAssistantMessage: (message) =>
+      set((state) => {
+        state.streamingText = '';
+        state.streamingAssistantMessageId = message.id;
+        state.messages.push(message);
+      }),
+
+    setStreamingAssistantBlocks: (blocks) =>
+      set((state) => {
+        const target = state.messages.find(
+          (message) => message.id === state.streamingAssistantMessageId,
+        );
+        if (target?.role === 'assistant') {
+          target.blocks = [...blocks];
+        }
+      }),
+
     updateLastAssistantContent: (content) =>
       set((state) => {
-        const last = state.messages[state.messages.length - 1];
-        if (last?.role === 'assistant') {
-          last.content = content;
-          last.isError = false;
+        const target =
+          state.messages.find((message) => message.id === state.streamingAssistantMessageId) ??
+          [...state.messages].reverse().find((message) => message.role === 'assistant');
+        if (target?.role === 'assistant') {
+          target.content = content;
+          target.isError = false;
         }
       }),
 
     updateLastAssistantError: (errorMessage) =>
       set((state) => {
-        const last = state.messages[state.messages.length - 1];
-        if (last?.role === 'assistant') {
-          last.content = errorMessage;
-          last.isError = true;
+        const target =
+          state.messages.find((message) => message.id === state.streamingAssistantMessageId) ??
+          [...state.messages].reverse().find((message) => message.role === 'assistant');
+        if (target?.role === 'assistant') {
+          target.content = errorMessage;
+          target.isError = true;
         }
       }),
 
     appendStreamingText: (text) =>
       set((state) => {
         state.streamingText += text;
-        // Also update the last assistant message content in the same mutation
-        // to avoid a second set() call per token
-        const last = state.messages[state.messages.length - 1];
-        if (last?.role === 'assistant') {
-          last.content = state.streamingText;
+        const target = state.messages.find(
+          (message) => message.id === state.streamingAssistantMessageId,
+        );
+        if (target?.role === 'assistant') {
+          target.content = state.streamingText;
         }
       }),
 
     appendThinkingText: (text) =>
       set((state) => {
-        const last = state.messages[state.messages.length - 1];
-        if (last?.role === 'assistant') {
-          last.thinking = (last.thinking ?? '') + text;
+        const target = state.messages.find(
+          (message) => message.id === state.streamingAssistantMessageId,
+        );
+        if (target?.role === 'assistant') {
+          target.thinking = (target.thinking ?? '') + text;
         }
       }),
 
     flushStreamingText: () =>
       set((state) => {
-        if (!state.streamingText) return;
-        const last = state.messages[state.messages.length - 1];
-        if (last?.role === 'assistant') {
-          last.content = state.streamingText;
-        } else {
-          state.messages.push({
-            id: crypto.randomUUID(),
-            role: 'assistant',
-            content: state.streamingText,
-            timestamp: Date.now(),
-          });
+        if (state.streamingText) {
+          const target = state.messages.find(
+            (message) => message.id === state.streamingAssistantMessageId,
+          );
+          if (target?.role === 'assistant') {
+            target.content = state.streamingText;
+          }
         }
         state.streamingText = '';
       }),
@@ -593,6 +618,7 @@ export const useAgentStore = create<AgentState>()(
         state.isStreaming = streaming;
         if (!streaming) {
           state.streamingText = '';
+          state.streamingAssistantMessageId = null;
         }
       }),
 
@@ -666,6 +692,7 @@ export const useAgentStore = create<AgentState>()(
         state.attachedTerminal = null;
         state.gatheredContext = [];
         state.streamingText = '';
+        state.streamingAssistantMessageId = null;
         state.sddPhase = null;
         state.sddSpec = null;
         state.sddTasks = [];
@@ -686,11 +713,12 @@ export const useAgentStore = create<AgentState>()(
     addToolCall: (tc) =>
       set((state) => {
         state.pendingToolCalls.push(tc);
-        // Also attach to last assistant message
-        const last = state.messages[state.messages.length - 1];
-        if (last?.role === 'assistant') {
-          if (!last.toolCalls) last.toolCalls = [];
-          last.toolCalls.push(tc);
+        const target =
+          state.messages.find((message) => message.id === state.streamingAssistantMessageId) ??
+          [...state.messages].reverse().find((message) => message.role === 'assistant');
+        if (target?.role === 'assistant') {
+          if (!target.toolCalls) target.toolCalls = [];
+          target.toolCalls.push(tc);
         }
       }),
 
@@ -1132,6 +1160,7 @@ function _extractTab(s: AgentState): PerTabState {
     messages: s.messages,
     isStreaming: s.isStreaming,
     streamingText: s.streamingText,
+    streamingAssistantMessageId: s.streamingAssistantMessageId,
     contextFiles: s.contextFiles,
     attachedImages: s.attachedImages,
     attachedTerminal: s.attachedTerminal,
@@ -1168,6 +1197,7 @@ function _applyTab(s: AgentState, ps: PerTabState): void {
   s.messages = ps.messages;
   s.isStreaming = ps.isStreaming;
   s.streamingText = ps.streamingText;
+  s.streamingAssistantMessageId = ps.streamingAssistantMessageId;
   s.contextFiles = ps.contextFiles;
   s.attachedImages = ps.attachedImages;
   s.attachedTerminal = ps.attachedTerminal;

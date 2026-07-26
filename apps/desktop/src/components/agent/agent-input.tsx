@@ -21,7 +21,7 @@ import {
   ImageIcon,
   AlertTriangle,
 } from 'lucide-react';
-import { useState, useRef, useMemo, useCallback } from 'react';
+import { memo, useState, useRef, useMemo, useCallback } from 'react';
 import { ContextMentionPicker } from './context-mention-picker';
 import { desktopTerminalRuntime } from '@/lib/terminal-runtime';
 import { Textarea } from '@/components/ui/textarea';
@@ -55,6 +55,17 @@ import type { AIModel } from '@hyscode/ai-providers';
 
 const ACCEPTED_IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'];
 const MAX_IMAGE_SIZE = 20 * 1024 * 1024; // 20 MB
+
+const AgentExecutionBorder = memo(function AgentExecutionBorder() {
+  return (
+    <div
+      aria-hidden="true"
+      className="agent-input-execution-layer pointer-events-none absolute inset-0 overflow-hidden rounded-lg"
+    >
+      <div className="agent-input-execution-orbit" />
+    </div>
+  );
+});
 
 function useActiveModel(): AIModel | null {
   const providerId = useSettingsStore((s) => s.activeProviderId);
@@ -436,24 +447,18 @@ export function AgentInput() {
       {/* ── Minimal input frame ── */}
       <div
         className={cn(
-          'relative mx-auto max-w-4xl rounded-lg',
-          isStreaming && 'p-[1px]',
+          'relative isolate mx-auto max-w-4xl rounded-lg bg-border/50 p-px',
+          'transition-[background-color,box-shadow] duration-200',
+          'focus-within:bg-border focus-within:ring-2 focus-within:ring-ring',
+          isDragOver && !isStreaming && 'bg-primary/50 ring-2 ring-primary/30',
         )}
       >
-        {isStreaming && (
-          <div className="pointer-events-none absolute inset-0 z-0 overflow-hidden rounded-lg">
-            <div className="h-full w-full origin-center animate-[spin_10s_linear_infinite] bg-[conic-gradient(from_0deg_at_50%_50%,transparent_0deg,transparent_180deg,var(--color-primary)_240deg,var(--color-primary)_300deg,transparent_360deg)]" />
-          </div>
-        )}
+        {isStreaming && <AgentExecutionBorder />}
         <div
           ref={inputWrapperRef}
           className={cn(
-            'group/input relative flex flex-col overflow-hidden rounded-lg transition-all',
-            'bg-card',
-            !isStreaming && 'border border-border/50',
-            !isStreaming && 'focus-within:border-border focus-within:ring-2 focus-within:ring-ring',
-            isStreaming && 'border border-transparent',
-            isDragOver && !isStreaming && 'border-primary/50 ring-2 ring-primary/30',
+            'agent-input-surface group/input relative flex flex-col overflow-hidden bg-card',
+            'transition-colors duration-200',
           )}
           onDragOver={handleDragOver}
           onDragLeave={handleDragLeave}

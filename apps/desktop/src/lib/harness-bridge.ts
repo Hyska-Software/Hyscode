@@ -646,9 +646,9 @@ export class HarnessBridge {
     this.activeTurnConversationId = useAgentStore.getState().conversationId;
     this.activeTurnId = null;
 
-    // Create placeholder assistant message
+    // Create the first assistant row and bind streaming updates to its identity.
     const assistantMsgId = crypto.randomUUID();
-    useAgentStore.getState().addMessage({
+    useAgentStore.getState().beginAssistantMessage({
       id: assistantMsgId,
       role: 'assistant',
       content: '',
@@ -1503,7 +1503,7 @@ Investigate the error, fix the underlying issue in the affected files, and verif
         // directly from the harness through transcript_message.
         if (event.iteration > 1) {
           store.flushStreamingText();
-          store.addMessage({
+          store.beginAssistantMessage({
             id: crypto.randomUUID(),
             role: 'assistant',
             content: '',
@@ -1602,15 +1602,7 @@ Investigate the error, fix the underlying issue in the affected files, and verif
 
       case 'transcript_message': {
         if (event.role === 'assistant') {
-          const messages = useAgentStore.getState().messages;
-          for (let index = messages.length - 1; index >= 0; index--) {
-            if (messages[index].role !== 'assistant') continue;
-            useAgentStore.setState((draft) => {
-              const target = draft.messages[index];
-              if (target) target.blocks = [...event.blocks];
-            });
-            break;
-          }
+          store.setStreamingAssistantBlocks(event.blocks);
         } else if (event.blocks.length > 0) {
           store.addMessage({
             id: crypto.randomUUID(),

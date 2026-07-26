@@ -328,6 +328,57 @@ body {
   animation: agent-breathe 2.4s ease-in-out infinite;
 }
 
+/*
+ * Execution border for the agent input. The orbit is deliberately larger than
+ * the frame's diagonal so rotating it can never uncover the clipped corners.
+ * The one-pixel frame is always present in the component, avoiding layout
+ * shifts when execution starts or ends.
+ */
+@keyframes agent-input-execution-orbit {
+  from {
+    transform: translate3d(-50%, -50%, 0) rotate(0turn);
+  }
+  to {
+    transform: translate3d(-50%, -50%, 0) rotate(1turn);
+  }
+}
+
+.agent-input-execution-layer {
+  contain: paint;
+}
+
+.agent-input-execution-orbit {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: max(160%, 32rem);
+  aspect-ratio: 1;
+  backface-visibility: hidden;
+  background: conic-gradient(
+    from 0deg,
+    transparent 0deg 202deg,
+    color-mix(in oklch, var(--color-primary) 12%, transparent) 222deg,
+    color-mix(in oklch, var(--color-primary) 48%, transparent) 246deg,
+    var(--color-primary) 266deg,
+    color-mix(in oklch, var(--color-primary) 32%, transparent) 280deg,
+    transparent 302deg 360deg
+  );
+  transform-origin: center;
+  will-change: transform;
+  animation: agent-input-execution-orbit 7s linear infinite;
+}
+
+.agent-input-surface {
+  border-radius: max(0px, calc(var(--radius-lg) - 1px));
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .agent-input-execution-orbit {
+    animation: none;
+    transform: translate3d(-50%, -50%, 0) rotate(0.125turn);
+  }
+}
+
 /* Utility for smooth collapsible height (used by tool cards and thinking blocks) */
 .agent-collapse {
   transition: height 0.3s cubic-bezier(0.16, 1, 0.3, 1),
