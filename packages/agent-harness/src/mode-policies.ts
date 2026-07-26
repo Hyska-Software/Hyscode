@@ -393,22 +393,8 @@ const MODEL_PROFILES: ModelProfile[] = [
     supportsThinking: true,
   },
   {
-    pattern: 'deepseek-v4-flash-free',
-    maxContext: 128_000,
-    recommendedMaxOutput: 8_192,
-    supportsToolCalling: true,
-    supportsThinking: true,
-  },
-  {
     pattern: 'deepseek-v4-pro|deepseek-v4-flash',
     maxContext: 1_000_000,
-    recommendedMaxOutput: 8_192,
-    supportsToolCalling: true,
-    supportsThinking: true,
-  },
-  {
-    pattern: 'deepseek-v4-flash-free',
-    maxContext: 128_000,
     recommendedMaxOutput: 8_192,
     supportsToolCalling: true,
     supportsThinking: true,

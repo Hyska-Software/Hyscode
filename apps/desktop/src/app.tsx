@@ -33,7 +33,6 @@ import { HarnessBridge } from './lib/harness-bridge';
 import { LspBridge } from './lib/lsp-bridge';
 import { startExtensionLspSync } from './lib/extension-lsp-bridge';
 import { getViewerType } from './lib/utils';
-import { UpdateBanner } from './components/updater/update-banner';
 import { UpdateDialog } from './components/updater/update-dialog';
 import { saveProjectState, switchProject, closeCurrentProject } from './lib/project-persistence';
 
@@ -252,7 +251,6 @@ function IDE() {
         {workspaceMode === 'agent' && <AgentLayout />}
       </div>
 
-      <UpdateBanner />
       <StatusBar />
       <SettingsModal />
       <ExtensionOverlays />

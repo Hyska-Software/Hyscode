@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { FileMenu } from './file-menu';
 import { ViewMenu } from './view-menu';
 import { ModeSelector } from './mode-selector';
+import { UpdateIndicator } from './update-indicator';
 import { WindowControls } from './window-controls';
 import { BrandMark } from '../brand-mark';
 import { useLayoutStore } from '../../stores/layout-store';
@@ -40,9 +41,10 @@ export function TitleBar() {
       {/* Center spacer for visual balance */}
       <div className="flex-1" />
 
-      {/* Right: layout mode selector + window controls */}
+      {/* Right: layout mode selector + update indicator + window controls */}
       <div className="flex shrink-0 items-center gap-2">
         <ModeSelector />
+        <UpdateIndicator />
         <WindowControls />
       </div>
     </header>
