@@ -116,8 +116,6 @@ interface SettingsState {
   terminalCursorStyle: TerminalCursorStyle;
 
   // ─ Git ─
-  gitUserName: string;
-  gitUserEmail: string;
   gitDefaultBranch: string;
   gitAutoFetch: boolean;
   gitAutoFetchInterval: number;
@@ -264,8 +262,12 @@ interface SettingsState {
 }
 
 export function migrateSettingsState(persistedState: unknown, version: number): unknown {
-  const state = persistedState as Partial<SettingsState>;
-  if (version < 1) return { ...state, interactionLimitEnabled: false };
+  const state = { ...(persistedState as Record<string, unknown>) };
+  if (version < 1) state.interactionLimitEnabled = false;
+  if (version < 2) {
+    delete state.gitUserName;
+    delete state.gitUserEmail;
+  }
   return state;
 }
 
@@ -467,7 +469,7 @@ export const useSettingsStore = create<SettingsState>()(
     {
       name: 'hyscode-settings',
       storage: createJSONStorage(() => localStorage),
-      version: 1,
+      version: 2,
       migrate: migrateSettingsState,
       partialize: (state) => {
         // Exclude transient UI state and action functions from persistence

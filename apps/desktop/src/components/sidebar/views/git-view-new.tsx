@@ -1,5 +1,16 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import {
+  Button,
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  ModelSelector,
+  type ModelOption,
+} from '@hyscode/ui';
+import {
   GitBranch,
   RefreshCw,
   Loader2,
@@ -24,6 +35,7 @@ import {
   Settings2,
   GitPullRequest,
   GitFork as GraphIcon,
+  Check,
 } from 'lucide-react';
 import { useGitStore, useEditorStore } from '../../../stores';
 import { useSettingsStore } from '../../../stores/settings-store';
@@ -36,13 +48,26 @@ import { PullRequestDialog } from '../../git/pull-request-dialog';
 import { promptInput, promptConfirm } from '../../ui/dialogs';
 import type { GitFile } from '../../../stores/git-store';
 import { generateCommitMessage } from '../../../lib/commit-message-ai';
-import { PROVIDERS, getAllEnabledModelsGrouped } from '../../../lib/provider-catalog';
+import { getAllEnabledModelsGrouped } from '../../../lib/provider-catalog';
+import {
+  getCommitRemoteActions,
+  isRepositoryOperationInProgress,
+  shouldConfirmGitDiscard,
+} from '../../../lib/git-workflow';
 
 type PanelMode = 'changes' | 'log' | 'graph';
+type CommitAction = 'commit' | 'amend' | 'push' | 'sync';
 
 export function GitView() {
   const isGitRepo = useGitStore((s) => s.isGitRepo);
+  const repositoryState = useGitStore((s) => s.repositoryState);
+  const repositoryError = useGitStore((s) => s.repositoryError);
+  const repositoryOperation = useGitStore((s) => s.repositoryOperation);
+  const activeOperation = useGitStore((s) => s.activeOperation);
   const currentBranch = useGitStore((s) => s.currentBranch);
+  const upstream = useGitStore((s) => s.upstream);
+  const headState = useGitStore((s) => s.headState);
+  const remotes = useGitStore((s) => s.remotes);
   const staged = useGitStore((s) => s.staged);
   const unstaged = useGitStore((s) => s.unstaged);
   const untracked = useGitStore((s) => s.untracked);
@@ -60,14 +85,18 @@ export function GitView() {
   const discardFiles = useGitStore((s) => s.discardFiles);
   const discardAll = useGitStore((s) => s.discardAll);
   const commit = useGitStore((s) => s.commit);
+  const amendCommit = useGitStore((s) => s.amendCommit);
   const setCommitMessage = useGitStore((s) => s.setCommitMessage);
   const initRepo = useGitStore((s) => s.initRepo);
   const stashChanges = useGitStore((s) => s.stashChanges);
   const popStash = useGitStore((s) => s.popStash);
+  const applyStash = useGitStore((s) => s.applyStash);
   const fetchStashes = useGitStore((s) => s.fetchStashes);
   const push = useGitStore((s) => s.push);
+  const publishBranch = useGitStore((s) => s.publishBranch);
   const pull = useGitStore((s) => s.pull);
   const fetchRemote = useGitStore((s) => s.fetch);
+  const fetchAll = useGitStore((s) => s.fetchAll);
   const mergeBranch = useGitStore((s) => s.mergeBranch);
   const createTag = useGitStore((s) => s.createTag);
   const createBranch = useGitStore((s) => s.createBranch);
@@ -75,6 +104,7 @@ export function GitView() {
   const deleteBranch = useGitStore((s) => s.deleteBranch);
   const fetchBranches = useGitStore((s) => s.fetchBranches);
   const getStagedDiff = useGitStore((s) => s.getStagedDiff);
+  const confirmDiscard = useSettingsStore((s) => s.gitConfirmDiscard);
 
   const commitAiProviderId = useSettingsStore((s) => s.commitAiProviderId);
   const commitAiModelId = useSettingsStore((s) => s.commitAiModelId);
@@ -95,13 +125,20 @@ export function GitView() {
   const [generateError, setGenerateError] = useState<string | null>(null);
   const [showAiSettings, setShowAiSettings] = useState(false);
   const [showPrDialog, setShowPrDialog] = useState(false);
+  const [showCommitMenu, setShowCommitMenu] = useState(false);
   const generateAbortRef = useRef<AbortController | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
-  const aiSettingsRef = useRef<HTMLDivElement>(null);
+  const commitMenuRef = useRef<HTMLDivElement>(null);
   const messageRef = useRef<HTMLTextAreaElement>(null);
 
   // Merge untracked into changes (unstaged + untracked = "Changes")
   const changes = useMemo(() => [...unstaged, ...untracked], [unstaged, untracked]);
+  const repositoryBusy = isRepositoryOperationInProgress(repositoryOperation);
+  const commitRemoteActions = getCommitRemoteActions({
+    headState,
+    hasUpstream: upstream !== null,
+    hasRemotes: remotes.length > 0,
+  });
 
   // Close menu on outside click
   useEffect(() => {
@@ -115,17 +152,19 @@ export function GitView() {
     return () => document.removeEventListener('mousedown', handler);
   }, [showMenu]);
 
-  // Close AI settings popover on outside click
   useEffect(() => {
-    if (!showAiSettings) return;
-    const handler = (e: MouseEvent) => {
-      if (aiSettingsRef.current && !aiSettingsRef.current.contains(e.target as Node)) {
-        setShowAiSettings(false);
+    if (!showCommitMenu) return;
+    const handler = (event: MouseEvent) => {
+      if (
+        commitMenuRef.current &&
+        !commitMenuRef.current.contains(event.target as Node)
+      ) {
+        setShowCommitMenu(false);
       }
     };
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
-  }, [showAiSettings]);
+  }, [showCommitMenu]);
 
   // Refresh on mount
   useEffect(() => {
@@ -180,21 +219,15 @@ export function GitView() {
       setIsGenerating(false);
       generateAbortRef.current = null;
     }
-  }, [staged.length, commitAiProviderId, commitAiModelId, activeProviderId, activeModelId, getStagedDiff, setCommitMessage]);
-
-  const handleCommit = useCallback(async () => {
-    if (!commitMessage.trim() || staged.length === 0) return;
-    setIsCommitting(true);
-    setCommitError(null);
-    try {
-      await commit();
-      setOpStatus({ type: 'success', msg: 'Committed successfully' });
-    } catch (err: any) {
-      setCommitError(err.message ?? String(err));
-    } finally {
-      setIsCommitting(false);
-    }
-  }, [commitMessage, staged.length, commit]);
+  }, [
+    staged.length,
+    commitAiProviderId,
+    commitAiModelId,
+    activeProviderId,
+    activeModelId,
+    getStagedDiff,
+    setCommitMessage,
+  ]);
 
   const runOp = useCallback(async (label: string, fn: () => Promise<unknown>) => {
     setShowMenu(false);
@@ -208,15 +241,148 @@ export function GitView() {
 
   // ── Dropdown operations ────────────────────────────────────────────────────
 
-  const handlePush = useCallback(() => runOp('Push', () => push()), [runOp, push]);
+  const chooseRemote = useCallback(async (requireExplicitChoice = false): Promise<string | null> => {
+    if (!requireExplicitChoice && upstream?.remote) return upstream.remote;
+    if (remotes.length === 0) {
+      setOpStatus({ type: 'error', msg: 'No Git remote is configured' });
+      return null;
+    }
+    if (remotes.length === 1) return remotes[0].name;
+    const selected = await promptInput({
+      title: `Select Remote (${remotes.map((remote) => remote.name).join(', ')})`,
+      placeholder: remotes[0].name,
+      defaultValue: remotes[0].name,
+    });
+    if (!selected) return null;
+    if (!remotes.some((remote) => remote.name === selected)) {
+      setOpStatus({ type: 'error', msg: `Remote "${selected}" does not exist` });
+      return null;
+    }
+    return selected;
+  }, [remotes, upstream]);
+
+  const handlePush = useCallback(async () => {
+    if (upstream) {
+      await runOp('Push', () => push());
+      return;
+    }
+    const remote = await chooseRemote();
+    if (remote) await runOp('Publish Branch', () => publishBranch(remote));
+  }, [chooseRemote, publishBranch, push, runOp, upstream]);
   const handlePull = useCallback(() => runOp('Pull', () => pull()), [runOp, pull]);
   const handleFetch = useCallback(() => runOp('Fetch', () => fetchRemote()), [runOp, fetchRemote]);
+  const handlePushTo = useCallback(async () => {
+    const remote = await chooseRemote(true);
+    if (remote) await runOp(`Push To ${remote}`, () => push(remote, currentBranch));
+  }, [chooseRemote, currentBranch, push, runOp]);
+  const handlePullFrom = useCallback(async () => {
+    const remote = await chooseRemote(true);
+    if (remote) await runOp(`Pull From ${remote}`, () => pull(remote));
+  }, [chooseRemote, pull, runOp]);
+  const handleFetchAll = useCallback(
+    () => runOp('Fetch All', () => fetchAll(false)),
+    [fetchAll, runOp],
+  );
+  const handleFetchPrune = useCallback(
+    () => runOp('Fetch & Prune', () => fetchAll(true)),
+    [fetchAll, runOp],
+  );
+
+  const handleCommit = useCallback(
+    async (action: CommitAction = 'commit') => {
+      if (
+        !commitMessage.trim() ||
+        (action !== 'amend' && staged.length === 0) ||
+        (action === 'amend' && headState === 'unborn')
+      ) {
+        return;
+      }
+      setShowCommitMenu(false);
+      setIsCommitting(true);
+      setCommitError(null);
+      let committedLocally = false;
+      try {
+        if (action === 'amend') {
+          await amendCommit();
+        } else {
+          await commit();
+        }
+        committedLocally = true;
+
+        if (action === 'push') {
+          if (upstream) {
+            await push();
+          } else {
+            const remote = await chooseRemote();
+            if (!remote) {
+              setOpStatus({
+                type: 'success',
+                msg: 'Committed locally; publish was cancelled',
+              });
+              return;
+            }
+            await publishBranch(remote);
+          }
+        } else if (action === 'sync') {
+          await pull();
+          await push();
+        }
+
+        setOpStatus({
+          type: 'success',
+          msg:
+            action === 'commit'
+              ? 'Committed successfully'
+              : action === 'amend'
+                ? 'Commit amended successfully'
+              : action === 'push'
+                ? upstream
+                  ? 'Committed and pushed successfully'
+                  : 'Committed and published successfully'
+                : 'Committed and synchronized successfully',
+        });
+      } catch (err: any) {
+        const message = err.message ?? String(err);
+        setCommitError(
+          committedLocally && action !== 'commit'
+            ? `Committed locally, but the remote operation failed: ${message}`
+            : message,
+        );
+      } finally {
+        setIsCommitting(false);
+      }
+    },
+    [
+      amendCommit,
+      chooseRemote,
+      commit,
+      commitMessage,
+      publishBranch,
+      pull,
+      push,
+      staged.length,
+      upstream,
+    ],
+  );
 
   const handleStash = useCallback(async () => {
     setShowMenu(false);
-    const msg = await promptInput({ title: 'Stash Changes (optional message)', placeholder: 'WIP' });
+    const msg = await promptInput({
+      title: 'Stash Changes (optional message)',
+      placeholder: 'WIP',
+    });
     if (msg === null) return; // cancelled
     await runOp('Stash', () => stashChanges(msg || undefined));
+  }, [runOp, stashChanges]);
+
+  const handleStashIncludingUntracked = useCallback(async () => {
+    setShowMenu(false);
+    const msg = await promptInput({
+      title: 'Stash Changes Including Untracked Files',
+      placeholder: 'WIP',
+    });
+    if (msg === null) return;
+    await runOp('Stash', () => stashChanges(msg || undefined, true));
   }, [runOp, stashChanges]);
 
   const handlePopStash = useCallback(async () => {
@@ -240,6 +406,28 @@ export function GitView() {
     }
     await runOp('Pop Stash', () => popStash(idx));
   }, [runOp, popStash, fetchStashes]);
+
+  const handleApplyStash = useCallback(async () => {
+    setShowMenu(false);
+    await fetchStashes();
+    const stashList = useGitStore.getState().stashes;
+    if (stashList.length === 0) {
+      setOpStatus({ type: 'error', msg: 'No stashes to apply' });
+      return;
+    }
+    const pick = await promptInput({
+      title: `Apply Stash (index 0-${stashList.length - 1})`,
+      placeholder: '0',
+      defaultValue: '0',
+    });
+    if (pick === null) return;
+    const index = Number.parseInt(pick, 10);
+    if (Number.isNaN(index) || index < 0 || index >= stashList.length) {
+      setOpStatus({ type: 'error', msg: 'Invalid stash index' });
+      return;
+    }
+    await runOp('Apply Stash', () => applyStash(index));
+  }, [applyStash, fetchStashes, runOp]);
 
   const handleCreateBranch = useCallback(async () => {
     setShowMenu(false);
@@ -279,7 +467,10 @@ export function GitView() {
       placeholder: 'branch name',
     });
     if (!name) return;
-    const confirmed = await promptConfirm({ title: 'Delete Branch', description: `Delete branch "${name}"? This cannot be undone.` });
+    const confirmed = await promptConfirm({
+      title: 'Delete Branch',
+      description: `Delete branch "${name}"? This cannot be undone.`,
+    });
     if (!confirmed) return;
     await runOp('Delete Branch', () => deleteBranch(name));
   }, [runOp, deleteBranch, fetchBranches]);
@@ -305,17 +496,44 @@ export function GitView() {
     setShowMenu(false);
     const name = await promptInput({ title: 'Create Tag', placeholder: 'v1.0.0' });
     if (!name) return;
-    const msg = await promptInput({ title: 'Tag Message (optional)', placeholder: 'Release v1.0.0' });
+    const msg = await promptInput({
+      title: 'Tag Message (optional)',
+      placeholder: 'Release v1.0.0',
+    });
     await runOp('Create Tag', () => createTag(name, msg || undefined));
   }, [runOp, createTag]);
 
   const handleDiscardAll = useCallback(async () => {
     setShowMenu(false);
     if (changes.length === 0) return;
-    const confirmed = await promptConfirm({ title: 'Discard All Changes', description: `Discard all ${changes.length} changes? This cannot be undone.` });
+    const untrackedCount = untracked.length;
+    const confirmed = await promptConfirm({
+      title: 'Discard All Changes',
+      description:
+        untrackedCount > 0
+          ? `Restore tracked changes and permanently delete ${untrackedCount} untracked file${untrackedCount === 1 ? '' : 's'}? This cannot be undone.`
+          : `Discard all ${changes.length} tracked changes? This cannot be undone.`,
+    });
     if (!confirmed) return;
     await runOp('Discard All', () => discardAll());
-  }, [runOp, discardAll, changes.length]);
+  }, [runOp, discardAll, changes.length, untracked.length]);
+
+  const handleDiscardFiles = useCallback(
+    async (files: GitFile[]) => {
+      const untrackedFiles = files.filter((file) => file.status === '?');
+      const mustConfirm = shouldConfirmGitDiscard(files, confirmDiscard);
+      if (mustConfirm) {
+        const description =
+          untrackedFiles.length > 0
+            ? `Permanently delete ${untrackedFiles.map((file) => file.path).join(', ')}? This cannot be undone.`
+            : `Discard changes in ${files.map((file) => file.path).join(', ')}? This cannot be undone.`;
+        const confirmed = await promptConfirm({ title: 'Discard Changes', description });
+        if (!confirmed) return;
+      }
+      await runOp('Discard', () => discardFiles(files.map((file) => file.path)));
+    },
+    [confirmDiscard, discardFiles, runOp],
+  );
 
   const handleUnstageAll = useCallback(async () => {
     setShowMenu(false);
@@ -323,15 +541,15 @@ export function GitView() {
   }, [runOp, unstageAll]);
 
   const openDiffTab = useCallback(
-    (file: GitFile, isStaged: boolean) => {
+    (file: GitFile, mode: 'staged' | 'unstaged' | 'conflict') => {
       const fileName = file.path.split(/[\\/]/).pop() ?? file.path;
       openTab({
-        id: `diff:${isStaged ? 'staged' : 'unstaged'}:${file.path}`,
+        id: `diff:${mode}:${file.path}`,
         filePath: file.path,
-        fileName: `${fileName} (${isStaged ? 'Staged' : 'Working Tree'})`,
+        fileName: `${fileName} (${mode === 'staged' ? 'Staged' : mode === 'conflict' ? 'Conflict' : 'Working Tree'})`,
         language: detectLanguage(file.path),
         type: 'diff',
-        diffProps: { filePath: file.path, staged: isStaged },
+        diffProps: { filePath: file.path, staged: mode === 'staged', mode },
       });
     },
     [openTab],
@@ -341,24 +559,57 @@ export function GitView() {
     (file: GitFile) => {
       const fileName = file.path.split(/[\\/]/).pop() ?? file.path;
       openTab({
-        id: file.path,
-        filePath: file.path,
+        id: file.absolute_path,
+        filePath: file.absolute_path,
         fileName,
-        language: detectLanguage(file.path),
+        language: detectLanguage(file.absolute_path),
         viewerType: getViewerType(fileName),
       });
     },
     [openTab],
   );
 
-  // Not a git repo
-  if (!isGitRepo) {
+  if (repositoryState === 'no-workspace') {
+    return (
+      <div className="flex flex-col items-center justify-center py-12 text-center text-muted-foreground">
+        <GitBranch className="mb-3 h-8 w-8 opacity-30" />
+        <p className="text-xs">Open a folder to view source control</p>
+      </div>
+    );
+  }
+
+  if (repositoryState === 'checking') {
+    return (
+      <div className="flex flex-col items-center justify-center py-12 text-center text-muted-foreground">
+        <Loader2 className="mb-3 h-6 w-6 animate-spin opacity-60" />
+        <p className="text-xs">Checking repository…</p>
+      </div>
+    );
+  }
+
+  if (repositoryState === 'error') {
+    return (
+      <div className="flex flex-col items-center justify-center px-4 py-12 text-center text-muted-foreground">
+        <XCircle className="mb-3 h-8 w-8 text-destructive opacity-70" />
+        <p className="text-xs text-destructive">Git repository error</p>
+        <p className="mt-1 text-[10px]">{repositoryError}</p>
+        <button
+          onClick={() => void refresh()}
+          className="mt-3 rounded-md bg-muted px-3 py-1.5 text-[11px] text-foreground"
+        >
+          Try Again
+        </button>
+      </div>
+    );
+  }
+
+  if (repositoryState === 'not-repository' || !isGitRepo) {
     return (
       <div className="flex flex-col items-center justify-center py-12 text-center text-muted-foreground">
         <GitBranch className="mb-3 h-8 w-8 opacity-30" />
         <p className="text-xs">Not a Git repository</p>
         <button
-          onClick={initRepo}
+          onClick={() => void runOp('Initialize Repository', initRepo)}
           className="mt-3 rounded-md bg-primary px-3 py-1.5 text-[11px] text-white hover:bg-primary/80 transition-colors"
         >
           Initialize Repository
@@ -439,15 +690,25 @@ export function GitView() {
                 {/* Remote */}
                 <MenuSection label="Remote">
                   <MenuBtn icon={ArrowUp} label="Push" onClick={handlePush} />
+                  <MenuBtn icon={ArrowUp} label="Push To…" onClick={handlePushTo} />
                   <MenuBtn icon={ArrowDown} label="Pull" onClick={handlePull} />
+                  <MenuBtn icon={ArrowDown} label="Pull From…" onClick={handlePullFrom} />
                   <MenuBtn icon={Download} label="Fetch" onClick={handleFetch} />
+                  <MenuBtn icon={Download} label="Fetch All" onClick={handleFetchAll} />
+                  <MenuBtn icon={Download} label="Fetch All & Prune" onClick={handleFetchPrune} />
                 </MenuSection>
 
                 <MenuDivider />
 
                 {/* Staging */}
                 <MenuSection label="Changes">
-                  <MenuBtn icon={Plus} label="Stage All" onClick={async () => { setShowMenu(false); await stageAll(); }} />
+                  <MenuBtn
+                    icon={Plus}
+                    label="Stage All"
+                    onClick={async () => {
+                      await runOp('Stage All', stageAll);
+                    }}
+                  />
                   <MenuBtn icon={Minus} label="Unstage All" onClick={handleUnstageAll} />
                   <MenuBtn icon={RotateCcw} label="Discard All" onClick={handleDiscardAll} />
                 </MenuSection>
@@ -457,7 +718,11 @@ export function GitView() {
                 {/* Branch */}
                 <MenuSection label="Branch">
                   <MenuBtn icon={GitFork} label="Create Branch" onClick={handleCreateBranch} />
-                  <MenuBtn icon={GitBranch} label="Checkout Branch" onClick={handleCheckoutBranch} />
+                  <MenuBtn
+                    icon={GitBranch}
+                    label="Checkout Branch"
+                    onClick={handleCheckoutBranch}
+                  />
                   <MenuBtn icon={Trash2} label="Delete Branch" onClick={handleDeleteBranch} />
                   <MenuBtn icon={GitMerge} label="Merge Branch" onClick={handleMerge} />
                 </MenuSection>
@@ -467,9 +732,22 @@ export function GitView() {
                 {/* Misc */}
                 <MenuSection label="Other">
                   <MenuBtn icon={Archive} label="Stash Changes" onClick={handleStash} />
+                  <MenuBtn
+                    icon={Archive}
+                    label="Stash Including Untracked"
+                    onClick={handleStashIncludingUntracked}
+                  />
                   <MenuBtn icon={Archive} label="Pop Stash" onClick={handlePopStash} />
+                  <MenuBtn icon={Archive} label="Apply Stash" onClick={handleApplyStash} />
                   <MenuBtn icon={Tag} label="Create Tag" onClick={handleCreateTag} />
-                  <MenuBtn icon={History} label="View History" onClick={() => { setShowMenu(false); setPanelMode('log'); }} />
+                  <MenuBtn
+                    icon={History}
+                    label="View History"
+                    onClick={() => {
+                      setShowMenu(false);
+                      setPanelMode('log');
+                    }}
+                  />
                 </MenuSection>
               </div>
             )}
@@ -477,12 +755,29 @@ export function GitView() {
         </div>
       </div>
 
+      {(repositoryError || repositoryBusy || activeOperation) && (
+        <div className="border-b border-border bg-muted/40 px-2 py-1 text-[10px] text-muted-foreground">
+          {repositoryError ??
+            (repositoryBusy
+              ? `Repository operation in progress: ${repositoryOperation}`
+              : `${activeOperation} in progress…`)}
+        </div>
+      )}
+
       {/* Operation status toast */}
       {opStatus && (
-        <div className={`flex items-center gap-1.5 px-2 py-1 text-[10px] border-b border-border ${
-          opStatus.type === 'success' ? 'text-success bg-success/5' : 'text-destructive bg-destructive/5'
-        }`}>
-          {opStatus.type === 'success' ? <CheckCircle className="h-3 w-3" /> : <XCircle className="h-3 w-3" />}
+        <div
+          className={`flex items-center gap-1.5 px-2 py-1 text-[10px] border-b border-border ${
+            opStatus.type === 'success'
+              ? 'text-success bg-success/5'
+              : 'text-destructive bg-destructive/5'
+          }`}
+        >
+          {opStatus.type === 'success' ? (
+            <CheckCircle className="h-3 w-3" />
+          ) : (
+            <XCircle className="h-3 w-3" />
+          )}
           <span className="truncate">{opStatus.msg}</span>
         </div>
       )}
@@ -518,8 +813,7 @@ export function GitView() {
                 <Sparkles className="h-3 w-3" />
               )}
             </button>
-            {/* AI model settings popover */}
-            <div className="relative" ref={aiSettingsRef}>
+            <div>
               <button
                 onClick={() => setShowAiSettings((v) => !v)}
                 className={`flex h-5 w-5 items-center justify-center rounded-sm transition-colors ${
@@ -531,18 +825,6 @@ export function GitView() {
               >
                 <Settings2 className="h-3 w-3" />
               </button>
-
-              {showAiSettings && (
-                <AiModelPopover
-                  commitAiProviderId={commitAiProviderId}
-                  commitAiModelId={commitAiModelId}
-                  enabledModels={enabledModels}
-                  customModels={customModels}
-                  onProviderChange={(pid) => setSettings('commitAiProviderId', pid)}
-                  onModelChange={(mid) => setSettings('commitAiModelId', mid)}
-                  onClose={() => setShowAiSettings(false)}
-                />
-              )}
             </div>
           </div>
         </div>
@@ -550,17 +832,76 @@ export function GitView() {
         {(commitError || generateError) && (
           <p className="mt-0.5 text-[10px] text-destructive">{commitError ?? generateError}</p>
         )}
-        <button
-          onClick={handleCommit}
-          disabled={!commitMessage.trim() || staged.length === 0 || isCommitting}
-          className="mt-1 w-full rounded-md bg-primary px-3 py-1 text-[11px] font-medium text-white hover:bg-primary/80 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-        >
-          {isCommitting ? (
-            <Loader2 className="mx-auto h-3.5 w-3.5 animate-spin" />
-          ) : (
-            `Commit${staged.length > 0 ? ` (${staged.length})` : ''}`
+        <div ref={commitMenuRef} className="relative mt-1 flex w-full">
+          <button
+            onClick={() => void handleCommit()}
+            disabled={
+              !commitMessage.trim() ||
+              staged.length === 0 ||
+              isCommitting ||
+              activeOperation !== null ||
+              repositoryBusy
+            }
+            className="flex min-w-0 flex-1 items-center justify-center gap-1 rounded-l-md bg-primary px-3 py-1 text-[11px] font-medium text-white hover:bg-primary/80 disabled:cursor-not-allowed disabled:opacity-40 transition-colors"
+          >
+            {isCommitting ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <>
+                <Check className="h-3 w-3" />
+                <span>{`Commit${staged.length > 0 ? ` (${staged.length})` : ''}`}</span>
+              </>
+            )}
+          </button>
+          <button
+            onClick={() => setShowCommitMenu((open) => !open)}
+            disabled={isCommitting || activeOperation !== null || repositoryBusy}
+            className="flex w-7 shrink-0 items-center justify-center rounded-r-md border-l border-primary-foreground/25 bg-primary text-white hover:bg-primary/80 disabled:cursor-not-allowed disabled:opacity-40 transition-colors"
+            aria-label="More commit actions"
+            aria-expanded={showCommitMenu}
+            title="More commit actions"
+          >
+            <ChevronDown className="h-3.5 w-3.5" />
+          </button>
+
+          {showCommitMenu && (
+            <div className="absolute right-0 top-full z-50 mt-1 min-w-[210px] overflow-hidden rounded-md border border-border bg-background py-1 shadow-xl">
+              <CommitMenuButton
+                label="Commit"
+                disabled={!commitMessage.trim() || staged.length === 0}
+                onClick={() => void handleCommit('commit')}
+              />
+              {headState !== 'unborn' && (
+                <CommitMenuButton
+                  label="Commit (Amend)"
+                  disabled={!commitMessage.trim()}
+                  onClick={() => void handleCommit('amend')}
+                />
+              )}
+              {commitRemoteActions.map((action) => (
+                <CommitMenuButton
+                  key={action}
+                  label={
+                    action === 'publish'
+                      ? 'Commit & Publish Branch'
+                      : action === 'push'
+                        ? 'Commit & Push'
+                        : 'Commit & Sync'
+                  }
+                  disabled={!commitMessage.trim() || staged.length === 0}
+                  onClick={() => void handleCommit(action === 'sync' ? 'sync' : 'push')}
+                />
+              ))}
+              {commitRemoteActions.length === 0 && (
+                <div className="border-t border-border px-3 py-2 text-[10px] text-muted-foreground">
+                  {remotes.length === 0
+                    ? 'Commit remains local because no remote is configured.'
+                    : 'Publishing requires a named local branch.'}
+                </div>
+              )}
+            </div>
           )}
-        </button>
+        </div>
       </div>
 
       {/* File Lists */}
@@ -578,8 +919,9 @@ export function GitView() {
                 key={`conflict:${f.path}`}
                 file={f}
                 mode="conflict"
-                onOpenDiff={() => openDiffTab(f, false)}
-                onOpenFile={() => openFileTab(f)}
+                onStage={() => void runOp('Mark Conflict Resolved', () => stageFiles([f.path]))}
+                onOpenDiff={() => openDiffTab(f, 'conflict')}
+                onOpenFile={f.status === 'D' ? undefined : () => openFileTab(f)}
               />
             ))}
           </FileSection>
@@ -592,7 +934,9 @@ export function GitView() {
             defaultOpen
             action={
               <button
-                onClick={() => unstageFiles(staged.map((f) => f.path))}
+                onClick={() =>
+                  void runOp('Unstage All', () => unstageFiles(staged.map((f) => f.path)))
+                }
                 className="flex h-4 w-4 items-center justify-center rounded-sm text-muted-foreground hover:text-foreground transition-colors"
                 title="Unstage All"
               >
@@ -605,9 +949,9 @@ export function GitView() {
                 key={`staged:${f.path}`}
                 file={f}
                 mode="staged"
-                onUnstage={() => unstageFiles([f.path])}
-                onOpenDiff={() => openDiffTab(f, true)}
-                onOpenFile={() => openFileTab(f)}
+                onUnstage={() => void runOp('Unstage', () => unstageFiles([f.path]))}
+                onOpenDiff={() => openDiffTab(f, 'staged')}
+                onOpenFile={f.status === 'D' ? undefined : () => openFileTab(f)}
               />
             ))}
           </FileSection>
@@ -620,7 +964,9 @@ export function GitView() {
             defaultOpen
             action={
               <button
-                onClick={() => stageFiles(changes.map((f) => f.path))}
+                onClick={() =>
+                  void runOp('Stage All', () => stageFiles(changes.map((f) => f.path)))
+                }
                 className="flex h-4 w-4 items-center justify-center rounded-sm text-muted-foreground hover:text-foreground transition-colors"
                 title="Stage All"
               >
@@ -633,10 +979,10 @@ export function GitView() {
                 key={`change:${f.path}`}
                 file={f}
                 mode={f.status === '?' ? 'untracked' : 'unstaged'}
-                onStage={() => stageFiles([f.path])}
-                onDiscard={() => discardFiles([f.path])}
-                onOpenDiff={f.status !== '?' ? () => openDiffTab(f, false) : undefined}
-                onOpenFile={() => openFileTab(f)}
+                onStage={() => void runOp('Stage', () => stageFiles([f.path]))}
+                onDiscard={() => void handleDiscardFiles([f])}
+                onOpenDiff={f.status !== '?' ? () => openDiffTab(f, 'unstaged') : undefined}
+                onOpenFile={f.status === 'D' ? undefined : () => openFileTab(f)}
               />
             ))}
           </FileSection>
@@ -645,93 +991,116 @@ export function GitView() {
 
       {/* Pull Request Dialog */}
       <PullRequestDialog open={showPrDialog} onClose={() => setShowPrDialog(false)} />
+      {showAiSettings && (
+        <AiCommitModelDialog
+          commitAiProviderId={commitAiProviderId}
+          commitAiModelId={commitAiModelId}
+          enabledModels={enabledModels}
+          customModels={customModels}
+          onApply={(providerId, modelId) => {
+            setSettings('commitAiProviderId', providerId);
+            setSettings('commitAiModelId', modelId);
+            setShowAiSettings(false);
+          }}
+          onClose={() => setShowAiSettings(false)}
+        />
+      )}
     </div>
   );
 }
 
 // ── Sub-components ───────────────────────────────────────────────────────────
 
-interface AiModelPopoverProps {
+interface AiCommitModelDialogProps {
   commitAiProviderId: string | null;
   commitAiModelId: string | null;
   enabledModels: Record<string, string[]>;
   customModels: Array<{ providerId: string; modelId: string; name: string }>;
-  onProviderChange: (pid: string | null) => void;
-  onModelChange: (mid: string | null) => void;
+  onApply: (providerId: string | null, modelId: string | null) => void;
   onClose: () => void;
 }
 
-function AiModelPopover({
+function AiCommitModelDialog({
   commitAiProviderId,
   commitAiModelId,
   enabledModels,
   customModels,
-  onProviderChange,
-  onModelChange,
-}: AiModelPopoverProps) {
+  onApply,
+  onClose,
+}: AiCommitModelDialogProps) {
   const grouped = getAllEnabledModelsGrouped(enabledModels, customModels);
   const hasModels = grouped.some((g) => g.models.length > 0);
-
-  const currentValue =
+  const modelOptions: ModelOption[] = [
+    {
+      id: '',
+      name: 'Use active agent model',
+      description: 'Follow the model selected for the current agent session.',
+      icon: <Sparkles className="text-primary" />,
+    },
+    ...grouped.flatMap(({ provider, models }) =>
+      models.map((model) => ({
+        id: `${provider.id}::${model.id}`,
+        name: model.name,
+        description: `${provider.name} · ${model.id}`,
+        icon: <Sparkles />,
+      })),
+    ),
+  ];
+  const initialValue =
     commitAiProviderId && commitAiModelId
       ? `${commitAiProviderId}::${commitAiModelId}`
       : '';
+  const [selectedValue, setSelectedValue] = useState(initialValue);
 
-  const handleChange = (value: string) => {
-    if (!value) {
-      onProviderChange(null);
-      onModelChange(null);
+  const handleApply = () => {
+    if (!selectedValue) {
+      onApply(null, null);
       return;
     }
-    const sep = value.indexOf('::');
-    if (sep === -1) return;
-    const pid = value.slice(0, sep);
-    const mid = value.slice(sep + 2);
-    onProviderChange(pid);
-    onModelChange(mid);
+    const separator = selectedValue.indexOf('::');
+    if (separator === -1) return;
+    onApply(selectedValue.slice(0, separator), selectedValue.slice(separator + 2));
   };
 
   return (
-    <div className="absolute right-0 top-6 z-50 w-64 rounded-lg border border-border bg-background p-3 shadow-xl">
-      <div className="mb-2 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
-        AI Commit Model
-      </div>
-      <p className="mb-2 text-[10px] text-muted-foreground leading-relaxed">
-        Model used to generate commit messages. Leave empty to use the active agent model.
-      </p>
-      {!hasModels ? (
-        <p className="text-[10px] text-warning">
-          No enabled models found. Configure providers in Settings → AI.
-        </p>
-      ) : (
-        <select
-          value={currentValue}
-          onChange={(e) => handleChange(e.target.value)}
-          className="w-full rounded-md bg-muted px-2 py-1 text-[11px] text-foreground outline-none"
-        >
-          <option value="">Use active agent model</option>
-          {grouped.map(({ provider, models }) => (
-            <optgroup key={provider.id} label={provider.name}>
-              {models.map((m) => (
-                <option key={m.id} value={`${provider.id}::${m.id}`}>
-                  {m.name}
-                </option>
-              ))}
-            </optgroup>
-          ))}
-        </select>
-      )}
+    <Dialog open onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="flex max-h-[calc(100dvh-1.5rem)] w-[calc(100vw-1.5rem)] max-w-md flex-col gap-0 overflow-hidden p-0">
+        <DialogHeader className="shrink-0 border-b border-border px-4 py-3 pr-12 sm:px-5 sm:py-4">
+          <DialogTitle className="text-base">AI Commit Message Model</DialogTitle>
+          <DialogDescription className="text-xs">
+            Choose the model used to generate commit messages.
+          </DialogDescription>
+        </DialogHeader>
 
-      {commitAiProviderId && (
-        <div className="mt-2 flex items-center gap-1 text-[10px] text-muted-foreground">
-          <span className="truncate">
-            {PROVIDERS.find((p) => p.id === commitAiProviderId)?.name ?? commitAiProviderId}
-          </span>
-          <ChevronRight className="h-2.5 w-2.5 shrink-0" />
-          <span className="truncate text-foreground">{commitAiModelId}</span>
+        <div className="min-h-0 flex-1 space-y-2 overflow-y-auto overscroll-contain px-4 py-4 sm:px-5 sm:py-5">
+          <span className="block text-xs font-medium text-foreground">Model</span>
+          <ModelSelector
+            models={modelOptions}
+            value={selectedValue}
+            onValueChange={setSelectedValue}
+            className="min-h-10 w-full min-w-0 justify-between border border-border bg-card px-3 text-left hover:bg-muted sm:min-h-11"
+          />
+          <p className="text-xs leading-relaxed text-muted-foreground">
+            This selection only affects automatic commit-message generation.
+          </p>
+
+          {!hasModels && (
+            <p className="rounded-md border border-warning/20 bg-warning/5 px-3 py-2 text-xs text-warning">
+              No enabled models found. Configure providers in Settings → AI.
+            </p>
+          )}
         </div>
-      )}
-    </div>
+
+        <DialogFooter className="shrink-0 border-t border-border bg-muted/20 px-4 py-3 sm:px-5">
+          <Button variant="ghost" size="sm" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button size="sm" onClick={handleApply}>
+            Apply
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -785,6 +1154,26 @@ function MenuSection({ label, children }: { label: string; children: React.React
 
 function MenuDivider() {
   return <div className="my-1 h-px bg-border" />;
+}
+
+function CommitMenuButton({
+  label,
+  disabled,
+  onClick,
+}: {
+  label: string;
+  disabled: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      className="flex w-full items-center px-3 py-1.5 text-left text-[11px] text-foreground hover:bg-surface-raised disabled:cursor-not-allowed disabled:opacity-40"
+    >
+      {label}
+    </button>
+  );
 }
 
 function MenuBtn({

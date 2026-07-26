@@ -208,6 +208,25 @@ Tauri events for real-time communication between Rust and frontend:
 
 ## Rust Project Structure
 
+### Git repository contract
+
+The Source Control frontend reads `git_repository_snapshot` as the atomic repository
+boundary. The snapshot contains the canonical repository and worktree roots, HEAD state,
+current branch, configured upstream, ahead/behind counts, remotes, in-progress repository
+operation, and all change groups. Legacy Git commands remain registered for consumers that
+have not migrated yet.
+
+`GitFile.path` is always a repository-relative pathspec. `GitFile.absolute_path` is resolved
+by Rust and is the only path passed to editor and filesystem APIs. Mutating commands validate
+pathspecs, reject absolute/parent traversal, insert `--` before file arguments, and delegate
+to the installed Git executable so hooks, identity, signing, merge strategy, and user
+configuration are honored.
+
+Diff content has explicit `staged`, `unstaged`, and `conflict` modes. Missing sides and binary
+content are represented as states instead of empty-string fallbacks. Normal push and pull
+use Git's configured upstream; publishing a branch is a separate `push --set-upstream`
+operation, and fetch-all/prune are explicit commands.
+
 ```
 src-tauri/
 ├── src/
@@ -216,7 +235,7 @@ src-tauri/
 │   │   ├── mod.rs
 │   │   ├── fs.rs             # File system commands
 │   │   ├── pty.rs            # Terminal/PTY commands
-│   │   ├── git.rs            # Git operations (via git2 crate)
+│   │   ├── git.rs            # Git inspection plus CLI-native mutations
 │   │   ├── db.rs             # SQLite commands
 │   │   ├── sandbox.rs        # Process sandbox
 │   │   └── keychain.rs       # Secure storage

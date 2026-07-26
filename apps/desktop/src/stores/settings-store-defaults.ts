@@ -46,8 +46,6 @@ export const SETTINGS_DEFAULTS = {
   terminalCursorStyle: 'block',
 
   // ─ Git ─
-  gitUserName: '',
-  gitUserEmail: '',
   gitDefaultBranch: 'main',
   gitAutoFetch: false,
   gitAutoFetchInterval: 5,

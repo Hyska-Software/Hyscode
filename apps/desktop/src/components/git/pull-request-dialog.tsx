@@ -9,6 +9,8 @@ import {
   Eye,
 } from 'lucide-react';
 import { useGitStore } from '../../stores';
+import { chooseDefaultGitRemote } from '../../lib/git-workflow';
+import { tauriInvoke } from '../../lib/tauri-invoke';
 
 interface PullRequestDialogProps {
   open: boolean;
@@ -17,36 +19,62 @@ interface PullRequestDialogProps {
 
 export function PullRequestDialog({ open, onClose }: PullRequestDialogProps) {
   const branches = useGitStore((s) => s.branches);
-  const currentBranch = useGitStore((s) => s.currentBranch);
   const remotes = useGitStore((s) => s.remotes);
-  const ahead = useGitStore((s) => s.ahead);
+  const upstream = useGitStore((s) => s.upstream);
 
   const [title, setTitle] = useState('');
   const [body, setBody] = useState('');
   const [baseBranch, setBaseBranch] = useState('');
   const [headBranch, setHeadBranch] = useState('');
+  const [baseRemote, setBaseRemote] = useState('');
+  const [headRemote, setHeadRemote] = useState('');
+  const [hasToken, setHasToken] = useState(false);
   const [isDraft, setIsDraft] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [result, setResult] = useState<{ type: 'success' | 'error'; msg: string } | null>(null);
+  const [result, setResult] = useState<{
+    type: 'success' | 'error';
+    msg: string;
+    url?: string;
+  } | null>(null);
   const [showPreview, setShowPreview] = useState(false);
   const titleRef = useRef<HTMLInputElement>(null);
 
-  // Auto-populate default branches
+  // Refresh repository metadata once for each dialog opening. User edits are
+  // intentionally not reset when branch data changes in the background.
   useEffect(() => {
     if (!open) return;
-    // Default head = current branch
-    setHeadBranch(currentBranch);
-    // Default base = 'main' or 'master' or first local non-current branch
-    const mainLike = branches.find((b) => !b.is_remote && (b.name === 'main' || b.name === 'master'));
-    const firstOther = branches.find((b) => !b.is_remote && !b.is_current);
-    setBaseBranch(mainLike?.name ?? firstOther?.name ?? '');
-    // Auto-title from recent commit or empty
-    setTitle('');
-    setBody('');
-    setResult(null);
-    setIsDraft(false);
-    setTimeout(() => titleRef.current?.focus(), 50);
-  }, [open, currentBranch, branches]);
+    let cancelled = false;
+    void Promise.all([useGitStore.getState().fetchBranches(), tauriInvoke('github_has_token', {})])
+      .then(([, tokenAvailable]) => {
+        if (cancelled) return;
+        const git = useGitStore.getState();
+        const localBranches = git.branches.filter((branch) => !branch.is_remote);
+        const mainLike = localBranches.find(
+          (branch) => branch.name === 'main' || branch.name === 'master',
+        );
+        const firstOther = localBranches.find((branch) => !branch.is_current);
+        const preferredRemote =
+          chooseDefaultGitRemote(git.upstream?.remote ?? null, git.remotes) ?? '';
+        setHeadBranch(git.currentBranch);
+        setBaseBranch(mainLike?.name ?? firstOther?.name ?? '');
+        setBaseRemote(preferredRemote);
+        setHeadRemote(git.upstream?.remote ?? preferredRemote);
+        setHasToken(tokenAvailable);
+        setTitle('');
+        setBody('');
+        setResult(null);
+        setIsDraft(false);
+        setTimeout(() => titleRef.current?.focus(), 50);
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) {
+          setResult({ type: 'error', msg: error instanceof Error ? error.message : String(error) });
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open]);
 
   const handleSubmit = useCallback(async () => {
     if (!title.trim() || !baseBranch || !headBranch) return;
@@ -59,18 +87,16 @@ export function PullRequestDialog({ open, onClose }: PullRequestDialogProps) {
         base: baseBranch,
         head: headBranch,
         draft: isDraft,
+        baseRemote,
+        headRemote,
       });
-      setResult({ type: 'success', msg: `Pull request created: ${url}` });
-      setTimeout(() => {
-        onClose();
-        setResult(null);
-      }, 2500);
+      setResult({ type: 'success', msg: 'Pull request created', url });
     } catch (err: any) {
       setResult({ type: 'error', msg: err.message ?? String(err) });
     } finally {
       setIsSubmitting(false);
     }
-  }, [title, body, baseBranch, headBranch, isDraft, onClose]);
+  }, [title, body, baseBranch, headBranch, isDraft, baseRemote, headRemote]);
 
   // Close on Escape
   useEffect(() => {
@@ -84,7 +110,20 @@ export function PullRequestDialog({ open, onClose }: PullRequestDialogProps) {
 
   const localBranches = branches.filter((b) => !b.is_remote);
   const hasRemote = remotes.length > 0;
-  const canSubmit = title.trim() && baseBranch && headBranch && hasRemote && !isSubmitting;
+  const selectedHead = branches.find((branch) => !branch.is_remote && branch.name === headBranch);
+  const publishedRemote = selectedHead?.upstream?.split('/')[0] ?? upstream?.remote;
+  const isHeadPublished = Boolean(publishedRemote && publishedRemote === headRemote);
+  const canSubmit =
+    title.trim() &&
+    baseBranch &&
+    headBranch &&
+    baseBranch !== headBranch &&
+    baseRemote &&
+    headRemote &&
+    hasRemote &&
+    hasToken &&
+    isHeadPublished &&
+    !isSubmitting;
 
   if (!open) return null;
 
@@ -104,7 +143,9 @@ export function PullRequestDialog({ open, onClose }: PullRequestDialogProps) {
             <div className="flex flex-col">
               <span className="text-[12px] font-semibold text-foreground">Create Pull Request</span>
               <span className="text-[10px] text-muted-foreground">
-                {hasRemote ? `${remotes[0]?.name} → ${remotes[0]?.url}` : 'No remote configured'}
+                {baseRemote
+                  ? `${baseRemote} → ${remotes.find((remote) => remote.name === baseRemote)?.url ?? ''}`
+                  : 'No remote configured'}
               </span>
             </div>
           </div>
@@ -118,6 +159,43 @@ export function PullRequestDialog({ open, onClose }: PullRequestDialogProps) {
 
         {/* Content */}
         <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3">
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label className="mb-1 block text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+                Base Remote
+              </label>
+              <select
+                value={baseRemote}
+                onChange={(event) => setBaseRemote(event.target.value)}
+                className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-[11px] text-foreground outline-none focus:border-primary/40"
+              >
+                <option value="">Select remote…</option>
+                {remotes.map((remote) => (
+                  <option key={remote.name} value={remote.name}>
+                    {remote.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="mb-1 block text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+                Head Remote
+              </label>
+              <select
+                value={headRemote}
+                onChange={(event) => setHeadRemote(event.target.value)}
+                className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-[11px] text-foreground outline-none focus:border-primary/40"
+              >
+                <option value="">Select remote…</option>
+                {remotes.map((remote) => (
+                  <option key={remote.name} value={remote.name}>
+                    {remote.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
           {/* Branch selector */}
           <div className="grid grid-cols-2 gap-2">
             <div>
@@ -217,11 +295,17 @@ export function PullRequestDialog({ open, onClose }: PullRequestDialogProps) {
             <span className="text-[11px] text-foreground">Create as draft</span>
           </label>
 
-          {/* Ahead warning */}
-          {ahead === 0 && headBranch === currentBranch && (
+          {!hasToken && (
             <div className="flex items-center gap-1.5 rounded-md border border-warning/20 bg-warning/5 px-2 py-1.5 text-[10px] text-warning">
               <AlertCircle className="h-3 w-3 shrink-0" />
-              <span>Current branch has no commits ahead of base. Push your commits first.</span>
+              <span>Add a repository GitHub token in Settings → Git.</span>
+            </div>
+          )}
+
+          {headBranch && headRemote && !isHeadPublished && (
+            <div className="flex items-center gap-1.5 rounded-md border border-warning/20 bg-warning/5 px-2 py-1.5 text-[10px] text-warning">
+              <AlertCircle className="h-3 w-3 shrink-0" />
+              <span>Publish this branch to {headRemote} before creating the pull request.</span>
             </div>
           )}
 
@@ -239,7 +323,20 @@ export function PullRequestDialog({ open, onClose }: PullRequestDialogProps) {
               ) : (
                 <AlertCircle className="h-3 w-3 shrink-0" />
               )}
-              <span className="break-all">{result.msg}</span>
+              <span className="break-all">
+                {result.url ? (
+                  <a
+                    href={result.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="underline underline-offset-2"
+                  >
+                    {result.msg}: {result.url}
+                  </a>
+                ) : (
+                  result.msg
+                )}
+              </span>
             </div>
           )}
         </div>

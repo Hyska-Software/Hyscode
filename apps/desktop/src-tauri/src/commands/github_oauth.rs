@@ -86,9 +86,10 @@ pub async fn github_oauth_start() -> Result<DeviceFlowResponse, String> {
     eprintln!("[CopilotAuth] github_oauth_start HTTP status: {}", status);
 
     if !status.is_success() {
-        let body = resp.text().await.unwrap_or_default();
-        eprintln!("[CopilotAuth] github_oauth_start error body: {}", body);
-        return Err(format!("GitHub device flow error: {}", body));
+        return Err(format!(
+            "GitHub device flow failed with HTTP status {}",
+            status.as_u16()
+        ));
     }
 
     let data: GitHubDeviceResponse = resp
@@ -96,10 +97,7 @@ pub async fn github_oauth_start() -> Result<DeviceFlowResponse, String> {
         .await
         .map_err(|e| format!("Failed to parse device flow response: {}", e))?;
 
-    eprintln!(
-        "[CopilotAuth] github_oauth_start OK — user_code: {}, interval: {}s, expires_in: {}s",
-        data.user_code, data.interval, data.expires_in
-    );
+    eprintln!("[CopilotAuth] github_oauth_start completed");
 
     Ok(DeviceFlowResponse {
         device_code: data.device_code,
@@ -140,21 +138,18 @@ pub async fn github_oauth_poll(
     eprintln!("[CopilotAuth] github_oauth_poll HTTP status: {}", status);
 
     if !status.is_success() {
-        let body = resp.text().await.unwrap_or_default();
-        eprintln!("[CopilotAuth] github_oauth_poll HTTP error body: {}", body);
-        return Err(format!("GitHub OAuth error: {}", body));
+        return Err(format!(
+            "GitHub OAuth polling failed with HTTP status {}",
+            status.as_u16()
+        ));
     }
 
-    // Capture the raw body first so we can log it on parse failure
     let body_bytes = resp
         .bytes()
         .await
         .map_err(|e| format!("Failed to read poll response body: {}", e))?;
-    let body_str = String::from_utf8_lossy(&body_bytes);
-    eprintln!("[CopilotAuth] github_oauth_poll raw response: {}", body_str);
-
     let data: GitHubTokenResponse = serde_json::from_slice(&body_bytes)
-        .map_err(|e| format!("Failed to parse OAuth response: {} — body: {}", e, body_str))?;
+        .map_err(|e| format!("Failed to parse OAuth response: {}", e))?;
 
     if let Some(ref err) = data.error {
         eprintln!(
@@ -237,9 +232,8 @@ pub async fn ensure_copilot_token(
     let user_status = user_resp.status();
     let user_body = user_resp.text().await.unwrap_or_default();
     eprintln!(
-        "[CopilotAuth] ensure_copilot_token — /user status: {}, body: {}",
-        user_status,
-        &user_body[..user_body.len().min(200)]
+        "[CopilotAuth] ensure_copilot_token — /user status: {}",
+        user_status
     );
     if !user_status.is_success() {
         return Err(format!(
@@ -250,11 +244,6 @@ pub async fn ensure_copilot_token(
     }
 
     eprintln!("[CopilotAuth] ensure_copilot_token — calling copilot_internal/v2/token");
-    eprintln!(
-        "[CopilotAuth] ensure_copilot_token — token prefix: {}...",
-        &access_token[..access_token.len().min(6)]
-    );
-
     let resp = client
         .get("https://api.github.com/copilot_internal/v2/token")
         .header("Authorization", format!("Bearer {}", access_token))
@@ -273,11 +262,7 @@ pub async fn ensure_copilot_token(
 
     if !status.is_success() {
         let status_u16 = status.as_u16();
-        let body = resp.text().await.unwrap_or_default();
-        eprintln!(
-            "[CopilotAuth] ensure_copilot_token error ({}): {}",
-            status_u16, body
-        );
+        eprintln!("[CopilotAuth] ensure_copilot_token failed ({status_u16})");
         if status_u16 == 401 {
             // Access token is invalid/revoked — clear it
             let mut store = keychain.lock().map_err(|e| e.to_string())?;
@@ -286,24 +271,15 @@ pub async fn ensure_copilot_token(
             super::keychain::persist_keychain_ref(&store);
             return Err("GitHub access token is invalid. Please re-authenticate.".to_string());
         }
-        return Err(format!(
-            "Copilot token exchange failed ({}): {}",
-            status_u16, body
-        ));
+        return Err(format!("Copilot token exchange failed ({status_u16})"));
     }
 
     let body_bytes = resp
         .bytes()
         .await
         .map_err(|e| format!("Failed to read Copilot token response body: {}", e))?;
-    let body_str = String::from_utf8_lossy(&body_bytes);
-    eprintln!(
-        "[CopilotAuth] ensure_copilot_token raw response: {}",
-        body_str
-    );
-
     let data: CopilotTokenResponse = serde_json::from_slice(&body_bytes)
-        .map_err(|e| format!("Failed to parse Copilot token: {} — body: {}", e, body_str))?;
+        .map_err(|e| format!("Failed to parse Copilot token: {}", e))?;
 
     // Store the short-lived Copilot API token
     {

@@ -68,9 +68,7 @@ export function GitFileItem({
   const contextRef = useRef<HTMLDivElement>(null);
 
   const fileName = file.path.split(/[\\/]/).pop() ?? file.path;
-  const dirPath = file.path.includes('/')
-    ? file.path.substring(0, file.path.lastIndexOf('/'))
-    : '';
+  const dirPath = file.path.includes('/') ? file.path.substring(0, file.path.lastIndexOf('/')) : '';
 
   const Icon = STATUS_ICONS[file.status] ?? FileText;
   const statusColor = STATUS_COLORS[file.status] ?? 'text-muted-foreground';
@@ -103,9 +101,7 @@ export function GitFileItem({
         <Icon className={`h-3 w-3 shrink-0 ${statusColor}`} />
         <span className="truncate text-foreground">{fileName}</span>
         {dirPath && (
-          <span className="truncate text-[10px] text-muted-foreground opacity-60">
-            {dirPath}
-          </span>
+          <span className="truncate text-[10px] text-muted-foreground opacity-60">{dirPath}</span>
         )}
         <span className={`ml-auto shrink-0 text-[10px] font-mono ${statusColor}`}>
           {file.status === '?' ? 'U' : file.status}
@@ -117,35 +113,50 @@ export function GitFileItem({
             <ActionButton
               icon={Minus}
               title="Unstage"
-              onClick={(e) => { e.stopPropagation(); onUnstage(); }}
+              onClick={(e) => {
+                e.stopPropagation();
+                onUnstage();
+              }}
             />
           )}
           {mode === 'staged' && onOpenDiff && (
             <ActionButton
               icon={GitCompare}
               title="Open Diff"
-              onClick={(e) => { e.stopPropagation(); onOpenDiff(); }}
+              onClick={(e) => {
+                e.stopPropagation();
+                onOpenDiff();
+              }}
             />
           )}
-          {(mode === 'unstaged' || mode === 'untracked') && onStage && (
+          {(mode === 'unstaged' || mode === 'untracked' || mode === 'conflict') && onStage && (
             <ActionButton
               icon={Plus}
-              title="Stage"
-              onClick={(e) => { e.stopPropagation(); onStage(); }}
+              title={mode === 'conflict' ? 'Mark as Resolved' : 'Stage'}
+              onClick={(e) => {
+                e.stopPropagation();
+                onStage();
+              }}
             />
           )}
           {mode === 'unstaged' && onDiscard && (
             <ActionButton
               icon={RotateCcw}
               title="Discard Changes"
-              onClick={(e) => { e.stopPropagation(); onDiscard(); }}
+              onClick={(e) => {
+                e.stopPropagation();
+                onDiscard();
+              }}
             />
           )}
           {mode === 'untracked' && onDiscard && (
             <ActionButton
               icon={Trash2}
               title="Delete"
-              onClick={(e) => { e.stopPropagation(); onDiscard(); }}
+              onClick={(e) => {
+                e.stopPropagation();
+                onDiscard();
+              }}
             />
           )}
         </div>
@@ -159,21 +170,52 @@ export function GitFileItem({
           style={{ left: contextPos.x, top: contextPos.y }}
         >
           {mode !== 'staged' && onStage && (
-            <CtxItem label="Stage" onClick={() => { setShowContext(false); onStage(); }} />
+            <CtxItem
+              label="Stage"
+              onClick={() => {
+                setShowContext(false);
+                onStage();
+              }}
+            />
           )}
           {mode === 'staged' && onUnstage && (
-            <CtxItem label="Unstage" onClick={() => { setShowContext(false); onUnstage(); }} />
+            <CtxItem
+              label="Unstage"
+              onClick={() => {
+                setShowContext(false);
+                onUnstage();
+              }}
+            />
           )}
           {onOpenDiff && (
-            <CtxItem label="Open Diff" onClick={() => { setShowContext(false); onOpenDiff(); }} />
+            <CtxItem
+              label="Open Diff"
+              onClick={() => {
+                setShowContext(false);
+                onOpenDiff();
+              }}
+            />
           )}
           {onOpenFile && (
-            <CtxItem label="Open File" onClick={() => { setShowContext(false); onOpenFile(); }} />
+            <CtxItem
+              label="Open File"
+              onClick={() => {
+                setShowContext(false);
+                onOpenFile();
+              }}
+            />
           )}
-          {mode === 'unstaged' && onDiscard && (
+          {(mode === 'unstaged' || mode === 'untracked') && onDiscard && (
             <>
               <div className="my-1 h-px bg-surface-raised" />
-              <CtxItem label="Discard Changes" danger onClick={() => { setShowContext(false); onDiscard(); }} />
+              <CtxItem
+                label={mode === 'untracked' ? 'Delete Permanently' : 'Discard Changes'}
+                danger
+                onClick={() => {
+                  setShowContext(false);
+                  onDiscard();
+                }}
+              />
             </>
           )}
         </div>

@@ -5,10 +5,44 @@ import { invoke } from '@tauri-apps/api/core';
 
 // ─── Shared types ───────────────────────────────────────────────────────────
 
-interface GitFile {
+export type GitFileStatus = 'M' | 'A' | 'D' | 'R' | 'C' | 'T' | '?' | 'U';
+
+export type GitRepositoryOperation =
+  | 'clean'
+  | 'merging'
+  | 'rebasing'
+  | 'cherry-picking'
+  | 'reverting'
+  | 'bisecting'
+  | 'applying-mailbox'
+  | 'unknown';
+
+export interface GitFileContract {
   path: string;
-  status: string;
+  absolute_path: string;
+  status: GitFileStatus;
   old_path: string | null;
+}
+
+export interface GitRepositorySnapshotContract {
+  repository_root: string;
+  worktree_root: string | null;
+  head_state: 'branch' | 'detached' | 'unborn';
+  current_branch: string | null;
+  head_oid: string | null;
+  upstream: {
+    reference: string;
+    remote: string | null;
+    branch: string;
+  } | null;
+  ahead: number;
+  behind: number;
+  operation_state: GitRepositoryOperation;
+  remotes: Array<{ name: string; url: string }>;
+  staged: GitFileContract[];
+  unstaged: GitFileContract[];
+  untracked: GitFileContract[];
+  conflicts: GitFileContract[];
 }
 
 // ─── Command signatures ─────────────────────────────────────────────────────
@@ -40,12 +74,33 @@ interface TauriCommands {
   git_is_repo: { args: { path: string }; ret: boolean };
   git_status: {
     args: { repoPath: string };
-    ret: { staged: GitFile[]; unstaged: GitFile[]; untracked: GitFile[]; conflicts: GitFile[] };
+    ret: {
+      staged: GitFileContract[];
+      unstaged: GitFileContract[];
+      untracked: GitFileContract[];
+      conflicts: GitFileContract[];
+    };
+  };
+  git_repository_snapshot: {
+    args: { repoPath: string };
+    ret: GitRepositorySnapshotContract;
   };
   git_diff_file: { args: { repoPath: string; filePath: string; staged: boolean }; ret: string };
+  git_diff_staged_all: { args: { repoPath: string }; ret: string };
+  git_diff_content: {
+    args: { repoPath: string; filePath: string; mode: 'staged' | 'unstaged' | 'conflict' };
+    ret: {
+      original: string | null;
+      modified: string | null;
+      original_missing: boolean;
+      modified_missing: boolean;
+      is_binary: boolean;
+    };
+  };
   git_add: { args: { repoPath: string; paths: string[] }; ret: void };
   git_add_all: { args: { repoPath: string }; ret: void };
   git_commit: { args: { repoPath: string; message: string }; ret: string };
+  git_commit_amend: { args: { repoPath: string; message: string }; ret: string };
   git_log: {
     args: { repoPath: string; limit: number };
     ret: Array<{
@@ -63,15 +118,25 @@ interface TauriCommands {
     args: { repoPath: string };
     ret: Array<{ name: string; is_current: boolean; is_remote: boolean; upstream: string | null }>;
   };
-  git_branch_create: { args: { repoPath: string; name: string; checkout: boolean }; ret: void };
-  git_branch_delete: { args: { repoPath: string; name: string }; ret: void };
+  git_branch_create: {
+    args: { repoPath: string; name: string; checkout: boolean; source?: string | null };
+    ret: void;
+  };
+  git_branch_delete: {
+    args: { repoPath: string; name: string; force?: boolean | null };
+    ret: void;
+  };
   git_unstage: { args: { repoPath: string; paths: string[] }; ret: void };
   git_discard: { args: { repoPath: string; paths: string[] }; ret: void };
   git_remote_list: { args: { repoPath: string }; ret: Array<{ name: string; url: string }> };
   git_ahead_behind: { args: { repoPath: string }; ret: { ahead: number; behind: number } };
-  git_stash: { args: { repoPath: string; message?: string }; ret: void };
+  git_stash: {
+    args: { repoPath: string; message?: string | null; includeUntracked?: boolean | null };
+    ret: void;
+  };
   git_stash_list: { args: { repoPath: string }; ret: Array<{ index: number; message: string }> };
   git_stash_pop: { args: { repoPath: string; index: number }; ret: void };
+  git_stash_apply: { args: { repoPath: string; index: number }; ret: void };
   git_log_file: {
     args: { repoPath: string; filePath: string; limit: number };
     ret: Array<{
@@ -97,7 +162,7 @@ interface TauriCommands {
     };
     ret: { original: string; modified: string };
   };
-  git_init: { args: { path: string }; ret: void };
+  git_init: { args: { path: string; initialBranch?: string | null }; ret: void };
   git_commit_detail: {
     args: { repoPath: string; hash: string };
     ret: {
@@ -113,15 +178,73 @@ interface TauriCommands {
     };
   };
   git_commit_file_diff: { args: { repoPath: string; hash: string; filePath: string }; ret: string };
+  git_log_graph: {
+    args: { repoPath: string; limit: number };
+    ret: Array<{
+      hash: string;
+      short_hash: string;
+      message: string;
+      author: string;
+      email: string;
+      timestamp: number;
+      parents: string[];
+      refs: string[];
+    }>;
+  };
+  git_blame: {
+    args: { repoPath: string; filePath: string; line?: number };
+    ret: Array<{
+      start_line: number;
+      lines_in_hunk: number;
+      author: string;
+      email: string;
+      timestamp: number;
+      short_hash: string;
+      message: string;
+    }>;
+  };
   git_push: { args: { repoPath: string; remote?: string; branch?: string }; ret: string };
+  git_publish_branch: { args: { repoPath: string; remote: string; branch: string }; ret: string };
   git_pull: { args: { repoPath: string; remote?: string }; ret: string };
   git_fetch: { args: { repoPath: string; remote?: string }; ret: string };
+  git_fetch_all: { args: { repoPath: string; prune?: boolean | null }; ret: string };
   git_merge: { args: { repoPath: string; branch: string }; ret: string };
   git_tag_create: { args: { repoPath: string; name: string; message?: string }; ret: void };
   git_branch_changes: {
     args: { repoPath: string; baseBranch?: string };
-    ret: Array<{ path: string; status: string; old_path: string | null }>;
+    ret: GitFileContract[];
   };
+  git_config_identity: {
+    args: { repoPath?: string | null; scope: 'local' | 'global' };
+    ret: { user_name: string | null; user_email: string | null };
+  };
+  git_config_set_identity: {
+    args: {
+      repoPath?: string | null;
+      scope: 'local' | 'global';
+      userName: string;
+      userEmail: string;
+    };
+    ret: void;
+  };
+  github_create_pull_request: {
+    args: {
+      repoPath: string;
+      baseRemote: string;
+      headRemote: string;
+      payload: {
+        title: string;
+        body?: string | null;
+        head: string;
+        base: string;
+        draft?: boolean | null;
+      };
+    };
+    ret: { url: string; number: number };
+  };
+  github_has_token: { args: Record<string, never>; ret: boolean };
+  github_set_token: { args: { token: string }; ret: void };
+  github_remove_token: { args: Record<string, never>; ret: void };
 
   // PTY — spawn returns the pty_id; output arrives via 'pty:data' events
   pty_spawn: { args: { shell?: string; cwd?: string; env?: Record<string, string> }; ret: string };

@@ -527,6 +527,7 @@ export function EditorArea() {
             <DiffViewer
               filePath={activeTab.diffProps.filePath}
               staged={activeTab.diffProps.staged}
+              mode={activeTab.diffProps.mode}
             />
           ) : editSession ? (
             <div className="flex flex-1 flex-col overflow-hidden">

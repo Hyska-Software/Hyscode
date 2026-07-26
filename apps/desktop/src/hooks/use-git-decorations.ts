@@ -1,8 +1,8 @@
 import { useEffect, useRef, useCallback } from 'react';
-import { invoke } from '@tauri-apps/api/core';
 import { useGitStore } from '../stores/git-store';
 import { useFileStore } from '../stores/file-store';
 import { computeDiffHunks } from '../lib/compute-diff';
+import { tauriInvoke } from '../lib/tauri-invoke';
 import type { DiffHunk } from '../stores/agent-store';
 import type * as monacoEditor from 'monaco-editor';
 
@@ -219,7 +219,7 @@ export function useGitDecorations(
           const currentContent = model.getValue();
           hunks = computeDiffHunks(originalContentRef.current, currentContent);
         } else {
-          const backendHunks = await invoke<DiffHunkInfo[]>('git_diff_hunks', {
+          const backendHunks = await tauriInvoke('git_diff_hunks', {
             repoPath: rootPath,
             filePath: relPath,
             staged: useStaged,
@@ -280,17 +280,16 @@ export function useGitDecorations(
     const relPath = normalizeRelPath(filePath, rootPath);
 
     // Fetch original content from HEAD for real-time diff
-    if (currentFilePathRef.current !== filePath) {
-      currentFilePathRef.current = filePath;
-      invoke<{ original: string }>('git_file_content', {
+    const contentKey = `${filePath}:${fileGitStatus}`;
+    if (currentFilePathRef.current !== contentKey) {
+      currentFilePathRef.current = contentKey;
+      tauriInvoke('git_diff_content', {
         repoPath: rootPath,
         filePath: relPath,
-        originalRef: undefined,
-        modifiedRef: undefined,
-        baseBranch: undefined,
+        mode: fileGitStatus,
       })
         .then((result) => {
-          originalContentRef.current = result.original;
+          originalContentRef.current = result.is_binary ? null : (result.original ?? '');
           applyDecorations(false);
         })
         .catch(() => {

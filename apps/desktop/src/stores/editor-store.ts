@@ -16,6 +16,7 @@ export interface Tab {
   diffProps?: {
     filePath: string;
     staged: boolean;
+    mode?: 'staged' | 'unstaged' | 'conflict';
   };
   /** Commit details when type === 'commit' */
   commitProps?: {
