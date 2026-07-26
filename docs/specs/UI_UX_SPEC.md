@@ -211,6 +211,20 @@ is confirmed and uses Git's merged-branch protection; force deletion is a separa
 confirmation. Pull-request creation requires explicit base/head remotes, a published head
 branch, and a dedicated GitHub repository token stored in the OS keychain.
 
+AI commit-message generation is available only when staged changes exist. The model modal
+lists enabled models from configured providers, preserves an unavailable saved selection
+without silently choosing a replacement, and closes as soon as the user selects a model.
+While generating, the generate control becomes Cancel and reports collection, provider retry,
+and validation progress. Cancellation never applies partial text.
+
+The generated message is applied automatically only while the repository, staged fingerprint,
+and original draft remain unchanged. A staged change makes the response stale and requires a
+new generation; editing only the draft preserves the user's text and presents the generated
+message as an explicit Apply/Dismiss suggestion. Invalid provider output and provider errors
+remain visible and retryable. Git Settings states that remote providers receive
+repository-relative staged paths and patches, while local providers such as Ollama keep that
+data on the machine.
+
 ### Loading States
 
 - **App launch**: skeleton layout with pulsing zinc-800 blocks

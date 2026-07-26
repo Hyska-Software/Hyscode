@@ -47,8 +47,11 @@ import { GitGraphView } from '../../git/git-graph-view';
 import { PullRequestDialog } from '../../git/pull-request-dialog';
 import { promptInput, promptConfirm } from '../../ui/dialogs';
 import type { GitFile } from '../../../stores/git-store';
-import { generateCommitMessage } from '../../../lib/commit-message-ai';
-import { getAllEnabledModelsGrouped } from '../../../lib/provider-catalog';
+import { useCommitMessageGeneration } from '../../../hooks/use-commit-message-generation';
+import {
+  listCommitMessageTargets,
+  type CommitMessageTarget,
+} from '../../../lib/commit-message-provider';
 import {
   getCommitRemoteActions,
   isRepositoryOperationInProgress,
@@ -62,6 +65,7 @@ export function GitView() {
   const isGitRepo = useGitStore((s) => s.isGitRepo);
   const repositoryState = useGitStore((s) => s.repositoryState);
   const repositoryError = useGitStore((s) => s.repositoryError);
+  const repositoryRoot = useGitStore((s) => s.repositoryRoot);
   const repositoryOperation = useGitStore((s) => s.repositoryOperation);
   const activeOperation = useGitStore((s) => s.activeOperation);
   const currentBranch = useGitStore((s) => s.currentBranch);
@@ -103,7 +107,8 @@ export function GitView() {
   const checkoutBranch = useGitStore((s) => s.checkoutBranch);
   const deleteBranch = useGitStore((s) => s.deleteBranch);
   const fetchBranches = useGitStore((s) => s.fetchBranches);
-  const getStagedDiff = useGitStore((s) => s.getStagedDiff);
+  const getCommitContext = useGitStore((s) => s.getCommitContext);
+  const getStagedFingerprint = useGitStore((s) => s.getStagedFingerprint);
   const confirmDiscard = useSettingsStore((s) => s.gitConfirmDiscard);
 
   const commitAiProviderId = useSettingsStore((s) => s.commitAiProviderId);
@@ -121,18 +126,40 @@ export function GitView() {
   const [isCommitting, setIsCommitting] = useState(false);
   const [commitError, setCommitError] = useState<string | null>(null);
   const [opStatus, setOpStatus] = useState<{ type: 'success' | 'error'; msg: string } | null>(null);
-  const [isGenerating, setIsGenerating] = useState(false);
-  const [generateError, setGenerateError] = useState<string | null>(null);
   const [showAiSettings, setShowAiSettings] = useState(false);
   const [showPrDialog, setShowPrDialog] = useState(false);
   const [showCommitMenu, setShowCommitMenu] = useState(false);
-  const generateAbortRef = useRef<AbortController | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const commitMenuRef = useRef<HTMLDivElement>(null);
   const messageRef = useRef<HTMLTextAreaElement>(null);
 
   // Merge untracked into changes (unstaged + untracked = "Changes")
   const changes = useMemo(() => [...unstaged, ...untracked], [unstaged, untracked]);
+  const stagedSignature = useMemo(
+    () =>
+      staged
+        .map((file) => `${file.status}:${file.old_path ?? ''}:${file.path}`)
+        .sort()
+        .join('\u0000'),
+    [staged],
+  );
+  const openAiSettings = useCallback(() => setShowAiSettings(true), []);
+  const commitMessageGeneration = useCommitMessageGeneration({
+    repositoryRoot,
+    stagedSignature,
+    hasStagedChanges: staged.length > 0,
+    commitMessage,
+    commitProviderId: commitAiProviderId,
+    commitModelId: commitAiModelId,
+    activeProviderId,
+    activeModelId,
+    enabledModels,
+    customModels,
+    getCommitContext,
+    getStagedFingerprint,
+    setCommitMessage,
+    openModelSelector: openAiSettings,
+  });
   const repositoryBusy = isRepositoryOperationInProgress(repositoryOperation);
   const commitRemoteActions = getCommitRemoteActions({
     headState,
@@ -155,10 +182,7 @@ export function GitView() {
   useEffect(() => {
     if (!showCommitMenu) return;
     const handler = (event: MouseEvent) => {
-      if (
-        commitMenuRef.current &&
-        !commitMenuRef.current.contains(event.target as Node)
-      ) {
+      if (commitMenuRef.current && !commitMenuRef.current.contains(event.target as Node)) {
         setShowCommitMenu(false);
       }
     };
@@ -178,57 +202,6 @@ export function GitView() {
     return () => clearTimeout(t);
   }, [opStatus]);
 
-  const handleGenerateMessage = useCallback(async () => {
-    if (staged.length === 0) {
-      setGenerateError('Stage some files first');
-      return;
-    }
-    // Resolve which provider/model to use: commit-specific first, then active
-    const resolvedProviderId = commitAiProviderId ?? activeProviderId;
-    const resolvedModelId = commitAiModelId ?? activeModelId;
-    if (!resolvedProviderId || !resolvedModelId) {
-      setGenerateError('Configure an AI provider in Settings → AI');
-      return;
-    }
-
-    setIsGenerating(true);
-    setGenerateError(null);
-    const abort = new AbortController();
-    generateAbortRef.current = abort;
-
-    try {
-      const diff = await getStagedDiff();
-      if (!diff.trim()) {
-        setGenerateError('No staged diff available');
-        return;
-      }
-      const message = await generateCommitMessage({
-        providerId: resolvedProviderId,
-        modelId: resolvedModelId,
-        diff,
-        signal: abort.signal,
-      });
-      if (!abort.signal.aborted && message) {
-        setCommitMessage(message);
-      }
-    } catch (err: any) {
-      if (!abort.signal.aborted) {
-        setGenerateError(err.message ?? String(err));
-      }
-    } finally {
-      setIsGenerating(false);
-      generateAbortRef.current = null;
-    }
-  }, [
-    staged.length,
-    commitAiProviderId,
-    commitAiModelId,
-    activeProviderId,
-    activeModelId,
-    getStagedDiff,
-    setCommitMessage,
-  ]);
-
   const runOp = useCallback(async (label: string, fn: () => Promise<unknown>) => {
     setShowMenu(false);
     try {
@@ -241,25 +214,28 @@ export function GitView() {
 
   // ── Dropdown operations ────────────────────────────────────────────────────
 
-  const chooseRemote = useCallback(async (requireExplicitChoice = false): Promise<string | null> => {
-    if (!requireExplicitChoice && upstream?.remote) return upstream.remote;
-    if (remotes.length === 0) {
-      setOpStatus({ type: 'error', msg: 'No Git remote is configured' });
-      return null;
-    }
-    if (remotes.length === 1) return remotes[0].name;
-    const selected = await promptInput({
-      title: `Select Remote (${remotes.map((remote) => remote.name).join(', ')})`,
-      placeholder: remotes[0].name,
-      defaultValue: remotes[0].name,
-    });
-    if (!selected) return null;
-    if (!remotes.some((remote) => remote.name === selected)) {
-      setOpStatus({ type: 'error', msg: `Remote "${selected}" does not exist` });
-      return null;
-    }
-    return selected;
-  }, [remotes, upstream]);
+  const chooseRemote = useCallback(
+    async (requireExplicitChoice = false): Promise<string | null> => {
+      if (!requireExplicitChoice && upstream?.remote) return upstream.remote;
+      if (remotes.length === 0) {
+        setOpStatus({ type: 'error', msg: 'No Git remote is configured' });
+        return null;
+      }
+      if (remotes.length === 1) return remotes[0].name;
+      const selected = await promptInput({
+        title: `Select Remote (${remotes.map((remote) => remote.name).join(', ')})`,
+        placeholder: remotes[0].name,
+        defaultValue: remotes[0].name,
+      });
+      if (!selected) return null;
+      if (!remotes.some((remote) => remote.name === selected)) {
+        setOpStatus({ type: 'error', msg: `Remote "${selected}" does not exist` });
+        return null;
+      }
+      return selected;
+    },
+    [remotes, upstream],
+  );
 
   const handlePush = useCallback(async () => {
     if (upstream) {
@@ -335,11 +311,11 @@ export function GitView() {
               ? 'Committed successfully'
               : action === 'amend'
                 ? 'Commit amended successfully'
-              : action === 'push'
-                ? upstream
-                  ? 'Committed and pushed successfully'
-                  : 'Committed and published successfully'
-                : 'Committed and synchronized successfully',
+                : action === 'push'
+                  ? upstream
+                    ? 'Committed and pushed successfully'
+                    : 'Committed and published successfully'
+                  : 'Committed and synchronized successfully',
         });
       } catch (err: any) {
         const message = err.message ?? String(err);
@@ -802,20 +778,24 @@ export function GitView() {
           {/* AI generate + AI settings buttons (top-right of textarea) */}
           <div className="absolute right-1.5 top-1.5 flex items-center gap-0.5">
             <button
-              onClick={handleGenerateMessage}
-              disabled={isGenerating || staged.length === 0}
+              onClick={() => void commitMessageGeneration.generateOrCancel()}
+              disabled={!commitMessageGeneration.isGenerating && staged.length === 0}
               className="flex h-5 w-5 items-center justify-center rounded-sm text-muted-foreground hover:text-primary hover:bg-primary/10 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-              title={isGenerating ? 'Generating…' : 'Generate commit message with AI'}
+              title={
+                commitMessageGeneration.isGenerating
+                  ? 'Cancel commit-message generation'
+                  : 'Generate commit message with AI'
+              }
             >
-              {isGenerating ? (
-                <Loader2 className="h-3 w-3 animate-spin" />
+              {commitMessageGeneration.isGenerating ? (
+                <XCircle className="h-3 w-3" />
               ) : (
                 <Sparkles className="h-3 w-3" />
               )}
             </button>
             <div>
               <button
-                onClick={() => setShowAiSettings((v) => !v)}
+                onClick={() => setShowAiSettings(true)}
                 className={`flex h-5 w-5 items-center justify-center rounded-sm transition-colors ${
                   showAiSettings
                     ? 'text-primary bg-primary/10'
@@ -829,8 +809,38 @@ export function GitView() {
           </div>
         </div>
 
-        {(commitError || generateError) && (
-          <p className="mt-0.5 text-[10px] text-destructive">{commitError ?? generateError}</p>
+        {commitMessageGeneration.progressLabel && (
+          <p className="mt-0.5 text-[10px] text-muted-foreground">
+            {commitMessageGeneration.progressLabel}
+          </p>
+        )}
+        {(commitError || commitMessageGeneration.error) && (
+          <p className="mt-0.5 text-[10px] text-destructive">
+            {commitError ?? commitMessageGeneration.error}
+          </p>
+        )}
+        {commitMessageGeneration.suggestion && (
+          <div className="mt-1 rounded-md border border-primary/20 bg-primary/5 p-2">
+            <p className="whitespace-pre-wrap text-[10px] text-foreground">
+              {commitMessageGeneration.suggestion}
+            </p>
+            <div className="mt-1.5 flex justify-end gap-1">
+              <button
+                type="button"
+                onClick={commitMessageGeneration.dismissSuggestion}
+                className="rounded px-2 py-1 text-[10px] text-muted-foreground hover:bg-muted"
+              >
+                Dismiss
+              </button>
+              <button
+                type="button"
+                onClick={commitMessageGeneration.applySuggestion}
+                className="rounded bg-primary px-2 py-1 text-[10px] text-primary-foreground"
+              >
+                Apply
+              </button>
+            </div>
+          </div>
         )}
         <div ref={commitMenuRef} className="relative mt-1 flex w-full">
           <button
@@ -1028,8 +1038,30 @@ function AiCommitModelDialog({
   onApply,
   onClose,
 }: AiCommitModelDialogProps) {
-  const grouped = getAllEnabledModelsGrouped(enabledModels, customModels);
-  const hasModels = grouped.some((g) => g.models.length > 0);
+  const [targets, setTargets] = useState<CommitMessageTarget[]>([]);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [isLoadingTargets, setIsLoadingTargets] = useState(true);
+  const loadTargets = useCallback(async (): Promise<void> => {
+    setIsLoadingTargets(true);
+    setLoadError(null);
+    try {
+      setTargets(await listCommitMessageTargets(enabledModels, customModels));
+    } catch (error) {
+      setLoadError(error instanceof Error ? error.message : 'Could not load configured models.');
+    } finally {
+      setIsLoadingTargets(false);
+    }
+  }, [customModels, enabledModels]);
+
+  useEffect(() => {
+    void loadTargets();
+  }, [loadTargets]);
+
+  const initialValue =
+    commitAiProviderId && commitAiModelId ? `${commitAiProviderId}::${commitAiModelId}` : '';
+  const selectedTargetExists = targets.some(
+    (target) => `${target.providerId}::${target.modelId}` === initialValue,
+  );
   const modelOptions: ModelOption[] = [
     {
       id: '',
@@ -1037,29 +1069,34 @@ function AiCommitModelDialog({
       description: 'Follow the model selected for the current agent session.',
       icon: <Sparkles className="text-primary" />,
     },
-    ...grouped.flatMap(({ provider, models }) =>
-      models.map((model) => ({
-        id: `${provider.id}::${model.id}`,
-        name: model.name,
-        description: `${provider.name} · ${model.id}`,
-        icon: <Sparkles />,
-      })),
-    ),
+    ...(!selectedTargetExists && initialValue
+      ? [
+          {
+            id: initialValue,
+            name: commitAiModelId ?? 'Unavailable model',
+            description: `${commitAiProviderId ?? 'Unknown provider'} · unavailable`,
+            icon: <XCircle className="text-destructive" />,
+          },
+        ]
+      : []),
+    ...targets.map((target) => ({
+      id: `${target.providerId}::${target.modelId}`,
+      name: target.modelName,
+      description: `${target.providerName} · ${target.modelId}`,
+      icon: <Sparkles />,
+    })),
   ];
-  const initialValue =
-    commitAiProviderId && commitAiModelId
-      ? `${commitAiProviderId}::${commitAiModelId}`
-      : '';
   const [selectedValue, setSelectedValue] = useState(initialValue);
 
-  const handleApply = () => {
-    if (!selectedValue) {
+  const handleSelection = (value: string): void => {
+    setSelectedValue(value);
+    if (!value) {
       onApply(null, null);
       return;
     }
-    const separator = selectedValue.indexOf('::');
+    const separator = value.indexOf('::');
     if (separator === -1) return;
-    onApply(selectedValue.slice(0, separator), selectedValue.slice(separator + 2));
+    onApply(value.slice(0, separator), value.slice(separator + 2));
   };
 
   return (
@@ -1077,26 +1114,37 @@ function AiCommitModelDialog({
           <ModelSelector
             models={modelOptions}
             value={selectedValue}
-            onValueChange={setSelectedValue}
+            onValueChange={handleSelection}
             className="min-h-10 w-full min-w-0 justify-between border border-border bg-card px-3 text-left hover:bg-muted sm:min-h-11"
           />
           <p className="text-xs leading-relaxed text-muted-foreground">
             This selection only affects automatic commit-message generation.
           </p>
 
-          {!hasModels && (
+          {isLoadingTargets && (
+            <p className="flex items-center gap-2 text-xs text-muted-foreground">
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              Loading configured models…
+            </p>
+          )}
+          {loadError && (
+            <div className="rounded-md border border-destructive/20 bg-destructive/5 px-3 py-2 text-xs text-destructive">
+              <p>{loadError}</p>
+              <Button variant="ghost" size="sm" className="mt-1" onClick={() => void loadTargets()}>
+                Retry
+              </Button>
+            </div>
+          )}
+          {!isLoadingTargets && !loadError && targets.length === 0 && (
             <p className="rounded-md border border-warning/20 bg-warning/5 px-3 py-2 text-xs text-warning">
-              No enabled models found. Configure providers in Settings → AI.
+              No configured and enabled models found. Configure providers in Settings → AI.
             </p>
           )}
         </div>
 
         <DialogFooter className="shrink-0 border-t border-border bg-muted/20 px-4 py-3 sm:px-5">
           <Button variant="ghost" size="sm" onClick={onClose}>
-            Cancel
-          </Button>
-          <Button size="sm" onClick={handleApply}>
-            Apply
+            Close
           </Button>
         </DialogFooter>
       </DialogContent>

@@ -45,6 +45,23 @@ export interface GitRepositorySnapshotContract {
   conflicts: GitFileContract[];
 }
 
+export interface GitCommitContextFileContract {
+  path: string;
+  old_path: string | null;
+  status: GitFileStatus;
+  is_binary: boolean;
+  patch: string | null;
+  patch_truncated: boolean;
+  patch_bytes_omitted: number;
+}
+
+export interface GitCommitContextContract {
+  fingerprint: string;
+  files: GitCommitContextFileContract[];
+  patch_bytes_included: number;
+  patch_bytes_omitted: number;
+}
+
 // ─── Command signatures ─────────────────────────────────────────────────────
 
 interface TauriCommands {
@@ -87,6 +104,8 @@ interface TauriCommands {
   };
   git_diff_file: { args: { repoPath: string; filePath: string; staged: boolean }; ret: string };
   git_diff_staged_all: { args: { repoPath: string }; ret: string };
+  git_commit_context: { args: { repoPath: string }; ret: GitCommitContextContract };
+  git_staged_fingerprint: { args: { repoPath: string }; ret: string };
   git_diff_content: {
     args: { repoPath: string; filePath: string; mode: 'staged' | 'unstaged' | 'conflict' };
     ret: {

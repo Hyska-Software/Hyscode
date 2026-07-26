@@ -1,8 +1,11 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useSettingsStore } from '../../../stores';
 import { useFileStore } from '../../../stores/file-store';
 import { tauriInvoke } from '../../../lib/tauri-invoke';
-import { getAllEnabledModelsGrouped, PROVIDERS } from '../../../lib/provider-catalog';
+import {
+  listCommitMessageTargets,
+  type CommitMessageTarget,
+} from '../../../lib/commit-message-provider';
 import {
   SettingRow,
   SettingSection,
@@ -24,12 +27,44 @@ export function GitTab() {
   const [githubToken, setGithubToken] = useState('');
   const [hasGithubToken, setHasGithubToken] = useState(false);
   const [credentialStatus, setCredentialStatus] = useState<string | null>(null);
-  const grouped = getAllEnabledModelsGrouped(store.enabledModels, store.customModels);
+  const [aiTargets, setAiTargets] = useState<CommitMessageTarget[]>([]);
+  const [aiTargetsError, setAiTargetsError] = useState<string | null>(null);
+  const [isLoadingAiTargets, setIsLoadingAiTargets] = useState(true);
 
   const currentAiValue =
     store.commitAiProviderId && store.commitAiModelId
       ? `${store.commitAiProviderId}::${store.commitAiModelId}`
       : '';
+  const selectedAiTarget = aiTargets.find(
+    (target) =>
+      target.providerId === store.commitAiProviderId && target.modelId === store.commitAiModelId,
+  );
+  const aiTargetGroups = useMemo(() => {
+    const groups = new Map<string, { label: string; targets: CommitMessageTarget[] }>();
+    for (const target of aiTargets) {
+      const group = groups.get(target.providerId) ?? {
+        label: target.providerName,
+        targets: [],
+      };
+      group.targets.push(target);
+      groups.set(target.providerId, group);
+    }
+    return [...groups.values()];
+  }, [aiTargets]);
+
+  const loadAiTargets = useCallback(async (): Promise<void> => {
+    setIsLoadingAiTargets(true);
+    setAiTargetsError(null);
+    try {
+      setAiTargets(await listCommitMessageTargets(store.enabledModels, store.customModels));
+    } catch (error) {
+      setAiTargetsError(
+        error instanceof Error ? error.message : 'Could not load configured AI models.',
+      );
+    } finally {
+      setIsLoadingAiTargets(false);
+    }
+  }, [store.customModels, store.enabledModels]);
 
   const handleAiModelChange = (value: string) => {
     if (!value) {
@@ -74,6 +109,10 @@ export function GitTab() {
         setCredentialStatus(error instanceof Error ? error.message : String(error));
       });
   }, []);
+
+  useEffect(() => {
+    void loadAiTargets();
+  }, [loadAiTargets]);
 
   const saveIdentity = async (): Promise<void> => {
     setIdentityStatus(null);
@@ -231,21 +270,40 @@ export function GitTab() {
           Model used by the <span className="text-foreground">✦ Generate</span> button in the Git
           panel. Leave empty to use the active agent model.
         </p>
+        <p className="rounded-md border border-warning/20 bg-warning/5 px-3 py-2 text-[10px] leading-relaxed text-warning">
+          Remote AI providers receive repository-relative staged file paths and staged patch
+          content. Local providers such as Ollama keep this data on your machine.
+        </p>
         <SettingRow label="Model">
-          {grouped.length === 0 ? (
+          {isLoadingAiTargets ? (
+            <span className="text-[11px] text-muted-foreground">Loading configured models…</span>
+          ) : aiTargetsError ? (
+            <button
+              type="button"
+              onClick={() => void loadAiTargets()}
+              className="text-[11px] text-destructive underline-offset-2 hover:underline"
+            >
+              {aiTargetsError} Retry
+            </button>
+          ) : aiTargets.length === 0 ? (
             <span className="text-[11px] text-muted-foreground">
-              No providers configured — add an API key in the AI tab.
+              No configured and enabled models — check the AI tab or local provider.
             </span>
           ) : (
             <SettingSelect
               value={currentAiValue}
               onChange={(v) => handleAiModelChange(v)}
-              options={[{ value: '' as string, label: 'Use active agent model' }]}
-              groups={grouped.map(({ provider, models }) => ({
-                label: provider.name,
-                options: models.map((m) => ({
-                  value: `${provider.id}::${m.id}` as string,
-                  label: m.name,
+              options={[
+                { value: '' as string, label: 'Use active agent model' },
+                ...(!selectedAiTarget && currentAiValue
+                  ? [{ value: currentAiValue, label: `${currentAiValue} (unavailable)` }]
+                  : []),
+              ]}
+              groups={aiTargetGroups.map((group) => ({
+                label: group.label,
+                options: group.targets.map((target) => ({
+                  value: `${target.providerId}::${target.modelId}` as string,
+                  label: target.modelName,
                 })),
               }))}
             />
@@ -254,10 +312,11 @@ export function GitTab() {
         {store.commitAiProviderId && (
           <SettingRow label="Selected">
             <span className="text-[11px] text-muted-foreground">
-              {PROVIDERS.find((p) => p.id === store.commitAiProviderId)?.name ??
-                store.commitAiProviderId}
+              {selectedAiTarget?.providerName ?? store.commitAiProviderId}
               {' / '}
-              <span className="text-foreground">{store.commitAiModelId}</span>
+              <span className={selectedAiTarget ? 'text-foreground' : 'text-destructive'}>
+                {selectedAiTarget?.modelName ?? `${store.commitAiModelId} (unavailable)`}
+              </span>
             </span>
           </SettingRow>
         )}

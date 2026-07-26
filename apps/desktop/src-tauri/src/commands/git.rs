@@ -1,5 +1,5 @@
 use super::utils::cmd;
-use git2::{BranchType, Delta, DiffOptions, ErrorCode, Repository, Sort, StatusOptions};
+use git2::{BranchType, Delta, DiffOptions, ErrorCode, Patch, Repository, Sort, StatusOptions};
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
 use std::path::{Component, Path, PathBuf};
@@ -96,6 +96,25 @@ pub struct GitDiffContent {
     pub original_missing: bool,
     pub modified_missing: bool,
     pub is_binary: bool,
+}
+
+#[derive(Serialize, Clone)]
+pub struct GitCommitContextFile {
+    pub path: String,
+    pub old_path: Option<String>,
+    pub status: String,
+    pub is_binary: bool,
+    pub patch: Option<String>,
+    pub patch_truncated: bool,
+    pub patch_bytes_omitted: usize,
+}
+
+#[derive(Serialize)]
+pub struct GitCommitContext {
+    pub fingerprint: String,
+    pub files: Vec<GitCommitContextFile>,
+    pub patch_bytes_included: usize,
+    pub patch_bytes_omitted: usize,
 }
 
 #[derive(Serialize)]
@@ -202,6 +221,193 @@ fn git_file(
         path,
         status: status.to_string(),
         old_path,
+    })
+}
+
+const COMMIT_CONTEXT_PATCH_BUDGET: usize = 32 * 1024;
+const FNV_OFFSET_BASIS: u64 = 0xcbf29ce484222325;
+const FNV_PRIME: u64 = 0x100000001b3;
+
+struct StagedContextFile {
+    diff_index: usize,
+    path: String,
+    old_path: Option<String>,
+    status: String,
+    is_binary: bool,
+    fingerprint_material: Vec<u8>,
+}
+
+fn update_fingerprint(hash: &mut u64, bytes: &[u8]) {
+    for byte in bytes {
+        *hash ^= u64::from(*byte);
+        *hash = hash.wrapping_mul(FNV_PRIME);
+    }
+    *hash ^= 0xff;
+    *hash = hash.wrapping_mul(FNV_PRIME);
+}
+
+fn staged_diff<'repo>(repo: &'repo Repository) -> Result<git2::Diff<'repo>, String> {
+    let head_tree = repo.head().ok().and_then(|head| head.peel_to_tree().ok());
+    let mut diff = repo
+        .diff_tree_to_index(head_tree.as_ref(), None, None)
+        .map_err(|error| format!("Commit context diff error: {error}"))?;
+    diff.find_similar(None)
+        .map_err(|error| format!("Commit context rename detection error: {error}"))?;
+    Ok(diff)
+}
+
+fn staged_context_files(diff: &git2::Diff<'_>) -> Result<(String, Vec<StagedContextFile>), String> {
+    let mut files = Vec::with_capacity(diff.deltas().len());
+
+    for index in 0..diff.deltas().len() {
+        let delta = diff
+            .get_delta(index)
+            .ok_or_else(|| format!("Commit context delta {index} disappeared"))?;
+        let status = delta_to_status(delta.status()).to_string();
+        let path = delta
+            .new_file()
+            .path()
+            .or_else(|| delta.old_file().path())
+            .ok_or_else(|| "Git returned a staged delta without a path".to_string())?
+            .to_string_lossy()
+            .to_string();
+        let old_path = if delta.status() == Delta::Renamed || delta.status() == Delta::Copied {
+            delta
+                .old_file()
+                .path()
+                .map(|value| value.to_string_lossy().to_string())
+        } else {
+            None
+        };
+
+        let mut fingerprint_material = Vec::new();
+        fingerprint_material.extend_from_slice(status.as_bytes());
+        fingerprint_material.push(0xff);
+        fingerprint_material.extend_from_slice(path.as_bytes());
+        fingerprint_material.push(0xff);
+        if let Some(value) = old_path.as_deref() {
+            fingerprint_material.extend_from_slice(value.as_bytes());
+        }
+        fingerprint_material.push(0xff);
+        fingerprint_material.extend_from_slice(delta.old_file().id().as_bytes());
+        fingerprint_material.extend_from_slice(delta.new_file().id().as_bytes());
+
+        let patch = Patch::from_diff(diff, index)
+            .map_err(|error| format!("Commit context patch error for '{path}': {error}"))?;
+        let is_binary =
+            delta.old_file().is_binary() || delta.new_file().is_binary() || patch.is_none();
+
+        files.push(StagedContextFile {
+            diff_index: index,
+            path,
+            old_path,
+            status,
+            is_binary,
+            fingerprint_material,
+        });
+    }
+
+    files.sort_by(|left, right| left.path.cmp(&right.path));
+    let mut fingerprint = FNV_OFFSET_BASIS;
+    for file in &files {
+        update_fingerprint(&mut fingerprint, &file.fingerprint_material);
+    }
+    Ok((format!("{fingerprint:016x}"), files))
+}
+
+fn append_bounded_utf8(output: &mut String, value: &str, maximum_bytes: usize) {
+    let remaining = maximum_bytes.saturating_sub(output.len());
+    if remaining == 0 {
+        return;
+    }
+    let mut boundary = remaining.min(value.len());
+    while boundary > 0 && !value.is_char_boundary(boundary) {
+        boundary -= 1;
+    }
+    output.push_str(&value[..boundary]);
+}
+
+fn bounded_patch(
+    diff: &git2::Diff<'_>,
+    index: usize,
+    maximum_bytes: usize,
+    path: &str,
+) -> Result<(Option<String>, usize), String> {
+    let mut patch = match Patch::from_diff(diff, index)
+        .map_err(|error| format!("Commit context patch error for '{path}': {error}"))?
+    {
+        Some(patch) => patch,
+        None => return Ok((None, 0)),
+    };
+    let mut output = String::new();
+    let mut total_bytes = 0usize;
+    let mut invalid_utf8 = false;
+
+    patch
+        .print(&mut |_delta, _hunk, line| {
+            let origin = line.origin();
+            if matches!(origin, '+' | '-' | ' ') {
+                total_bytes = total_bytes.saturating_add(origin.len_utf8());
+                if output.len() < maximum_bytes {
+                    output.push(origin);
+                }
+            }
+            total_bytes = total_bytes.saturating_add(line.content().len());
+            match std::str::from_utf8(line.content()) {
+                Ok(content) => append_bounded_utf8(&mut output, content, maximum_bytes),
+                Err(_) => invalid_utf8 = true,
+            }
+            true
+        })
+        .map_err(|error| format!("Commit context patch error for '{path}': {error}"))?;
+
+    if invalid_utf8 {
+        return Ok((None, 0));
+    }
+    let omitted = total_bytes.saturating_sub(output.len());
+    Ok((Some(output), omitted))
+}
+
+fn build_git_commit_context(repo: &Repository) -> Result<GitCommitContext, String> {
+    let diff = staged_diff(repo)?;
+    let (fingerprint, staged_files) = staged_context_files(&diff)?;
+    let text_file_count = staged_files.iter().filter(|file| !file.is_binary).count();
+    let per_file_budget = COMMIT_CONTEXT_PATCH_BUDGET
+        .checked_div(text_file_count)
+        .unwrap_or(0);
+    let mut patch_bytes_included = 0;
+    let mut patch_bytes_omitted = 0;
+
+    let files = staged_files
+        .into_iter()
+        .map(|file| -> Result<GitCommitContextFile, String> {
+            let (patch, omitted) = if file.is_binary {
+                (None, 0)
+            } else {
+                bounded_patch(&diff, file.diff_index, per_file_budget, &file.path)?
+            };
+            let is_binary = file.is_binary || patch.is_none();
+            let included = patch.as_ref().map_or(0, String::len);
+            patch_bytes_included += included;
+            patch_bytes_omitted += omitted;
+
+            Ok(GitCommitContextFile {
+                path: file.path,
+                old_path: file.old_path,
+                status: file.status,
+                is_binary,
+                patch,
+                patch_truncated: omitted > 0,
+                patch_bytes_omitted: omitted,
+            })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+
+    Ok(GitCommitContext {
+        fingerprint,
+        files,
+        patch_bytes_included,
+        patch_bytes_omitted,
     })
 }
 
@@ -486,9 +692,8 @@ pub fn git_diff_hunks(
     Ok(hunks)
 }
 
-/// Returns the full unified diff of ALL staged changes (index vs HEAD).
-/// Used by the AI commit message generator. Output is truncated at 32 KB to
-/// avoid overwhelming the model context.
+/// Legacy unified diff of all staged changes (index vs HEAD).
+/// New commit-message consumers use `git_commit_context`.
 #[tauri::command]
 pub fn git_diff_staged_all(repo_path: String) -> Result<String, String> {
     let repo = open_repo(&repo_path)?;
@@ -526,6 +731,19 @@ pub fn git_diff_staged_all(repo_path: String) -> Result<String, String> {
     }
 
     Ok(output)
+}
+
+#[tauri::command]
+pub fn git_commit_context(repo_path: String) -> Result<GitCommitContext, String> {
+    let repo = open_repo(&repo_path)?;
+    build_git_commit_context(&repo)
+}
+
+#[tauri::command]
+pub fn git_staged_fingerprint(repo_path: String) -> Result<String, String> {
+    let repo = open_repo(&repo_path)?;
+    let diff = staged_diff(&repo)?;
+    staged_context_files(&diff).map(|(fingerprint, _)| fingerprint)
 }
 
 #[tauri::command]
@@ -1945,6 +2163,126 @@ mod tests {
         assert_eq!(staged.modified.as_deref(), Some("index\n"));
         assert_eq!(unstaged.original.as_deref(), Some("index\n"));
         assert_eq!(unstaged.modified.as_deref(), Some("worktree\n"));
+    }
+
+    #[test]
+    fn commit_context_contains_only_staged_content_and_stable_fingerprint() {
+        let repo = TestRepository::new();
+        repo.commit_file("file.txt", b"head\n", "initial");
+        repo.write("file.txt", b"index\n");
+        repo.git(["add", "--", "file.txt"]);
+
+        let staged_context = git_commit_context(repo.path_string()).unwrap();
+        let staged_fingerprint = staged_context.fingerprint.clone();
+        repo.write("file.txt", b"worktree only\n");
+        let worktree_context = git_commit_context(repo.path_string()).unwrap();
+
+        assert_eq!(staged_context.files.len(), 1);
+        assert!(staged_context.files[0]
+            .patch
+            .as_deref()
+            .is_some_and(|patch| patch.contains("+index")));
+        assert!(!staged_context.files[0]
+            .patch
+            .as_deref()
+            .is_some_and(|patch| patch.contains("worktree only")));
+        assert_eq!(worktree_context.fingerprint, staged_fingerprint);
+
+        repo.git(["add", "--", "file.txt"]);
+        assert_ne!(
+            git_staged_fingerprint(repo.path_string()).unwrap(),
+            staged_fingerprint
+        );
+    }
+
+    #[test]
+    fn commit_context_represents_add_delete_rename_and_binary_without_absolute_paths() {
+        let repo = TestRepository::new();
+        repo.commit_file("delete.txt", b"delete me\n", "initial");
+        repo.commit_file("old.txt", b"rename me\n", "rename source");
+        repo.write("added.txt", b"added\n");
+        repo.write("binary.dat", &[0, 159, 146, 150, 0, 1]);
+        repo.git(["add", "--", "added.txt", "binary.dat"]);
+        repo.git(["rm", "--", "delete.txt"]);
+        repo.git(["mv", "old.txt", "new.txt"]);
+
+        let context = git_commit_context(repo.path_string()).unwrap();
+        let paths: Vec<_> = context
+            .files
+            .iter()
+            .map(|file| file.path.as_str())
+            .collect();
+
+        assert_eq!(
+            paths,
+            vec!["added.txt", "binary.dat", "delete.txt", "new.txt"]
+        );
+        assert!(context
+            .files
+            .iter()
+            .any(|file| file.status == "A" && file.path == "added.txt"));
+        assert!(context
+            .files
+            .iter()
+            .any(|file| file.status == "D" && file.path == "delete.txt"));
+        assert!(context.files.iter().any(|file| {
+            file.status == "R"
+                && file.path == "new.txt"
+                && file.old_path.as_deref() == Some("old.txt")
+        }));
+        let binary = context
+            .files
+            .iter()
+            .find(|file| file.path == "binary.dat")
+            .unwrap();
+        assert!(binary.is_binary);
+        assert!(binary.patch.is_none());
+        assert!(context
+            .files
+            .iter()
+            .all(|file| !file.path.contains(repo.path.to_string_lossy().as_ref())));
+    }
+
+    #[test]
+    fn commit_context_balances_patch_budget_and_truncates_unicode_safely() {
+        let repo = TestRepository::new();
+        let content = "á".repeat(COMMIT_CONTEXT_PATCH_BUDGET);
+        repo.write("a.txt", content.as_bytes());
+        repo.write("b.txt", content.as_bytes());
+        repo.git(["add", "--", "a.txt", "b.txt"]);
+
+        let context = git_commit_context(repo.path_string()).unwrap();
+
+        assert_eq!(context.files.len(), 2);
+        assert!(context.files.iter().all(|file| file.patch_truncated));
+        assert!(context.files.iter().all(|file| file
+            .patch
+            .as_ref()
+            .is_some_and(|patch| patch.is_char_boundary(patch.len()))));
+        assert!(context.patch_bytes_included <= COMMIT_CONTEXT_PATCH_BUDGET);
+        assert!(context.patch_bytes_omitted > 0);
+        let included_sizes: Vec<_> = context
+            .files
+            .iter()
+            .map(|file| file.patch.as_ref().map_or(0, String::len))
+            .collect();
+        assert!(included_sizes[0].abs_diff(included_sizes[1]) <= 1);
+    }
+
+    #[test]
+    fn commit_context_supports_unborn_head() {
+        let repo = TestRepository::new();
+        repo.write("first.txt", b"first\n");
+        repo.git(["add", "--", "first.txt"]);
+
+        let context = git_commit_context(repo.path_string()).unwrap();
+
+        assert_eq!(context.files.len(), 1);
+        assert_eq!(context.files[0].status, "A");
+        assert!(context.files[0]
+            .patch
+            .as_deref()
+            .is_some_and(|patch| patch.contains("+first")));
     }
 
     #[test]

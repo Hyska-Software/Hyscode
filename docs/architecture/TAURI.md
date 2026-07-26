@@ -227,6 +227,14 @@ content are represented as states instead of empty-string fallbacks. Normal push
 use Git's configured upstream; publishing a branch is a separate `push --set-upstream`
 operation, and fetch-all/prune are explicit commands.
 
+AI commit-message generation reads `git_commit_context`, not a working-tree diff. The command
+compares `HEAD` with the index and returns an opaque staged fingerprint plus a deterministic,
+path-sorted file summary. Each entry carries relative path, rename source, status, binary
+state, a bounded patch, and explicit truncation metadata. A 32 KiB patch budget is divided
+between text files; binary contents and absolute paths are never returned. The frontend calls
+`git_staged_fingerprint` after generation so a response cannot be applied after the staged
+index changes. Unstaged-only edits intentionally do not change this fingerprint.
+
 ```
 src-tauri/
 ├── src/

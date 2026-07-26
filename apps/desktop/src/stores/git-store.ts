@@ -5,6 +5,7 @@ import { useFileStore } from './file-store';
 import { useSettingsStore } from './settings-store';
 import {
   tauriInvoke,
+  type GitCommitContextContract,
   type GitFileContract,
   type GitRepositoryOperation,
 } from '../lib/tauri-invoke';
@@ -161,8 +162,10 @@ interface GitState {
     mode?: 'staged' | 'unstaged' | 'conflict',
   ) => Promise<GitFileContent & { isBinary: boolean }>;
   getDiff: (filePath: string, staged: boolean) => Promise<string>;
-  /** Returns the full unified diff of all staged changes (for AI commit message generation) */
+  /** Legacy full staged diff retained for consumers not yet using structured context. */
   getStagedDiff: () => Promise<string>;
+  getCommitContext: () => Promise<GitCommitContextContract>;
+  getStagedFingerprint: () => Promise<string>;
 
   // New operations
   push: (remote?: string, branch?: string) => Promise<string>;
@@ -558,6 +561,18 @@ export const useGitStore = create<GitState>()(
       const rootPath = getRootPath();
       if (!rootPath) throw new Error('No project open');
       return tauriInvoke('git_diff_staged_all', { repoPath: rootPath });
+    },
+
+    getCommitContext: async () => {
+      const rootPath = getRootPath();
+      if (!rootPath) throw new Error('No project open');
+      return tauriInvoke('git_commit_context', { repoPath: rootPath });
+    },
+
+    getStagedFingerprint: async () => {
+      const rootPath = getRootPath();
+      if (!rootPath) throw new Error('No project open');
+      return tauriInvoke('git_staged_fingerprint', { repoPath: rootPath });
     },
 
     push: async (remote, branch) => {
