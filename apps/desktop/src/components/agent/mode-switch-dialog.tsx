@@ -8,9 +8,9 @@ import type { ModeSwitchRequest } from '@hyscode/agent-harness';
 // Agent mode display config
 const MODE_DISPLAY: Record<string, { label: string; color: string }> = {
   chat: { label: 'Chat', color: 'text-blue-400' },
-  build: { label: 'Build', color: 'text-accent' },
+  build: { label: 'Build', color: 'text-primary' },
   review: { label: 'Review', color: 'text-purple-400' },
-  debug: { label: 'Debug', color: 'text-red-400' },
+  debug: { label: 'Debug', color: 'text-destructive' },
   plan: { label: 'Plan', color: 'text-amber-400' },
 };
 
@@ -92,7 +92,7 @@ export function ModeSwitchDialog() {
             size="sm"
             variant="ghost"
             onClick={handleDeny}
-            className="h-7 gap-1.5 rounded-md px-3.5 text-[11px] text-red-400/80 hover:bg-red-500/10 hover:text-red-300 transition-colors"
+            className="h-7 gap-1.5 rounded-md px-3.5 text-[11px] text-destructive/80 hover:bg-destructive/10 hover:text-destructive transition-colors"
           >
             <X className="h-3 w-3" />
             Stay in {from.label}

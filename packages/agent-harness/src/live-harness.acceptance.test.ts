@@ -35,7 +35,7 @@ describe.skipIf(!liveEnabled)('live agent harness acceptance', () => {
       },
       config: {
         providerId: 'openrouter',
-        modelId: 'google/gemini-2.5-flash',
+        modelId: 'google/gemini-3.5-flash',
         maxIterations: 5,
         maxOutputTokens: 256,
         approval: { mode: 'manual' },

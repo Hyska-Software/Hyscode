@@ -44,7 +44,7 @@ function FileRow({ file }: { file: TurnSummaryFile }) {
     <button
       type="button"
       onClick={() => setSelectedFile(file.filePath)}
-      className="group flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-foreground/[0.04]"
+      className="group flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-muted"
     >
       <FileCode2 className="h-3.5 w-3.5 shrink-0 text-muted-foreground/55" />
       <span className="min-w-0 flex-1 truncate font-mono text-[10.5px] text-foreground/80">
@@ -52,7 +52,7 @@ function FileRow({ file }: { file: TurnSummaryFile }) {
       </span>
       <span className="flex shrink-0 gap-1 text-[10px] tabular-nums">
         {file.added > 0 && <span className="text-emerald-400">+{file.added}</span>}
-        {file.removed > 0 && <span className="text-red-400">-{file.removed}</span>}
+        {file.removed > 0 && <span className="text-destructive">-{file.removed}</span>}
       </span>
       {file.resolution !== 'pending' && (
         <span className="text-[9px] text-muted-foreground/55">
@@ -78,7 +78,7 @@ function FileGroup({
   const visibleFiles = expanded ? files : files.slice(0, INITIAL_FILE_COUNT);
   const hiddenCount = files.length - visibleFiles.length;
   return (
-    <div className="border-t border-foreground/[0.06] px-2 py-1.5">
+    <div className="border-t border-border/50 px-2 py-1.5">
       <div className="flex items-center gap-1.5 px-2 py-1">
         <span className="text-[10px] font-medium text-muted-foreground">{label}</span>
         <span className="text-[9px] text-muted-foreground/45">{files.length}</span>
@@ -129,7 +129,7 @@ export function TurnSummaryCard({ summary }: { summary: TurnSummary }) {
   const openReview = (): void => useLayoutStore.getState().setAgentRightTab('changes');
 
   return (
-    <section className="mt-3 overflow-hidden rounded-xl border border-foreground/[0.09] bg-foreground/[0.018] shadow-sm">
+    <section className="mt-3 overflow-hidden rounded-lg border border-border/50 bg-card shadow-sm">
       <div className="flex items-center gap-2.5 px-3 py-2.5">
         <div
           className={cn(
@@ -158,7 +158,7 @@ export function TurnSummaryCard({ summary }: { summary: TurnSummary }) {
           <button
             type="button"
             onClick={openReview}
-            className="inline-flex items-center gap-1 rounded-md border border-foreground/[0.09] px-2 py-1 text-[10px] text-foreground/80 transition-colors hover:bg-foreground/[0.05]"
+              className="inline-flex items-center gap-1 rounded-md border border-border/50 px-2 py-1 text-[10px] text-foreground transition-colors hover:bg-muted"
           >
             <GitCompare className="h-3 w-3" /> Review
           </button>
@@ -166,18 +166,18 @@ export function TurnSummaryCard({ summary }: { summary: TurnSummary }) {
       </div>
 
       {liveSummary.files.length === 0 ? (
-        <div className="flex items-center gap-2 border-t border-foreground/[0.06] px-3 py-2 text-[10px] text-muted-foreground/65">
+        <div className="flex items-center gap-2 border-t border-border px-3 py-2 text-[10px] text-muted-foreground">
           <Files className="h-3.5 w-3.5" /> No files changed in this turn
         </div>
       ) : (
         <>
-          <div className="flex items-center gap-2 border-t border-foreground/[0.06] px-3 py-2">
+          <div className="flex items-center gap-2 border-t border-border px-3 py-2">
             <span className="text-[10.5px] font-medium text-foreground/80">
               {liveSummary.files.length} {liveSummary.files.length === 1 ? 'file' : 'files'} changed
             </span>
             <span className="flex gap-1 text-[10px] tabular-nums">
               {totals.added > 0 && <span className="text-emerald-400">+{totals.added}</span>}
-              {totals.removed > 0 && <span className="text-red-400">-{totals.removed}</span>}
+              {totals.removed > 0 && <span className="text-destructive">-{totals.removed}</span>}
             </span>
             {hasPending && (
               <div className="ml-auto flex items-center gap-1">
@@ -195,7 +195,7 @@ export function TurnSummaryCard({ summary }: { summary: TurnSummary }) {
                   onClick={() =>
                     void HarnessBridge.get().resolveTurnEditSessions(liveSummary.turnId, false)
                   }
-                  className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-[10px] text-muted-foreground transition-colors hover:bg-foreground/[0.05] hover:text-foreground"
+                  className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-[10px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
                 >
                   <RotateCcw className="h-3 w-3" /> Undo
                 </button>

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import type { McpServerConfig } from '@/stores/settings-store';
+import { SettingInput, SettingSegmented } from '../controls';
 
 interface McpServerFormProps {
   onSave: (server: McpServerConfig) => void;
@@ -41,73 +42,67 @@ export function McpServerForm({ onSave, onCancel }: McpServerFormProps) {
   };
 
   return (
-    <div className="rounded-lg border border-surface-raised bg-background p-3">
+    <div className="rounded-lg border border-border bg-card p-3">
       <div className="flex flex-col gap-2.5">
         {/* Name */}
         <Field label="Name">
-          <input
+          <SettingInput
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder="My MCP Server"
-            className="h-7 w-full rounded-md bg-muted px-2 text-[11px] text-foreground outline-none placeholder:text-muted-foreground/50"
+            className="h-7 w-full"
           />
         </Field>
 
         {/* Transport */}
         <Field label="Transport">
-          <div className="flex gap-1">
-            {(['stdio', 'sse', 'websocket'] as const).map((t) => (
-              <button
-                key={t}
-                onClick={() => setTransport(t)}
-                className={`rounded-md px-3 py-1 text-[11px] font-medium transition-colors ${
-                  transport === t
-                    ? 'bg-accent/15 text-accent'
-                    : 'bg-muted text-muted-foreground hover:text-foreground'
-                }`}
-              >
-                {t === 'websocket' ? 'WS' : t.toUpperCase()}
-              </button>
-            ))}
-          </div>
+          <SettingSegmented
+            value={transport}
+            onChange={setTransport}
+            options={[
+              { value: 'stdio', label: 'STDIO' },
+              { value: 'sse', label: 'SSE' },
+              { value: 'websocket', label: 'WS' },
+            ]}
+          />
         </Field>
 
         {/* Transport-specific fields */}
         {transport === 'stdio' ? (
           <>
             <Field label="Command">
-              <input
+              <SettingInput
                 value={command}
                 onChange={(e) => setCommand(e.target.value)}
                 placeholder="npx -y @modelcontextprotocol/server"
-                className="h-7 w-full rounded-md bg-muted px-2 text-[11px] text-foreground outline-none placeholder:text-muted-foreground/50"
+                className="h-7 w-full"
               />
             </Field>
             <Field label="Arguments">
-              <input
+              <SettingInput
                 value={args}
                 onChange={(e) => setArgs(e.target.value)}
                 placeholder="--flag value"
-                className="h-7 w-full rounded-md bg-muted px-2 text-[11px] text-foreground outline-none placeholder:text-muted-foreground/50"
+                className="h-7 w-full"
               />
             </Field>
           </>
         ) : transport === 'sse' ? (
           <Field label="URL">
-            <input
+            <SettingInput
               value={url}
               onChange={(e) => setUrl(e.target.value)}
               placeholder="http://localhost:3001/sse"
-              className="h-7 w-full rounded-md bg-muted px-2 text-[11px] text-foreground outline-none placeholder:text-muted-foreground/50"
+              className="h-7 w-full"
             />
           </Field>
         ) : (
           <Field label="WebSocket URL">
-            <input
+            <SettingInput
               value={wsUrl}
               onChange={(e) => setWsUrl(e.target.value)}
               placeholder="ws://localhost:3001/ws"
-              className="h-7 w-full rounded-md bg-muted px-2 text-[11px] text-foreground outline-none placeholder:text-muted-foreground/50"
+              className="h-7 w-full"
             />
           </Field>
         )}

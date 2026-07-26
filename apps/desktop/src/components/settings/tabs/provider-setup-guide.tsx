@@ -37,7 +37,7 @@ export function ProviderSetupGuide({ guide, open, onClose }: ProviderSetupGuideP
       }}
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm"
     >
-      <div className="relative w-full max-w-[520px] max-h-[80vh] overflow-y-auto rounded-xl border border-border bg-background shadow-2xl">
+      <div       className="relative w-full max-w-[520px] max-h-[80vh] overflow-y-auto rounded-xl border border-border bg-card shadow-2xl">
         {/* Header */}
         <div className="sticky top-0 z-10 flex items-center justify-between border-b border-border bg-background/95 backdrop-blur-sm px-5 py-3.5">
           <h2 className="text-[13px] font-semibold text-foreground tracking-tight">
@@ -45,7 +45,7 @@ export function ProviderSetupGuide({ guide, open, onClose }: ProviderSetupGuideP
           </h2>
           <button
             onClick={onClose}
-            className="rounded-md p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            className="rounded-md p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
           >
             <X className="h-4 w-4" />
           </button>
@@ -98,14 +98,19 @@ function ClaudeAgentGuide() {
           </p>
           <ModelList
             models={[
-              { name: 'Claude Sonnet 4 (Agent)', desc: 'Best balance of speed and quality' },
-              { name: 'Claude Opus 4 (Agent)', desc: 'Maximum capability for complex tasks' },
-              { name: 'Claude Haiku 4 (Agent)', desc: 'Fastest and most cost-effective' },
+              { name: 'Claude Fable 5 (Agent)', desc: 'Most powerful — Anthropic\'s flagship creative model' },
+              { name: 'Claude Opus 5 (Agent)', desc: 'Maximum capability for complex agentic tasks' },
+              { name: 'Claude Opus 4.8 (Agent)', desc: 'Premium reasoning for tough problems' },
+              { name: 'Claude Sonnet 5 (Agent)', desc: 'Best balance of speed and quality' },
+              { name: 'Claude Opus 4.7 (Agent)', desc: 'Strong reasoning at scale' },
+              { name: 'Claude Opus 4.6 (Agent)', desc: 'Solid premium choice' },
+              { name: 'Claude Sonnet 4.6 (Agent)', desc: 'Fast and capable for everyday coding' },
+              { name: 'Claude Haiku 4.5 (Agent)', desc: 'Fastest and most cost-effective' },
             ]}
           />
         </Step>
 
-        <Step number={3} title="Start using it" last>
+        <Step number={4} title="Start using it" last>
           <p className="text-[11px] leading-relaxed text-muted-foreground">
             Open the chat panel and start a conversation. Claude Agent can execute
             multi-step tasks, use tools, and work with your codebase autonomously.
@@ -127,16 +132,18 @@ function GitHubCopilotGuide() {
   return (
     <div className="flex flex-col gap-5">
       <p className="text-[12px] leading-relaxed text-muted-foreground">
-        GitHub Copilot uses the OAuth Device Flow to authenticate. You need
-        an active GitHub Copilot subscription and a GitHub OAuth App to connect.
+        GitHub Copilot uses the OAuth Device Flow to authenticate. Billing is
+        credit-based — you purchase credits that are consumed per request
+        depending on the model tier.
       </p>
 
       <StepList>
         <Step number={1} title="Create a GitHub OAuth App">
           <p className="text-[11px] leading-relaxed text-muted-foreground">
             Register a new OAuth App in your GitHub settings. Set the callback URL
-            to <CodeSnippet text="http://localhost" /> (it won't be used — the device
-            flow doesn't redirect).
+            to{' '}
+            <CodeSnippet text="http://localhost" />{' '}
+            (it won't be used — the device flow doesn't redirect).
           </p>
           <ExternalLinkButton
             href="https://github.com/settings/applications/new"
@@ -146,10 +153,10 @@ function GitHubCopilotGuide() {
 
         <Step number={2} title="Copy your Client ID">
           <p className="text-[11px] leading-relaxed text-muted-foreground">
-            After creating the app, copy the <Kbd>Client ID</Kbd> (starts
-            with <CodeSnippet text="Iv1." /> or <CodeSnippet text="Ov23li" />).
-            You do <span className="font-medium text-foreground">not</span> need
-            a Client Secret for the device flow.
+            After creating the app, copy the <Kbd>Client ID</Kbd> (starts with{' '}
+            <CodeSnippet text="Iv1." /> or <CodeSnippet text="Ov23li" />
+            ). You do <span className="font-medium text-foreground">not</span>{' '}
+            need a Client Secret for the device flow.
           </p>
         </Step>
 
@@ -162,8 +169,8 @@ function GitHubCopilotGuide() {
 
         <Step number={4} title="Sign in with GitHub">
           <p className="text-[11px] leading-relaxed text-muted-foreground">
-            Click the <Kbd>Sign in with GitHub</Kbd> button. You'll receive
-            a one-time code — copy it and open the GitHub verification page to
+            Click the <Kbd>Sign in with GitHub</Kbd> button. You'll receive a
+            one-time code — copy it and open the GitHub verification page to
             authorize the app. HysCode will detect the authorization automatically.
           </p>
         </Step>
@@ -171,23 +178,25 @@ function GitHubCopilotGuide() {
         <Step number={5} title="Start using it" last>
           <p className="text-[11px] leading-relaxed text-muted-foreground">
             Once connected, select <Kbd>GitHub Copilot</Kbd> as your provider.
-            Models available depend on your Copilot plan:
+            Models available:
           </p>
           <ModelList
             models={[
-              { name: 'GPT-4.1', desc: '0× · free · all plans' },
-              { name: 'GPT-4o', desc: '0× · free · LTS fallback' },
-              { name: 'GPT-5 Mini', desc: '0× · free · all plans' },
-              { name: 'Raptor Mini', desc: '0× · preview · fine-tuned GPT-5 Mini' },
-              { name: 'Grok Code Fast 1', desc: '0.25× · xAI · fast coding' },
-              { name: 'Claude Haiku 4.5', desc: '0.33× · fast lightweight' },
-              { name: 'Gemini 3 Flash', desc: '0.33× · preview · Google' },
-              { name: 'GPT-5.4 Mini', desc: '0.33× · fast agentic' },
-              { name: 'Claude Sonnet 4 / 4.5 / 4.6', desc: '1× · balanced reasoning' },
-              { name: 'Gemini 2.5 Pro / 3.1 Pro', desc: '1× · long context reasoning' },
-              { name: 'GPT-5.2 / 5.2-Codex / 5.3-Codex', desc: '1× · agentic coding' },
-              { name: 'GPT-5.4', desc: '1× · deep reasoning (Xhigh)' },
-              { name: 'Claude Opus 4.5 / 4.6', desc: '3× · most powerful' },
+              { name: 'GPT-5.5', desc: 'Free tier' },
+              { name: 'GPT-5 Mini', desc: 'Free tier' },
+              { name: 'Raptor Mini', desc: 'Free tier · preview' },
+              { name: 'Gemini 3.5 Flash', desc: 'Low credits' },
+              { name: 'Gemini 3.5 Flash-Lite', desc: 'Low credits' },
+              { name: 'Gemini 3.6 Flash', desc: 'Low credits' },
+              { name: 'Claude Haiku 4.5', desc: 'Low credits' },
+              { name: 'Gemini 3 Flash', desc: 'Low credits' },
+              { name: 'GPT-5.4 Mini', desc: 'Low credits' },
+              { name: 'GPT-5.6', desc: 'Low credits' },
+              { name: 'Claude Sonnet 4.5 / 4.6 / 5', desc: 'Standard credits' },
+              { name: 'Gemini 3.1 Pro', desc: 'Standard credits' },
+              { name: 'GPT-5.3-Codex', desc: 'Standard credits' },
+              { name: 'GPT-5.4', desc: 'Standard credits' },
+              { name: 'Claude Opus 4.5 / 4.6 / 4.7 / 4.8 / 5', desc: 'Premium credits' },
             ]}
           />
         </Step>
@@ -198,15 +207,6 @@ function GitHubCopilotGuide() {
         A Copilot session token is refreshed automatically when it expires.
         You can disconnect at any time from the settings panel.
       </InfoBox>
-
-      <div className="rounded-lg border border-amber-500/20 bg-amber-500/5 px-3.5 py-2.5">
-        <p className="text-[11px] leading-relaxed text-amber-400/90">
-          <span className="font-medium">Requirement:</span> You must have an active
-          GitHub Copilot subscription (Free, Pro, Pro+, Business, or Enterprise).
-          Models marked 1× or 3× consume premium requests. Free-tier plans have
-          limited premium request allowance.
-        </p>
-      </div>
     </div>
   );
 }
@@ -232,7 +232,7 @@ function Step({
     <div className="flex gap-3">
       {/* Step indicator + line */}
       <div className="flex flex-col items-center">
-        <div className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-accent/15 text-[10px] font-semibold text-accent">
+        <div className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary/15 text-[10px] font-semibold text-primary">
           {number}
         </div>
         {!last && <div className="mt-1 w-px flex-1 bg-border" />}
@@ -253,7 +253,7 @@ function ExternalLinkButton({ href, label }: { href: string; label: string }) {
       href={href}
       target="_blank"
       rel="noopener noreferrer"
-      className="inline-flex items-center gap-1.5 rounded-md border border-border bg-muted/50 px-2.5 py-1.5 text-[11px] text-foreground transition-colors hover:bg-muted w-fit mt-1"
+      className="inline-flex items-center gap-1.5 rounded-md border border-border bg-card px-2.5 py-1.5 text-[11px] font-medium text-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background w-fit mt-1"
     >
       <ExternalLink className="h-3 w-3 text-muted-foreground" />
       {label}
@@ -279,7 +279,7 @@ function CodeSnippet({ text }: { text: string }) {
     >
       {text}
       {copied ? (
-        <Check className="h-2.5 w-2.5 text-green-500" />
+        <Check className="h-2.5 w-2.5 text-success" />
       ) : (
         <Copy className="h-2.5 w-2.5 text-muted-foreground" />
       )}
@@ -310,8 +310,8 @@ function ModelList({ models }: { models: { name: string; desc: string }[] }) {
 
 function InfoBox({ children }: { children: React.ReactNode }) {
   return (
-    <div className="rounded-lg border border-accent/20 bg-accent/5 px-3.5 py-2.5">
-      <p className="text-[11px] leading-relaxed text-accent/90">{children}</p>
+    <div className="rounded-lg border border-primary/20 bg-primary/5 px-3.5 py-2.5">
+      <p className="text-[11px] leading-relaxed text-primary/90">{children}</p>
     </div>
   );
 }

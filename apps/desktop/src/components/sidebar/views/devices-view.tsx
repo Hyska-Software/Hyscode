@@ -57,7 +57,7 @@ function DeviceRow({ device }: { device: DeviceInfo }) {
       className={cn(
         'group flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left transition-colors',
         isSelected
-          ? 'bg-accent/10 text-foreground'
+          ? 'bg-primary/10 text-foreground'
           : 'text-muted-foreground hover:bg-surface-raised hover:text-foreground',
       )}
     >
@@ -84,7 +84,7 @@ function DeviceRow({ device }: { device: DeviceInfo }) {
       {isSelected && device.available && rootPath && !isRunning && (
         <button
           onClick={handleRun}
-          className="shrink-0 rounded p-0.5 text-accent hover:bg-accent/20 transition-colors opacity-0 group-hover:opacity-100"
+          className="shrink-0 rounded p-0.5 text-primary hover:bg-primary/20 transition-colors opacity-0 group-hover:opacity-100"
           title={`Run on ${device.name}`}
         >
           <Play className="h-3 w-3" />
@@ -92,7 +92,7 @@ function DeviceRow({ device }: { device: DeviceInfo }) {
       )}
 
       {isRunning && (
-        <span className="text-[9px] text-accent font-medium">Running</span>
+        <span className="text-[9px] text-primary font-medium">Running</span>
       )}
     </button>
   );
@@ -119,7 +119,7 @@ function EmulatorRow({ emulator }: { emulator: EmulatorInfo }) {
 
       <button
         onClick={handleLaunch}
-        className="shrink-0 rounded p-0.5 text-muted-foreground hover:text-accent hover:bg-accent/20 transition-colors opacity-0 group-hover:opacity-100"
+        className="shrink-0 rounded p-0.5 text-muted-foreground hover:text-primary hover:bg-primary/20 transition-colors opacity-0 group-hover:opacity-100"
         title={`Launch ${emulator.name}`}
       >
         <Rocket className="h-3 w-3" />
@@ -174,7 +174,7 @@ export function DevicesView() {
 
       {/* Flutter not found warning */}
       {flutterAvailable === false && (
-        <div className="flex items-start gap-2 rounded-md bg-yellow-500/10 px-2.5 py-2 text-[10px] text-yellow-400">
+        <div className="flex items-start gap-2 rounded-md bg-warning/10 px-2.5 py-2 text-[10px] text-warning">
           <AlertCircle className="h-3 w-3 mt-0.5 shrink-0" />
           <div>
             <span className="font-medium">Flutter not found.</span>{' '}

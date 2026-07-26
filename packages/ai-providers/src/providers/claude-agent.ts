@@ -1,4 +1,9 @@
 import type { AIProvider, AIModel, ChatParams, StreamChunk } from '../types';
+import {
+  ADAPTIVE_CLAUDE_XHIGH_VARIANTS,
+  ADAPTIVE_CLAUDE_VARIANTS,
+  BUDGET_CLAUDE_VARIANTS,
+} from './anthropic';
 
 // ─── Claude Agent Provider ──────────────────────────────────────────────────
 // Wraps the Claude Agent SDK sidecar. Chat requests are dispatched to the
@@ -19,6 +24,20 @@ const CLAUDE_AGENT_MODELS: AIModel[] = [
     supportsVision: true,
     inputPricePerMToken: 10,
     outputPricePerMToken: 50,
+    thinkingVariants: ADAPTIVE_CLAUDE_XHIGH_VARIANTS,
+  },
+  {
+    id: 'claude-opus-5',
+    name: 'Claude Opus 5 (Agent)',
+    provider: 'claude-agent',
+    contextWindow: 1_000_000,
+    maxOutputTokens: 128_000,
+    supportsTools: true,
+    supportsStreaming: true,
+    supportsVision: true,
+    inputPricePerMToken: 5,
+    outputPricePerMToken: 25,
+    thinkingVariants: ADAPTIVE_CLAUDE_XHIGH_VARIANTS,
   },
   {
     id: 'claude-opus-4-8',
@@ -31,6 +50,20 @@ const CLAUDE_AGENT_MODELS: AIModel[] = [
     supportsVision: true,
     inputPricePerMToken: 5,
     outputPricePerMToken: 25,
+    thinkingVariants: ADAPTIVE_CLAUDE_XHIGH_VARIANTS,
+  },
+  {
+    id: 'claude-sonnet-5',
+    name: 'Claude Sonnet 5 (Agent)',
+    provider: 'claude-agent',
+    contextWindow: 1_000_000,
+    maxOutputTokens: 128_000,
+    supportsTools: true,
+    supportsStreaming: true,
+    supportsVision: true,
+    inputPricePerMToken: 2,
+    outputPricePerMToken: 10,
+    thinkingVariants: ADAPTIVE_CLAUDE_XHIGH_VARIANTS,
   },
   {
     id: 'claude-sonnet-4-6',
@@ -43,6 +76,7 @@ const CLAUDE_AGENT_MODELS: AIModel[] = [
     supportsVision: true,
     inputPricePerMToken: 3,
     outputPricePerMToken: 15,
+    thinkingVariants: ADAPTIVE_CLAUDE_VARIANTS,
   },
   {
     id: 'claude-haiku-4-5',
@@ -55,6 +89,7 @@ const CLAUDE_AGENT_MODELS: AIModel[] = [
     supportsVision: true,
     inputPricePerMToken: 1,
     outputPricePerMToken: 5,
+    thinkingVariants: BUDGET_CLAUDE_VARIANTS,
   },
 ];
 

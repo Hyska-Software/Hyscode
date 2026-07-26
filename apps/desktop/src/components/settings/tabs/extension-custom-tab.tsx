@@ -11,6 +11,7 @@ import type {
   SettingsButtonItem,
   SettingsColorItem,
 } from '@hyscode/extension-api';
+import { SettingInput, SettingSelect, SettingSlider, SettingToggle } from '../controls';
 
 // ── Props ────────────────────────────────────────────────────────────────────
 
@@ -34,19 +35,7 @@ function ToggleItem({ item, extensionName }: { item: SettingsToggleItem; extensi
           <p className="mt-0.5 text-[11px] leading-snug text-muted-foreground">{item.description}</p>
         )}
       </div>
-      <button
-        onClick={() => setValue(key, !value)}
-        className={`relative mt-0.5 h-5 w-9 shrink-0 rounded-full transition-colors ${
-          value ? 'bg-accent' : 'bg-muted'
-        }`}
-        aria-pressed={value}
-      >
-        <span
-          className={`absolute top-0.5 left-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform ${
-            value ? 'translate-x-4' : 'translate-x-0'
-          }`}
-        />
-      </button>
+      <SettingToggle checked={value} onChange={(v) => setValue(key, v)} />
     </div>
   );
 }
@@ -70,15 +59,15 @@ function TextItem({ item, extensionName }: { item: SettingsTextItem; extensionNa
           onChange={(e) => setValue(key, e.target.value)}
           placeholder={item.placeholder}
           rows={3}
-          className="w-full resize-none rounded-md bg-muted px-2.5 py-1.5 text-[12px] text-foreground outline-none placeholder:text-muted-foreground/40 focus:ring-1 focus:ring-accent/50"
+          className="w-full resize-none rounded-md bg-card px-2.5 py-1.5 text-[12px] text-foreground outline-none placeholder:text-muted-foreground/40 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 focus:ring-offset-background"
         />
       ) : (
-        <input
+        <SettingInput
           type="text"
           value={value}
           onChange={(e) => setValue(key, e.target.value)}
           placeholder={item.placeholder}
-          className="w-full rounded-md bg-muted px-2.5 py-1.5 text-[12px] text-foreground outline-none placeholder:text-muted-foreground/40 focus:ring-1 focus:ring-accent/50"
+          className="w-full"
         />
       )}
     </div>
@@ -102,24 +91,22 @@ function NumberItem({ item, extensionName }: { item: SettingsNumberItem; extensi
             <p className="mt-0.5 text-[11px] leading-snug text-muted-foreground">{item.description}</p>
           )}
         </div>
-        <input
+        <SettingInput
           type="number"
           value={value}
           min={min}
           max={max}
           step={step}
-          onChange={(e) => setValue(key, Number(e.target.value))}
-          className="w-16 rounded-md bg-muted px-2 py-1 text-center text-[12px] text-foreground outline-none focus:ring-1 focus:ring-accent/50"
+          onChange={(v) => setValue(key, Number(v))}
+          className="w-16 text-center"
         />
       </div>
-      <input
-        type="range"
+      <SettingSlider
         value={value}
+        onChange={(v) => setValue(key, v)}
         min={min}
         max={max}
         step={step}
-        onChange={(e) => setValue(key, Number(e.target.value))}
-        className="w-full cursor-pointer accent-accent"
       />
     </div>
   );
@@ -138,17 +125,12 @@ function SelectItem({ item, extensionName }: { item: SettingsSelectItem; extensi
           <p className="mt-0.5 text-[11px] leading-snug text-muted-foreground">{item.description}</p>
         )}
       </div>
-      <select
+      <SettingSelect
         value={value}
-        onChange={(e) => setValue(key, e.target.value)}
-        className="h-7 min-w-[120px] rounded-md bg-muted px-2 text-[12px] text-foreground outline-none focus:ring-1 focus:ring-accent/50"
-      >
-        {item.options.map((opt) => (
-          <option key={opt.value} value={opt.value}>
-            {opt.label}
-          </option>
-        ))}
-      </select>
+        onChange={(v) => setValue(key, v)}
+        options={item.options}
+        className="min-w-[120px]"
+      />
     </div>
   );
 }
@@ -169,8 +151,8 @@ function ButtonItem({ item }: { item: SettingsButtonItem }) {
         onClick={() => void executeCommand(item.command, ...(item.commandArgs ?? []))}
         className={`shrink-0 rounded-md px-3 py-1.5 text-[12px] font-medium transition-colors ${
           isDanger
-            ? 'bg-red-500/10 text-red-400 hover:bg-red-500/20'
-            : 'bg-accent/10 text-accent hover:bg-accent/20'
+            ? 'bg-destructive/10 text-destructive hover:bg-destructive/20'
+            : 'bg-primary/10 text-primary hover:bg-primary/20'
         }`}
       >
         {item.buttonLabel ?? item.label ?? 'Run'}

@@ -1,7 +1,6 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import {
   ChevronRight,
-  ChevronDown,
   Loader2,
   FilePlus,
   FolderPlus,
@@ -32,25 +31,25 @@ import type { GitFile } from '../../../stores/git-store';
 
 // ── Git status colors (matching VS Code) ─────────────────────────────────────
 const GIT_NAME_COLORS: Record<string, string> = {
-  M: 'text-amber-300',
-  A: 'text-green-400',
-  D: 'text-red-400',
-  R: 'text-green-400',
-  C: 'text-green-400',
-  T: 'text-purple-400',
-  U: 'text-orange-400',
-  '?': 'text-green-400',
+  M: 'text-warning',
+  A: 'text-success',
+  D: 'text-destructive',
+  R: 'text-success',
+  C: 'text-success',
+  T: 'text-primary',
+  U: 'text-warning',
+  '?': 'text-success',
 };
 
 const GIT_BADGE_COLORS: Record<string, string> = {
-  M: 'text-amber-300',
-  A: 'text-green-400',
-  D: 'text-red-400',
-  R: 'text-green-400',
-  C: 'text-green-400',
-  T: 'text-purple-400',
-  U: 'text-orange-400',
-  '?': 'text-green-400',
+  M: 'text-warning',
+  A: 'text-success',
+  D: 'text-destructive',
+  R: 'text-success',
+  C: 'text-success',
+  T: 'text-primary',
+  U: 'text-warning',
+  '?': 'text-success',
 };
 
 function buildGitStatusMap(
@@ -224,7 +223,7 @@ function InlineInput({ defaultValue = '', onSubmit, onCancel, depth, isDir }: In
         onChange={(e) => setValue(e.target.value)}
         onKeyDown={handleKeyDown}
         onBlur={onCancel}
-        className="flex-1 rounded-sm bg-background px-1 py-0.5 text-[11px] text-foreground outline-none focus:ring-1 focus:ring-accent/40"
+        className="flex-1 rounded-md bg-card px-1.5 py-0.5 text-[11px] text-foreground outline-none ring-2 ring-primary/40"
       />
     </div>
   );
@@ -301,11 +300,11 @@ function FileTreeNode({
   }, [node.isDir, relPath, diagnosticsMap]);
 
   const nameColorClass = useMemo(() => {
-    if (fileDiagnostics && fileDiagnostics.errors > 0) return 'text-red-400';
-    if (fileDiagnostics && fileDiagnostics.warnings > 0) return 'text-amber-300';
+    if (fileDiagnostics && fileDiagnostics.errors > 0) return 'text-destructive';
+    if (fileDiagnostics && fileDiagnostics.warnings > 0) return 'text-warning';
     if (gitStatus) return GIT_NAME_COLORS[gitStatus] ?? '';
-    if (dirDiagnostics && dirDiagnostics.errors > 0) return 'text-red-400';
-    if (dirDiagnostics && dirDiagnostics.warnings > 0) return 'text-amber-300';
+    if (dirDiagnostics && dirDiagnostics.errors > 0) return 'text-destructive';
+    if (dirDiagnostics && dirDiagnostics.warnings > 0) return 'text-warning';
     if (dirGit && dirGit.count > 0) return GIT_NAME_COLORS[dirGit.dominantStatus ?? 'M'] ?? '';
     return '';
   }, [fileDiagnostics, gitStatus, dirDiagnostics, dirGit]);
@@ -352,7 +351,8 @@ function FileTreeNode({
   const NodeIcon = node.isDir
     ? getFolderIcon(node.name, !!node.isExpanded)
     : getFileIcon(node.name);
-  const ChevronIcon = node.isExpanded ? ChevronDown : ChevronRight;
+
+  // ── Render ──────────────────────────────────────────────────────────────
 
   const isRenaming = renamingPath === node.path;
 
@@ -399,28 +399,28 @@ function FileTreeNode({
         onDragEnd={onDragEnd}
         onDragOver={!node.isDir ? (e) => { e.preventDefault(); e.dataTransfer.dropEffect = draggedPath ? 'move' : 'copy'; } : undefined}
         data-tree-path={node.path}
-        className={`flex w-full items-center gap-1 rounded-sm px-1 py-[3px] text-[11px] transition-colors ${
+        className={`flex w-full items-center gap-1.5 py-1 pr-2 text-left text-[11px] text-foreground transition-colors ${
           isDragOver
-            ? 'bg-accent/20 ring-1 ring-inset ring-accent/50'
-            : isActive ? 'bg-accent-muted' : 'hover:bg-surface-raised'
-        } ${nameColorClass || 'text-foreground'} ${isHidden ? 'opacity-60' : ''} ${
+            ? 'bg-primary/20 ring-1 ring-inset ring-primary/50'
+            : isActive ? 'bg-primary/15' : 'hover:bg-muted'
+        } ${nameColorClass || ''} ${isHidden ? 'opacity-60' : ''} ${
           isDragging || isCut ? 'opacity-30' : ''
         }`}
-        style={{ paddingLeft: `${depth * 12 + 4}px` }}
+        style={{ paddingLeft: `${depth * 12 + 8}px` }}
       >
         {node.isDir ? (
           <>
             {node.isLoading ? (
-              <Loader2 className="h-3 w-3 shrink-0 animate-spin text-muted-foreground" />
+              <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-muted-foreground" />
             ) : (
-              <ChevronIcon className="h-3 w-3 shrink-0 text-muted-foreground" />
+              <ChevronRight className={`h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform ${node.isExpanded ? 'rotate-90' : ''}`} />
             )}
-            <NodeIcon className="h-3.5 w-3.5 shrink-0" />
+            <NodeIcon className="h-4 w-4 shrink-0" />
           </>
         ) : (
           <>
-            <span className="w-3 shrink-0" />
-            <NodeIcon className="h-3.5 w-3.5 shrink-0" />
+            <span className="w-3.5 shrink-0" />
+            <NodeIcon className="h-4 w-4 shrink-0" />
           </>
         )}
         <span className={`truncate ${nameColorClass || ''} ${gitStatus === 'D' ? 'line-through opacity-70' : ''}`}>
@@ -428,12 +428,12 @@ function FileTreeNode({
         </span>
         {/* Diagnostics badge for files */}
         {!node.isDir && fileDiagnostics && fileDiagnostics.errors > 0 && (
-          <span className="ml-auto shrink-0 rounded-full bg-red-500/15 px-1 py-0 text-[9px] font-bold text-red-400">
+          <span className="ml-auto shrink-0 rounded-full bg-destructive/15 px-1 py-0 text-[9px] font-bold text-destructive">
             {formatBadge(fileDiagnostics.errors)}
           </span>
         )}
         {!node.isDir && fileDiagnostics && fileDiagnostics.errors === 0 && fileDiagnostics.warnings > 0 && (
-          <span className="ml-auto shrink-0 rounded-full bg-amber-500/15 px-1 py-0 text-[9px] font-bold text-amber-300">
+          <span className="ml-auto shrink-0 rounded-full bg-warning/15 px-1 py-0 text-[9px] font-bold text-warning">
             {formatBadge(fileDiagnostics.warnings)}
           </span>
         )}
@@ -445,17 +445,17 @@ function FileTreeNode({
         )}
         {/* Diagnostics dot for directories */}
         {node.isDir && dirDiagnostics && dirDiagnostics.errors > 0 && (
-          <span className="ml-auto mr-1 shrink-0 h-[6px] w-[6px] rounded-full bg-red-400" />
+          <span className="ml-auto mr-1 shrink-0 h-[6px] w-[6px] rounded-full bg-destructive" />
         )}
         {node.isDir && dirDiagnostics && dirDiagnostics.errors === 0 && dirDiagnostics.warnings > 0 && (
-          <span className="ml-auto mr-1 shrink-0 h-[6px] w-[6px] rounded-full bg-amber-400" />
+          <span className="ml-auto mr-1 shrink-0 h-[6px] w-[6px] rounded-full bg-warning" />
         )}
         {/* Git dot for directories */}
         {node.isDir && dirGit && dirGit.count > 0 && (
           <span className={`ml-1 shrink-0 pr-1 h-[6px] w-[6px] rounded-full ${
             dirGit.dominantStatus === 'M' || dirGit.dominantStatus === 'U'
-              ? 'bg-amber-400'
-              : dirGit.dominantStatus === 'D' ? 'bg-red-400' : 'bg-green-400'
+              ? 'bg-warning'
+              : dirGit.dominantStatus === 'D' ? 'bg-destructive' : 'bg-success'
           }`} />
         )}
       </button>
@@ -522,7 +522,7 @@ function ContextMenuItem({
     <button
       onClick={onClick}
       className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-[11px] transition-colors ${
-        danger ? 'text-error hover:bg-error/10' : 'text-foreground hover:bg-surface-raised'
+        danger ? 'text-destructive hover:bg-destructive/10' : 'text-foreground hover:bg-muted'
       }`}
     >
       <Icon className="h-3.5 w-3.5 shrink-0" />
@@ -1095,7 +1095,7 @@ export function FileTree() {
       {contextMenu && (
         <div
           ref={menuRef}
-          className="fixed z-50 min-w-[200px] rounded-lg border border-border bg-surface p-1 shadow-xl"
+          className="fixed z-50 min-w-[200px] rounded-xl border border-border bg-popover p-1 shadow-lg"
           style={{ left: menuX, top: menuY }}
         >
           <ContextMenuItem icon={FilePlus} label="New File..." onClick={handleNewFile} />
@@ -1155,7 +1155,7 @@ export function FileTree() {
       {/* Pending ops overlay */}
       {pendingOps.size > 0 && (
         <div className="pointer-events-none absolute inset-0 z-10 flex items-end justify-end p-2">
-          <div className="flex items-center gap-1.5 rounded-md bg-surface-raised px-2 py-1 text-[10px] text-muted-foreground shadow">
+            <div className="flex items-center gap-1.5 rounded-md bg-card px-2 py-1 text-[10px] text-muted-foreground shadow-sm">
             <Loader2 className="h-3 w-3 animate-spin" />
             Working...
           </div>

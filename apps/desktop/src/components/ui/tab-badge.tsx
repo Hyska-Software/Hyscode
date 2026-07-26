@@ -13,7 +13,7 @@ export function TabBadge({ count, showZero = false, className }: TabBadgeProps) 
   return (
     <span
       className={cn(
-        'rounded-full bg-accent/20 px-1 text-[9px] font-medium tabular-nums text-accent',
+        'min-w-4 rounded-full bg-primary/15 px-1 text-[9px] font-medium tabular-nums text-primary',
         className,
       )}
     >

@@ -70,7 +70,7 @@ export function MarkdownViewer({
           onClick={() => onModeChange('preview')}
           className={`flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-medium transition-colors ${
             mode === 'preview'
-              ? 'bg-accent/20 text-accent'
+              ? 'bg-primary/20 text-primary'
               : 'text-muted-foreground hover:text-foreground'
           }`}
         >
@@ -81,7 +81,7 @@ export function MarkdownViewer({
           onClick={() => onModeChange('code')}
           className={`flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-medium transition-colors ${
             mode === 'code'
-              ? 'bg-accent/20 text-accent'
+              ? 'bg-primary/20 text-primary'
               : 'text-muted-foreground hover:text-foreground'
           }`}
         >

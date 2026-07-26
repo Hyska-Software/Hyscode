@@ -22,9 +22,9 @@ const AGENT_ICONS: Record<AgentMode, typeof MessageSquare> = {
 
 const AGENT_COLORS: Record<AgentMode, string> = {
   chat: 'text-blue-400',
-  build: 'text-accent',
+  build: 'text-primary',
   review: 'text-purple-400',
-  debug: 'text-red-400',
+  debug: 'text-destructive',
   plan: 'text-amber-400',
 };
 
@@ -49,7 +49,7 @@ export function AgentPicker() {
       {AGENT_DEFS.map((agent) => {
         const mode = agent.type as AgentMode;
         const Icon = AGENT_ICONS[mode] ?? MessageSquare;
-        const color = AGENT_COLORS[mode] ?? 'text-accent';
+        const color = AGENT_COLORS[mode] ?? 'text-primary';
         const isActive = mode === currentMode;
 
         return (
@@ -70,7 +70,7 @@ export function AgentPicker() {
                 {agent.description}
               </span>
             </div>
-            {isActive && <ChevronRight className="h-3 w-3 shrink-0 text-accent" />}
+            {isActive && <ChevronRight className="h-3 w-3 shrink-0 text-primary" />}
           </button>
         );
       })}

@@ -39,7 +39,7 @@ export function StatusBar() {
 
   return (
     <>
-      <footer className="flex h-5 items-center justify-between bg-background px-3 text-[10px]">
+      <footer className="flex h-5 items-center justify-between border-t border-border/50 bg-background px-3 text-[10px]">
         <div className="flex items-center gap-3">
           {isGitRepo ? (
             <button
@@ -49,9 +49,9 @@ export function StatusBar() {
             >
               <GitBranch className="h-2.5 w-2.5" />
               <span>{currentBranch || 'HEAD'}</span>
-              {ahead > 0 && <span className="text-green-400">↑{ahead}</span>}
-              {behind > 0 && <span className="text-yellow-400">↓{behind}</span>}
-              {totalChanges > 0 && <span className="text-accent">{totalChanges}⨉</span>}
+              {ahead > 0 && <span className="text-success">↑{ahead}</span>}
+              {behind > 0 && <span className="text-warning">↓{behind}</span>}
+              {totalChanges > 0 && <span className="text-primary">{totalChanges}⨉</span>}
             </button>
           ) : (
             <span className="flex items-center gap-1.5 text-muted-foreground">
@@ -60,11 +60,11 @@ export function StatusBar() {
             </span>
           )}
           <div
-            className={`flex items-center gap-1.5 ${connectionState === 'degraded' || connectionState === 'offline' || connectionState === 'retry_wait' ? 'text-yellow-400' : 'text-muted-foreground'}`}
+            className={`flex items-center gap-1.5 ${connectionState === 'degraded' || connectionState === 'offline' || connectionState === 'retry_wait' ? 'text-warning' : 'text-muted-foreground'}`}
             title={connectionMessage ?? `Agent connection: ${connectionState}`}
           >
             <Circle
-              className={`h-1.5 w-1.5 ${connectionState === 'degraded' || connectionState === 'offline' || connectionState === 'retry_wait' ? 'fill-yellow-400 text-yellow-400' : 'fill-success text-success'}`}
+              className={`h-1.5 w-1.5 ${connectionState === 'degraded' || connectionState === 'offline' || connectionState === 'retry_wait' ? 'fill-warning text-warning' : 'fill-success text-success'}`}
             />
             <span>
               {connectionState === 'idle' ? 'Ready' : (connectionMessage ?? connectionState)}
@@ -83,7 +83,7 @@ export function StatusBar() {
           )}
           {selectedDevice && (
             <span
-              className="flex items-center gap-1 text-accent"
+               className="flex items-center gap-1 text-primary"
               title={`Target: ${selectedDevice.name} (${selectedDevice.platform})`}
             >
               <Smartphone className="h-2.5 w-2.5" />
@@ -98,7 +98,7 @@ export function StatusBar() {
                 lspInfo.status === 'ready'
                   ? 'text-success'
                   : lspInfo.status === 'starting'
-                    ? 'text-yellow-400'
+                    ? 'text-warning'
                     : lspInfo.status === 'error'
                       ? 'text-destructive'
                       : 'text-muted-foreground'

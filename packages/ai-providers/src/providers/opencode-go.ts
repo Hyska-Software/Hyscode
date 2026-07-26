@@ -17,23 +17,71 @@ const GO_ANTHROPIC_MODELS = new Set([
 ]);
 
 // ─── Thinking variant presets ────────────────────────────────────────────────
+// Per official provider docs (MiniMax, Moonshot, Zhipu/GLM, DeepSeek, Xiaomi/MiMo,
+// xAI, Tencent/Hunyuan) — verified against vendor API references.
 
+/** Toggle thinking (enable_thinking / thinking.type): GLM, MiMo, Qwen */
 const THINKING_KIMI: ThinkingVariants = {
   kind: 'kimi',
   levels: ['enabled', 'disabled'],
   defaultLevel: 'enabled',
 };
 
-const THINKING_DEEPSEEK: ThinkingVariants = {
-  kind: 'deepseek',
-  levels: ['enabled', 'disabled'],
+/** DeepSeek V4: reasoning effort high/max */
+const THINKING_DEEPSEEK_TOGGLE: ThinkingVariants = {
+  kind: 'openai',
+  levels: ['high', 'max'],
+  defaultLevel: 'max',
+};
+
+/** Qwen hybrid thinking: reasoning effort default/high/max */
+const THINKING_QWEN: ThinkingVariants = {
+  kind: 'openai',
+  levels: ['default', 'high', 'max'],
+  defaultLevel: 'max',
+};
+
+/** Reasoning models with low/medium/high effort: grok-4.5 (xAI) */
+const THINKING_REASONING_LMH: ThinkingVariants = {
+  kind: 'openai',
+  levels: ['low', 'medium', 'high'],
+  defaultLevel: 'high',
+};
+
+/** Kimi K3: reasoning_effort low/high/max (default max), cannot disable */
+const THINKING_KIMI_K3: ThinkingVariants = {
+  kind: 'openai',
+  levels: ['default', 'max'],
+  defaultLevel: 'max',
+};
+
+/** GLM-5.2: reasoning effort default/high/max */
+const THINKING_GLM: ThinkingVariants = {
+  kind: 'openai',
+  levels: ['default', 'high', 'max'],
+  defaultLevel: 'max',
+};
+
+/** MiniMax M3: thinking.type adaptive/disabled (adaptive = thinking on) */
+const THINKING_MINIMAX_M3: ThinkingVariants = {
+  kind: 'kimi',
+  levels: ['adaptive', 'disabled'],
+  defaultLevel: 'adaptive',
+};
+
+/** Always-on thinking (cannot be disabled): Kimi K2.7-code, MiniMax M2.x */
+const THINKING_ALWAYS_ON: ThinkingVariants = {
+  kind: 'kimi',
+  levels: ['enabled'],
   defaultLevel: 'enabled',
 };
 
-const THINKING_QWEN: ThinkingVariants = {
-  kind: 'anthropic',
-  levels: ['enabled', 'disabled'],
-  defaultLevel: 'enabled',
+// Hy3 = Tencent Hunyuan 3: OpenAI-compatible hybrid thinking via `reasoning_effort`.
+// Official docs: levels none/low/medium/high (none = instant, no thinking).
+const THINKING_HY3: ThinkingVariants = {
+  kind: 'openai',
+  levels: ['none', 'low', 'medium', 'high'],
+  defaultLevel: 'medium',
 };
 
 // ─── Static Model List ──────────────────────────────────────────────────────
@@ -43,6 +91,17 @@ const THINKING_QWEN: ThinkingVariants = {
 const GO_MODELS: AIModel[] = [
   // ── OpenAI-compatible chat models (/zen/go/v1/chat/completions) ───────────
   {
+    id: 'grok-4.5',
+    name: 'Grok 4.5 (Go)',
+    provider: 'opencode-go',
+    contextWindow: 500_000,
+    maxOutputTokens: 16_384,
+    supportsTools: true,
+    supportsStreaming: true,
+    supportsVision: false,
+    thinkingVariants: THINKING_REASONING_LMH,
+  },
+  {
     id: 'glm-5.2',
     name: 'GLM 5.2 (Go)',
     provider: 'opencode-go',
@@ -51,7 +110,7 @@ const GO_MODELS: AIModel[] = [
     supportsTools: true,
     supportsStreaming: true,
     supportsVision: false,
-    thinkingVariants: THINKING_KIMI,
+    thinkingVariants: THINKING_GLM,
   },
   {
     id: 'glm-5.1',
@@ -65,6 +124,17 @@ const GO_MODELS: AIModel[] = [
     thinkingVariants: THINKING_KIMI,
   },
   {
+    id: 'kimi-k3',
+    name: 'Kimi K3 (Go)',
+    provider: 'opencode-go',
+    contextWindow: 1_000_000,
+    maxOutputTokens: 32_768,
+    supportsTools: true,
+    supportsStreaming: true,
+    supportsVision: false,
+    thinkingVariants: THINKING_KIMI_K3,
+  },
+  {
     id: 'kimi-k2.7-code',
     name: 'Kimi K2.7 Code (Go)',
     provider: 'opencode-go',
@@ -73,7 +143,7 @@ const GO_MODELS: AIModel[] = [
     supportsTools: true,
     supportsStreaming: true,
     supportsVision: false,
-    thinkingVariants: THINKING_KIMI,
+    thinkingVariants: THINKING_ALWAYS_ON,
   },
   {
     id: 'kimi-k2.6',
@@ -90,7 +160,7 @@ const GO_MODELS: AIModel[] = [
     id: 'mimo-v2.5',
     name: 'MiMo V2.5 (Go)',
     provider: 'opencode-go',
-    contextWindow: 128_000,
+    contextWindow: 1_000_000,
     maxOutputTokens: 8_192,
     supportsTools: true,
     supportsStreaming: true,
@@ -101,7 +171,7 @@ const GO_MODELS: AIModel[] = [
     id: 'mimo-v2.5-pro',
     name: 'MiMo V2.5 Pro (Go)',
     provider: 'opencode-go',
-    contextWindow: 128_000,
+    contextWindow: 1_000_000,
     maxOutputTokens: 8_192,
     supportsTools: true,
     supportsStreaming: true,
@@ -112,12 +182,12 @@ const GO_MODELS: AIModel[] = [
     id: 'deepseek-v4-pro',
     name: 'DeepSeek V4 Pro (Go)',
     provider: 'opencode-go',
-    contextWindow: 128_000,
+    contextWindow: 1_000_000,
     maxOutputTokens: 8_192,
     supportsTools: true,
     supportsStreaming: true,
     supportsVision: false,
-    thinkingVariants: THINKING_DEEPSEEK,
+    thinkingVariants: THINKING_DEEPSEEK_TOGGLE,
   },
   {
     id: 'deepseek-v4-flash',
@@ -128,7 +198,18 @@ const GO_MODELS: AIModel[] = [
     supportsTools: true,
     supportsStreaming: true,
     supportsVision: false,
-    thinkingVariants: THINKING_DEEPSEEK,
+    thinkingVariants: THINKING_DEEPSEEK_TOGGLE,
+  },
+  {
+    id: 'hy3',
+    name: 'Hy3 (Go)',
+    provider: 'opencode-go',
+    contextWindow: 1_000_000,
+    maxOutputTokens: 16_384,
+    supportsTools: true,
+    supportsStreaming: true,
+    supportsVision: false,
+    thinkingVariants: THINKING_HY3,
   },
 
   // ── Anthropic-compatible models (/zen/go/v1/messages) ────────────────────
@@ -136,40 +217,40 @@ const GO_MODELS: AIModel[] = [
     id: 'minimax-m3',
     name: 'MiniMax M3 (Go)',
     provider: 'opencode-go',
-    contextWindow: 204_800,
+    contextWindow: 1_000_000,
     maxOutputTokens: 16_384,
     supportsTools: true,
     supportsStreaming: true,
     supportsVision: false,
-    thinkingVariants: THINKING_KIMI,
+    thinkingVariants: THINKING_MINIMAX_M3,
   },
   {
     id: 'minimax-m2.7',
     name: 'MiniMax M2.7 (Go)',
     provider: 'opencode-go',
-    contextWindow: 204_800,
+    contextWindow: 1_000_000,
     maxOutputTokens: 16_384,
     supportsTools: true,
     supportsStreaming: true,
     supportsVision: false,
-    thinkingVariants: THINKING_KIMI,
+    thinkingVariants: THINKING_ALWAYS_ON,
   },
   {
     id: 'minimax-m2.5',
     name: 'MiniMax M2.5 (Go)',
     provider: 'opencode-go',
-    contextWindow: 204_800,
+    contextWindow: 1_000_000,
     maxOutputTokens: 16_384,
     supportsTools: true,
     supportsStreaming: true,
     supportsVision: false,
-    thinkingVariants: THINKING_KIMI,
+    thinkingVariants: THINKING_ALWAYS_ON,
   },
   {
     id: 'qwen3.7-max',
     name: 'Qwen3.7 Max (Go)',
     provider: 'opencode-go',
-    contextWindow: 262_144,
+    contextWindow: 1_000_000,
     maxOutputTokens: 32_768,
     supportsTools: true,
     supportsStreaming: true,
@@ -180,7 +261,7 @@ const GO_MODELS: AIModel[] = [
     id: 'qwen3.7-plus',
     name: 'Qwen3.7 Plus (Go)',
     provider: 'opencode-go',
-    contextWindow: 262_144,
+    contextWindow: 1_000_000,
     maxOutputTokens: 32_768,
     supportsTools: true,
     supportsStreaming: true,
@@ -191,7 +272,7 @@ const GO_MODELS: AIModel[] = [
     id: 'qwen3.6-plus',
     name: 'Qwen3.6 Plus (Go)',
     provider: 'opencode-go',
-    contextWindow: 131_072,
+    contextWindow: 1_000_000,
     maxOutputTokens: 32_768,
     supportsTools: true,
     supportsStreaming: true,

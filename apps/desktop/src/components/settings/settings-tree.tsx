@@ -352,11 +352,11 @@ function TreeGroupRow({
         type="button"
         onClick={() => onToggleGroup(group.id)}
         onFocus={() => setFocusedId(group.id)}
-        className={`flex w-full items-center gap-1.5 px-2 py-1.5 text-left transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-ring/60 ${
+        className={`flex w-full items-center gap-1.5 px-2 py-1.5 text-left transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background ${
           hasActiveDescendant
             ? 'text-foreground'
             : 'text-muted-foreground hover:text-foreground'
-        } hover:bg-muted/50`}
+        }         hover:bg-muted/40`}
       >
         <ChevronRight
           className={`h-3 w-3 shrink-0 text-muted-foreground transition-transform duration-150 motion-reduce:transition-none ${
@@ -364,7 +364,7 @@ function TreeGroupRow({
           }`}
           aria-hidden
         />
-        <span className="text-[10px] font-medium uppercase tracking-wider">
+          <span className="text-[10px] font-medium uppercase tracking-widest">
           <HighlightedText text={group.label} query={query} />
         </span>
       </button>
@@ -421,10 +421,10 @@ function TreeLeafRow({
       onClick={() => onSelectLeaf(leaf.id)}
       onContextMenu={(e) => onContextMenu(e, leaf)}
       onFocus={() => setFocusedId(leaf.id)}
-      className={`ml-3 flex w-[calc(100%-0.75rem)] cursor-pointer items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[12px] font-medium transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-ring/60 ${
+      className={`ml-3 flex w-[calc(100%-0.75rem)] cursor-pointer items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[12px] font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background ${
         isActive
-          ? 'bg-surface-raised text-foreground'
-          : 'text-muted-foreground hover:bg-surface-raised/50 hover:text-foreground'
+          ? 'bg-primary/10 text-primary'
+          : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground'
       }`}
     >
       <leaf.icon className="h-4 w-4 shrink-0" aria-hidden />
@@ -464,7 +464,7 @@ const SettingsContextMenu = forwardRef<HTMLDivElement, {
   return (
     <div
       ref={ref}
-      className="fixed z-50 min-w-[180px] rounded-lg border border-border bg-surface p-1 shadow-xl"
+      className="fixed z-50 min-w-[180px] rounded-lg border border-border bg-popover p-1 shadow-xl"
       style={{ left: x, top: y }}
     >
       <ContextMenuItem
@@ -499,7 +499,7 @@ function ContextMenuItem({
       className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[11px] transition-colors ${
         disabled
           ? 'pointer-events-none text-muted-foreground/50'
-          : 'text-foreground hover:bg-surface-raised'
+          : 'text-foreground hover:bg-muted'
       }`}
     >
       <Icon className="h-3.5 w-3.5 shrink-0" />

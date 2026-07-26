@@ -127,7 +127,7 @@ export function InputDialog() {
       <div className="absolute inset-0 bg-black/50" onClick={handleCancel} />
 
       {/* Dialog */}
-      <div className="relative z-10 w-full max-w-sm rounded-lg border border-border bg-surface p-4 shadow-xl">
+      <div className="relative z-10 w-full max-w-sm rounded-xl border border-border bg-card p-4 shadow-lg">
         <h3 className="mb-3 text-[12px] font-semibold text-foreground">{dialog.title}</h3>
         <input
           ref={inputRef}
@@ -136,20 +136,20 @@ export function InputDialog() {
           onChange={(e) => setValue(e.target.value)}
           onKeyDown={handleKeyDown}
           placeholder={dialog.placeholder}
-          className="w-full rounded-md border border-border bg-background px-3 py-1.5 text-[12px] text-foreground outline-none focus:border-accent focus:ring-1 focus:ring-accent/40"
+          className="w-full rounded-md border border-input bg-background px-3 py-1.5 text-[12px] text-foreground outline-none focus:border-ring focus:ring-1 focus:ring-ring/40"
           style={{ userSelect: 'text', WebkitUserSelect: 'text' }}
         />
         <div className="mt-3 flex justify-end gap-2">
           <button
             onClick={handleCancel}
-            className="rounded-md px-3 py-1 text-[11px] font-medium text-muted-foreground hover:bg-muted transition-colors"
+            className="rounded-md px-3 py-1 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-muted"
           >
             Cancel
           </button>
           <button
             onClick={handleConfirm}
             disabled={!value.trim()}
-            className="rounded-md bg-accent px-3 py-1 text-[11px] font-medium text-accent-foreground hover:bg-accent/90 disabled:opacity-40 transition-colors"
+            className="rounded-md bg-primary px-3 py-1 text-[11px] font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-40"
           >
             {dialog.confirmLabel ?? 'OK'}
           </button>
@@ -204,7 +204,7 @@ export function ConfirmDialog() {
       <div className="absolute inset-0 bg-black/50" onClick={handleCancel} />
 
       {/* Dialog */}
-      <div className="relative z-10 w-full max-w-sm rounded-lg border border-border bg-surface p-4 shadow-xl">
+      <div className="relative z-10 w-full max-w-sm rounded-xl border border-border bg-card p-4 shadow-lg">
         <h3 className="mb-1 text-[12px] font-semibold text-foreground">{dialog.title}</h3>
         {dialog.description && (
           <p className="mb-3 text-[11px] text-muted-foreground">{dialog.description}</p>
@@ -212,7 +212,7 @@ export function ConfirmDialog() {
         <div className="mt-3 flex justify-end gap-2">
           <button
             onClick={handleCancel}
-            className="rounded-md px-3 py-1 text-[11px] font-medium text-muted-foreground hover:bg-muted transition-colors"
+            className="rounded-md px-3 py-1 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-muted"
           >
             Cancel
           </button>
@@ -221,8 +221,8 @@ export function ConfirmDialog() {
             onClick={handleConfirm}
             className={`rounded-md px-3 py-1 text-[11px] font-medium transition-colors ${
               dialog.danger
-                ? 'bg-error text-white hover:bg-error/90'
-                : 'bg-accent text-accent-foreground hover:bg-accent/90'
+                ? 'bg-destructive text-white hover:bg-destructive/90'
+                : 'bg-primary text-primary-foreground hover:bg-primary/90'
             }`}
           >
             {dialog.confirmLabel ?? 'Confirm'}

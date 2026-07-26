@@ -13,14 +13,22 @@ import type {
 import { ProviderError } from '../types';
 
 // ─── Thinking variant presets ────────────────────────────────────────────────
-// Aligned with the official OpenCode built-in variants
-// (https://dev.opencode.ai/docs/models/#variants): Google supports low / high.
+// Per docs/MODELS_REFERENCE.md — Gemini 3.6 Flash / 3.5 Flash / 3.1 Pro support
+// thinking levels low/medium/high; 3.5 Flash Lite and 3 Flash support low/medium.
 // The Gemini API uses a numeric thinkingBudget; map the level to a token count.
 
-const GEMINI_THINKING_VARIANTS: ThinkingVariants = {
+/** low/medium/high — Gemini 3.6 Flash, 3.5 Flash, 3.1 Pro */
+export const GEMINI_THINKING_LMH_VARIANTS: ThinkingVariants = {
   kind: 'gemini',
-  levels: ['low', 'high'],
+  levels: ['low', 'medium', 'high'],
   defaultLevel: 'high',
+};
+
+/** low/medium — Gemini 3.5 Flash Lite, 3 Flash */
+export const GEMINI_THINKING_LM_VARIANTS: ThinkingVariants = {
+  kind: 'gemini',
+  levels: ['low', 'medium'],
+  defaultLevel: 'medium',
 };
 
 /** Map an OpenCode Gemini thinking level to a thinkingBudget token count. */
@@ -28,6 +36,8 @@ function thinkingBudgetForLevel(level?: string): number {
   switch (level) {
     case 'low':
       return 0; // 0 disables thinking budget expansion beyond the minimum
+    case 'medium':
+      return 8_192;
     case 'high':
       return 24_576;
     default:
@@ -227,19 +237,19 @@ function* parseGeminiResponse(data: string): Iterable<StreamChunk> {
 // ─── Provider Implementation ────────────────────────────────────────────────
 
 const GEMINI_MODELS: AIModel[] = [
-  // ── Gemini 3.x models ──
   {
-    id: 'gemini-3.1-pro-preview',
-    name: 'Gemini 3.1 Pro Preview',
+    id: 'gemini-3.6-flash',
+    name: 'Gemini 3.6 Flash',
     provider: 'gemini',
     contextWindow: 1_048_576,
     maxOutputTokens: 65_536,
     supportsTools: true,
     supportsStreaming: true,
     supportsVision: true,
-    inputPricePerMToken: 2.0,
-    outputPricePerMToken: 12.0,
-    thinkingVariants: GEMINI_THINKING_VARIANTS,
+    inputPricePerMToken: 1.5,
+    outputPricePerMToken: 7.5,
+    cachedInputPricePerMToken: 0.15,
+    thinkingVariants: GEMINI_THINKING_LMH_VARIANTS,
   },
   {
     id: 'gemini-3.5-flash',
@@ -252,11 +262,40 @@ const GEMINI_MODELS: AIModel[] = [
     supportsVision: true,
     inputPricePerMToken: 1.5,
     outputPricePerMToken: 9,
-    thinkingVariants: GEMINI_THINKING_VARIANTS,
+    cachedInputPricePerMToken: 0.15,
+    thinkingVariants: GEMINI_THINKING_LMH_VARIANTS,
   },
   {
-    id: 'gemini-3-flash-preview',
-    name: 'Gemini 3 Flash Preview',
+    id: 'gemini-3.5-flash-lite',
+    name: 'Gemini 3.5 Flash Lite',
+    provider: 'gemini',
+    contextWindow: 1_048_576,
+    maxOutputTokens: 65_536,
+    supportsTools: true,
+    supportsStreaming: true,
+    supportsVision: true,
+    inputPricePerMToken: 0.3,
+    outputPricePerMToken: 2.5,
+    cachedInputPricePerMToken: 0.03,
+    thinkingVariants: GEMINI_THINKING_LM_VARIANTS,
+  },
+  {
+    id: 'gemini-3.1-pro',
+    name: 'Gemini 3.1 Pro',
+    provider: 'gemini',
+    contextWindow: 1_048_576,
+    maxOutputTokens: 65_536,
+    supportsTools: true,
+    supportsStreaming: true,
+    supportsVision: true,
+    inputPricePerMToken: 2.0,
+    outputPricePerMToken: 12.0,
+    cachedInputPricePerMToken: 0.2,
+    thinkingVariants: GEMINI_THINKING_LMH_VARIANTS,
+  },
+  {
+    id: 'gemini-3-flash',
+    name: 'Gemini 3 Flash',
     provider: 'gemini',
     contextWindow: 1_048_576,
     maxOutputTokens: 65_536,
@@ -265,59 +304,8 @@ const GEMINI_MODELS: AIModel[] = [
     supportsVision: true,
     inputPricePerMToken: 0.5,
     outputPricePerMToken: 3.0,
-    thinkingVariants: GEMINI_THINKING_VARIANTS,
-  },
-  {
-    id: 'gemini-3.1-flash-lite',
-    name: 'Gemini 3.1 Flash-Lite',
-    provider: 'gemini',
-    contextWindow: 1_048_576,
-    maxOutputTokens: 65_536,
-    supportsTools: true,
-    supportsStreaming: true,
-    supportsVision: true,
-    inputPricePerMToken: 0.25,
-    outputPricePerMToken: 1.5,
-    thinkingVariants: GEMINI_THINKING_VARIANTS,
-  },
-  // ── Gemini 2.5 stable models ──
-  {
-    id: 'gemini-2.5-pro',
-    name: 'Gemini 2.5 Pro',
-    provider: 'gemini',
-    contextWindow: 1_048_576,
-    maxOutputTokens: 65_536,
-    supportsTools: true,
-    supportsStreaming: true,
-    supportsVision: true,
-    inputPricePerMToken: 1.25,
-    outputPricePerMToken: 10.0,
-    thinkingVariants: GEMINI_THINKING_VARIANTS,
-  },
-  {
-    id: 'gemini-2.5-flash',
-    name: 'Gemini 2.5 Flash',
-    provider: 'gemini',
-    contextWindow: 1_048_576,
-    maxOutputTokens: 65_535, // OpenRouter reports 65,535 for Vertex provider
-    supportsTools: true,
-    supportsStreaming: true,
-    supportsVision: true,
-    inputPricePerMToken: 0.3,
-    outputPricePerMToken: 2.5,
-    thinkingVariants: GEMINI_THINKING_VARIANTS,
-  },
-  {
-    id: 'gemini-2.5-flash-lite',
-    name: 'Gemini 2.5 Flash-Lite',
-    provider: 'gemini',
-    contextWindow: 1_048_576,
-    maxOutputTokens: 65_535, // OpenRouter reports 65,535 for Vertex provider
-    supportsTools: true,
-    supportsStreaming: true,
-    supportsVision: true,
-    inputPricePerMToken: 0.1,
-    outputPricePerMToken: 0.4,
+    cachedInputPricePerMToken: 0.05,
+    thinkingVariants: GEMINI_THINKING_LM_VARIANTS,
   },
 ];
 

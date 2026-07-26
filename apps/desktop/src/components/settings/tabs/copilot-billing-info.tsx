@@ -70,11 +70,11 @@ function chatsForPlan(requests: number, multiplier: number): string {
 }
 
 function multiplierColor(multiplier: number): string {
-  if (multiplier === 0)    return 'text-green-500';
+  if (multiplier === 0)    return 'text-success';
   if (multiplier <= 0.33)  return 'text-emerald-400';
   if (multiplier === 1)    return 'text-foreground';
   if (multiplier <= 3)     return 'text-amber-400';
-  return 'text-red-400';
+  return 'text-destructive';
 }
 
 function multiplierLabel(multiplier: number): string {
@@ -117,7 +117,7 @@ export function CopilotBillingInfo() {
               {PLANS.map((plan) => (
                 <div
                   key={plan.name}
-                  className="flex flex-col items-center rounded bg-muted/60 px-1 py-1.5 gap-0.5"
+                  className="flex flex-col items-center rounded-lg bg-card px-1 py-1.5 gap-0.5"
                 >
                   <span className="text-[9px] font-medium text-foreground">{plan.name}</span>
                   <span className="text-[12px] font-bold text-foreground tabular-nums">
@@ -182,7 +182,7 @@ export function CopilotBillingInfo() {
             href="https://docs.github.com/en/copilot/reference/ai-models/supported-models#model-multipliers"
             target="_blank"
             rel="noopener noreferrer"
-            className="flex items-center gap-1 text-[9px] text-accent hover:underline w-fit"
+            className="flex items-center gap-1 text-[9px] text-primary hover:underline w-fit"
           >
             <ExternalLink className="h-2.5 w-2.5" />
             Tabela completa de multiplicadores no GitHub Docs

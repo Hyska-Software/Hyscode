@@ -88,6 +88,6 @@ describe.skipIf(!liveEnabled)('live provider acceptance', () => {
   it.skipIf(Boolean(providerFilter && providerFilter !== 'openrouter'))('round-trips a tool call through an OpenAI-compatible protocol', async () => {
     const key = keys['hyscode:openrouter_api_key'];
     expect(key, 'OpenRouter key is not configured in the HysCode keychain.').toBeTruthy();
-    await verifyToolRoundTrip(new OpenRouterProvider(key), 'google/gemini-2.5-flash');
+    await verifyToolRoundTrip(new OpenRouterProvider(key), 'google/gemini-3.5-flash');
   }, 120_000);
 });

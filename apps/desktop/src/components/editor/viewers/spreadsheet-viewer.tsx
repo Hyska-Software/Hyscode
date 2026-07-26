@@ -83,7 +83,7 @@ export function SpreadsheetViewer({ filePath }: SpreadsheetViewerProps) {
               onClick={() => setActiveSheet(name)}
               className={`px-2.5 py-1 text-[11px] font-medium transition-colors rounded-t-md ${
                 activeSheet === name
-                  ? 'bg-muted text-foreground border-b-2 border-accent'
+                  ? 'bg-muted text-foreground border-b-2 border-primary'
                   : 'text-muted-foreground hover:text-foreground'
               }`}
             >

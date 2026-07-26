@@ -1,6 +1,7 @@
 import { ExternalLink, Github, Heart, RefreshCw, Loader2, CheckCircle, ArrowUpCircle } from 'lucide-react';
 import { useUpdateStore } from '../../../stores/update-store';
 import { BrandMark } from '../../brand-mark';
+import { SettingInfoRow, SettingSection } from '../controls';
 
 const APP_NAME = 'HysCode';
 const APP_VERSION = '0.2.1';
@@ -44,7 +45,7 @@ export function AboutTab() {
           )}
 
           {updateStatus === 'up-to-date' && (
-            <span className="flex items-center gap-1.5 text-[11px] text-green-400">
+            <span className="flex items-center gap-1.5 text-[11px] text-success">
               <CheckCircle className="h-3 w-3" />
               You're up to date
             </span>
@@ -53,7 +54,7 @@ export function AboutTab() {
           {(updateStatus === 'available' || updateStatus === 'downloading' || updateStatus === 'ready') && releaseInfo && (
             <button
               onClick={openDialog}
-              className="flex items-center gap-1.5 rounded-md bg-accent/10 px-3 py-1.5 text-[11px] font-medium text-accent hover:bg-accent/20 transition-colors"
+              className="flex items-center gap-1.5 rounded-md bg-primary/10 px-3 py-1.5 text-[11px] font-medium text-primary hover:bg-primary/20 transition-colors"
             >
               <ArrowUpCircle className="h-3.5 w-3.5" />
               {updateStatus === 'ready' ? 'Restart to update' : `${releaseInfo.version} available`}
@@ -71,7 +72,7 @@ export function AboutTab() {
           )}
 
           {updateStatus === 'error' && (
-            <span className="text-[10px] text-red-400">
+            <span className="text-[10px] text-destructive">
               Failed to check — click to retry
             </span>
           )}
@@ -79,25 +80,25 @@ export function AboutTab() {
       </div>
 
       {/* Details */}
-      <Section title="Application">
-        <Row label="Name" value={APP_NAME} />
-        <Row label="Version" value={APP_VERSION} />
-        <Row label="Identifier" value={APP_IDENTIFIER} />
-        <Row label="Framework" value="Tauri 2 + React + Monaco Editor" />
-        <Row label="License" value="MIT" />
-      </Section>
+      <SettingSection title="Application">
+        <SettingInfoRow label="Name" value={APP_NAME} />
+        <SettingInfoRow label="Version" value={APP_VERSION} />
+        <SettingInfoRow label="Identifier" value={APP_IDENTIFIER} />
+        <SettingInfoRow label="Framework" value="Tauri 2 + React + Monaco Editor" />
+        <SettingInfoRow label="License" value="MIT" />
+      </SettingSection>
 
       {/* Tech Stack */}
-      <Section title="Tech Stack">
-        <Row label="Frontend" value="React, TypeScript, Tailwind CSS" />
-        <Row label="Editor" value="Monaco Editor" />
-        <Row label="Backend" value="Tauri (Rust)" />
-        <Row label="AI" value="Multi-provider (Anthropic, OpenAI, Copilot, etc.)" />
-        <Row label="Package Manager" value="pnpm (monorepo)" />
-      </Section>
+      <SettingSection title="Tech Stack">
+        <SettingInfoRow label="Frontend" value="React, TypeScript, Tailwind CSS" />
+        <SettingInfoRow label="Editor" value="Monaco Editor" />
+        <SettingInfoRow label="Backend" value="Tauri (Rust)" />
+        <SettingInfoRow label="AI" value="Multi-provider (Anthropic, OpenAI, Copilot, etc.)" />
+        <SettingInfoRow label="Package Manager" value="pnpm (monorepo)" />
+      </SettingSection>
 
       {/* Links */}
-      <Section title="Links">
+      <SettingSection title="Links">
         <a
           href={REPO_URL}
           target="_blank"
@@ -108,34 +109,12 @@ export function AboutTab() {
           GitHub Repository
           <ExternalLink className="ml-auto h-3 w-3 text-muted-foreground" />
         </a>
-      </Section>
+      </SettingSection>
 
       {/* Footer */}
       <div className="flex items-center justify-center gap-1.5 py-2 text-[10px] text-muted-foreground">
-        Made with <Heart className="h-3 w-3 text-red-400" /> by the HysCode team
+        Made with <Heart className="h-3 w-3 text-destructive" /> by the HysCode team
       </div>
-    </div>
-  );
-}
-
-// ── Shared atoms ─────────────────────────────────────────────────────────────
-
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <div>
-      <h3 className="mb-3 text-[10px] font-medium uppercase tracking-widest text-muted-foreground">
-        {title}
-      </h3>
-      <div className="flex flex-col gap-2">{children}</div>
-    </div>
-  );
-}
-
-function Row({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="flex items-center justify-between gap-4 rounded-lg bg-surface-raised px-3 py-2.5">
-      <span className="text-[12px] text-foreground">{label}</span>
-      <span className="text-[11px] text-muted-foreground">{value}</span>
     </div>
   );
 }

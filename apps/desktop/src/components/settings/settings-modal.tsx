@@ -225,14 +225,14 @@ export function SettingsModal() {
     >
       <div className="flex h-[580px] w-[1100px] overflow-hidden rounded-xl bg-surface shadow-2xl">
         {/* Left navigation */}
-        <nav className="flex w-[240px] flex-col overflow-hidden border-r border-border/40 bg-background">
+        <nav className="flex w-[240px] flex-col overflow-hidden border-r border-border bg-background">
           <div className="flex items-center justify-between px-3 pb-2 pt-3">
             <span className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
               Settings
             </span>
             <button
               onClick={closeSettings}
-              className="flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+              className="flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
               aria-label="Close settings"
             >
               <X className="h-3.5 w-3.5" />
@@ -260,7 +260,7 @@ export function SettingsModal() {
         {/* Right content */}
         <div className="flex flex-1 flex-col overflow-hidden">
           {/* Tab header */}
-          <div className="flex h-12 items-center justify-between border-b border-surface-raised px-6">
+          <div className="flex h-12 items-center justify-between border-b border-border px-6">
             <div className="flex flex-col">
               {activeGroupLabel && activeTab.type === 'builtin' && findGroupForBuiltin(activeTab.id) !== activeTab.id && (
                 <div className="flex items-center gap-1 text-[9px] font-mono uppercase tracking-widest text-muted-foreground/60">
@@ -275,7 +275,7 @@ export function SettingsModal() {
               <button
                 type="button"
                 onClick={handleResetTab}
-                className="flex items-center gap-1.5 rounded-md px-2 py-1 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-surface-raised hover:text-foreground"
+                className="flex items-center gap-1.5 rounded-md px-2 py-1 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-surface-raised hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
                 title="Reset all settings on this tab to their defaults"
               >
                 <RotateCcw className="h-3 w-3" />

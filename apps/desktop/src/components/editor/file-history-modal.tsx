@@ -106,7 +106,7 @@ export function FileHistoryModal({ filePath, onClose }: FileHistoryModalProps) {
       <div className="relative flex h-[520px] w-[520px] flex-col overflow-hidden rounded-xl border border-border bg-surface shadow-2xl">
         {/* Header */}
         <div className="flex items-center gap-2 border-b border-border px-4 py-3">
-          <Clock className="h-4 w-4 shrink-0 text-accent" />
+          <Clock className="h-4 w-4 shrink-0 text-primary" />
           <div className="min-w-0 flex-1">
             <p className="truncate text-sm font-semibold text-foreground">File History</p>
             <p className="truncate text-[11px] text-muted-foreground">{fileName}</p>
@@ -155,7 +155,7 @@ export function FileHistoryModal({ filePath, onClose }: FileHistoryModalProps) {
                   <button
                     onClick={() => handleOpen(entry)}
                     disabled={openingId === entry.id}
-                    className="flex items-center gap-1.5 rounded-md bg-accent/10 px-2.5 py-1 text-[11px] font-medium text-accent transition-colors hover:bg-accent/20 disabled:opacity-50"
+                    className="flex items-center gap-1.5 rounded-md bg-primary/10 px-2.5 py-1 text-[11px] font-medium text-primary transition-colors hover:bg-primary/20 disabled:opacity-50"
                     aria-label={`Open snapshot from ${formatAbsoluteTime(entry.created_at)}`}
                   >
                     {openingId === entry.id ? (
@@ -180,7 +180,7 @@ export function FileHistoryModal({ filePath, onClose }: FileHistoryModalProps) {
             <button
               onClick={handleClear}
               disabled={clearing}
-              className="flex items-center gap-1.5 rounded-md px-2 py-1 text-[11px] text-red-400 transition-colors hover:bg-red-500/10 disabled:opacity-50"
+              className="flex items-center gap-1.5 rounded-md px-2 py-1 text-[11px] text-destructive transition-colors hover:bg-destructive/10 disabled:opacity-50"
               aria-label="Clear all history"
             >
               {clearing ? <Loader2 className="h-3 w-3 animate-spin" /> : <Trash2 className="h-3 w-3" />}

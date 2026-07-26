@@ -90,7 +90,7 @@ export function WindowControls() {
         onClick={handleClose}
         title="Close"
         aria-label="Close"
-        className="flex h-7 w-9 items-center justify-center text-muted-foreground transition-colors hover:bg-red-500 hover:text-white"
+        className="flex h-7 w-9 items-center justify-center text-muted-foreground transition-colors hover:bg-destructive hover:text-white"
       >
         <X className="h-3.5 w-3.5" />
       </button>

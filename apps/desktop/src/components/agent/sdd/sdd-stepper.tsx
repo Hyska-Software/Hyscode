@@ -40,17 +40,17 @@ export function SddStepper() {
               {i > 0 && <ChevronRight className="h-2.5 w-2.5 text-muted-foreground/30" />}
               <div className="flex items-center gap-1">
                 {st === 'completed' ? (
-                  <Check className="h-3 w-3 text-green-400/80" />
+                  <Check className="h-3 w-3 text-success/80" />
                 ) : st === 'active' ? (
-                  <Loader2 className="h-3 w-3 animate-spin text-accent" />
+                  <Loader2 className="h-3 w-3 animate-spin text-primary" />
                 ) : (
                   <Circle className="h-3 w-3 text-muted-foreground/30" />
                 )}
                 <span
                   className={cn(
                     'text-[10px] font-medium',
-                    st === 'completed' && 'text-green-400/80',
-                    st === 'active' && 'text-accent',
+                    st === 'completed' && 'text-success/80',
+                    st === 'active' && 'text-primary',
                     st === 'upcoming' && 'text-muted-foreground/40',
                   )}
                 >
@@ -66,7 +66,7 @@ export function SddStepper() {
       {sddPhase === 'executing' && (
         <div className="mt-1.5 h-1 w-full rounded-full bg-foreground/[0.06]">
           <div
-            className="h-full rounded-full bg-accent transition-all duration-300"
+            className="h-full rounded-full bg-primary transition-all duration-300"
             style={{ width: `${sddProgress}%` }}
           />
         </div>

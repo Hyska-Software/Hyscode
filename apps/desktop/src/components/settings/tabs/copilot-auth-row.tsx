@@ -172,16 +172,16 @@ export function CopilotAuthRow({ className }: CopilotAuthRowProps) {
             </code>
             <button
               onClick={() => copyCode(authState.userCode)}
-              className="text-muted-foreground hover:text-foreground transition-colors"
+              className="rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
             >
-              {copied ? <Check className="h-3.5 w-3.5 text-green-500" /> : <Copy className="h-3.5 w-3.5" />}
+              {copied ? <Check className="h-3.5 w-3.5 text-success" /> : <Copy className="h-3.5 w-3.5" />}
             </button>
           </div>
           <a
             href={authState.verificationUri}
             target="_blank"
             rel="noopener noreferrer"
-            className="flex items-center gap-1 text-[11px] text-accent hover:underline"
+            className="flex items-center gap-1 text-[11px] text-primary hover:underline"
           >
             <ExternalLink className="h-3 w-3" />
             Open GitHub to authorize
@@ -195,7 +195,7 @@ export function CopilotAuthRow({ className }: CopilotAuthRowProps) {
 
       {authState.step === 'authenticated' && (
         <div className="flex items-center gap-2">
-          <span className="text-[11px] text-green-500">● Connected to GitHub Copilot</span>
+          <span className="text-[11px] text-success">● Connected to GitHub Copilot</span>
           <Button
             variant="ghost"
             size="sm"

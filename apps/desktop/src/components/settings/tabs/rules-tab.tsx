@@ -6,6 +6,7 @@ import { HarnessBridge } from '../../../lib/harness-bridge';
 import { tauriFs } from '../../../lib/tauri-fs';
 import { RuleEditorDialog } from './rule-editor-dialog';
 import type { RuleEntry } from '../../../stores/rules-store';
+import { SettingSection, SettingToggle } from '../controls';
 
 export function RulesTab() {
   const rules = useRulesStore((s) => s.rules);
@@ -84,7 +85,7 @@ export function RulesTab() {
         </div>
         <button
           onClick={() => openRuleEditor()}
-          className="flex items-center gap-1.5 rounded-md bg-accent px-3 py-1.5 text-[11px] font-medium text-accent-foreground hover:bg-accent/90 transition-colors"
+          className="flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-[11px] font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
         >
           <Plus className="h-3 w-3" />
           New Rule
@@ -92,7 +93,7 @@ export function RulesTab() {
       </div>
 
       {/* Global Rules */}
-      <Section
+      <SettingSection
         title={`Global Rules (${globalRules.length})`}
         description="~/.config/hyscode/rules/"
       >
@@ -112,10 +113,10 @@ export function RulesTab() {
             ))}
           </div>
         )}
-      </Section>
+      </SettingSection>
 
       {/* Workspace Rules */}
-      <Section
+      <SettingSection
         title={`Workspace Rules (${workspaceRules.length})`}
         description={projectPath ? `${projectPath}/.hyscode/rules/` : 'No workspace open'}
       >
@@ -137,7 +138,7 @@ export function RulesTab() {
             ))}
           </div>
         )}
-      </Section>
+      </SettingSection>
 
       {loading && (
         <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
@@ -157,28 +158,6 @@ export function RulesTab() {
 }
 
 // ── Sub-components ───────────────────────────────────────────────────────────
-
-function Section({
-  title,
-  description,
-  children,
-}: {
-  title: string;
-  description: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div>
-      <div className="mb-2 flex items-center justify-between">
-        <div>
-          <h3 className="text-[11px] font-medium text-foreground">{title}</h3>
-          <span className="text-[9px] text-muted-foreground">{description}</span>
-        </div>
-      </div>
-      {children}
-    </div>
-  );
-}
 
 function EmptyState({ children }: { children: React.ReactNode }) {
   return (
@@ -204,7 +183,7 @@ function RuleRow({
   return (
     <div className="flex items-center justify-between rounded-lg bg-surface-raised px-3 py-2">
       <div className="flex items-center gap-2.5">
-        <Toggle checked={rule.enabled} onChange={onToggle} />
+        <SettingToggle checked={rule.enabled} onChange={onToggle} />
         <div className="flex flex-col">
           <span className="text-[12px] text-foreground">{rule.name}</span>
           <span className="text-[9px] text-muted-foreground truncate max-w-[320px]">
@@ -223,7 +202,7 @@ function RuleRow({
         <button
           onClick={onDelete}
           disabled={deleting}
-          className="flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-red-500/10 hover:text-red-400 disabled:opacity-40"
+          className="flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive disabled:opacity-40"
           title="Delete"
         >
           {deleting ? <Loader2 className="h-3 w-3 animate-spin" /> : <Trash2 className="h-3 w-3" />}
@@ -233,25 +212,4 @@ function RuleRow({
   );
 }
 
-function Toggle({
-  checked,
-  onChange,
-}: {
-  checked: boolean;
-  onChange: () => void;
-}) {
-  return (
-    <button
-      onClick={onChange}
-      className={`relative h-4 w-7 rounded-full transition-colors ${
-        checked ? 'bg-accent' : 'bg-muted'
-      }`}
-    >
-      <span
-        className={`absolute top-0.5 left-0.5 h-3 w-3 rounded-full bg-foreground transition-transform ${
-          checked ? 'translate-x-3' : 'translate-x-0'
-        }`}
-      />
-    </button>
-  );
-}
+

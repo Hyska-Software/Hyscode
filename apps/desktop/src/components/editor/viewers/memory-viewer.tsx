@@ -43,11 +43,11 @@ const TYPE_LABELS: Record<string, string> = {
 };
 
 const TYPE_COLORS: Record<string, string> = {
-  error_solution: 'bg-red-500/15 text-red-400 border-red-500/20',
+  error_solution: 'bg-destructive/15 text-destructive border-destructive/20',
   convention:     'bg-blue-500/15 text-blue-400 border-blue-500/20',
   decision:       'bg-purple-500/15 text-purple-400 border-purple-500/20',
-  workflow:       'bg-green-500/15 text-green-400 border-green-500/20',
-  fact:           'bg-yellow-500/15 text-yellow-400 border-yellow-500/20',
+  workflow:       'bg-success/15 text-success border-success/20',
+  fact:           'bg-warning/15 text-warning border-warning/20',
   preference:     'bg-orange-500/15 text-orange-400 border-orange-500/20',
 };
 
@@ -263,7 +263,7 @@ export function MemoryViewer({ memoryId }: MemoryViewerProps) {
           {saving
             ? <RefreshCw className="h-3 w-3 animate-spin" />
             : saved
-              ? <Save className="h-3 w-3 text-green-400" />
+              ? <Save className="h-3 w-3 text-success" />
               : <Save className="h-3 w-3" />
           }
           {saved ? 'Saved' : 'Save'}
@@ -279,7 +279,7 @@ export function MemoryViewer({ memoryId }: MemoryViewerProps) {
 
         <button
           onClick={handleDelete}
-          className="flex items-center gap-1 rounded px-2 py-1 text-xs text-[var(--text-muted)] hover:text-red-400 hover:bg-red-500/10 transition-colors"
+          className="flex items-center gap-1 rounded px-2 py-1 text-xs text-[var(--text-muted)] hover:text-destructive hover:bg-destructive/10 transition-colors"
           title="Delete memory"
         >
           <Trash2 className="h-3.5 w-3.5" />

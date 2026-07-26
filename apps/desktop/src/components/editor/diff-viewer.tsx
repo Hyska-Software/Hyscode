@@ -54,7 +54,7 @@ export function DiffViewer({ filePath, staged }: DiffViewerProps) {
   if (loading) return <DiffLoading />;
   if (error) {
     return (
-      <div className="flex flex-1 items-center justify-center text-[11px] text-red-400">
+      <div className="flex flex-1 items-center justify-center text-[11px] text-destructive">
         {error}
       </div>
     );

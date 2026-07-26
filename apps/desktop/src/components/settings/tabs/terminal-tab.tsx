@@ -1,41 +1,42 @@
 import { useSettingsStore } from '../../../stores';
 import type { TerminalCursorStyle } from '../../../stores/settings-store';
+import { SettingRow, SettingSection, SettingSelect, SettingSlider, SettingTextInput } from '../controls';
 
 export function TerminalTab() {
   const store = useSettingsStore();
 
   return (
     <div className="flex flex-col gap-6">
-      <Section title="Font">
-        <Row label="Font Family">
-          <TextInput
+      <SettingSection title="Font">
+        <SettingRow label="Font Family">
+          <SettingTextInput
             value={store.terminalFontFamily}
             onChange={(v) => store.set('terminalFontFamily', v)}
             placeholder="Geist Mono"
           />
-        </Row>
-        <Row label="Font Size">
-          <NumberInput
+        </SettingRow>
+        <SettingRow label="Font Size">
+          <SettingSlider
             value={store.terminalFontSize}
             onChange={(v) => store.set('terminalFontSize', v)}
             min={8}
             max={24}
           />
-        </Row>
-      </Section>
+        </SettingRow>
+      </SettingSection>
 
-      <Section title="Behavior">
-        <Row label="Scrollback Lines">
-          <NumberInput
+      <SettingSection title="Behavior">
+        <SettingRow label="Scrollback Lines">
+          <SettingSlider
             value={store.terminalScrollback}
             onChange={(v) => store.set('terminalScrollback', v)}
             min={100}
             max={10000}
             step={100}
           />
-        </Row>
-        <Row label="Cursor Style">
-          <SelectInput<TerminalCursorStyle>
+        </SettingRow>
+        <SettingRow label="Cursor Style">
+          <SettingSelect<TerminalCursorStyle>
             value={store.terminalCursorStyle}
             onChange={(v) => store.set('terminalCursorStyle', v)}
             options={[
@@ -44,18 +45,18 @@ export function TerminalTab() {
               { value: 'bar', label: 'Bar' },
             ]}
           />
-        </Row>
-        <Row label="Default Shell">
-          <TextInput
+        </SettingRow>
+        <SettingRow label="Default Shell">
+          <SettingTextInput
             value={store.terminalShell}
             onChange={(v) => store.set('terminalShell', v)}
             placeholder="System default"
           />
-        </Row>
-      </Section>
+        </SettingRow>
+      </SettingSection>
 
       {/* Preview */}
-      <Section title="Preview">
+      <SettingSection title="Preview">
         <div
           className="overflow-hidden rounded-lg bg-background p-3"
           style={{
@@ -66,7 +67,7 @@ export function TerminalTab() {
           <div className="text-muted-foreground">
             <span className="text-success">user@machine</span>
             <span className="text-muted-foreground">:</span>
-            <span className="text-accent">~/project</span>
+            <span className="text-primary">~/project</span>
             <span className="text-muted-foreground">$ </span>
             <span className="text-foreground">echo "Hello World"</span>
           </div>
@@ -74,7 +75,7 @@ export function TerminalTab() {
           <div className="text-muted-foreground">
             <span className="text-success">user@machine</span>
             <span className="text-muted-foreground">:</span>
-            <span className="text-accent">~/project</span>
+            <span className="text-primary">~/project</span>
             <span className="text-muted-foreground">$ </span>
             <span
               className={`inline-block ${
@@ -89,104 +90,7 @@ export function TerminalTab() {
             </span>
           </div>
         </div>
-      </Section>
+      </SettingSection>
     </div>
-  );
-}
-
-// ── Shared atoms ─────────────────────────────────────────────────────────────
-
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <div>
-      <h3 className="mb-3 text-[10px] font-medium uppercase tracking-widest text-muted-foreground">
-        {title}
-      </h3>
-      <div className="flex flex-col gap-2">{children}</div>
-    </div>
-  );
-}
-
-function Row({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div className="flex items-center justify-between gap-4 rounded-lg bg-surface-raised px-3 py-2.5">
-      <span className="text-[12px] text-foreground">{label}</span>
-      {children}
-    </div>
-  );
-}
-
-function TextInput({
-  value,
-  onChange,
-  placeholder,
-}: {
-  value: string;
-  onChange: (v: string) => void;
-  placeholder?: string;
-}) {
-  return (
-    <input
-      type="text"
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-      placeholder={placeholder}
-      className="h-7 w-44 rounded-md bg-muted px-2 text-[12px] text-foreground outline-none placeholder:text-muted-foreground"
-    />
-  );
-}
-
-function NumberInput({
-  value,
-  onChange,
-  min,
-  max,
-  step = 1,
-}: {
-  value: number;
-  onChange: (v: number) => void;
-  min: number;
-  max: number;
-  step?: number;
-}) {
-  return (
-    <div className="flex items-center gap-2">
-      <input
-        type="range"
-        min={min}
-        max={max}
-        step={step}
-        value={value}
-        onChange={(e) => onChange(Number(e.target.value))}
-        className="h-1 w-24 cursor-pointer appearance-none rounded-full bg-muted accent-accent"
-      />
-      <span className="w-12 text-right text-[11px] tabular-nums text-muted-foreground">
-        {value}
-      </span>
-    </div>
-  );
-}
-
-function SelectInput<T extends string>({
-  value,
-  onChange,
-  options,
-}: {
-  value: T;
-  onChange: (v: T) => void;
-  options: { value: T; label: string }[];
-}) {
-  return (
-    <select
-      value={value}
-      onChange={(e) => onChange(e.target.value as T)}
-      className="h-7 rounded-md bg-muted px-2 text-[12px] text-foreground outline-none"
-    >
-      {options.map((opt) => (
-        <option key={opt.value} value={opt.value}>
-          {opt.label}
-        </option>
-      ))}
-    </select>
   );
 }

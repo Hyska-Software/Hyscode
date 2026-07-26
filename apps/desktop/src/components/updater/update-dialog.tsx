@@ -69,8 +69,8 @@ export function UpdateDialog() {
         {/* Header */}
         <div className="flex items-center justify-between border-b border-border px-4 py-3">
           <div className="flex items-center gap-2.5">
-            <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-accent/10">
-              <ArrowUpCircle className="h-4 w-4 text-accent" />
+            <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-primary/10">
+              <ArrowUpCircle className="h-4 w-4 text-primary" />
             </div>
             <div className="flex flex-col">
               <span className="text-[12px] font-semibold text-foreground">
@@ -79,7 +79,7 @@ export function UpdateDialog() {
               <div className="flex items-center gap-1 text-[10px] text-muted-foreground">
                 <span>v{releaseInfo.currentVersion}</span>
                 <ArrowRight className="h-2.5 w-2.5" />
-                <span className="text-accent font-medium">{releaseInfo.version}</span>
+                <span className="text-primary font-medium">{releaseInfo.version}</span>
               </div>
             </div>
           </div>
@@ -132,11 +132,11 @@ export function UpdateDialog() {
                   rel="noopener noreferrer"
                   className="group flex items-start gap-2 rounded-md px-2 py-1.5 hover:bg-muted transition-colors"
                 >
-                  <span className="mt-0.5 font-mono text-[10px] text-accent shrink-0">
+                  <span className="mt-0.5 font-mono text-[10px] text-primary shrink-0">
                     {commit.sha}
                   </span>
                   <div className="flex-1 min-w-0">
-                    <p className="text-[11px] text-foreground leading-snug truncate group-hover:text-accent transition-colors">
+                    <p className="text-[11px] text-foreground leading-snug truncate group-hover:text-primary transition-colors">
                       {commit.message}
                     </p>
                     <p className="text-[10px] text-muted-foreground mt-0.5">
@@ -163,7 +163,7 @@ export function UpdateDialog() {
             <div className="mb-3">
               <div className="h-2 w-full rounded-full bg-muted overflow-hidden">
                 <div
-                  className="h-full rounded-full bg-accent transition-all duration-300"
+                  className="h-full rounded-full bg-primary transition-all duration-300"
                   style={{ width: `${Math.min(downloadProgress.percent, 100)}%` }}
                 />
               </div>
@@ -178,7 +178,7 @@ export function UpdateDialog() {
 
           {/* Error message */}
           {status === 'error' && error && (
-            <div className="mb-3 rounded-md border border-red-500/20 bg-red-500/5 px-3 py-2 text-[11px] text-red-400">
+            <div className="mb-3 rounded-md border border-destructive/20 bg-destructive/5 px-3 py-2 text-[11px] text-destructive">
               {error}
             </div>
           )}
@@ -188,7 +188,7 @@ export function UpdateDialog() {
             {status === 'available' && (
               <button
                 onClick={() => void startDownload()}
-                className="flex items-center gap-1.5 rounded-md bg-accent px-4 py-1.5 text-[11px] font-medium text-accent-foreground hover:bg-accent/90 transition-colors"
+                className="flex items-center gap-1.5 rounded-md bg-primary px-4 py-1.5 text-[11px] font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
               >
                 <Download className="h-3.5 w-3.5" />
                 Download & Install
@@ -198,7 +198,7 @@ export function UpdateDialog() {
             {status === 'downloading' && (
               <button
                 disabled
-                className="flex items-center gap-1.5 rounded-md bg-accent/60 px-4 py-1.5 text-[11px] font-medium text-accent-foreground cursor-not-allowed"
+                className="flex items-center gap-1.5 rounded-md bg-primary/60 px-4 py-1.5 text-[11px] font-medium text-primary-foreground cursor-not-allowed"
               >
                 <Loader2 className="h-3.5 w-3.5 animate-spin" />
                 Downloading...
@@ -208,7 +208,7 @@ export function UpdateDialog() {
             {status === 'ready' && (
               <button
                 onClick={() => void installUpdate()}
-                className="flex items-center gap-1.5 rounded-md bg-green-600 px-4 py-1.5 text-[11px] font-medium text-white hover:bg-green-500 transition-colors"
+                className="flex items-center gap-1.5 rounded-md bg-green-600 px-4 py-1.5 text-[11px] font-medium text-white hover:bg-success transition-colors"
               >
                 <RefreshCw className="h-3.5 w-3.5" />
                 Restart & Update
@@ -226,7 +226,7 @@ export function UpdateDialog() {
             )}
 
             {status === 'ready' && (
-              <span className="flex items-center gap-1 text-[10px] text-green-400">
+              <span className="flex items-center gap-1 text-[10px] text-success">
                 <CheckCircle className="h-3 w-3" />
                 Download complete
               </span>

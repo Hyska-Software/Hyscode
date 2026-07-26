@@ -1,102 +1,66 @@
-import {
-  CheckCircle2,
-  Circle,
-  Loader2,
-  AlertTriangle,
-  ChevronDown,
-  ChevronRight,
-  ListTodo,
-} from 'lucide-react';
 import { useState } from 'react';
-import { useAgentStore } from '@/stores/agent-store';
+import { Check, Circle, Loader2, X, ChevronDown, ChevronRight, ListTodo } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { useAgentStore } from '@/stores/agent-store';
 
-const STATUS_CONFIG: Record<
-  string,
-  { icon: typeof CheckCircle2; color: string; animate?: boolean }
-> = {
-  not_started: { icon: Circle, color: 'text-muted-foreground/30' },
-  in_progress: { icon: Loader2, color: 'text-accent', animate: true },
-  completed: { icon: CheckCircle2, color: 'text-green-400/80' },
-  blocked: { icon: AlertTriangle, color: 'text-yellow-400/80' },
-};
+function statusIcon(status: string) {
+  switch (status) {
+    case 'completed':
+      return <Check className="size-3 shrink-0 text-success" />;
+    case 'in_progress':
+      return <Loader2 className="size-3 shrink-0 animate-spin text-primary" />;
+    case 'blocked':
+      return <X className="size-3 shrink-0 text-muted-foreground" />;
+    default:
+      return <Circle className="size-3 shrink-0 text-muted-foreground" />;
+  }
+}
 
 export function AgentTaskList() {
+  const [isExpanded, setIsExpanded] = useState(true);
   const tasks = useAgentStore((s) => s.agentTasks);
-  const [expanded, setExpanded] = useState(true);
-
   if (tasks.length === 0) return null;
 
-  const completed = tasks.filter((t) => t.status === 'completed').length;
-  const total = tasks.length;
-  const allDone = completed === total;
+  const done = tasks.filter((t) => t.status === 'completed').length;
 
   return (
-    <div className="agent-fade-in mx-4 my-2 border-l-2 border-foreground/[0.08] pl-3">
-      <div>
-        {/* Header — clickable to expand/collapse */}
-        <button
-          onClick={() => setExpanded(!expanded)}
-          className="flex w-full items-center gap-2 py-1 text-left transition-colors hover:text-foreground"
-        >
-          {expanded ? (
-            <ChevronDown className="h-3 w-3 shrink-0 text-muted-foreground/50" />
-          ) : (
-            <ChevronRight className="h-3 w-3 shrink-0 text-muted-foreground/50" />
-          )}
-          <ListTodo className="h-3.5 w-3.5 shrink-0 text-muted-foreground/40" />
-          <span className="text-[11px] font-medium text-foreground/80">
-            Todos ({completed}/{total})
-          </span>
-
-          {/* Mini progress indicator */}
-          {!allDone && (
-            <div className="ml-auto h-1 w-16 overflow-hidden rounded-full bg-foreground/[0.08]">
-              <div
-                className="h-full rounded-full bg-accent transition-all duration-500"
-                style={{ width: `${Math.round((completed / total) * 100)}%` }}
-              />
-            </div>
-          )}
-          {allDone && <CheckCircle2 className="ml-auto h-3.5 w-3.5 text-green-400/80" />}
-        </button>
-
-        {/* Task items */}
-        {expanded && (
-          <div className="mt-1 space-y-0.5 border-l border-foreground/[0.06] pl-3">
-            {tasks.map((task) => {
-              const cfg = STATUS_CONFIG[task.status] ?? STATUS_CONFIG.not_started;
-              const Icon = cfg.icon;
-              return (
-                <div
-                  key={task.id}
-                  className="flex items-center gap-2.5 rounded-md px-2 py-1 transition-colors"
-                >
-                  <Icon
-                    className={cn(
-                      'h-3.5 w-3.5 flex-shrink-0',
-                      cfg.color,
-                      cfg.animate && 'animate-spin',
-                    )}
-                  />
-                  <span
-                    className={cn(
-                      'truncate text-[11px]',
-                      task.status === 'completed'
-                        ? 'text-muted-foreground/50'
-                        : task.status === 'in_progress'
-                          ? 'font-medium text-foreground'
-                          : 'text-foreground/75',
-                    )}
-                  >
-                    {task.title}
-                  </span>
-                </div>
-              );
-            })}
-          </div>
+    <div className="px-4 py-1">
+      <button
+        type="button"
+        onClick={() => setIsExpanded((v) => !v)}
+        className="inline-flex items-center gap-1 rounded px-0.5 py-px text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+      >
+        {isExpanded ? (
+          <ChevronDown className="size-3 shrink-0" />
+        ) : (
+          <ChevronRight className="size-3 shrink-0" />
         )}
-      </div>
+        <ListTodo className="size-3 shrink-0" />
+        <span>
+          {done}/{tasks.length} tasks
+        </span>
+      </button>
+
+      {isExpanded && (
+        <ul className="mt-1 max-h-40 space-y-0.5 overflow-y-auto">
+          {tasks.map((task) => (
+            <li key={task.id} className="flex items-start gap-1.5 px-1">
+              <span className="mt-px shrink-0">{statusIcon(task.status)}</span>
+              <span
+                className={cn(
+                  'text-xs leading-relaxed',
+                  task.status === 'completed' && 'text-muted-foreground line-through',
+                  task.status === 'blocked' && 'text-muted-foreground line-through opacity-70',
+                  task.status === 'in_progress' && 'font-medium text-foreground',
+                  task.status === 'not_started' && 'text-foreground',
+                )}
+              >
+                {task.title}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }

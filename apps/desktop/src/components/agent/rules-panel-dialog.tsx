@@ -150,7 +150,7 @@ export function RulesPanelDialog({ open, onClose }: RulesPanelDialogProps) {
               <br />
               <button
                 onClick={() => openRuleEditor()}
-                className="mt-1 text-accent hover:underline"
+                className="mt-1 text-primary hover:underline"
               >
                 Create your first rule
               </button>
@@ -165,7 +165,7 @@ export function RulesPanelDialog({ open, onClose }: RulesPanelDialogProps) {
           </span>
           <button
             onClick={() => openRuleEditor()}
-            className="flex items-center gap-1 rounded-md bg-accent/10 px-2 py-1 text-[10px] font-medium text-accent hover:bg-accent/20 transition-colors"
+            className="flex items-center gap-1 rounded-md bg-primary/10 px-2 py-1 text-[10px] font-medium text-primary hover:bg-primary/20 transition-colors"
           >
             <Plus className="h-3 w-3" />
             New Rule
@@ -213,7 +213,7 @@ function RuleItem({
         <button
           onClick={onDelete}
           disabled={deleting}
-          className="flex h-5 w-5 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-red-500/10 hover:text-red-400 disabled:opacity-40"
+          className="flex h-5 w-5 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive disabled:opacity-40"
           title="Delete"
         >
           {deleting ? <Loader2 className="h-3 w-3 animate-spin" /> : <X className="h-3 w-3" />}
@@ -234,7 +234,7 @@ function ToggleMini({
     <button
       onClick={onChange}
       className={`relative h-3.5 w-6 rounded-full transition-colors ${
-        checked ? 'bg-accent' : 'bg-muted'
+        checked ? 'bg-primary' : 'bg-muted'
       }`}
     >
       <span

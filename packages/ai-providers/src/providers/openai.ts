@@ -8,6 +8,7 @@ import type {
   StopReason,
   FetchImpl,
   ProviderCapabilities,
+  ThinkingVariants,
 } from '../types';
 import { ProviderError } from '../types';
 import { parseSSEStream } from '../retry';
@@ -229,12 +230,53 @@ function normalizeOpenAIUsage(usage: Record<string, unknown>): import('../types'
   };
 }
 
+// ─── Thinking variant presets ────────────────────────────────────────────────
+// Per docs/MODELS_REFERENCE.md §5 — reasoning.effort ladders per model tier.
+// GPT-5.6 additionally supports reasoning.mode = standard (default) | pro.
+
+/** none/low/medium/high/xhigh/max — GPT-5.5, 5.5 Pro, 5.4, 5.4 Pro, 5.3 Codex */
+export const OPENAI_THINKING_FULL: ThinkingVariants = {
+  kind: 'openai',
+  levels: ['none', 'low', 'medium', 'high', 'xhigh', 'max'],
+  defaultLevel: 'medium',
+};
+
+/** Full ladder + standard/pro reasoning mode — GPT-5.6 Sol/Terra/Luna */
+export const OPENAI_THINKING_FULL_PRO: ThinkingVariants = {
+  kind: 'openai',
+  levels: ['none', 'low', 'medium', 'high', 'xhigh', 'max'],
+  defaultLevel: 'medium',
+  modes: ['standard', 'pro'],
+  defaultMode: 'standard',
+};
+
+/** none/low/medium/high/xhigh — GPT-5.2, 5.1, 5 */
+export const OPENAI_THINKING_XHIGH: ThinkingVariants = {
+  kind: 'openai',
+  levels: ['none', 'low', 'medium', 'high', 'xhigh'],
+  defaultLevel: 'medium',
+};
+
+/** none/low/medium/high — GPT-5.4 Mini, 5.3 Codex Spark */
+export const OPENAI_THINKING_HIGH: ThinkingVariants = {
+  kind: 'openai',
+  levels: ['none', 'low', 'medium', 'high'],
+  defaultLevel: 'medium',
+};
+
+/** none/low/medium — GPT-5.4 Nano, 5 Nano */
+export const OPENAI_THINKING_LOW: ThinkingVariants = {
+  kind: 'openai',
+  levels: ['none', 'low', 'medium'],
+  defaultLevel: 'medium',
+};
+
 // ─── Provider Implementation ────────────────────────────────────────────────
 
 const OPENAI_MODELS: AIModel[] = [
   {
-    id: 'gpt-5.5',
-    name: 'GPT-5.5',
+    id: 'gpt-5.6-sol',
+    name: 'GPT-5.6 Sol',
     provider: 'openai',
     contextWindow: 1_050_000,
     maxOutputTokens: 128_000,
@@ -243,6 +285,63 @@ const OPENAI_MODELS: AIModel[] = [
     supportsVision: true,
     inputPricePerMToken: 5,
     outputPricePerMToken: 30,
+    cachedInputPricePerMToken: 0.5,
+    thinkingVariants: OPENAI_THINKING_FULL_PRO,
+  },
+  {
+    id: 'gpt-5.6-terra',
+    name: 'GPT-5.6 Terra',
+    provider: 'openai',
+    contextWindow: 1_050_000,
+    maxOutputTokens: 128_000,
+    supportsTools: true,
+    supportsStreaming: true,
+    supportsVision: true,
+    inputPricePerMToken: 2.5,
+    outputPricePerMToken: 15,
+    cachedInputPricePerMToken: 0.25,
+    thinkingVariants: OPENAI_THINKING_FULL_PRO,
+  },
+  {
+    id: 'gpt-5.6-luna',
+    name: 'GPT-5.6 Luna',
+    provider: 'openai',
+    contextWindow: 1_050_000,
+    maxOutputTokens: 128_000,
+    supportsTools: true,
+    supportsStreaming: true,
+    supportsVision: true,
+    inputPricePerMToken: 1,
+    outputPricePerMToken: 6,
+    cachedInputPricePerMToken: 0.1,
+    thinkingVariants: OPENAI_THINKING_FULL_PRO,
+  },
+  {
+    id: 'gpt-5.5',
+    name: 'GPT-5.5',
+    provider: 'openai',
+    contextWindow: 1_000_000,
+    maxOutputTokens: 128_000,
+    supportsTools: true,
+    supportsStreaming: true,
+    supportsVision: true,
+    inputPricePerMToken: 5,
+    outputPricePerMToken: 30,
+    cachedInputPricePerMToken: 0.5,
+    thinkingVariants: OPENAI_THINKING_FULL,
+  },
+  {
+    id: 'gpt-5.5-pro',
+    name: 'GPT-5.5 Pro',
+    provider: 'openai',
+    contextWindow: 1_000_000,
+    maxOutputTokens: 128_000,
+    supportsTools: true,
+    supportsStreaming: true,
+    supportsVision: true,
+    inputPricePerMToken: 30,
+    outputPricePerMToken: 180,
+    thinkingVariants: OPENAI_THINKING_FULL,
   },
   {
     id: 'gpt-5.4',
@@ -255,30 +354,63 @@ const OPENAI_MODELS: AIModel[] = [
     supportsVision: true,
     inputPricePerMToken: 2.5,
     outputPricePerMToken: 15,
+    cachedInputPricePerMToken: 0.25,
+    thinkingVariants: OPENAI_THINKING_FULL,
+  },
+  {
+    id: 'gpt-5.4-pro',
+    name: 'GPT-5.4 Pro',
+    provider: 'openai',
+    contextWindow: 1_000_000,
+    maxOutputTokens: 128_000,
+    supportsTools: true,
+    supportsStreaming: true,
+    supportsVision: true,
+    inputPricePerMToken: 30,
+    outputPricePerMToken: 180,
+    thinkingVariants: OPENAI_THINKING_FULL,
   },
   {
     id: 'gpt-5.4-mini',
     name: 'GPT-5.4 Mini',
     provider: 'openai',
-    contextWindow: 400_000,
+    contextWindow: 200_000,
     maxOutputTokens: 128_000,
     supportsTools: true,
     supportsStreaming: true,
     supportsVision: true,
     inputPricePerMToken: 0.75,
     outputPricePerMToken: 4.5,
+    cachedInputPricePerMToken: 0.075,
+    thinkingVariants: OPENAI_THINKING_HIGH,
   },
   {
     id: 'gpt-5.4-nano',
     name: 'GPT-5.4 Nano',
     provider: 'openai',
-    contextWindow: 400_000,
+    contextWindow: 200_000,
     maxOutputTokens: 128_000,
     supportsTools: true,
     supportsStreaming: true,
     supportsVision: true,
     inputPricePerMToken: 0.2,
     outputPricePerMToken: 1.25,
+    cachedInputPricePerMToken: 0.02,
+    thinkingVariants: OPENAI_THINKING_LOW,
+  },
+  {
+    id: 'gpt-5.3-codex',
+    name: 'GPT-5.3 Codex',
+    provider: 'openai',
+    contextWindow: 272_000,
+    maxOutputTokens: 128_000,
+    supportsTools: true,
+    supportsStreaming: true,
+    supportsVision: true,
+    inputPricePerMToken: 1.75,
+    outputPricePerMToken: 14,
+    cachedInputPricePerMToken: 0.175,
+    thinkingVariants: OPENAI_THINKING_FULL,
   },
 ];
 
@@ -349,7 +481,18 @@ export class OpenAIProvider implements AIProvider {
       body.prompt_cache_key = params.promptCacheKey;
     }
     if (params.thinking?.enabled) {
-      const isKimi = params.model.startsWith('kimi-') || params.model.startsWith('mimo-');
+      // Toggle-style thinking (thinking: { type }) applies to Kimi K2.x, MiMo
+      // and Hy3. Kimi K3 is a reasoning model with low/medium/high effort per
+      // docs/MODELS_REFERENCE.md, so effort levels route to reasoning_effort.
+      const hasEffortLevel =
+        params.thinking.level !== undefined &&
+        params.thinking.level !== 'enabled' &&
+        params.thinking.level !== 'disabled';
+      const isToggleModel =
+        (params.model.startsWith('kimi-') && params.model !== 'kimi-k3') ||
+        params.model.startsWith('mimo-') ||
+        params.model === 'hy3';
+      const isKimi = isToggleModel || (params.model === 'kimi-k3' && !hasEffortLevel);
       if (isKimi) {
         // Kimi/MiMo uses thinking: { type: 'enabled' | 'disabled' }
         body.thinking = { type: params.thinking.level === 'disabled' ? 'disabled' : 'enabled' };
@@ -357,6 +500,8 @@ export class OpenAIProvider implements AIProvider {
         // Map generic 'enabled' to a default effort level for APIs that require specific values
         const effort = params.thinking.level === 'enabled' ? 'medium' : params.thinking.level;
         body.reasoning_effort = effort;
+        // GPT-5.6 family supports reasoning.mode = standard (default) | pro
+        if (params.thinking.mode) body.reasoning_mode = params.thinking.mode;
       }
     }
 

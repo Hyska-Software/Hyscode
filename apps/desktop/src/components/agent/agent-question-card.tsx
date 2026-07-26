@@ -96,8 +96,8 @@ export function AgentQuestionCard() {
                   onClick={() => handleSelectOption(current.id, opt.label)}
                   className={`flex flex-col gap-0.5 rounded-md border px-3 py-2 text-left transition-all ${
                     isSelected
-                      ? 'border-violet-500/40 bg-violet-500/[0.06] text-foreground'
-                      : 'border-foreground/[0.08] bg-transparent text-foreground/75 hover:border-foreground/[0.14] hover:bg-foreground/[0.02]'
+                      ? 'border-violet-500/40 bg-violet-500/10 text-foreground'
+                      : 'border-border/50 bg-card text-foreground/75 hover:border-border hover:bg-muted'
                   }`}
                 >
                   <span className="text-[11.5px] font-medium">{opt.label}</span>

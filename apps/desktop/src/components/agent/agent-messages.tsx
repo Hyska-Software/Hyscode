@@ -1,14 +1,11 @@
 import {
   Sparkles,
-  ChevronDown,
-  ChevronRight,
-  Brain,
   AlertCircle,
   CircleStop,
   Copy,
   RotateCw,
 } from 'lucide-react';
-import { useRef, useEffect, useMemo, useState, memo } from 'react';
+import { useRef, useEffect, useMemo, memo } from 'react';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { useAgentStore } from '@/stores/agent-store';
 import { ToolCallGroup } from './tool-call-card';
@@ -22,8 +19,9 @@ import { FileActivity, isFileMutation } from './file-activity';
 import { MarkdownContent } from './markdown-renderer';
 import { HarnessBridge } from '@/lib/harness-bridge';
 import { useSettingsStore } from '@/stores/settings-store';
+import { ThinkingBlock as AuroraThinkingBlock, TypingIndicator as AuroraTypingIndicator } from '@hyscode/ui';
 
-// ─── Thinking Block (collapsible, minimal) ────────────────────────────────────
+// ─── Thinking Block (Aurora-styled, collapsible) ────────────────────────────
 
 const ThinkingBlock = memo(function ThinkingBlock({
   content,
@@ -34,64 +32,46 @@ const ThinkingBlock = memo(function ThinkingBlock({
   isStreaming?: boolean;
   defaultOpen?: boolean;
 }) {
-  const [open, setOpen] = useState(defaultOpen);
-  return (
-    <div className="agent-fade-in">
-      <button
-        onClick={() => setOpen(!open)}
-        className="group/thinking flex w-full items-center gap-1.5 py-1 text-left text-[10px] text-muted-foreground/60 transition-colors hover:text-muted-foreground"
-      >
-        {open ? (
-          <ChevronDown className="h-2.5 w-2.5 shrink-0 transition-transform" />
-        ) : (
-          <ChevronRight className="h-2.5 w-2.5 shrink-0 transition-transform" />
-        )}
-        <Brain className="h-2.5 w-2.5 shrink-0 text-accent/60" />
-        <span className="font-medium">Thinking</span>
-        {isStreaming && (
-          <span className="ml-0.5 flex items-center gap-[3px]">
-            <span className="agent-dot-bounce h-1 w-1 rounded-full bg-accent/50" />
-            <span
-              className="agent-dot-bounce h-1 w-1 rounded-full bg-accent/50"
-              style={{ animationDelay: '0.16s' }}
-            />
-            <span
-              className="agent-dot-bounce h-1 w-1 rounded-full bg-accent/50"
-              style={{ animationDelay: '0.32s' }}
-            />
-          </span>
-        )}
-        {!isStreaming && content && (
-          <span className="ml-auto text-[9px] font-normal text-muted-foreground/35">
-            {content.split(/\s+/).filter(Boolean).length} words
-          </span>
-        )}
-      </button>
-      {open && (
-        <div className="agent-fade-in border-l border-foreground/[0.08] pl-3 pr-1 pt-1 pb-1">
-          <p className="whitespace-pre-wrap text-[11px] leading-[1.72] text-foreground/50">
-            {content}
-          </p>
-        </div>
+  const wordCount = content.split(/\s+/).filter(Boolean).length;
+  const label = (
+    <span className="flex items-center gap-1.5">
+      <span className="text-[10px] font-medium text-muted-foreground">Thinking</span>
+      {isStreaming && (
+        <span className="flex items-center gap-[3px]">
+          <span className="agent-dot-bounce h-1 w-1 rounded-full bg-primary/50" />
+          <span className="agent-dot-bounce h-1 w-1 rounded-full bg-primary/50" style={{ animationDelay: '0.16s' }} />
+          <span className="agent-dot-bounce h-1 w-1 rounded-full bg-primary/50" style={{ animationDelay: '0.32s' }} />
+        </span>
       )}
-    </div>
+      {!isStreaming && content && (
+        <span className="text-[9px] font-normal text-muted-foreground/60">
+          {wordCount} words
+        </span>
+      )}
+    </span>
+  );
+  return (
+    <AuroraThinkingBlock
+      label={label}
+      thinking={isStreaming}
+      defaultOpen={defaultOpen}
+      className="agent-fade-in text-[11px]"
+    >
+      <div className="border-l border-border pl-3 pt-1 pb-1">
+        <p className="whitespace-pre-wrap leading-[1.72] text-foreground/60">
+          {content}
+        </p>
+      </div>
+    </AuroraThinkingBlock>
   );
 });
 
-// ─── Streaming Cursor ─────────────────────────────────────────────────────────
+// ─── Streaming Indicator ──────────────────────────────────────────────────────
 
 function StreamingIndicator() {
   return (
-    <div className="agent-fade-in flex items-center gap-[5px] py-2">
-      <span className="agent-dot-bounce h-[5px] w-[5px] rounded-full bg-accent/60" />
-      <span
-        className="agent-dot-bounce h-[5px] w-[5px] rounded-full bg-accent/60"
-        style={{ animationDelay: '0.16s' }}
-      />
-      <span
-        className="agent-dot-bounce h-[5px] w-[5px] rounded-full bg-accent/60"
-        style={{ animationDelay: '0.32s' }}
-      />
+    <div className="agent-fade-in py-2">
+      <AuroraTypingIndicator label="Agent is typing" />
     </div>
   );
 }
@@ -132,7 +112,7 @@ function RecoveryCard() {
     else void HarnessBridge.get().retryTurn();
   };
   return (
-    <div className="mt-3 rounded-md border border-destructive/30 bg-destructive/5 p-3 text-[11px]">
+    <div className="mt-3 rounded-lg border border-destructive/30 bg-card p-3 text-[11px]">
       <div className="flex items-start gap-2">
         <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-destructive" />
         <div className="min-w-0 flex-1">
@@ -145,27 +125,27 @@ function RecoveryCard() {
           </div>
           <details className="mt-2 text-[10px] text-muted-foreground">
             <summary className="cursor-pointer">Technical details</summary>
-            <pre className="mt-1 max-h-28 overflow-auto whitespace-pre-wrap rounded bg-background/60 p-2">
+            <pre className="mt-1 max-h-28 overflow-auto whitespace-pre-wrap rounded-md bg-muted/50 p-2">
               {recovery.error.technicalMessage}
             </pre>
           </details>
           <div className="mt-2 flex flex-wrap gap-2">
             <button
-              className="flex items-center gap-1 rounded bg-accent px-2 py-1 text-accent-foreground"
+              className="inline-flex h-7 items-center gap-1 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
               onClick={handleAction}
             >
               <RotateCw className="h-3 w-3" />
               {recovery.action === 'continue' ? 'Continue' : 'Try again'}
             </button>
             <button
-              className="flex items-center gap-1 rounded border border-border px-2 py-1"
+              className="inline-flex h-7 items-center gap-1 rounded-md border border-border px-3 text-xs font-medium transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
               onClick={() => void navigator.clipboard.writeText(recovery.error.technicalMessage)}
             >
               <Copy className="h-3 w-3" />
               Copy details
             </button>
             <button
-              className="rounded border border-border px-2 py-1"
+              className="inline-flex h-7 items-center rounded-md border border-border px-3 text-xs font-medium transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
               onClick={() => useSettingsStore.getState().openSettingsOnTab('ai')}
             >
               {recovery.error.kind === 'authentication' ? 'Open providers' : 'Change model'}
@@ -208,7 +188,7 @@ const MessageItem = memo(function MessageItem({
 
   return (
     <div className="group/msg">
-      {/* User message — right-aligned, minimal */}
+      {/* User message — right-aligned card */}
       {msg.role === 'user' && (
         <div className="mb-3 mt-1 flex justify-end">
           <div className="max-w-[85%]">
@@ -224,12 +204,12 @@ const MessageItem = memo(function MessageItem({
                       key={i}
                       src={`data:${img.mediaType};base64,${img.base64}`}
                       alt="attached"
-                      className="max-h-[180px] max-w-[240px] rounded-md object-contain"
+                      className="max-h-[180px] max-w-[240px] rounded-lg object-contain"
                     />
                   ))}
               </div>
             )}
-            <div className="text-[12.5px] leading-[1.7] text-foreground/90">
+            <div className="rounded-lg bg-card px-3.5 py-2.5 text-[12.5px] leading-[1.7] text-foreground">
               <MarkdownContent content={msg.content} />
             </div>
           </div>
@@ -245,13 +225,13 @@ const MessageItem = memo(function MessageItem({
           msg.isError) && (
           <div className={cn('mb-4', isConsecutiveAssistant ? 'mt-1' : 'mt-5')}>
             <div className="flex gap-3">
-              {/* Icon column — shows avatar for first in group, spacer for consecutive */}
+              {/* Icon column — avatar for first in group, spacer for consecutive */}
               {!isConsecutiveAssistant ? (
-                <div className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-accent/10">
-                  <Sparkles className="h-2.5 w-2.5 text-accent" />
+                <div className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary [&_svg]:size-4">
+                  <Sparkles />
                 </div>
               ) : (
-                <div className="w-5 shrink-0" />
+                <div className="w-7 shrink-0" />
               )}
 
               {/* Content column */}
@@ -259,9 +239,9 @@ const MessageItem = memo(function MessageItem({
                 {/* Role label (first in group only) */}
                 {!isConsecutiveAssistant && (
                   <div className="mb-0.5 flex items-center gap-1.5">
-                    <span className="text-[10px] font-medium text-muted-foreground/55">Agent</span>
+                    <span className="text-xs font-semibold text-foreground">Agent</span>
                     {isActivelyStreaming && (
-                      <span className="agent-breathe h-1.5 w-1.5 rounded-full bg-accent/70" />
+                      <span className="agent-breathe h-1.5 w-1.5 rounded-full bg-primary/70" />
                     )}
                   </div>
                 )}
@@ -315,8 +295,6 @@ export function AgentMessages() {
   const isStreaming = useAgentStore((s) => s.isStreaming);
   const pendingApprovals = useAgentStore((s) => s.pendingApprovals);
   const terminalStatus = useAgentStore((s) => s.terminalStatus);
-  const connectionState = useAgentStore((s) => s.connectionState);
-  const connectionMessage = useAgentStore((s) => s.connectionMessage);
   const bottomRef = useRef<HTMLDivElement>(null);
   const liveFileOperations = useMemo(() => {
     let lastUserMessageIndex = -1;
@@ -352,8 +330,8 @@ export function AgentMessages() {
         <ScrollArea className="h-full">
           <div className="flex min-h-[200px] items-center justify-center p-4">
             <div className="flex flex-col items-center gap-3 text-center">
-              <div className="flex h-9 w-9 items-center justify-center rounded-full bg-accent/8">
-                <Sparkles className="h-4 w-4 text-accent/70" />
+              <div className="flex size-9 items-center justify-center rounded-full bg-primary/10 text-primary [&_svg]:size-5">
+                <Sparkles />
               </div>
               <p className="text-xs font-medium text-foreground/80">How can I help?</p>
               <p className="max-w-[220px] text-[11px] leading-relaxed text-muted-foreground/60">
@@ -401,21 +379,12 @@ export function AgentMessages() {
           {/* Pending mode switch delegation */}
           <ModeSwitchDialog />
 
-          {isStreaming && connectionState !== 'connected' && connectionState !== 'idle' && (
-            <div className="mt-2 rounded-md border border-yellow-500/25 bg-yellow-500/5 px-3 py-2 text-[10px] text-yellow-300">
-              {connectionMessage ??
-                (connectionState === 'connecting'
-                  ? 'Connecting to provider…'
-                  : 'Connection degraded')}
-            </div>
-          )}
-
           <RecoveryCard />
 
           {!isStreaming &&
             terminalStatus &&
             !['complete', 'error', 'recoverable_error'].includes(terminalStatus) && (
-              <div className="mt-2 flex items-center gap-2 rounded-md border border-border/50 bg-muted/20 px-3 py-2 text-[10px] text-muted-foreground">
+              <div className="mt-2 flex items-center gap-2 rounded-md border border-border/50 bg-muted/40 px-3 py-2 text-[10px] text-muted-foreground">
                 <CircleStop className="h-3 w-3" />
                 <span>
                   {terminalStatus === 'max_iterations' &&

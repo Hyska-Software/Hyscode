@@ -6,13 +6,15 @@ import { LspBridge } from '../../../lib/lsp-bridge';
 import { BUILTIN_SERVERS } from '@hyscode/lsp-client';
 import type { BuiltinServerConfig } from '@hyscode/lsp-client';
 import { pickFile } from '../../../lib/tauri-dialog';
+import { SettingInput } from '../controls';
+import { Button } from '@/components/ui/button';
 
 function StatusDot({ status }: { status: string }) {
   switch (status) {
     case 'ready':
       return <CheckCircle2 className="h-3 w-3 text-success" />;
     case 'starting':
-      return <Circle className="h-3 w-3 animate-pulse text-yellow-400" />;
+      return <Circle className="h-3 w-3 animate-pulse text-warning" />;
     case 'error':
       return <XCircle className="h-3 w-3 text-destructive" />;
     default:
@@ -105,7 +107,7 @@ function ServerRow({ server }: { server: BuiltinServerConfig }) {
   }
 
   return (
-    <div className="rounded-lg border border-border bg-background">
+    <div className="rounded-lg border border-border bg-card">
       <button
         className="flex w-full items-center gap-3 px-3 py-2.5 text-left hover:bg-muted/50 transition-colors"
         onClick={() => setExpanded(!expanded)}
@@ -126,7 +128,7 @@ function ServerRow({ server }: { server: BuiltinServerConfig }) {
 
         <div className="flex items-center gap-2 shrink-0">
           {savedCustomPath && (
-            <span className="text-[10px] text-accent" title={savedCustomPath}>
+            <span className="text-[10px] text-primary" title={savedCustomPath}>
               custom path
             </span>
           )}
@@ -135,7 +137,7 @@ function ServerRow({ server }: { server: BuiltinServerConfig }) {
           ) : installed ? (
             <span className="text-[10px] text-success">Installed</span>
           ) : (
-            <span className="flex items-center gap-1 text-[10px] text-yellow-400">
+            <span className="flex items-center gap-1 text-[10px] text-warning">
               <AlertTriangle className="h-2.5 w-2.5" />
               Not found
             </span>
@@ -148,7 +150,7 @@ function ServerRow({ server }: { server: BuiltinServerConfig }) {
               onChange={() => toggleServer(server.id, !isEnabled)}
               className="sr-only peer"
             />
-            <div className="w-7 h-4 bg-muted rounded-full peer peer-checked:bg-accent transition-colors after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-foreground after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:after:translate-x-full" />
+            <div className="w-7 h-4 bg-muted rounded-full peer peer-checked:bg-primary transition-colors after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-foreground after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:after:translate-x-full" />
           </label>
         </div>
       </button>
@@ -171,7 +173,7 @@ function ServerRow({ server }: { server: BuiltinServerConfig }) {
                 {Object.entries(server.installInstructions).map(([platform, cmd]) => (
                   <React.Fragment key={platform}>
                     <span className="text-muted-foreground capitalize">{platform}:</span>
-                    <CopyCode text={cmd} className="text-accent" />
+                    <CopyCode text={cmd} className="text-primary" />
                   </React.Fragment>
                 ))}
               </>
@@ -182,30 +184,34 @@ function ServerRow({ server }: { server: BuiltinServerConfig }) {
           <div className="space-y-1.5 pt-1 border-t border-border/50">
             <span className="text-[11px] font-medium text-muted-foreground">Custom binary path</span>
             <div className="flex items-center gap-1.5">
-              <input
+              <SettingInput
                 type="text"
                 value={localPath}
                 onChange={(e) => setLocalPath(e.target.value)}
                 onBlur={() => handleSavePath(localPath)}
                 onKeyDown={(e) => { if (e.key === 'Enter') handleSavePath(localPath); }}
                 placeholder={`/usr/local/bin/${defaultCommand}`}
-                className="h-7 flex-1 rounded-md bg-muted px-2 text-[11px] font-mono text-foreground outline-none placeholder:text-muted-foreground/50 min-w-0"
+                className="h-7 flex-1 font-mono text-[11px] min-w-0"
               />
-              <button
+              <Button
+                size="sm"
+                variant="ghost"
                 onClick={handleBrowse}
-                className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground transition-colors hover:bg-surface-raised hover:text-foreground"
+                className="h-7 w-7 p-0"
                 title="Browse for binary"
               >
                 <FolderOpen className="h-3 w-3" />
-              </button>
+              </Button>
               {savedCustomPath && (
-                <button
+                <Button
+                  size="sm"
+                  variant="ghost"
                   onClick={handleClearPath}
-                  className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground transition-colors hover:bg-surface-raised hover:text-destructive"
+                  className="h-7 w-7 p-0 text-muted-foreground hover:text-destructive"
                   title="Clear custom path"
                 >
                   <X className="h-3 w-3" />
-                </button>
+                </Button>
               )}
             </div>
             <p className="text-[10px] text-muted-foreground">
@@ -214,17 +220,19 @@ function ServerRow({ server }: { server: BuiltinServerConfig }) {
           </div>
 
           <div className="flex gap-2 pt-1">
-            <button
-              className="text-[10px] px-2 py-1 rounded bg-muted hover:bg-muted/80 text-foreground transition-colors"
+            <Button
+              variant="ghost"
+              size="sm"
               onClick={() => {
                 for (const langId of server.languageIds) {
                   LspBridge.restartServer(langId);
                 }
               }}
+              className="text-[10px] h-6"
             >
               <RefreshCw className="h-2.5 w-2.5 inline mr-1" />
               Restart
-            </button>
+            </Button>
           </div>
         </div>
       )}
@@ -251,15 +259,17 @@ export function LanguageServersTab() {
             Built-in language servers for code intelligence. Servers start automatically when you open a supported file.
           </p>
         </div>
-        <button
+        <Button
+          variant="ghost"
+          size="sm"
           onClick={handleRescan}
           disabled={rescanning || !probeComplete}
-          className="flex items-center gap-1.5 text-[10px] px-2 py-1 rounded bg-muted hover:bg-muted/80 text-foreground transition-colors disabled:opacity-50"
+          className="text-[10px] h-6 disabled:opacity-50"
           title="Re-scan after installing language servers"
         >
           <RefreshCw className={`h-2.5 w-2.5 ${rescanning ? 'animate-spin' : ''}`} />
           Re-scan
-        </button>
+        </Button>
       </div>
 
       {!probeComplete && (

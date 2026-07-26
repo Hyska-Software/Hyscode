@@ -189,7 +189,7 @@ export function CommandPalette() {
                 onMouseEnter={() => setSelectedIndex(index)}
                 className={`flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left transition-colors ${
                   isSelected
-                    ? 'bg-accent/15 text-foreground'
+                    ? 'bg-primary/15 text-foreground'
                     : 'text-foreground/80 hover:bg-surface-raised'
                 }`}
               >

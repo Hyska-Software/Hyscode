@@ -61,13 +61,13 @@ export function ViewMenu() {
         {/* ── Workspace Mode ── */}
         <DropdownMenuItem
           onClick={() => setWorkspaceMode('editor')}
-          className={workspaceMode === 'editor' ? 'bg-accent text-accent-foreground' : ''}
+          className={workspaceMode === 'editor' ? 'bg-primary text-primary-foreground' : ''}
         >
           Editor Mode
         </DropdownMenuItem>
         <DropdownMenuItem
           onClick={() => setWorkspaceMode('agent')}
-          className={workspaceMode === 'agent' ? 'bg-accent text-accent-foreground' : ''}
+          className={workspaceMode === 'agent' ? 'bg-primary text-primary-foreground' : ''}
         >
           Agent Mode
         </DropdownMenuItem>
@@ -162,7 +162,7 @@ export function ViewMenu() {
                 <DropdownMenuItem
                   key={id}
                   onClick={() => focusSidebarView(id)}
-                  className={sidebarActiveView === id ? 'bg-accent text-accent-foreground' : ''}
+                  className={sidebarActiveView === id ? 'bg-primary text-primary-foreground' : ''}
                 >
                   {VIEW_LABELS[id]}
                 </DropdownMenuItem>

@@ -162,7 +162,7 @@ function ViewSearchBar({
         value={query}
         onChange={(e) => setQuery(viewId, e.target.value)}
         placeholder={placeholder || 'Filter...'}
-        className="w-full rounded bg-muted/50 border border-border/50 py-1 pl-6 pr-2 text-[11px] text-foreground placeholder:text-muted-foreground/40 outline-none focus:border-accent/50"
+        className="w-full rounded bg-muted/50 border border-border/50 py-1 pl-6 pr-2 text-[11px] text-foreground placeholder:text-muted-foreground/40 outline-none focus:border-primary/50"
       />
     </div>
   );
@@ -355,10 +355,10 @@ function ProgressBar({ progress }: { progress: { value?: number; label?: string 
       )}
       <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden">
         {isIndeterminate ? (
-          <div className="h-full w-1/3 rounded-full bg-accent animate-[indeterminate_1.5s_ease-in-out_infinite]" />
+          <div className="h-full w-1/3 rounded-full bg-primary animate-[indeterminate_1.5s_ease-in-out_infinite]" />
         ) : (
           <div
-            className="h-full rounded-full bg-accent transition-all duration-300"
+            className="h-full rounded-full bg-primary transition-all duration-300"
             style={{ width: `${Math.min(100, Math.max(0, progress.value ?? 0))}%` }}
           />
         )}

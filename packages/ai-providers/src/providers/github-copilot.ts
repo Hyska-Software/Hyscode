@@ -1,5 +1,17 @@
 import type { AIModel, ChatParams, StreamChunk, FetchImpl } from '../types';
 import { OpenAIProvider } from './openai';
+import {
+  ADAPTIVE_CLAUDE_XHIGH_VARIANTS,
+  ADAPTIVE_CLAUDE_VARIANTS,
+  ADAPTIVE_CLAUDE_BASIC_VARIANTS,
+  BUDGET_CLAUDE_VARIANTS,
+} from './anthropic';
+import {
+  OPENAI_THINKING_FULL,
+  OPENAI_THINKING_FULL_PRO,
+  OPENAI_THINKING_HIGH,
+} from './openai';
+import { GEMINI_THINKING_LMH_VARIANTS, GEMINI_THINKING_LM_VARIANTS } from './gemini';
 
 // ─── GitHub Copilot Provider ────────────────────────────────────────────────
 // GitHub Copilot exposes an OpenAI-compatible chat completions endpoint at
@@ -16,8 +28,7 @@ import { OpenAIProvider } from './openai';
 // The provider itself is a thin OpenAI adapter — auth header injection is
 // handled by the Rust ai_stream_request proxy like all other providers.
 
-// Models current as of June 30, 2026 — see:
-// https://docs.github.com/en/copilot/reference/ai-models/supported-models
+// Models current as of July 25, 2026 — see docs/MODELS_REFERENCE.md §1.
 //
 // Copilot API (api.githubcopilot.com) model IDs follow the convention:
 //   lowercase display name, spaces → hyphens, dots preserved.
@@ -33,6 +44,7 @@ const COPILOT_MODELS: AIModel[] = [
     supportsTools: true,
     supportsStreaming: true,
     supportsVision: true,
+    thinkingVariants: OPENAI_THINKING_FULL,
   },
   {
     id: 'gpt-5-mini',
@@ -64,6 +76,29 @@ const COPILOT_MODELS: AIModel[] = [
     supportsTools: true,
     supportsStreaming: true,
     supportsVision: true,
+    thinkingVariants: GEMINI_THINKING_LMH_VARIANTS,
+  },
+  {
+    id: 'gemini-3.5-flash-lite',
+    name: 'Gemini 3.5 Flash-Lite (Copilot)',
+    provider: 'github-copilot',
+    contextWindow: 1_048_576,
+    maxOutputTokens: 65_536,
+    supportsTools: true,
+    supportsStreaming: true,
+    supportsVision: true,
+    thinkingVariants: GEMINI_THINKING_LM_VARIANTS,
+  },
+  {
+    id: 'gemini-3.6-flash',
+    name: 'Gemini 3.6 Flash (Copilot)',
+    provider: 'github-copilot',
+    contextWindow: 1_048_576,
+    maxOutputTokens: 65_536,
+    supportsTools: true,
+    supportsStreaming: true,
+    supportsVision: true,
+    thinkingVariants: GEMINI_THINKING_LMH_VARIANTS,
   },
   {
     id: 'claude-haiku-4.5',
@@ -74,6 +109,7 @@ const COPILOT_MODELS: AIModel[] = [
     supportsTools: true,
     supportsStreaming: true,
     supportsVision: true,
+    thinkingVariants: BUDGET_CLAUDE_VARIANTS,
   },
   {
     id: 'gemini-3-flash',
@@ -84,6 +120,7 @@ const COPILOT_MODELS: AIModel[] = [
     supportsTools: true,
     supportsStreaming: true,
     supportsVision: true,
+    thinkingVariants: GEMINI_THINKING_LM_VARIANTS,
   },
   {
     id: 'gpt-5.4-mini',
@@ -94,6 +131,18 @@ const COPILOT_MODELS: AIModel[] = [
     supportsTools: true,
     supportsStreaming: true,
     supportsVision: true,
+    thinkingVariants: OPENAI_THINKING_HIGH,
+  },
+  {
+    id: 'gpt-5.6',
+    name: 'GPT-5.6 (Copilot)',
+    provider: 'github-copilot',
+    contextWindow: 1_050_000,
+    maxOutputTokens: 128_000,
+    supportsTools: true,
+    supportsStreaming: true,
+    supportsVision: true,
+    thinkingVariants: OPENAI_THINKING_FULL_PRO,
   },
   // ── 1× multiplier (standard premium) ──────────────────────────────────
   {
@@ -105,6 +154,7 @@ const COPILOT_MODELS: AIModel[] = [
     supportsTools: true,
     supportsStreaming: true,
     supportsVision: true,
+    thinkingVariants: BUDGET_CLAUDE_VARIANTS,
   },
   {
     id: 'claude-sonnet-4.6',
@@ -115,16 +165,18 @@ const COPILOT_MODELS: AIModel[] = [
     supportsTools: true,
     supportsStreaming: true,
     supportsVision: true,
+    thinkingVariants: ADAPTIVE_CLAUDE_VARIANTS,
   },
   {
-    id: 'gemini-2.5-pro',
-    name: 'Gemini 2.5 Pro (Copilot)',
+    id: 'claude-sonnet-5',
+    name: 'Claude Sonnet 5 (Copilot)',
     provider: 'github-copilot',
-    contextWindow: 1_048_576,
-    maxOutputTokens: 65_536,
+    contextWindow: 1_000_000,
+    maxOutputTokens: 128_000,
     supportsTools: true,
     supportsStreaming: true,
     supportsVision: true,
+    thinkingVariants: ADAPTIVE_CLAUDE_XHIGH_VARIANTS,
   },
   {
     id: 'gemini-3.1-pro',
@@ -135,6 +187,7 @@ const COPILOT_MODELS: AIModel[] = [
     supportsTools: true,
     supportsStreaming: true,
     supportsVision: true,
+    thinkingVariants: GEMINI_THINKING_LMH_VARIANTS,
   },
   {
     id: 'mai-code-1-flash',
@@ -155,6 +208,7 @@ const COPILOT_MODELS: AIModel[] = [
     supportsTools: true,
     supportsStreaming: true,
     supportsVision: false,
+    thinkingVariants: OPENAI_THINKING_FULL,
   },
   {
     id: 'claude-opus-4.8',
@@ -165,6 +219,7 @@ const COPILOT_MODELS: AIModel[] = [
     supportsTools: true,
     supportsStreaming: true,
     supportsVision: true,
+    thinkingVariants: ADAPTIVE_CLAUDE_XHIGH_VARIANTS,
   },
   {
     id: 'claude-opus-4.8-fast',
@@ -175,6 +230,7 @@ const COPILOT_MODELS: AIModel[] = [
     supportsTools: true,
     supportsStreaming: true,
     supportsVision: true,
+    thinkingVariants: ADAPTIVE_CLAUDE_XHIGH_VARIANTS,
   },
   {
     id: 'gpt-5.4',
@@ -185,6 +241,7 @@ const COPILOT_MODELS: AIModel[] = [
     supportsTools: true,
     supportsStreaming: true,
     supportsVision: true,
+    thinkingVariants: OPENAI_THINKING_FULL,
   },
   // ── 3× multiplier (premium) ───────────────────────────────────────────
   {
@@ -196,6 +253,18 @@ const COPILOT_MODELS: AIModel[] = [
     supportsTools: true,
     supportsStreaming: true,
     supportsVision: true,
+    thinkingVariants: ADAPTIVE_CLAUDE_XHIGH_VARIANTS,
+  },
+  {
+    id: 'claude-opus-5',
+    name: 'Claude Opus 5 (Copilot)',
+    provider: 'github-copilot',
+    contextWindow: 1_000_000,
+    maxOutputTokens: 128_000,
+    supportsTools: true,
+    supportsStreaming: true,
+    supportsVision: true,
+    thinkingVariants: ADAPTIVE_CLAUDE_XHIGH_VARIANTS,
   },
   {
     id: 'claude-opus-4.5',
@@ -206,6 +275,7 @@ const COPILOT_MODELS: AIModel[] = [
     supportsTools: true,
     supportsStreaming: true,
     supportsVision: true,
+    thinkingVariants: ADAPTIVE_CLAUDE_BASIC_VARIANTS,
   },
   {
     id: 'claude-opus-4.6',
@@ -216,6 +286,7 @@ const COPILOT_MODELS: AIModel[] = [
     supportsTools: true,
     supportsStreaming: true,
     supportsVision: true,
+    thinkingVariants: ADAPTIVE_CLAUDE_VARIANTS,
   },
 ];
 

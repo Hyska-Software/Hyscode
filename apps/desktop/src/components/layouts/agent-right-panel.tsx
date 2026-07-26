@@ -137,7 +137,7 @@ function ChangesTab() {
           className={cn(
             'flex items-center gap-1 rounded-md px-2 py-1 text-[10px] font-medium transition-colors',
             subTab === 'agent'
-              ? 'bg-accent/10 text-foreground'
+              ? 'bg-primary/10 text-foreground'
               : 'text-muted-foreground hover:text-foreground hover:bg-muted/50',
           )}
         >
@@ -150,7 +150,7 @@ function ChangesTab() {
           className={cn(
             'flex items-center gap-1 rounded-md px-2 py-1 text-[10px] font-medium transition-colors',
             subTab === 'git'
-              ? 'bg-accent/10 text-foreground'
+              ? 'bg-primary/10 text-foreground'
               : 'text-muted-foreground hover:text-foreground hover:bg-muted/50',
           )}
         >
@@ -299,9 +299,9 @@ function statusClasses(letter: string): string {
   switch (letter) {
     case 'A':
     case 'C':
-      return 'bg-green-500/15 text-green-400';
+      return 'bg-success/15 text-success';
     case 'D':
-      return 'bg-red-500/15 text-red-400';
+      return 'bg-destructive/15 text-destructive';
     case 'R':
       return 'bg-blue-500/15 text-blue-400';
     case '?':
@@ -312,7 +312,7 @@ function statusClasses(letter: string): string {
       return 'bg-purple-500/15 text-purple-400';
     case 'M':
     default:
-      return 'bg-yellow-500/15 text-yellow-400';
+      return 'bg-warning/15 text-warning';
   }
 }
 
@@ -349,9 +349,9 @@ function FilePath({ relPath }: { relPath: string }) {
 function CountBadge({ added, removed }: { added: number; removed: number }) {
   return (
     <span className="shrink-0 text-[10px] tabular-nums">
-      {added > 0 && <span className="text-green-400">+{added}</span>}
+      {added > 0 && <span className="text-success">+{added}</span>}
       {added > 0 && removed > 0 && ' '}
-      {removed > 0 && <span className="text-red-400">-{removed}</span>}
+      {removed > 0 && <span className="text-destructive">-{removed}</span>}
     </span>
   );
 }
@@ -461,7 +461,7 @@ function AgentChangesContent() {
                   className={cn(
                     'group flex w-full items-center gap-2 px-2 py-1 text-left transition-colors',
                     isExpanded
-                      ? 'bg-accent/10 text-foreground'
+                      ? 'bg-primary/10 text-foreground'
                       : 'text-muted-foreground hover:bg-muted/50 hover:text-foreground',
                   )}
                 >
@@ -489,7 +489,7 @@ function AgentChangesContent() {
                           e.stopPropagation();
                           handleAcceptOne(entry.agentSession!.id);
                         }}
-                        className="rounded p-0.5 hover:bg-green-500/15 text-green-400"
+                        className="rounded p-0.5 hover:bg-success/15 text-success"
                         title="Keep"
                       >
                         <Check className="h-3 w-3" />
@@ -596,7 +596,7 @@ function FilterDropdown({
       <select
         value={value}
         onChange={(e) => onChange(e.target.value as ChangeFilter)}
-        className="h-6 appearance-none rounded-md border border-border/50 bg-surface-raised pl-2 pr-6 text-[11px] font-medium text-foreground outline-none transition-colors hover:border-border hover:bg-muted/50 focus:border-accent/50 focus:ring-1 focus:ring-accent/20"
+        className="h-6 appearance-none rounded-md border border-border/50 bg-surface-raised pl-2 pr-6 text-[11px] font-medium text-foreground outline-none transition-colors hover:border-border hover:bg-muted/50 focus:border-primary/50 focus:ring-1 focus:ring-primary/20"
       >
         {FILTER_OPTIONS.map((f) => (
           <option key={f} value={f}>
@@ -712,7 +712,7 @@ function AgentChangesToolbar() {
         {hasPending && (
           <>
             <IconButton onClick={handleAcceptAll} title="Keep all pending agent changes">
-              <Check className="h-3 w-3 text-green-400" />
+              <Check className="h-3 w-3 text-success" />
             </IconButton>
             <IconButton onClick={handleRejectAll} title="Undo all pending agent changes">
               <Undo2 className="h-3 w-3" />
@@ -1024,20 +1024,20 @@ export function AgentRightPanel() {
                 activeTab === id
                   ? 'bg-surface text-foreground'
                   : 'text-muted-foreground hover:text-foreground hover:bg-muted',
-                dragOverIndex === index && dragIndex !== index && 'border-l-2 border-accent',
+                dragOverIndex === index && dragIndex !== index && 'border-l-2 border-primary',
               )}
             >
               <Icon className="h-3 w-3 shrink-0" />
               {label}
               {id === 'changes' && pendingCount > 0 && (
-                <span className="rounded-full bg-accent/20 px-1.5 text-[9px] font-medium text-accent tabular-nums">
+                <span className="rounded-full bg-primary/20 px-1.5 text-[9px] font-medium text-primary tabular-nums">
                   {pendingCount}
                 </span>
               )}
               {id === 'terminal' && terminalActive && (
                 <span className="relative flex h-2 w-2">
                   <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-green-400 opacity-75" />
-                  <span className="relative inline-flex h-2 w-2 rounded-full bg-green-500" />
+                  <span className="relative inline-flex h-2 w-2 rounded-full bg-success" />
                 </span>
               )}
             </button>

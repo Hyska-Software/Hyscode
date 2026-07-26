@@ -95,16 +95,16 @@ function LineNumber({ value }: { value: number | null }) {
 function DiffLine({ row }: { row: DiffRow }) {
   const bgClass =
     row.type === 'deleted'
-      ? 'bg-red-500/10'
+      ? 'bg-destructive/10'
       : row.type === 'added'
-        ? 'bg-green-500/10'
+        ? 'bg-success/10'
         : 'transparent';
   const marker = row.type === 'deleted' ? '-' : row.type === 'added' ? '+' : ' ';
 
   return (
     <div
       className={cn(
-        'grid grid-cols-[2.5rem_2.5rem_1fr] items-start transition-colors duration-150 hover:bg-accent/5',
+        'grid grid-cols-[2.5rem_2.5rem_1fr] items-start transition-colors duration-150 hover:bg-primary/5',
         bgClass,
       )}
     >
@@ -114,9 +114,9 @@ function DiffLine({ row }: { row: DiffRow }) {
         className={cn(
           'px-2 py-0.5 whitespace-pre',
           row.type === 'deleted'
-            ? 'text-red-400'
+            ? 'text-destructive'
             : row.type === 'added'
-              ? 'text-green-400'
+              ? 'text-success'
               : 'text-foreground',
         )}
       >

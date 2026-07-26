@@ -8,9 +8,9 @@ interface GitFileStatus {
 }
 
 const STATUS_COLORS: Record<string, string> = {
-  M: 'text-yellow-400',
-  A: 'text-green-400',
-  D: 'text-red-400',
+  M: 'text-warning',
+  A: 'text-success',
+  D: 'text-destructive',
   R: 'text-blue-400',
   U: 'text-orange-400',
   '?': 'text-muted-foreground',
@@ -118,7 +118,7 @@ export function GitView() {
       {/* Header */}
       <div className="flex items-center justify-between bg-surface-raised px-2 py-1">
         <div className="flex items-center gap-1.5">
-          <GitBranch className="h-3 w-3 text-accent" />
+          <GitBranch className="h-3 w-3 text-primary" />
           <span className="text-[11px] font-medium text-foreground">{branch}</span>
         </div>
         <button
@@ -136,7 +136,7 @@ export function GitView() {
 
       {/* Error */}
       {error && (
-        <div className="px-2 py-1 text-[10px] text-red-400 bg-red-500/5">
+        <div className="px-2 py-1 text-[10px] text-destructive bg-destructive/5">
           {error}
         </div>
       )}

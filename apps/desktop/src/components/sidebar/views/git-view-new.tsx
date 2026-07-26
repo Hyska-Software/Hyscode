@@ -359,7 +359,7 @@ export function GitView() {
         <p className="text-xs">Not a Git repository</p>
         <button
           onClick={initRepo}
-          className="mt-3 rounded-md bg-accent px-3 py-1.5 text-[11px] text-white hover:bg-accent/80 transition-colors"
+          className="mt-3 rounded-md bg-primary px-3 py-1.5 text-[11px] text-white hover:bg-primary/80 transition-colors"
         >
           Initialize Repository
         </button>
@@ -382,10 +382,10 @@ export function GitView() {
       {/* Header */}
       <div className="flex items-center justify-between border-b border-border px-2 py-1.5">
         <div className="flex items-center gap-1.5">
-          <GitBranch className="h-3 w-3 text-accent" />
+          <GitBranch className="h-3 w-3 text-primary" />
           <span className="text-[11px] font-medium text-foreground">{currentBranch}</span>
-          {ahead > 0 && <span className="text-[10px] text-green-400">↑{ahead}</span>}
-          {behind > 0 && <span className="text-[10px] text-yellow-400">↓{behind}</span>}
+          {ahead > 0 && <span className="text-[10px] text-success">↑{ahead}</span>}
+          {behind > 0 && <span className="text-[10px] text-warning">↓{behind}</span>}
         </div>
         <div className="flex items-center gap-0.5">
           {/* History — directly accessible */}
@@ -399,7 +399,7 @@ export function GitView() {
           {/* Git Graph — directly accessible */}
           <button
             onClick={() => setPanelMode('graph')}
-            className="flex h-5 w-5 items-center justify-center rounded-sm text-muted-foreground hover:text-accent hover:bg-accent/10 transition-colors"
+            className="flex h-5 w-5 items-center justify-center rounded-sm text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
             title="Git Graph Visualization"
           >
             <GraphIcon className="h-3 w-3" />
@@ -407,7 +407,7 @@ export function GitView() {
           {/* Create Pull Request — directly accessible */}
           <button
             onClick={() => setShowPrDialog(true)}
-            className="flex h-5 w-5 items-center justify-center rounded-sm text-muted-foreground hover:text-accent hover:bg-accent/10 transition-colors"
+            className="flex h-5 w-5 items-center justify-center rounded-sm text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
             title="Create Pull Request"
           >
             <GitPullRequest className="h-3 w-3" />
@@ -480,7 +480,7 @@ export function GitView() {
       {/* Operation status toast */}
       {opStatus && (
         <div className={`flex items-center gap-1.5 px-2 py-1 text-[10px] border-b border-border ${
-          opStatus.type === 'success' ? 'text-green-400 bg-green-500/5' : 'text-red-400 bg-red-500/5'
+          opStatus.type === 'success' ? 'text-success bg-success/5' : 'text-destructive bg-destructive/5'
         }`}>
           {opStatus.type === 'success' ? <CheckCircle className="h-3 w-3" /> : <XCircle className="h-3 w-3" />}
           <span className="truncate">{opStatus.msg}</span>
@@ -497,7 +497,7 @@ export function GitView() {
             onChange={(e) => setCommitMessage(e.target.value)}
             placeholder="Commit message..."
             rows={2}
-            className="w-full resize-none rounded-md border border-border bg-background px-2 py-1.5 pr-16 text-[11px] text-foreground placeholder:text-muted-foreground outline-none focus:border-accent/40 transition-colors"
+            className="w-full resize-none rounded-md border border-border bg-background px-2 py-1.5 pr-16 text-[11px] text-foreground placeholder:text-muted-foreground outline-none focus:border-primary/40 transition-colors"
             onKeyDown={(e) => {
               if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
                 handleCommit();
@@ -509,7 +509,7 @@ export function GitView() {
             <button
               onClick={handleGenerateMessage}
               disabled={isGenerating || staged.length === 0}
-              className="flex h-5 w-5 items-center justify-center rounded-sm text-muted-foreground hover:text-accent hover:bg-accent/10 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+              className="flex h-5 w-5 items-center justify-center rounded-sm text-muted-foreground hover:text-primary hover:bg-primary/10 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
               title={isGenerating ? 'Generating…' : 'Generate commit message with AI'}
             >
               {isGenerating ? (
@@ -524,7 +524,7 @@ export function GitView() {
                 onClick={() => setShowAiSettings((v) => !v)}
                 className={`flex h-5 w-5 items-center justify-center rounded-sm transition-colors ${
                   showAiSettings
-                    ? 'text-accent bg-accent/10'
+                    ? 'text-primary bg-primary/10'
                     : 'text-muted-foreground hover:text-foreground hover:bg-muted'
                 }`}
                 title="AI commit model settings"
@@ -548,12 +548,12 @@ export function GitView() {
         </div>
 
         {(commitError || generateError) && (
-          <p className="mt-0.5 text-[10px] text-red-400">{commitError ?? generateError}</p>
+          <p className="mt-0.5 text-[10px] text-destructive">{commitError ?? generateError}</p>
         )}
         <button
           onClick={handleCommit}
           disabled={!commitMessage.trim() || staged.length === 0 || isCommitting}
-          className="mt-1 w-full rounded-md bg-accent px-3 py-1 text-[11px] font-medium text-white hover:bg-accent/80 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+          className="mt-1 w-full rounded-md bg-primary px-3 py-1 text-[11px] font-medium text-white hover:bg-primary/80 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
         >
           {isCommitting ? (
             <Loader2 className="mx-auto h-3.5 w-3.5 animate-spin" />
@@ -700,7 +700,7 @@ function AiModelPopover({
         Model used to generate commit messages. Leave empty to use the active agent model.
       </p>
       {!hasModels ? (
-        <p className="text-[10px] text-yellow-400">
+        <p className="text-[10px] text-warning">
           No enabled models found. Configure providers in Settings → AI.
         </p>
       ) : (
