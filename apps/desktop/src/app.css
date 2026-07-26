@@ -458,17 +458,17 @@ body {
 /* ── Theme: HysCode Dark (default) ─────────────────────────────────────── */
 .theme-hyscode-dark {
   /* shadcn bridge vars — Aurora dark (cool neutrals + teal) */
-  --background: #202123;
+  --background: #18191d;
   --foreground: #ececf1;
-  --card: #2a2b32;
+  --card: #24252b;
   --card-foreground: #ececf1;
-  --popover: #2a2b32;
+  --popover: #24252b;
   --popover-foreground: #ececf1;
   --primary: #10a37f;
   --primary-foreground: #ffffff;
-  --secondary: #35363f;
+  --secondary: #292a31;
   --secondary-foreground: #ececf1;
-  --muted: #2f3037;
+  --muted: #25262c;
   --muted-foreground: #8e8ea0;
   --accent: #10a37f;
   --accent-foreground: #ffffff;
@@ -482,17 +482,17 @@ body {
   --chart-4: #f87171;
   --chart-5: #8e8ea0;
   --radius: 0.625rem;
-  --sidebar: #202123;
+  --sidebar: #18191d;
   --sidebar-foreground: #ececf1;
   --sidebar-primary: #10a37f;
   --sidebar-primary-foreground: #ffffff;
-  --sidebar-accent: #35363f;
+  --sidebar-accent: #25262c;
   --sidebar-accent-foreground: #ececf1;
   --sidebar-border: rgba(255, 255, 255, 0.08);
   --sidebar-ring: #10a37f;
   /* HysCode custom tokens */
-  --color-surface: #2a2b32;
-  --color-surface-raised: #35363f;
+  --color-surface: #202123;
+  --color-surface-raised: #27282f;
   --color-accent-muted: rgba(16, 163, 127, 0.12);
   --color-success: #4ade80;
   --color-warning: #facc15;

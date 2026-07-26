@@ -42,12 +42,12 @@ const THEME_OPTIONS: ThemeOption[] = [
   {
     id: 'hyscode-dark',
     name: 'Dark',
-    desc: 'Default dark with purple',
-    bg: '#0d0d0d',
-    surface: '#181818',
-    accent: '#a855f7',
-    fg: '#e8e8e8',
-    muted: '#555',
+    desc: 'Deep editor-matched dark',
+    bg: '#18191d',
+    surface: '#202123',
+    accent: '#10a37f',
+    fg: '#ececf1',
+    muted: '#8e8ea0',
   },
   {
     id: 'hyscode-light',

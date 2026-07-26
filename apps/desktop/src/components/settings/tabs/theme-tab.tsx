@@ -28,11 +28,11 @@ const THEMES: ThemeOption[] = [
   {
     id: 'hyscode-dark',
     name: 'HysCode Dark',
-    description: 'Dark theme with teal accent — cool neutrals',
+    description: 'Deep editor-matched surfaces with a teal accent',
     colors: {
-      bg: '#202123',
-      surface: '#2a2b32',
-      sidebar: '#202123',
+      bg: '#18191d',
+      surface: '#202123',
+      sidebar: '#18191d',
       accent: '#10a37f',
       fg: '#ececf1',
       muted: '#8e8ea0',
