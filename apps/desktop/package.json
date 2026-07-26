@@ -1,6 +1,6 @@
 {
   "name": "@hyscode/desktop",
-  "version": "0.6.0-build.61",
+  "version": "0.6.0-build.62",
   "private": true,
   "type": "module",
   "scripts": {
