@@ -52,19 +52,13 @@ export function UpdateIndicator() {
                   ? `Update failed: ${error}`
                   : ''
       }
-      className="relative -ml-1 flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+      className="relative flex h-7 w-7 items-center justify-center rounded-full bg-primary/10 text-primary transition-colors hover:bg-primary/15"
     >
       {status === 'checking' && (
         <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
       )}
       {status === 'available' && (
-        <>
-          <Download className="h-4 w-4 text-primary" />
-          <span className="absolute -right-0.5 -top-0.5 flex h-2.5 w-2.5">
-            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary opacity-75" />
-            <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-primary" />
-          </span>
-        </>
+        <Download className="h-4 w-4 text-primary" />
       )}
       {status === 'downloading' && (
         <div className="relative flex h-4 w-4 items-center justify-center">
