@@ -50,7 +50,14 @@ export type BuiltinTabId =
   | 'sub-agents'
   | 'about';
 
-export type GroupId = 'workspace' | 'editor' | 'source-control' | 'intelligence' | 'integrations' | 'about' | 'extensions';
+export type GroupId =
+  | 'workspace'
+  | 'editor'
+  | 'source-control'
+  | 'intelligence'
+  | 'integrations'
+  | 'about'
+  | 'extensions';
 
 export type LeafId = BuiltinTabId | string;
 
@@ -258,10 +265,14 @@ export const TAB_DEFAULT_KEYS: Record<BuiltinTabId, readonly SettingsKey[]> = {
     'gitBlameInline',
   ],
   theme: ['themeId', 'iconThemeId', 'disableRoundedBorders'],
-  terminal: ['terminalFontSize', 'terminalFontFamily', 'terminalScrollback', 'terminalShell', 'terminalCursorStyle'],
+  terminal: [
+    'terminalFontSize',
+    'terminalFontFamily',
+    'terminalScrollback',
+    'terminalShell',
+    'terminalCursorStyle',
+  ],
   git: [
-    'gitUserName',
-    'gitUserEmail',
     'gitDefaultBranch',
     'gitAutoFetch',
     'gitAutoFetchInterval',
@@ -269,7 +280,15 @@ export const TAB_DEFAULT_KEYS: Record<BuiltinTabId, readonly SettingsKey[]> = {
     'commitAiProviderId',
     'commitAiModelId',
   ],
-  general: ['confirmOnClose', 'showWelcomeOnStartup', 'reducedMotion', 'updateChannel', 'checkForUpdatesOnStartup', 'autoDownload', 'activityBarPosition'],
+  general: [
+    'confirmOnClose',
+    'showWelcomeOnStartup',
+    'reducedMotion',
+    'updateChannel',
+    'checkForUpdatesOnStartup',
+    'autoDownload',
+    'activityBarPosition',
+  ],
   ai: [
     'activeProviderId',
     'activeModelId',
@@ -297,10 +316,20 @@ export const TAB_DEFAULT_KEYS: Record<BuiltinTabId, readonly SettingsKey[]> = {
   ],
   languages: ['lspCustomBinaryPaths'],
   mobile: ['flutterSdkPath', 'androidSdkPath', 'reactNativeAutoDetect'],
-  docker: ['dockerSocketPath', 'dockerShowStopped', 'dockerAutoRefreshInterval', 'dockerComposeFile'],
+  docker: [
+    'dockerSocketPath',
+    'dockerShowStopped',
+    'dockerAutoRefreshInterval',
+    'dockerComposeFile',
+  ],
   extensions: [],
   rules: ['globalRulesPath'],
-  'sub-agents': ['subAgentEnabled', 'subAgentDefaultMode', 'subAgentMaxIterations', 'subAgentAutoApprove'],
+  'sub-agents': [
+    'subAgentEnabled',
+    'subAgentDefaultMode',
+    'subAgentMaxIterations',
+    'subAgentAutoApprove',
+  ],
   about: [],
 };
 
@@ -424,7 +453,8 @@ function deepEqual(a: unknown, b: unknown): boolean {
   const bk = Object.keys(b as object);
   if (ak.length !== bk.length) return false;
   for (const k of ak) {
-    if (!deepEqual((a as Record<string, unknown>)[k], (b as Record<string, unknown>)[k])) return false;
+    if (!deepEqual((a as Record<string, unknown>)[k], (b as Record<string, unknown>)[k]))
+      return false;
   }
   return true;
 }
@@ -453,12 +483,12 @@ export function resetTabToDefaults(tabId: BuiltinTabId): void {
 // ── Highlight helpers ──────────────────────────────────────────────────────
 
 /** Split a string into segments marking which substrings match the query. */
-export function highlightSegments(text: string, query: string): Array<{ text: string; match: boolean }> {
+export function highlightSegments(
+  text: string,
+  query: string,
+): Array<{ text: string; match: boolean }> {
   if (!query) return [{ text, match: false }];
-  const tokens = query
-    .toLowerCase()
-    .split(/\s+/)
-    .filter(Boolean);
+  const tokens = query.toLowerCase().split(/\s+/).filter(Boolean);
   if (tokens.length === 0) return [{ text, match: false }];
 
   // Build a single regex that matches any token, case-insensitive.

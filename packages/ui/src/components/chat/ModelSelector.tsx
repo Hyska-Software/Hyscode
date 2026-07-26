@@ -4,6 +4,7 @@ import { cn } from "../../lib/cn";
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuItem,
   DropdownMenuTrigger,
 } from "../primitives/DropdownMenu";
 import { useControllableState } from "../../lib/hooks/useControllableState";
@@ -47,16 +48,23 @@ export function ModelSelector({
           className,
         )}
       >
-        {current?.icon ?? <Sparkles className="text-primary" />}
-        {current?.name ?? "Select model"}
-        <ChevronDown className="text-muted-foreground" />
+        <span className="flex min-w-0 flex-1 items-center gap-1.5">
+          <span className="shrink-0">
+            {current?.icon ?? <Sparkles className="text-primary" />}
+          </span>
+          <span className="truncate">{current?.name ?? "Select model"}</span>
+        </span>
+        <ChevronDown className="shrink-0 text-muted-foreground" />
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="w-72">
+      <DropdownMenuContent
+        align="start"
+        collisionPadding={12}
+        className="max-h-[calc(100dvh-1.5rem)] w-[min(18rem,calc(100vw-1.5rem))] overflow-y-auto overscroll-contain sm:max-h-80"
+      >
         {models.map((model) => (
-          <button
+          <DropdownMenuItem
             key={model.id}
-            type="button"
-            onClick={() => setSelected(model.id)}
+            onSelect={() => setSelected(model.id)}
             className="flex w-full items-start gap-2.5 rounded-md px-2 py-2 text-left transition-colors hover:bg-muted"
           >
             <span className="mt-0.5 text-muted-foreground [&_svg]:size-4">
@@ -64,7 +72,7 @@ export function ModelSelector({
             </span>
             <span className="min-w-0 flex-1">
               <span className="flex items-center gap-2">
-                <span className="text-sm font-medium text-foreground">{model.name}</span>
+                <span className="truncate text-sm font-medium text-foreground">{model.name}</span>
                 {model.badge}
               </span>
               {model.description && (
@@ -72,7 +80,7 @@ export function ModelSelector({
               )}
             </span>
             {selected === model.id && <Check className="mt-0.5 size-4 shrink-0 text-primary" />}
-          </button>
+          </DropdownMenuItem>
         ))}
       </DropdownMenuContent>
     </DropdownMenu>

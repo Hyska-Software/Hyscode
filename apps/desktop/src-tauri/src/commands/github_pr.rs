@@ -1,4 +1,4 @@
-use super::git::{open_repo, GitRemoteInfo};
+use super::git::{open_repo, run_git_cli, GitRemoteInfo};
 use super::keychain::KeychainState;
 use serde::{Deserialize, Serialize};
 use tauri::State;
@@ -18,8 +18,6 @@ pub struct CreatePullRequestPayload {
 struct GitHubPullRequestResponse {
     html_url: String,
     number: u64,
-    #[serde(default)]
-    message: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -90,44 +88,75 @@ pub fn git_remote_info(repo_path: String) -> Result<GitRemoteInfo, String> {
     Err("No remote found".to_string())
 }
 
-/// Create a pull request on GitHub using the stored GitHub access token.
-/// Falls back to a user-provided token if no Copilot token is available.
+/// Create a pull request on GitHub using the dedicated repository token.
 #[tauri::command]
 pub async fn github_create_pull_request(
     keychain: State<'_, KeychainState>,
     repo_path: String,
-    payload: CreatePullRequestPayload,
+    mut payload: CreatePullRequestPayload,
+    base_remote: String,
+    head_remote: String,
 ) -> Result<PullRequestResult, String> {
-    // 1. Discover repo and get remote URL
-    let remote_url = {
+    // 1. Resolve the explicitly selected base/head GitHub remotes.
+    let (base_remote_url, head_remote_url) = {
         let repo = open_repo(&repo_path)?;
-        let remotes = repo
-            .remotes()
-            .map_err(|e| format!("Remotes error: {}", e))?;
-        remotes
-            .iter()
-            .flatten()
-            .find_map(|name| {
-                repo.find_remote(name)
-                    .ok()
-                    .and_then(|r| r.url().map(String::from))
-            })
-            .ok_or("No remote configured")?
+        let base = repo
+            .find_remote(&base_remote)
+            .map_err(|e| format!("Base remote '{base_remote}' was not found: {e}"))?
+            .url()
+            .map(String::from)
+            .ok_or_else(|| format!("Base remote '{base_remote}' has no URL"))?;
+        let head = repo
+            .find_remote(&head_remote)
+            .map_err(|e| format!("Head remote '{head_remote}' was not found: {e}"))?
+            .url()
+            .map(String::from)
+            .ok_or_else(|| format!("Head remote '{head_remote}' has no URL"))?;
+        (base, head)
     };
 
-    let (owner, repo_name) = parse_github_remote_url(&remote_url)
-        .ok_or_else(|| format!("Cannot parse GitHub remote URL: {}", remote_url))?;
+    let (base_owner, repo_name) = parse_github_remote_url(&base_remote_url).ok_or_else(|| {
+        format!("Only github.com remotes support pull requests: {base_remote_url}")
+    })?;
+    let (head_owner, head_repo_name) =
+        parse_github_remote_url(&head_remote_url).ok_or_else(|| {
+            format!("Only github.com remotes support pull requests: {head_remote_url}")
+        })?;
+    if repo_name != head_repo_name {
+        return Err(format!(
+            "The selected base and head remotes point to different repository names ('{repo_name}' and '{head_repo_name}')"
+        ));
+    }
+    let head_branch = payload.head.rsplit(':').next().unwrap_or(&payload.head);
+    if base_owner == head_owner && payload.base == head_branch {
+        return Err("The pull request base and head must be different".to_string());
+    }
+    run_git_cli(
+        &repo_path,
+        [
+            "ls-remote",
+            "--exit-code",
+            "--heads",
+            head_remote.as_str(),
+            format!("refs/heads/{head_branch}").as_str(),
+        ],
+    )
+    .map_err(|_| {
+        format!(
+            "Branch '{head_branch}' is not published on remote '{head_remote}'. Publish it before creating the pull request."
+        )
+    })?;
+    if head_owner != base_owner && !payload.head.contains(':') {
+        payload.head = format!("{head_owner}:{}", payload.head);
+    }
 
-    // 2. Get GitHub token from keychain (prefer copilot access token, fallback to generic github token)
+    // 2. A repository-scoped token is distinct from Copilot authentication.
     let token = {
         let store = keychain.0.lock().map_err(|e| e.to_string())?;
         store
-            .get("hyscode:github_copilot_access_token")
+            .get("hyscode:github_token")
             .cloned()
-            .or_else(|| store.get("hyscode:github_token").cloned())
-            .ok_or(
-                "No GitHub token found. Please authenticate via Settings → GitHub or add a token.",
-            )?
+            .ok_or("No repository GitHub token found. Add one in Settings → Git.")?
     };
 
     // 3. Build request
@@ -136,7 +165,10 @@ pub async fn github_create_pull_request(
         .build()
         .map_err(|e| format!("HTTP client error: {}", e))?;
 
-    let api_url = format!("https://api.github.com/repos/{}/{}/pulls", owner, repo_name);
+    let api_url = format!(
+        "https://api.github.com/repos/{}/{}/pulls",
+        base_owner, repo_name
+    );
 
     let resp = client
         .post(&api_url)
@@ -190,10 +222,17 @@ pub async fn github_set_token(
     Ok(())
 }
 
-/// Check if a GitHub token (copilot or generic) is available.
+/// Check if the dedicated repository GitHub token is available.
 #[tauri::command]
 pub async fn github_has_token(keychain: State<'_, KeychainState>) -> Result<bool, String> {
     let store = keychain.0.lock().map_err(|e| e.to_string())?;
-    Ok(store.contains_key("hyscode:github_copilot_access_token")
-        || store.contains_key("hyscode:github_token"))
+    Ok(store.contains_key("hyscode:github_token"))
+}
+
+#[tauri::command]
+pub async fn github_remove_token(keychain: State<'_, KeychainState>) -> Result<(), String> {
+    let mut store = keychain.0.lock().map_err(|e| e.to_string())?;
+    store.remove("hyscode:github_token");
+    super::keychain::persist_keychain_ref(&store);
+    Ok(())
 }

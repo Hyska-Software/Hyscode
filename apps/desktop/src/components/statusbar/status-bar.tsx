@@ -6,15 +6,21 @@ import { useDeviceStore } from '../../stores/device-store';
 import { detectLanguage } from '../../lib/lsp-bridge';
 import { BranchPicker } from '../git/branch-picker';
 import { useAgentStore } from '../../stores/agent-store';
+import { getGitStatusBarPresentation } from '../../lib/git-workflow';
 
 export function StatusBar() {
-  const isGitRepo = useGitStore((s) => s.isGitRepo);
+  const repositoryState = useGitStore((s) => s.repositoryState);
+  const repositoryError = useGitStore((s) => s.repositoryError);
+  const repositoryOperation = useGitStore((s) => s.repositoryOperation);
+  const headState = useGitStore((s) => s.headState);
   const currentBranch = useGitStore((s) => s.currentBranch);
   const ahead = useGitStore((s) => s.ahead);
   const behind = useGitStore((s) => s.behind);
+  const upstream = useGitStore((s) => s.upstream);
   const staged = useGitStore((s) => s.staged);
   const unstaged = useGitStore((s) => s.unstaged);
   const untracked = useGitStore((s) => s.untracked);
+  const conflicts = useGitStore((s) => s.conflicts);
 
   const activeTabId = useEditorStore((s) => s.activeTabId);
   const tabs = useEditorStore((s) => s.tabs);
@@ -35,28 +41,42 @@ export function StatusBar() {
   const [branchPickerOpen, setBranchPickerOpen] = useState(false);
   const branchRef = useRef<HTMLButtonElement>(null);
 
-  const totalChanges = staged.length + unstaged.length + untracked.length;
+  const totalChanges = staged.length + unstaged.length + untracked.length + conflicts.length;
+  const gitPresentation = getGitStatusBarPresentation({
+    repositoryState,
+    repositoryError,
+    headState,
+    currentBranch,
+    repositoryOperation,
+  });
 
   return (
     <>
       <footer className="flex h-5 items-center justify-between border-t border-border/50 bg-background px-3 text-[10px]">
         <div className="flex items-center gap-3">
-          {isGitRepo ? (
+          {gitPresentation.interactive ? (
             <button
               ref={branchRef}
               className="flex items-center gap-1.5 text-muted-foreground hover:text-foreground transition-colors"
               onClick={() => setBranchPickerOpen(!branchPickerOpen)}
+              title={gitPresentation.title}
             >
               <GitBranch className="h-2.5 w-2.5" />
-              <span>{currentBranch || 'HEAD'}</span>
+              <span>{gitPresentation.label}</span>
               {ahead > 0 && <span className="text-success">↑{ahead}</span>}
               {behind > 0 && <span className="text-warning">↓{behind}</span>}
+              {!upstream && currentBranch && <span className="text-warning">Publish</span>}
               {totalChanges > 0 && <span className="text-primary">{totalChanges}⨉</span>}
             </button>
           ) : (
-            <span className="flex items-center gap-1.5 text-muted-foreground">
+            <span
+              className={`flex items-center gap-1.5 ${
+                repositoryState === 'error' ? 'text-destructive' : 'text-muted-foreground'
+              }`}
+              title={gitPresentation.title}
+            >
               <GitBranch className="h-2.5 w-2.5" />
-              <span>No repo</span>
+              <span>{gitPresentation.label}</span>
             </span>
           )}
           <div

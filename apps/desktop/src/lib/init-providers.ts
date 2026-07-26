@@ -9,9 +9,30 @@ import { createClaudeAgentInvoke } from './tauri-claude-agent-transport';
 import { tauriInvoke } from './tauri-invoke';
 import type { ResilienceConfig } from '@hyscode/ai-providers';
 
-let _initialized = false;
 let _tauriFetch: ReturnType<typeof createTauriFetch> | null = null;
 let _claudeAgentInvoke: ReturnType<typeof createClaudeAgentInvoke> | null = null;
+
+export class ProviderInitializationCoordinator {
+  private initialized = false;
+  private pending: Promise<void> | null = null;
+
+  run(initializer: () => Promise<void>): Promise<void> {
+    if (this.initialized) return Promise.resolve();
+    if (this.pending) return this.pending;
+
+    this.pending = initializer()
+      .then(() => {
+        this.initialized = true;
+      })
+      .catch((error: unknown) => {
+        this.pending = null;
+        throw error;
+      });
+    return this.pending;
+  }
+}
+
+const providerInitialization = new ProviderInitializationCoordinator();
 
 function getTauriFetch() {
   if (!_tauriFetch) {
@@ -58,18 +79,18 @@ async function refreshCopilotToken(): Promise<void> {
 }
 
 export async function initProviders(): Promise<void> {
-  if (_initialized) return;
+  await providerInitialization.run(async () => {
+    // Refresh GitHub Copilot token before registry init so the keychain
+    // holds a valid short-lived token when registry.initialize reads it.
+    await refreshCopilotToken();
 
-  // Refresh GitHub Copilot token before registry init so the keychain
-  // holds a valid short-lived token when registry.initialize reads it.
-  await refreshCopilotToken();
-
-  const registry = getProviderRegistry();
-  await registry.initialize(tauriKeyStore, undefined, getTauriFetch(), getClaudeAgentInvoke());
-  _initialized = true;
+    const registry = getProviderRegistry();
+    await registry.initialize(tauriKeyStore, undefined, getTauriFetch(), getClaudeAgentInvoke());
+  });
 }
 
 export async function reinitProvider(providerId: string): Promise<void> {
+  await initProviders();
   const registry = getProviderRegistry();
   await registry.reinitializeProvider(
     providerId,

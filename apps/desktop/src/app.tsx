@@ -7,7 +7,7 @@ import { OnboardingWizard } from './components/onboarding';
 import { ExtensionOverlays } from './components/editor/extension-overlays';
 import { CommandPalette, openCommandPalette } from './components/editor/command-palette';
 import { TooltipProvider } from './components/ui/tooltip';
-import { DialogProvider } from './components/ui/dialogs';
+import { DialogProvider, promptConfirm } from './components/ui/dialogs';
 import { EditorLayout, AgentLayout } from './components/layouts';
 import {
   useProjectStore,
@@ -38,6 +38,7 @@ import { saveProjectState, switchProject, closeCurrentProject } from './lib/proj
 
 import { isLightTheme } from './lib/monaco-themes';
 import { tauriInvoke } from './lib/tauri-invoke';
+import { chooseDefaultGitRemote, shouldConfirmGitDiscard } from './lib/git-workflow';
 import type { AgentMode, ChatMessage } from './stores/agent-store';
 
 // ─── Open tabs persistence ───────────────────────────────────────────────────
@@ -549,7 +550,25 @@ export function App() {
       'git.discardAll',
       'Discard All Changes',
       async () => {
-        await useGitStore.getState().discardAll();
+        const git = useGitStore.getState();
+        const files = [...git.unstaged, ...git.untracked];
+        if (files.length === 0) return;
+        const mustConfirm = shouldConfirmGitDiscard(
+          files,
+          useSettingsStore.getState().gitConfirmDiscard,
+        );
+        if (mustConfirm) {
+          const untrackedCount = git.untracked.length;
+          const confirmed = await promptConfirm({
+            title: 'Discard All Changes',
+            description:
+              untrackedCount > 0
+                ? `Restore tracked changes and permanently delete ${untrackedCount} untracked file${untrackedCount === 1 ? '' : 's'}? This cannot be undone.`
+                : `Discard changes in ${files.map((file) => file.path).join(', ')}? This cannot be undone.`,
+          });
+          if (!confirmed) return;
+        }
+        await git.discardAll();
       },
       { category: 'Git' },
     );
@@ -571,11 +590,14 @@ export function App() {
       'git.push',
       'Push',
       async () => {
-        try {
-          await useGitStore.getState().push();
-        } catch (err) {
-          console.warn('[Git] Push failed:', err);
+        const git = useGitStore.getState();
+        if (git.upstream) {
+          await git.push();
+          return;
         }
+        const remote = chooseDefaultGitRemote(null, git.remotes);
+        if (!remote) throw new Error('No Git remote is configured');
+        await git.publishBranch(remote);
       },
       { category: 'Git' },
     );
@@ -584,11 +606,7 @@ export function App() {
       'git.pull',
       'Pull',
       async () => {
-        try {
-          await useGitStore.getState().pull();
-        } catch (err) {
-          console.warn('[Git] Pull failed:', err);
-        }
+        await useGitStore.getState().pull();
       },
       { category: 'Git' },
     );
@@ -597,20 +615,43 @@ export function App() {
       'git.fetch',
       'Fetch',
       async () => {
-        try {
-          await useGitStore.getState().fetch();
-        } catch (err) {
-          console.warn('[Git] Fetch failed:', err);
-        }
+        await useGitStore.getState().fetch();
+      },
+      { category: 'Git' },
+    );
+
+    builtin(
+      'git.fetchAll',
+      'Fetch All Remotes',
+      async () => {
+        await useGitStore.getState().fetchAll(false);
+      },
+      { category: 'Git' },
+    );
+
+    builtin(
+      'git.fetchPrune',
+      'Fetch All Remotes and Prune',
+      async () => {
+        await useGitStore.getState().fetchAll(true);
       },
       { category: 'Git' },
     );
 
     builtin(
       'git.stash',
-      'Stash Changes',
+      'Stash Tracked Changes',
       async () => {
         await useGitStore.getState().stashChanges();
+      },
+      { category: 'Git' },
+    );
+
+    builtin(
+      'git.stashIncludingUntracked',
+      'Stash Changes Including Untracked',
+      async () => {
+        await useGitStore.getState().stashChanges(undefined, true);
       },
       { category: 'Git' },
     );

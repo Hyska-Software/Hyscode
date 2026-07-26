@@ -41,13 +41,31 @@ const ROW_H = 26;
 const LANE_W = 16;
 const DOT_R = 4;
 const LANE_COLORS_SVG = [
-  '#10b981', '#3b82f6', '#f59e0b', '#ef4444', '#8b5cf6',
-  '#ec4899', '#06b6d4', '#f97316', '#14b8a6', '#6366f1',
+  '#10b981',
+  '#3b82f6',
+  '#f59e0b',
+  '#ef4444',
+  '#8b5cf6',
+  '#ec4899',
+  '#06b6d4',
+  '#f97316',
+  '#14b8a6',
+  '#6366f1',
 ];
-function lc(n: number) { return LANE_COLORS_SVG[n % LANE_COLORS_SVG.length]; }
+function lc(n: number) {
+  return LANE_COLORS_SVG[n % LANE_COLORS_SVG.length];
+}
 
-interface ActiveEdge { lane: number; color: number; targetHash: string; }
-interface Segment { fromLane: number; toLane: number; color: number; }
+interface ActiveEdge {
+  lane: number;
+  color: number;
+  targetHash: string;
+}
+interface Segment {
+  fromLane: number;
+  toLane: number;
+  color: number;
+}
 interface RowData {
   commit: GraphCommit;
   dotLane: number;
@@ -56,18 +74,23 @@ interface RowData {
   botSegs: Segment[];
 }
 
-function computeRows(commits: GraphCommit[]): { rows: RowData[]; maxLane: number } {
+export function computeRows(commits: GraphCommit[]): { rows: RowData[]; maxLane: number } {
   const rows: RowData[] = [];
   let active: ActiveEdge[] = [];
   let colorIdx = 0;
   const occ = new Set<number>();
-  const alloc = () => { let l = 0; while (occ.has(l)) l++; occ.add(l); return l; };
+  const alloc = () => {
+    let l = 0;
+    while (occ.has(l)) l++;
+    occ.add(l);
+    return l;
+  };
   const free = (l: number) => occ.delete(l);
   let maxLane = 0;
 
   for (const commit of commits) {
-    const inc = active.filter(e => e.targetHash === commit.hash);
-    const rest = active.filter(e => e.targetHash !== commit.hash);
+    const inc = active.filter((e) => e.targetHash === commit.hash);
+    const rest = active.filter((e) => e.targetHash !== commit.hash);
 
     let dotLane: number, dotColor: number;
     if (inc.length > 0) {
@@ -83,7 +106,7 @@ function computeRows(commits: GraphCommit[]): { rows: RowData[]; maxLane: number
     const out: ActiveEdge[] = [];
     for (let i = 0; i < commit.parents.length; i++) {
       const ph = commit.parents[i];
-      if (rest.find(e => e.targetHash === ph)) {
+      if (rest.find((e) => e.targetHash === ph)) {
         // Parent already tracked — free dotLane if first parent has no outgoing slot
         if (i === 0) free(dotLane);
         continue;
@@ -100,14 +123,16 @@ function computeRows(commits: GraphCommit[]): { rows: RowData[]; maxLane: number
     if (commit.parents.length === 0) free(dotLane);
 
     rows.push({
-      commit, dotLane, dotColor,
+      commit,
+      dotLane,
+      dotColor,
       topSegs: [
-        ...rest.map(e => ({ fromLane: e.lane, toLane: e.lane, color: e.color })),
-        ...inc.map(e => ({ fromLane: e.lane, toLane: dotLane, color: e.color })),
+        ...rest.map((e) => ({ fromLane: e.lane, toLane: e.lane, color: e.color })),
+        ...inc.map((e) => ({ fromLane: e.lane, toLane: dotLane, color: e.color })),
       ],
       botSegs: [
-        ...rest.map(e => ({ fromLane: e.lane, toLane: e.lane, color: e.color })),
-        ...out.map(e => ({ fromLane: dotLane, toLane: e.lane, color: e.color })),
+        ...rest.map((e) => ({ fromLane: e.lane, toLane: e.lane, color: e.color })),
+        ...out.map((e) => ({ fromLane: dotLane, toLane: e.lane, color: e.color })),
       ],
     });
     active = [...rest, ...out];
@@ -127,7 +152,7 @@ function computeRows(commits: GraphCommit[]): { rows: RowData[]; maxLane: number
  *    those commits to a named branch (using refs if available).
  *  - Emit oldest-first with correct branch/checkout/merge directives.
  */
-function formatMermaid(commits: GraphCommit[]): string {
+export function formatMermaid(commits: GraphCommit[]): string {
   const MAX_COMMITS = 50;
   const slice = commits.slice(0, MAX_COMMITS);
   if (!slice.length) return 'gitGraph\n    commit id: "empty" msg: "No commits"';
@@ -137,21 +162,29 @@ function formatMermaid(commits: GraphCommit[]): string {
 
   // Sanitize commit message: strip non-ASCII, quotes, cap length
   const safeMsg = (s: string) =>
-    s.split('\n')[0].replace(/"/g, "'").replace(/[^\x20-\x7E]/g, '').trim().slice(0, 40) || 'commit';
+    s
+      .split('\n')[0]
+      .replace(/"/g, "'")
+      .replace(/[^\x20-\x7E]/g, '')
+      .trim()
+      .slice(0, 40) || 'commit';
 
   // Sanitize branch name: only alphanumeric + dash/underscore
   const safeName = (s: string) =>
-    s.replace(/[^a-zA-Z0-9_-]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '') || 'branch';
+    s
+      .replace(/[^a-zA-Z0-9_-]/g, '-')
+      .replace(/-+/g, '-')
+      .replace(/^-|-$/g, '') || 'branch';
 
   // Pick a human-readable name from a commit's refs array.
   // Prefer local branches over remote tracking branches; skip tags.
   const extractRef = (refs: string[]): string | null => {
     for (const r of refs) {
       const n = r.replace(/^HEAD\s*->\s*/, '').trim();
-      if (n && !n.startsWith('tag:') && !n.startsWith('origin/')) return safeName(n);
+      if (n && !n.startsWith('tag:') && !n.includes('/')) return safeName(n);
     }
     for (const r of refs) {
-      const m = r.match(/^origin\/(.+)/);
+      const m = r.match(/^[^/]+\/(.+)/);
       if (m && m[1] !== 'HEAD') return safeName(m[1]);
     }
     return null;
@@ -184,7 +217,8 @@ function formatMermaid(commits: GraphCommit[]): string {
     let name = extractRef(p2.refs) ?? `branch-${++autoIdx}`;
     if (name === mainBranch) name = `branch-${++autoIdx}`;
     // Deduplicate colliding names
-    const base = name; let n = 2;
+    const base = name;
+    let n = 2;
     while (usedNames.has(name)) name = `${base}-${n++}`;
     usedNames.add(name);
 
@@ -248,6 +282,7 @@ interface GitGraphViewProps {
 
 export function GitGraphView({ onClose }: GitGraphViewProps) {
   const graphLog = useGitStore((s) => s.graphLog);
+  const repositoryError = useGitStore((s) => s.repositoryError);
   const fetchLogGraph = useGitStore((s) => s.fetchLogGraph);
   const openCommitTab = useEditorStore((s) => s.openCommitTab);
   const openGitGraphTab = useEditorStore((s) => s.openGitGraphTab);
@@ -256,11 +291,18 @@ export function GitGraphView({ onClose }: GitGraphViewProps) {
   const [loading, setLoading] = useState(true);
   const [expandedCommit, setExpandedCommit] = useState<string | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [limit, setLimit] = useState(200);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
     setLoading(true);
-    fetchLogGraph(200).finally(() => setLoading(false));
-  }, [fetchLogGraph]);
+    setLoadError(null);
+    fetchLogGraph(limit)
+      .catch((reason: unknown) => {
+        setLoadError(reason instanceof Error ? reason.message : String(reason));
+      })
+      .finally(() => setLoading(false));
+  }, [fetchLogGraph, limit]);
 
   const { rows } = useMemo(() => {
     if (graphLog.length === 0) return { rows: [], maxLane: 0 };
@@ -269,8 +311,13 @@ export function GitGraphView({ onClose }: GitGraphViewProps) {
 
   const handleRefresh = useCallback(() => {
     setIsRefreshing(true);
-    fetchLogGraph(200).finally(() => setIsRefreshing(false));
-  }, [fetchLogGraph]);
+    setLoadError(null);
+    fetchLogGraph(limit)
+      .catch((reason: unknown) => {
+        setLoadError(reason instanceof Error ? reason.message : String(reason));
+      })
+      .finally(() => setIsRefreshing(false));
+  }, [fetchLogGraph, limit]);
 
   const handleCopyHash = useCallback((hash: string) => {
     navigator.clipboard.writeText(hash);
@@ -285,7 +332,12 @@ export function GitGraphView({ onClose }: GitGraphViewProps) {
 
   if (loading) {
     return (
-      <div className="flex h-full items-center justify-center">
+      <div className="relative flex h-full items-center justify-center">
+        {onClose && (
+          <button onClick={onClose} className="absolute right-2 top-2 text-[10px] text-muted-foreground hover:text-foreground">
+            Close
+          </button>
+        )}
         <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
       </div>
     );
@@ -293,9 +345,22 @@ export function GitGraphView({ onClose }: GitGraphViewProps) {
 
   if (graphLog.length === 0) {
     return (
-      <div className="flex h-full flex-col items-center justify-center text-muted-foreground">
+      <div className="relative flex h-full flex-col items-center justify-center text-muted-foreground">
+        {onClose && (
+          <button onClick={onClose} className="absolute right-2 top-2 text-[10px] hover:text-foreground">
+            Close
+          </button>
+        )}
         <GitCommit className="mb-2 h-6 w-6 opacity-30" />
-        <p className="text-[11px]">No commits yet</p>
+        <p className="text-[11px]">{loadError ?? repositoryError ?? 'No commits yet'}</p>
+        {(loadError || repositoryError) && (
+          <button
+            onClick={handleRefresh}
+            className="mt-2 rounded bg-muted px-2 py-1 text-[10px] text-foreground"
+          >
+            Try Again
+          </button>
+        )}
       </div>
     );
   }
@@ -310,10 +375,30 @@ export function GitGraphView({ onClose }: GitGraphViewProps) {
           <span className="text-[10px] text-muted-foreground">({graphLog.length})</span>
         </div>
         <div className="flex items-center gap-0.5">
-          <ModeBtn icon={TreePine} active={viewMode === 'tree'} onClick={() => setViewMode('tree')} title="Tree" />
-          <ModeBtn icon={GitBranch} active={viewMode === 'compact'} onClick={() => setViewMode('compact')} title="Compact" />
-          <ModeBtn icon={Braces} active={viewMode === 'mermaid'} onClick={() => setViewMode('mermaid')} title="Mermaid" />
-          <ModeBtn icon={Table2} active={viewMode === 'grid'} onClick={() => setViewMode('grid')} title="Grid" />
+          <ModeBtn
+            icon={TreePine}
+            active={viewMode === 'tree'}
+            onClick={() => setViewMode('tree')}
+            title="Tree"
+          />
+          <ModeBtn
+            icon={GitBranch}
+            active={viewMode === 'compact'}
+            onClick={() => setViewMode('compact')}
+            title="Compact"
+          />
+          <ModeBtn
+            icon={Braces}
+            active={viewMode === 'mermaid'}
+            onClick={() => setViewMode('mermaid')}
+            title="Mermaid"
+          />
+          <ModeBtn
+            icon={Table2}
+            active={viewMode === 'grid'}
+            onClick={() => setViewMode('grid')}
+            title="Grid"
+          />
           <div className="mx-1 h-3 w-px bg-border" />
           <button
             onClick={openGitGraphTab}
@@ -327,7 +412,11 @@ export function GitGraphView({ onClose }: GitGraphViewProps) {
             className="flex h-5 w-5 items-center justify-center rounded-sm text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
             title="Refresh"
           >
-            {isRefreshing ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />}
+            {isRefreshing ? (
+              <Loader2 className="h-3 w-3 animate-spin" />
+            ) : (
+              <RefreshCw className="h-3 w-3" />
+            )}
           </button>
           {onClose && (
             <button
@@ -370,6 +459,16 @@ export function GitGraphView({ onClose }: GitGraphViewProps) {
             onOpenInEditor={handleOpenInEditor}
           />
         )}
+        {graphLog.length >= limit && (
+          <div className="border-t border-border p-2 text-center">
+            <button
+              onClick={() => setLimit((current) => current + 200)}
+              className="rounded-md bg-muted px-3 py-1 text-[10px] text-foreground hover:bg-surface-raised"
+            >
+              Load More
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -392,7 +491,9 @@ function ModeBtn({
     <button
       onClick={onClick}
       className={`flex h-5 w-5 items-center justify-center rounded-sm transition-colors ${
-        active ? 'bg-primary text-white' : 'text-muted-foreground hover:text-foreground hover:bg-muted'
+        active
+          ? 'bg-primary text-white'
+          : 'text-muted-foreground hover:text-foreground hover:bg-muted'
       }`}
       title={title}
     >
@@ -408,8 +509,8 @@ function GraphSvg({ row }: { row: RowData }) {
   // Width = only what this row actually uses
   const allLanes = [
     row.dotLane,
-    ...row.topSegs.flatMap(s => [s.fromLane, s.toLane]),
-    ...row.botSegs.flatMap(s => [s.fromLane, s.toLane]),
+    ...row.topSegs.flatMap((s) => [s.fromLane, s.toLane]),
+    ...row.botSegs.flatMap((s) => [s.fromLane, s.toLane]),
   ];
   const rowMax = allLanes.length > 0 ? Math.max(...allLanes) : 0;
   const svgW = (rowMax + 1) * LANE_W + PAD * 2;
@@ -428,15 +529,33 @@ function GraphSvg({ row }: { row: RowData }) {
   return (
     <svg width={svgW} height={ROW_H} style={{ display: 'block', flexShrink: 0 }}>
       {row.topSegs.map((s, i) => (
-        <path key={`t${i}`} d={segPath(s.fromLane, s.toLane, 0, mid)}
-          stroke={lc(s.color)} strokeWidth={1.5} fill="none" opacity={0.8} />
+        <path
+          key={`t${i}`}
+          d={segPath(s.fromLane, s.toLane, 0, mid)}
+          stroke={lc(s.color)}
+          strokeWidth={1.5}
+          fill="none"
+          opacity={0.8}
+        />
       ))}
       {row.botSegs.map((s, i) => (
-        <path key={`b${i}`} d={segPath(s.fromLane, s.toLane, mid, ROW_H)}
-          stroke={lc(s.color)} strokeWidth={1.5} fill="none" opacity={0.8} />
+        <path
+          key={`b${i}`}
+          d={segPath(s.fromLane, s.toLane, mid, ROW_H)}
+          stroke={lc(s.color)}
+          strokeWidth={1.5}
+          fill="none"
+          opacity={0.8}
+        />
       ))}
-      <circle cx={cx} cy={mid} r={isMerge ? 4.5 : DOT_R}
-        fill={lc(row.dotColor)} stroke="hsl(var(--background))" strokeWidth={1.5} />
+      <circle
+        cx={cx}
+        cy={mid}
+        r={isMerge ? 4.5 : DOT_R}
+        fill={lc(row.dotColor)}
+        stroke="hsl(var(--background))"
+        strokeWidth={1.5}
+      />
       {isMerge && <circle cx={cx} cy={mid} r={1.5} fill="hsl(var(--background))" opacity={0.6} />}
     </svg>
   );
@@ -480,18 +599,30 @@ function TreeView({
                     const isTag = ref.startsWith('tag:');
                     const label = isTag ? ref.slice(4) : ref;
                     return (
-                      <span key={ref} className={`rounded px-1 py-0.5 text-[9px] font-medium ${
-                        isTag ? 'bg-warning/10 text-warning' : 'bg-blue-500/10 text-blue-400'
-                      }`}>
-                        {isTag
-                          ? <span className="flex items-center gap-0.5"><Tag className="h-2 w-2" />{label}</span>
-                          : <span className="flex items-center gap-0.5"><GitBranch className="h-2 w-2" />{label}</span>
-                        }
+                      <span
+                        key={ref}
+                        className={`rounded px-1 py-0.5 text-[9px] font-medium ${
+                          isTag ? 'bg-warning/10 text-warning' : 'bg-blue-500/10 text-blue-400'
+                        }`}
+                      >
+                        {isTag ? (
+                          <span className="flex items-center gap-0.5">
+                            <Tag className="h-2 w-2" />
+                            {label}
+                          </span>
+                        ) : (
+                          <span className="flex items-center gap-0.5">
+                            <GitBranch className="h-2 w-2" />
+                            {label}
+                          </span>
+                        )}
                       </span>
                     );
                   })}
                   {commit.refs.length > 3 && (
-                    <span className="text-[9px] text-muted-foreground">+{commit.refs.length - 3}</span>
+                    <span className="text-[9px] text-muted-foreground">
+                      +{commit.refs.length - 3}
+                    </span>
                   )}
                 </div>
               )}
@@ -500,7 +631,11 @@ function TreeView({
               </span>
             </button>
             {isExpanded && (
-              <CommitDetailRow commit={commit} onCopyHash={onCopyHash} onOpenInEditor={onOpenInEditor} />
+              <CommitDetailRow
+                commit={commit}
+                onCopyHash={onCopyHash}
+                onOpenInEditor={onOpenInEditor}
+              />
             )}
           </div>
         );
@@ -557,9 +692,7 @@ function CompactView({
                     <span
                       key={ref}
                       className={`rounded px-1 py-0.5 text-[9px] font-medium ${
-                        isTag
-                          ? 'bg-warning/10 text-warning'
-                          : 'bg-blue-500/10 text-blue-400'
+                        isTag ? 'bg-warning/10 text-warning' : 'bg-blue-500/10 text-blue-400'
                       }`}
                     >
                       {label}
@@ -636,16 +769,28 @@ function GridView({
                 </td>
                 <td className="px-3 py-1.5">
                   <div className="flex items-center gap-1">
-                    {commit.refs.filter((r) => !r.startsWith('tag:')).slice(0, 1).map((r) => (
-                      <span key={r} className="rounded bg-blue-500/10 px-1 py-0.5 text-[9px] text-blue-400">
-                        {r}
-                      </span>
-                    ))}
-                    {commit.refs.filter((r) => r.startsWith('tag:')).slice(0, 1).map((r) => (
-                      <span key={r} className="rounded bg-warning/10 px-1 py-0.5 text-[9px] text-warning">
-                        {r.slice(4)}
-                      </span>
-                    ))}
+                    {commit.refs
+                      .filter((r) => !r.startsWith('tag:'))
+                      .slice(0, 1)
+                      .map((r) => (
+                        <span
+                          key={r}
+                          className="rounded bg-blue-500/10 px-1 py-0.5 text-[9px] text-blue-400"
+                        >
+                          {r}
+                        </span>
+                      ))}
+                    {commit.refs
+                      .filter((r) => r.startsWith('tag:'))
+                      .slice(0, 1)
+                      .map((r) => (
+                        <span
+                          key={r}
+                          className="rounded bg-warning/10 px-1 py-0.5 text-[9px] text-warning"
+                        >
+                          {r.slice(4)}
+                        </span>
+                      ))}
                   </div>
                 </td>
                 <td className="px-3 py-1.5 text-[10px] text-muted-foreground font-mono">
@@ -687,7 +832,8 @@ function MermaidView({ commits }: { commits: GraphCommit[] }) {
     <div className="p-3">
       <div className="mb-2 flex items-center justify-between">
         <span className="text-[10px] text-muted-foreground">
-          Mermaid gitGraph ({capped ? `${MERMAID_MAX} of ${commits.length}` : commits.length} commits
+          Mermaid gitGraph ({capped ? `${MERMAID_MAX} of ${commits.length}` : commits.length}{' '}
+          commits
           {capped && <span className="ml-1 text-warning/70">· capped for legibility</span>})
         </span>
         <button
@@ -740,9 +886,7 @@ function CommitDetailRow({
                 <span
                   key={ref}
                   className={`rounded px-1 py-0.5 text-[9px] font-medium ${
-                    isTag
-                      ? 'bg-warning/10 text-warning'
-                      : 'bg-blue-500/10 text-blue-400'
+                    isTag ? 'bg-warning/10 text-warning' : 'bg-blue-500/10 text-blue-400'
                   }`}
                 >
                   {isTag ? (

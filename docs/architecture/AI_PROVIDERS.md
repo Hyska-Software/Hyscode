@@ -10,33 +10,27 @@ The AI Provider layer provides a **unified interface** for communicating with mu
 
 ```typescript
 interface AIProvider {
-  readonly id: string; // "anthropic" | "openai" | "gemini" | "ollama" | "openrouter"
-  readonly name: string; // Human-readable name
-  readonly supportsStreaming: boolean;
-  readonly supportsTools: boolean;
-  readonly supportsVision: boolean;
-
+  readonly id: string;
+  readonly name: string;
+  models: AIModel[];
+  readonly capabilities?: ProviderCapabilities;
+  chat(params: ChatParams): AsyncIterable<StreamChunk>;
   listModels(): Promise<AIModel[]>;
-
-  chat(params: ChatParams): Promise<ChatResponse>;
-
-  streamChat(params: ChatParams): AsyncIterable<StreamChunk>;
-
-  countTokens(messages: Message[], model: string): Promise<number>;
-
-  validateApiKey(key: string): Promise<boolean>;
+  isConfigured(): boolean;
 }
 
 interface AIModel {
-  id: string; // "claude-sonnet-4-20250514"
-  name: string; // "Claude Sonnet 4"
+  id: string;
+  name: string;
   provider: string;
-  maxInputTokens: number;
+  contextWindow: number;
   maxOutputTokens: number;
   supportsTools: boolean;
+  supportsStreaming: boolean;
   supportsVision: boolean;
-  costPer1kInput?: number; // USD
-  costPer1kOutput?: number;
+  inputPricePerMToken?: number;
+  outputPricePerMToken?: number;
+  thinkingVariants?: ThinkingVariants;
 }
 ```
 
@@ -48,21 +42,14 @@ interface AIModel {
 interface Message {
   role: 'system' | 'user' | 'assistant' | 'tool';
   content: MessageContent[];
-  toolCalls?: ToolCall[]; // assistant messages with tool use
-  toolCallId?: string; // tool result messages
 }
 
 type MessageContent =
   | { type: 'text'; text: string }
   | { type: 'image'; base64: string; mediaType: string }
-  | { type: 'tool_use'; id: string; name: string; input: unknown }
-  | { type: 'tool_result'; toolCallId: string; content: string; isError?: boolean };
-
-interface ToolCall {
-  id: string;
-  name: string;
-  input: unknown;
-}
+  | { type: 'tool_call'; id: string; name: string; input: Record<string, unknown> }
+  | { type: 'tool_result'; toolCallId: string; output: string; isError?: boolean }
+  | { type: 'thinking'; thinking: string };
 
 interface ChatParams {
   model: string;
@@ -70,8 +57,11 @@ interface ChatParams {
   tools?: ToolDefinition[];
   temperature?: number;
   maxTokens?: number;
+  maxTurns?: number;
   stopSequences?: string[];
   systemPrompt?: string;
+  signal?: AbortSignal;
+  thinking?: ThinkingConfig;
 }
 ```
 
@@ -84,12 +74,13 @@ All providers normalize to a unified streaming protocol:
 ```typescript
 type StreamChunk =
   | { type: 'text_delta'; text: string }
+  | { type: 'thinking_delta'; text: string }
   | { type: 'tool_call_start'; id: string; name: string }
-  | { type: 'tool_call_delta'; id: string; input: string } // partial JSON
+  | { type: 'tool_call_delta'; id: string; input: string }
   | { type: 'tool_call_end'; id: string }
-  | { type: 'message_start'; model: string; usage?: TokenUsage }
-  | { type: 'message_end'; stopReason: string; usage: TokenUsage }
-  | { type: 'error'; error: string; code?: string };
+  | { type: 'usage'; usage: TokenUsage }
+  | { type: 'done'; stopReason: StopReason }
+  | { type: 'error'; error: string; retryable?: boolean; details?: ProviderErrorDetails };
 
 interface TokenUsage {
   inputTokens: number;
@@ -115,8 +106,7 @@ window without any individual request overflowing it.
 ```typescript
 // In agentStore
 async function streamResponse(params: ChatParams) {
-  const provider = getActiveProvider();
-  const stream = provider.streamChat(params);
+  const stream = registry.chat({ ...params, providerId });
 
   for await (const chunk of stream) {
     switch (chunk.type) {
@@ -132,8 +122,11 @@ async function streamResponse(params: ChatParams) {
       case 'tool_call_end':
         finalizeToolCall(chunk.id);
         break;
-      case 'message_end':
+      case 'usage':
         updateTokenUsage(chunk.usage);
+        break;
+      case 'error':
+        surfaceProviderError(chunk.details ?? chunk.error);
         break;
     }
   }
@@ -222,7 +215,9 @@ class ProviderRegistry {
   register(provider: AIProvider): void;
   get(id: string): AIProvider | undefined;
   list(): AIProvider[];
-  getDefault(): AIProvider;
+  listConfigured(): AIProvider[];
+  getDefault(): { provider: AIProvider; modelId: string };
+  chat(params: ChatParams & { providerId?: string }): AsyncIterable<StreamChunk>;
 
   // Factory method using API keys from keychain
   async initialize(): Promise<void> {
@@ -238,6 +233,25 @@ class ProviderRegistry {
   }
 }
 ```
+
+### Commit-message generation
+
+The Source Control generator uses a dedicated provider gateway rather than reading the
+registry from the React view. Provider initialization is single-flight, and the model picker
+intersects enabled catalog models with providers and models that are actually configured.
+An unavailable persisted selection is shown as unavailable and never falls back silently to
+another provider.
+
+Generation is a tool-free, single-turn text request (`maxTurns: 1`, `maxTokens: 256`) without
+a forced temperature or thinking mode. The consumer handles `error`, `usage`, and `done`
+chunks explicitly. Cancellation discards all partial text, and `max_tokens`, `tool_use`,
+missing completion markers, empty output, or a non-Conventional-Commit response are surfaced
+as typed errors. Retry, timeout, credential injection, and transport cancellation remain
+owned by the registry and Tauri transport.
+
+Only repository-relative staged-change metadata and bounded staged patches are sent. Prompts
+mark repository content as untrusted data, and neither prompts nor raw model responses are
+logged.
 
 ---
 

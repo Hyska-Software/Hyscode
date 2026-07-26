@@ -27,7 +27,7 @@ import type {
   SddSession,
 } from '@hyscode/agent-harness';
 import type { Message, ToolDefinition, MessageContent, TokenUsage } from '@hyscode/ai-providers';
-import { tauriInvokeRaw } from './tauri-invoke';
+import { tauriInvoke, tauriInvokeRaw } from './tauri-invoke';
 import { tauriFs } from './tauri-fs';
 import { listen as tauriListen } from '@tauri-apps/api/event';
 import { McpBridge } from './mcp-bridge';
@@ -2220,25 +2220,38 @@ Investigate the error, fix the underlying issue in the affected files, and verif
 
     // Git state
     try {
-      const branch = await tauriInvokeRaw<string>('git_current_branch', {
+      const snapshot = await tauriInvoke('git_repository_snapshot', {
         repoPath: env.workspacePath,
       });
-      const status = await tauriInvokeRaw<{
-        staged: Array<{ path: string; status: string }>;
-        unstaged: Array<{ path: string; status: string }>;
-        untracked: Array<{ path: string }>;
-      }>('git_status', { repoPath: env.workspacePath });
 
-      const total = status.staged.length + status.unstaged.length + status.untracked.length;
+      const total =
+        snapshot.staged.length +
+        snapshot.unstaged.length +
+        snapshot.untracked.length +
+        snapshot.conflicts.length;
       const summaryParts: string[] = [];
-      if (status.staged.length > 0) summaryParts.push(`${status.staged.length} staged`);
-      if (status.unstaged.length > 0) summaryParts.push(`${status.unstaged.length} modified`);
-      if (status.untracked.length > 0) summaryParts.push(`${status.untracked.length} untracked`);
+      if (snapshot.staged.length > 0) summaryParts.push(`${snapshot.staged.length} staged`);
+      if (snapshot.unstaged.length > 0) summaryParts.push(`${snapshot.unstaged.length} modified`);
+      if (snapshot.untracked.length > 0) {
+        summaryParts.push(`${snapshot.untracked.length} untracked`);
+      }
+      if (snapshot.conflicts.length > 0) {
+        summaryParts.push(`${snapshot.conflicts.length} conflicted`);
+      }
 
       env.gitState = {
-        branch,
+        branch:
+          snapshot.current_branch ??
+          (snapshot.head_state === 'detached'
+            ? `detached@${snapshot.head_oid?.slice(0, 7) ?? 'HEAD'}`
+            : 'unborn'),
         uncommittedFiles: total,
-        summary: total > 0 ? summaryParts.join(', ') : 'Working tree clean',
+        summary:
+          total > 0
+            ? summaryParts.join(', ')
+            : snapshot.operation_state === 'clean'
+              ? 'Working tree clean'
+              : `Repository operation: ${snapshot.operation_state}`,
       };
     } catch {
       // Git not available — skip

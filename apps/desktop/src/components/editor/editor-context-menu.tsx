@@ -29,6 +29,7 @@ import { useTerminalStore } from '../../stores/terminal-store';
 import { useFileStore } from '../../stores/file-store';
 import { detectLanguage } from '../../lib/lsp-bridge';
 import { writeClipboard } from '../../lib/utils';
+import { tauriInvoke } from '../../lib/tauri-invoke';
 import type { MenuActionContext } from '@hyscode/extension-api';
 
 // ── Icon map for extension-contributed icons ─────────────────────────────────
@@ -348,7 +349,7 @@ export function EditorContextMenu({ x, y, editorInstance, onClose }: EditorConte
     if (!showHistorySubmenu) {
       setHistoryLoading(true);
       try {
-        const log = await invoke<GitCommitInfo[]>('git_log_file', {
+        const log = await tauriInvoke('git_log_file', {
           repoPath: rootPath,
           filePath: relPath,
           limit: 20,

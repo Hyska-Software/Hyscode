@@ -1,16 +1,15 @@
 use super::utils::cmd;
-use git2::{
-    BranchType, Delta, DiffOptions, ErrorCode, IndexAddOption, Repository, Signature, Sort,
-    StatusOptions,
-};
+use git2::{BranchType, Delta, DiffOptions, ErrorCode, Patch, Repository, Sort, StatusOptions};
 use serde::Serialize;
-use std::path::Path;
+use std::collections::{HashMap, HashSet};
+use std::path::{Component, Path, PathBuf};
 
 // ── Serializable Types ──────────────────────────────────────────────────────
 
 #[derive(Serialize, Clone)]
 pub struct GitFile {
     pub path: String,
+    pub absolute_path: String,
     pub status: String, // "M" | "A" | "D" | "R" | "C" | "T"
     pub old_path: Option<String>,
 }
@@ -60,9 +59,68 @@ pub struct GitAheadBehind {
 }
 
 #[derive(Serialize)]
+pub struct GitUpstreamInfo {
+    pub reference: String,
+    pub remote: Option<String>,
+    pub branch: String,
+}
+
+#[derive(Serialize)]
+pub struct GitRepositorySnapshot {
+    pub repository_root: String,
+    pub worktree_root: Option<String>,
+    pub head_state: String,
+    pub current_branch: Option<String>,
+    pub head_oid: Option<String>,
+    pub upstream: Option<GitUpstreamInfo>,
+    pub ahead: usize,
+    pub behind: usize,
+    pub operation_state: String,
+    pub remotes: Vec<GitRemoteInfo>,
+    pub staged: Vec<GitFile>,
+    pub unstaged: Vec<GitFile>,
+    pub untracked: Vec<GitFile>,
+    pub conflicts: Vec<GitFile>,
+}
+
+#[derive(Serialize)]
 pub struct GitFileContent {
     pub original: String,
     pub modified: String,
+}
+
+#[derive(Serialize)]
+pub struct GitDiffContent {
+    pub original: Option<String>,
+    pub modified: Option<String>,
+    pub original_missing: bool,
+    pub modified_missing: bool,
+    pub is_binary: bool,
+}
+
+#[derive(Serialize, Clone)]
+pub struct GitCommitContextFile {
+    pub path: String,
+    pub old_path: Option<String>,
+    pub status: String,
+    pub is_binary: bool,
+    pub patch: Option<String>,
+    pub patch_truncated: bool,
+    pub patch_bytes_omitted: usize,
+}
+
+#[derive(Serialize)]
+pub struct GitCommitContext {
+    pub fingerprint: String,
+    pub files: Vec<GitCommitContextFile>,
+    pub patch_bytes_included: usize,
+    pub patch_bytes_omitted: usize,
+}
+
+#[derive(Serialize)]
+pub struct GitIdentityConfig {
+    pub user_name: Option<String>,
+    pub user_email: Option<String>,
 }
 
 #[derive(Serialize, Clone)]
@@ -115,22 +173,245 @@ fn delta_to_status(delta: Delta) -> &'static str {
     }
 }
 
-// ── Commands ────────────────────────────────────────────────────────────────
-
-#[tauri::command]
-pub fn git_is_repo(path: String) -> bool {
-    Repository::discover(&path).is_ok()
+fn worktree_root(repo: &Repository) -> Result<&Path, String> {
+    repo.workdir()
+        .ok_or_else(|| "Bare repositories are not supported".to_string())
 }
 
-#[tauri::command]
-pub fn git_init(path: String) -> Result<(), String> {
-    Repository::init(&path).map_err(|e| format!("Git init failed: {}", e))?;
-    Ok(())
+fn repository_root(repo: &Repository) -> String {
+    repo.path()
+        .parent()
+        .unwrap_or_else(|| repo.path())
+        .to_string_lossy()
+        .to_string()
 }
 
-#[tauri::command]
-pub fn git_status(repo_path: String) -> Result<GitStatusResult, String> {
-    let repo = open_repo(&repo_path)?;
+fn absolute_worktree_path(repo: &Repository, path: &str) -> Result<String, String> {
+    let relative = validate_repo_relative_path(path)?;
+    Ok(worktree_root(repo)?
+        .join(relative)
+        .to_string_lossy()
+        .to_string())
+}
+
+fn validate_repo_relative_path(path: &str) -> Result<PathBuf, String> {
+    let candidate = Path::new(path);
+    if path.trim().is_empty() || candidate.is_absolute() {
+        return Err(format!("Invalid repository-relative path: '{path}'"));
+    }
+    if candidate.components().any(|component| {
+        matches!(
+            component,
+            Component::ParentDir | Component::RootDir | Component::Prefix(_)
+        )
+    }) {
+        return Err(format!("Path escapes the repository worktree: '{path}'"));
+    }
+    Ok(candidate.to_path_buf())
+}
+
+fn git_file(
+    repo: &Repository,
+    path: String,
+    status: &str,
+    old_path: Option<String>,
+) -> Result<GitFile, String> {
+    Ok(GitFile {
+        absolute_path: absolute_worktree_path(repo, &path)?,
+        path,
+        status: status.to_string(),
+        old_path,
+    })
+}
+
+const COMMIT_CONTEXT_PATCH_BUDGET: usize = 32 * 1024;
+const FNV_OFFSET_BASIS: u64 = 0xcbf29ce484222325;
+const FNV_PRIME: u64 = 0x100000001b3;
+
+struct StagedContextFile {
+    diff_index: usize,
+    path: String,
+    old_path: Option<String>,
+    status: String,
+    is_binary: bool,
+    fingerprint_material: Vec<u8>,
+}
+
+fn update_fingerprint(hash: &mut u64, bytes: &[u8]) {
+    for byte in bytes {
+        *hash ^= u64::from(*byte);
+        *hash = hash.wrapping_mul(FNV_PRIME);
+    }
+    *hash ^= 0xff;
+    *hash = hash.wrapping_mul(FNV_PRIME);
+}
+
+fn staged_diff<'repo>(repo: &'repo Repository) -> Result<git2::Diff<'repo>, String> {
+    let head_tree = repo.head().ok().and_then(|head| head.peel_to_tree().ok());
+    let mut diff = repo
+        .diff_tree_to_index(head_tree.as_ref(), None, None)
+        .map_err(|error| format!("Commit context diff error: {error}"))?;
+    diff.find_similar(None)
+        .map_err(|error| format!("Commit context rename detection error: {error}"))?;
+    Ok(diff)
+}
+
+fn staged_context_files(diff: &git2::Diff<'_>) -> Result<(String, Vec<StagedContextFile>), String> {
+    let mut files = Vec::with_capacity(diff.deltas().len());
+
+    for index in 0..diff.deltas().len() {
+        let delta = diff
+            .get_delta(index)
+            .ok_or_else(|| format!("Commit context delta {index} disappeared"))?;
+        let status = delta_to_status(delta.status()).to_string();
+        let path = delta
+            .new_file()
+            .path()
+            .or_else(|| delta.old_file().path())
+            .ok_or_else(|| "Git returned a staged delta without a path".to_string())?
+            .to_string_lossy()
+            .to_string();
+        let old_path = if delta.status() == Delta::Renamed || delta.status() == Delta::Copied {
+            delta
+                .old_file()
+                .path()
+                .map(|value| value.to_string_lossy().to_string())
+        } else {
+            None
+        };
+
+        let mut fingerprint_material = Vec::new();
+        fingerprint_material.extend_from_slice(status.as_bytes());
+        fingerprint_material.push(0xff);
+        fingerprint_material.extend_from_slice(path.as_bytes());
+        fingerprint_material.push(0xff);
+        if let Some(value) = old_path.as_deref() {
+            fingerprint_material.extend_from_slice(value.as_bytes());
+        }
+        fingerprint_material.push(0xff);
+        fingerprint_material.extend_from_slice(delta.old_file().id().as_bytes());
+        fingerprint_material.extend_from_slice(delta.new_file().id().as_bytes());
+
+        let patch = Patch::from_diff(diff, index)
+            .map_err(|error| format!("Commit context patch error for '{path}': {error}"))?;
+        let is_binary =
+            delta.old_file().is_binary() || delta.new_file().is_binary() || patch.is_none();
+
+        files.push(StagedContextFile {
+            diff_index: index,
+            path,
+            old_path,
+            status,
+            is_binary,
+            fingerprint_material,
+        });
+    }
+
+    files.sort_by(|left, right| left.path.cmp(&right.path));
+    let mut fingerprint = FNV_OFFSET_BASIS;
+    for file in &files {
+        update_fingerprint(&mut fingerprint, &file.fingerprint_material);
+    }
+    Ok((format!("{fingerprint:016x}"), files))
+}
+
+fn append_bounded_utf8(output: &mut String, value: &str, maximum_bytes: usize) {
+    let remaining = maximum_bytes.saturating_sub(output.len());
+    if remaining == 0 {
+        return;
+    }
+    let mut boundary = remaining.min(value.len());
+    while boundary > 0 && !value.is_char_boundary(boundary) {
+        boundary -= 1;
+    }
+    output.push_str(&value[..boundary]);
+}
+
+fn bounded_patch(
+    diff: &git2::Diff<'_>,
+    index: usize,
+    maximum_bytes: usize,
+    path: &str,
+) -> Result<(Option<String>, usize), String> {
+    let mut patch = match Patch::from_diff(diff, index)
+        .map_err(|error| format!("Commit context patch error for '{path}': {error}"))?
+    {
+        Some(patch) => patch,
+        None => return Ok((None, 0)),
+    };
+    let mut output = String::new();
+    let mut total_bytes = 0usize;
+    let mut invalid_utf8 = false;
+
+    patch
+        .print(&mut |_delta, _hunk, line| {
+            let origin = line.origin();
+            if matches!(origin, '+' | '-' | ' ') {
+                total_bytes = total_bytes.saturating_add(origin.len_utf8());
+                if output.len() < maximum_bytes {
+                    output.push(origin);
+                }
+            }
+            total_bytes = total_bytes.saturating_add(line.content().len());
+            match std::str::from_utf8(line.content()) {
+                Ok(content) => append_bounded_utf8(&mut output, content, maximum_bytes),
+                Err(_) => invalid_utf8 = true,
+            }
+            true
+        })
+        .map_err(|error| format!("Commit context patch error for '{path}': {error}"))?;
+
+    if invalid_utf8 {
+        return Ok((None, 0));
+    }
+    let omitted = total_bytes.saturating_sub(output.len());
+    Ok((Some(output), omitted))
+}
+
+fn build_git_commit_context(repo: &Repository) -> Result<GitCommitContext, String> {
+    let diff = staged_diff(repo)?;
+    let (fingerprint, staged_files) = staged_context_files(&diff)?;
+    let text_file_count = staged_files.iter().filter(|file| !file.is_binary).count();
+    let per_file_budget = COMMIT_CONTEXT_PATCH_BUDGET
+        .checked_div(text_file_count)
+        .unwrap_or(0);
+    let mut patch_bytes_included = 0;
+    let mut patch_bytes_omitted = 0;
+
+    let files = staged_files
+        .into_iter()
+        .map(|file| -> Result<GitCommitContextFile, String> {
+            let (patch, omitted) = if file.is_binary {
+                (None, 0)
+            } else {
+                bounded_patch(&diff, file.diff_index, per_file_budget, &file.path)?
+            };
+            let is_binary = file.is_binary || patch.is_none();
+            let included = patch.as_ref().map_or(0, String::len);
+            patch_bytes_included += included;
+            patch_bytes_omitted += omitted;
+
+            Ok(GitCommitContextFile {
+                path: file.path,
+                old_path: file.old_path,
+                status: file.status,
+                is_binary,
+                patch,
+                patch_truncated: omitted > 0,
+                patch_bytes_omitted: omitted,
+            })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+
+    Ok(GitCommitContext {
+        fingerprint,
+        files,
+        patch_bytes_included,
+        patch_bytes_omitted,
+    })
+}
+
+fn collect_status(repo: &Repository) -> Result<GitStatusResult, String> {
     let mut result = GitStatusResult {
         staged: Vec::new(),
         unstaged: Vec::new(),
@@ -146,99 +427,222 @@ pub fn git_status(repo_path: String) -> Result<GitStatusResult, String> {
 
     let statuses = repo
         .statuses(Some(&mut opts))
-        .map_err(|e| format!("Status error: {}", e))?;
+        .map_err(|e| format!("Status error: {e}"))?;
 
     for entry in statuses.iter() {
-        let path = entry.path().unwrap_or("").to_string();
-        let s = entry.status();
+        let path = entry
+            .path()
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| "Git returned a status entry without a path".to_string())?
+            .to_string();
+        let status = entry.status();
 
-        // Conflicts
-        if s.is_conflicted() {
-            result.conflicts.push(GitFile {
-                path,
-                status: "U".to_string(),
-                old_path: None,
-            });
+        if status.is_conflicted() {
+            result.conflicts.push(git_file(repo, path, "U", None)?);
             continue;
         }
 
-        // Staged (index → HEAD)
-        if s.is_index_new() {
-            result.staged.push(GitFile {
-                path: path.clone(),
-                status: "A".to_string(),
-                old_path: None,
+        let staged = if status.is_index_new() {
+            Some(("A", None))
+        } else if status.is_index_modified() {
+            Some(("M", None))
+        } else if status.is_index_deleted() {
+            Some(("D", None))
+        } else if status.is_index_renamed() {
+            let old_path = entry.head_to_index().and_then(|delta| {
+                delta
+                    .old_file()
+                    .path()
+                    .map(|value| value.to_string_lossy().to_string())
             });
-        } else if s.is_index_modified() {
-            result.staged.push(GitFile {
-                path: path.clone(),
-                status: "M".to_string(),
-                old_path: None,
-            });
-        } else if s.is_index_deleted() {
-            result.staged.push(GitFile {
-                path: path.clone(),
-                status: "D".to_string(),
-                old_path: None,
-            });
-        } else if s.is_index_renamed() {
-            let old = entry
-                .head_to_index()
-                .and_then(|d| d.old_file().path().map(|p| p.to_string_lossy().to_string()));
-            result.staged.push(GitFile {
-                path: path.clone(),
-                status: "R".to_string(),
-                old_path: old,
-            });
-        } else if s.is_index_typechange() {
-            result.staged.push(GitFile {
-                path: path.clone(),
-                status: "T".to_string(),
-                old_path: None,
-            });
+            Some(("R", old_path))
+        } else if status.is_index_typechange() {
+            Some(("T", None))
+        } else {
+            None
+        };
+        if let Some((kind, old_path)) = staged {
+            result
+                .staged
+                .push(git_file(repo, path.clone(), kind, old_path)?);
         }
 
-        // Unstaged (workdir → index)
-        if s.is_wt_modified() {
-            result.unstaged.push(GitFile {
-                path: path.clone(),
-                status: "M".to_string(),
-                old_path: None,
+        let unstaged = if status.is_wt_modified() {
+            Some(("M", None))
+        } else if status.is_wt_deleted() {
+            Some(("D", None))
+        } else if status.is_wt_renamed() {
+            let old_path = entry.index_to_workdir().and_then(|delta| {
+                delta
+                    .old_file()
+                    .path()
+                    .map(|value| value.to_string_lossy().to_string())
             });
-        } else if s.is_wt_deleted() {
-            result.unstaged.push(GitFile {
-                path: path.clone(),
-                status: "D".to_string(),
-                old_path: None,
-            });
-        } else if s.is_wt_renamed() {
-            let old = entry
-                .index_to_workdir()
-                .and_then(|d| d.old_file().path().map(|p| p.to_string_lossy().to_string()));
-            result.unstaged.push(GitFile {
-                path: path.clone(),
-                status: "R".to_string(),
-                old_path: old,
-            });
-        } else if s.is_wt_typechange() {
-            result.unstaged.push(GitFile {
-                path: path.clone(),
-                status: "T".to_string(),
-                old_path: None,
-            });
+            Some(("R", old_path))
+        } else if status.is_wt_typechange() {
+            Some(("T", None))
+        } else {
+            None
+        };
+        if let Some((kind, old_path)) = unstaged {
+            result
+                .unstaged
+                .push(git_file(repo, path.clone(), kind, old_path)?);
         }
 
-        // Untracked
-        if s.is_wt_new() {
-            result.untracked.push(GitFile {
-                path,
-                status: "?".to_string(),
-                old_path: None,
-            });
+        if status.is_wt_new() {
+            result.untracked.push(git_file(repo, path, "?", None)?);
         }
     }
 
     Ok(result)
+}
+
+fn list_remotes(repo: &Repository) -> Result<Vec<GitRemoteInfo>, String> {
+    let remotes = repo.remotes().map_err(|e| format!("Remotes error: {e}"))?;
+    Ok(remotes
+        .iter()
+        .flatten()
+        .filter_map(|name| {
+            repo.find_remote(name).ok().map(|remote| GitRemoteInfo {
+                name: name.to_string(),
+                url: remote.url().unwrap_or("").to_string(),
+            })
+        })
+        .collect())
+}
+
+fn repository_operation_state(repo: &Repository) -> &'static str {
+    match repo.state() {
+        git2::RepositoryState::Clean => "clean",
+        git2::RepositoryState::Merge => "merging",
+        git2::RepositoryState::Rebase
+        | git2::RepositoryState::RebaseInteractive
+        | git2::RepositoryState::RebaseMerge => "rebasing",
+        git2::RepositoryState::CherryPick | git2::RepositoryState::CherryPickSequence => {
+            "cherry-picking"
+        }
+        git2::RepositoryState::Revert | git2::RepositoryState::RevertSequence => "reverting",
+        git2::RepositoryState::Bisect => "bisecting",
+        git2::RepositoryState::ApplyMailbox | git2::RepositoryState::ApplyMailboxOrRebase => {
+            "applying-mailbox"
+        }
+    }
+}
+
+// ── Commands ────────────────────────────────────────────────────────────────
+
+#[tauri::command]
+pub fn git_is_repo(path: String) -> bool {
+    Repository::discover(&path).is_ok()
+}
+
+#[tauri::command]
+pub fn git_init(path: String, initial_branch: Option<String>) -> Result<(), String> {
+    let branch = initial_branch
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| "main".to_string());
+    run_git_cli(&path, ["init", "--initial-branch", branch.as_str()]).map(|_| ())
+}
+
+#[tauri::command]
+pub fn git_status(repo_path: String) -> Result<GitStatusResult, String> {
+    let repo = open_repo(&repo_path)?;
+    collect_status(&repo)
+}
+
+#[tauri::command]
+pub fn git_repository_snapshot(repo_path: String) -> Result<GitRepositorySnapshot, String> {
+    let repo = open_repo(&repo_path)?;
+    let status = collect_status(&repo)?;
+    let worktree = repo
+        .workdir()
+        .map(|path| path.to_string_lossy().to_string());
+
+    let (head_state, current_branch, head_oid, upstream, ahead, behind) = match repo.head() {
+        Ok(head) if head.is_branch() => {
+            let branch_name = head.shorthand().map(String::from);
+            let local_oid = head.target();
+            let upstream = branch_name
+                .as_deref()
+                .and_then(|name| repo.find_branch(name, BranchType::Local).ok())
+                .and_then(|branch| branch.upstream().ok())
+                .and_then(|branch| {
+                    let reference = branch.name().ok().flatten()?.to_string();
+                    let shorthand = reference
+                        .strip_prefix("refs/remotes/")
+                        .unwrap_or(&reference)
+                        .to_string();
+                    let mut parts = shorthand.splitn(2, '/');
+                    let remote = parts.next().map(String::from);
+                    let remote_branch = parts.next().unwrap_or(&shorthand).to_string();
+                    Some((
+                        GitUpstreamInfo {
+                            reference,
+                            remote,
+                            branch: remote_branch,
+                        },
+                        branch.get().target(),
+                    ))
+                });
+            let (upstream_info, upstream_oid) = upstream
+                .map(|(info, oid)| (Some(info), oid))
+                .unwrap_or((None, None));
+            let (ahead, behind) = match (local_oid, upstream_oid) {
+                (Some(local), Some(remote)) => {
+                    repo.graph_ahead_behind(local, remote).unwrap_or((0, 0))
+                }
+                _ => (0, 0),
+            };
+            (
+                "branch".to_string(),
+                branch_name,
+                local_oid.map(|oid| oid.to_string()),
+                upstream_info,
+                ahead,
+                behind,
+            )
+        }
+        Ok(head) => (
+            "detached".to_string(),
+            None,
+            head.target().map(|oid| oid.to_string()),
+            None,
+            0,
+            0,
+        ),
+        Err(error) if error.code() == ErrorCode::UnbornBranch => {
+            let branch_name = repo
+                .find_reference("HEAD")
+                .ok()
+                .and_then(|head| head.symbolic_target().map(String::from))
+                .map(|reference| {
+                    reference
+                        .strip_prefix("refs/heads/")
+                        .unwrap_or(&reference)
+                        .to_string()
+                });
+            ("unborn".to_string(), branch_name, None, None, 0, 0)
+        }
+        Err(error) => return Err(format!("HEAD error: {error}")),
+    };
+
+    Ok(GitRepositorySnapshot {
+        repository_root: repository_root(&repo),
+        worktree_root: worktree,
+        head_state,
+        current_branch,
+        head_oid,
+        upstream,
+        ahead,
+        behind,
+        operation_state: repository_operation_state(&repo).to_string(),
+        remotes: list_remotes(&repo)?,
+        staged: status.staged,
+        unstaged: status.unstaged,
+        untracked: status.untracked,
+        conflicts: status.conflicts,
+    })
 }
 
 // ── Diff Hunks ───────────────────────────────────────────────────────────────
@@ -288,9 +692,8 @@ pub fn git_diff_hunks(
     Ok(hunks)
 }
 
-/// Returns the full unified diff of ALL staged changes (index vs HEAD).
-/// Used by the AI commit message generator. Output is truncated at 32 KB to
-/// avoid overwhelming the model context.
+/// Legacy unified diff of all staged changes (index vs HEAD).
+/// New commit-message consumers use `git_commit_context`.
 #[tauri::command]
 pub fn git_diff_staged_all(repo_path: String) -> Result<String, String> {
     let repo = open_repo(&repo_path)?;
@@ -302,7 +705,7 @@ pub fn git_diff_staged_all(repo_path: String) -> Result<String, String> {
     let mut output = String::new();
     diff.print(git2::DiffFormat::Patch, |_delta, _hunk, line| {
         let origin = line.origin();
-        if matches!(origin, '+' | '-' | ' ' | 'F' | 'H') {
+        if matches!(origin, '+' | '-' | ' ') {
             output.push(origin);
         }
         if let Ok(content) = std::str::from_utf8(line.content()) {
@@ -315,11 +718,32 @@ pub fn git_diff_staged_all(repo_path: String) -> Result<String, String> {
     // Truncate at 32 KB to keep within model context limits
     const MAX_BYTES: usize = 32 * 1024;
     if output.len() > MAX_BYTES {
-        output.truncate(MAX_BYTES);
-        output.push_str("\n... (diff truncated)");
+        let original_bytes = output.len();
+        let mut boundary = MAX_BYTES;
+        while !output.is_char_boundary(boundary) {
+            boundary -= 1;
+        }
+        output.truncate(boundary);
+        output.push_str(&format!(
+            "\n... (diff truncated; {} bytes omitted)",
+            original_bytes - boundary
+        ));
     }
 
     Ok(output)
+}
+
+#[tauri::command]
+pub fn git_commit_context(repo_path: String) -> Result<GitCommitContext, String> {
+    let repo = open_repo(&repo_path)?;
+    build_git_commit_context(&repo)
+}
+
+#[tauri::command]
+pub fn git_staged_fingerprint(repo_path: String) -> Result<String, String> {
+    let repo = open_repo(&repo_path)?;
+    let diff = staged_diff(&repo)?;
+    staged_context_files(&diff).map(|(fingerprint, _)| fingerprint)
 }
 
 #[tauri::command]
@@ -354,6 +778,100 @@ pub fn git_diff_file(repo_path: String, file_path: String, staged: bool) -> Resu
     Ok(output)
 }
 
+fn blob_bytes_from_head(repo: &Repository, file_path: &str) -> Result<Option<Vec<u8>>, String> {
+    let head = match repo.head() {
+        Ok(head) => head,
+        Err(error) if error.code() == ErrorCode::UnbornBranch => return Ok(None),
+        Err(error) => return Err(format!("HEAD error: {error}")),
+    };
+    let tree = head
+        .peel_to_tree()
+        .map_err(|error| format!("HEAD tree error: {error}"))?;
+    let entry = match tree.get_path(Path::new(file_path)) {
+        Ok(entry) => entry,
+        Err(error) if error.code() == ErrorCode::NotFound => return Ok(None),
+        Err(error) => return Err(format!("HEAD entry error: {error}")),
+    };
+    let blob = repo
+        .find_blob(entry.id())
+        .map_err(|error| format!("HEAD blob error: {error}"))?;
+    Ok(Some(blob.content().to_vec()))
+}
+
+fn blob_bytes_from_index(
+    repo: &Repository,
+    file_path: &str,
+    stage: i32,
+) -> Result<Option<Vec<u8>>, String> {
+    let index = repo
+        .index()
+        .map_err(|error| format!("Index error: {error}"))?;
+    let entry = match index.get_path(Path::new(file_path), stage) {
+        Some(entry) => entry,
+        None => return Ok(None),
+    };
+    let blob = repo
+        .find_blob(entry.id)
+        .map_err(|error| format!("Index blob error: {error}"))?;
+    Ok(Some(blob.content().to_vec()))
+}
+
+fn bytes_to_text(bytes: Option<Vec<u8>>) -> (Option<String>, bool, bool) {
+    match bytes {
+        None => (None, true, false),
+        Some(content) => match String::from_utf8(content) {
+            Ok(text) => (Some(text), false, false),
+            Err(_) => (None, false, true),
+        },
+    }
+}
+
+#[tauri::command]
+pub fn git_diff_content(
+    repo_path: String,
+    file_path: String,
+    mode: String,
+) -> Result<GitDiffContent, String> {
+    validate_repo_relative_path(&file_path)?;
+    let repo = open_repo(&repo_path)?;
+
+    let (original_bytes, modified_bytes) = match mode.as_str() {
+        "staged" => (
+            blob_bytes_from_head(&repo, &file_path)?,
+            blob_bytes_from_index(&repo, &file_path, 0)?,
+        ),
+        "unstaged" => {
+            let full_path = worktree_root(&repo)?.join(validate_repo_relative_path(&file_path)?);
+            let modified = match std::fs::read(&full_path) {
+                Ok(content) => Some(content),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+                Err(error) => return Err(format!("Read working tree file failed: {error}")),
+            };
+            (blob_bytes_from_index(&repo, &file_path, 0)?, modified)
+        }
+        "conflict" => {
+            let full_path = worktree_root(&repo)?.join(validate_repo_relative_path(&file_path)?);
+            let modified = match std::fs::read(&full_path) {
+                Ok(content) => Some(content),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+                Err(error) => return Err(format!("Read conflicted file failed: {error}")),
+            };
+            (blob_bytes_from_index(&repo, &file_path, 1)?, modified)
+        }
+        _ => return Err(format!("Unsupported diff content mode: '{mode}'")),
+    };
+
+    let (original, original_missing, original_binary) = bytes_to_text(original_bytes);
+    let (modified, modified_missing, modified_binary) = bytes_to_text(modified_bytes);
+    Ok(GitDiffContent {
+        original,
+        modified,
+        original_missing,
+        modified_missing,
+        is_binary: original_binary || modified_binary,
+    })
+}
+
 #[tauri::command]
 pub fn git_file_content(
     repo_path: String,
@@ -368,7 +886,10 @@ pub fn git_file_content(
     // compute the merge-base between HEAD and the provided (or default) base branch.
     let original = match original_ref.as_deref() {
         Some("merge-base") => {
-            let base_name = base_branch.unwrap_or_else(|| "origin/main".to_string());
+            let base_name = match base_branch {
+                Some(name) => name,
+                None => default_base_reference(&repo)?,
+            };
             let mb = resolve_merge_base(&repo, &base_name)?;
             get_commit_content(&repo, mb, &file_path).unwrap_or_default()
         }
@@ -387,6 +908,34 @@ pub fn git_file_content(
     };
 
     Ok(GitFileContent { original, modified })
+}
+
+fn default_base_reference(repo: &Repository) -> Result<String, String> {
+    let upstream = repo
+        .head()
+        .ok()
+        .and_then(|head| head.shorthand().map(String::from))
+        .and_then(|name| repo.find_branch(&name, BranchType::Local).ok())
+        .and_then(|branch| branch.upstream().ok())
+        .and_then(|branch| branch.name().ok().flatten().map(String::from));
+    if let Some(reference) = upstream {
+        return Ok(reference);
+    }
+    if let Some(local) = ["main", "master"]
+        .into_iter()
+        .find(|name| repo.revparse_single(name).is_ok())
+    {
+        return Ok(local.to_string());
+    }
+    repo.branches(Some(BranchType::Remote))
+        .map_err(|error| format!("List remote branches failed: {error}"))?
+        .flatten()
+        .filter_map(|(branch, _)| branch.name().ok().flatten().map(String::from))
+        .find(|name| name.ends_with("/main") || name.ends_with("/master"))
+        .ok_or_else(|| {
+            "Could not determine a base branch. Configure an upstream or choose a base branch."
+                .to_string()
+        })
 }
 
 fn resolve_merge_base(repo: &Repository, base_branch: &str) -> Result<git2::Oid, String> {
@@ -450,171 +999,132 @@ fn get_tree_content(
 
 #[tauri::command]
 pub fn git_add(repo_path: String, paths: Vec<String>) -> Result<(), String> {
-    let repo = open_repo(&repo_path)?;
-    let mut index = repo.index().map_err(|e| format!("Index error: {}", e))?;
-
-    for path in &paths {
-        let full_path = repo.workdir().ok_or("No working directory")?.join(path);
-
-        if full_path.exists() {
-            index
-                .add_path(Path::new(path))
-                .map_err(|e| format!("Stage error for '{}': {}", path, e))?;
-        } else {
-            // File was deleted, remove from index
-            index
-                .remove_path(Path::new(path))
-                .map_err(|e| format!("Stage removal error for '{}': {}", path, e))?;
-        }
+    if paths.is_empty() {
+        return Ok(());
     }
-
-    index
-        .write()
-        .map_err(|e| format!("Index write error: {}", e))?;
-    Ok(())
+    paths
+        .iter()
+        .try_for_each(|path| validate_repo_relative_path(path).map(|_| ()))?;
+    let mut args = vec!["add".to_string(), "--".to_string()];
+    args.extend(paths);
+    run_git_cli(&repo_path, &args).map(|_| ())
 }
 
 #[tauri::command]
 pub fn git_add_all(repo_path: String) -> Result<(), String> {
-    let repo = open_repo(&repo_path)?;
-    let mut index = repo.index().map_err(|e| format!("Index error: {}", e))?;
-
-    index
-        .add_all(["*"].iter(), IndexAddOption::DEFAULT, None)
-        .map_err(|e| format!("Stage all error: {}", e))?;
-
-    // Also handle deleted files
-    index
-        .update_all(["*"].iter(), None)
-        .map_err(|e| format!("Update index error: {}", e))?;
-
-    index
-        .write()
-        .map_err(|e| format!("Index write error: {}", e))?;
-    Ok(())
+    run_git_cli(&repo_path, ["add", "-A", "--", "."]).map(|_| ())
 }
 
 #[tauri::command]
 pub fn git_unstage(repo_path: String, paths: Vec<String>) -> Result<(), String> {
     let repo = open_repo(&repo_path)?;
-
-    let head = match repo.head() {
-        Ok(h) => Some(h.peel_to_tree().map_err(|e| format!("Tree error: {}", e))?),
-        Err(ref e) if e.code() == ErrorCode::UnbornBranch => None,
-        Err(e) => return Err(format!("HEAD error: {}", e)),
-    };
-
-    let mut index = repo.index().map_err(|e| format!("Index error: {}", e))?;
-
-    for path in &paths {
-        if let Some(ref tree) = head {
-            // Reset this path in the index to match HEAD
-            match tree.get_path(Path::new(path)) {
-                Ok(entry) => {
-                    let blob = repo
-                        .find_blob(entry.id())
-                        .map_err(|e| format!("Blob error: {}", e))?;
-                    let idx_entry = git2::IndexEntry {
-                        ctime: git2::IndexTime::new(0, 0),
-                        mtime: git2::IndexTime::new(0, 0),
-                        dev: 0,
-                        ino: 0,
-                        mode: entry.filemode() as u32,
-                        uid: 0,
-                        gid: 0,
-                        file_size: blob.size() as u32,
-                        id: entry.id(),
-                        flags: 0,
-                        flags_extended: 0,
-                        path: path.as_bytes().to_vec(),
-                    };
-                    index
-                        .add(&idx_entry)
-                        .map_err(|e| format!("Index add error: {}", e))?;
-                }
-                Err(_) => {
-                    // File doesn't exist in HEAD, remove from index
-                    let _ = index.remove_path(Path::new(path));
-                }
-            }
-        } else {
-            // No HEAD (initial commit), just remove from index
-            let _ = index.remove_path(Path::new(path));
-        }
+    if paths.is_empty() {
+        return Ok(());
     }
-
-    index
-        .write()
-        .map_err(|e| format!("Index write error: {}", e))?;
-    Ok(())
+    paths
+        .iter()
+        .try_for_each(|path| validate_repo_relative_path(path).map(|_| ()))?;
+    let unborn = repo
+        .head()
+        .err()
+        .is_some_and(|error| error.code() == ErrorCode::UnbornBranch);
+    let mut args = if unborn {
+        vec![
+            "rm".to_string(),
+            "--cached".to_string(),
+            "-r".to_string(),
+            "--ignore-unmatch".to_string(),
+            "--".to_string(),
+        ]
+    } else {
+        vec![
+            "restore".to_string(),
+            "--staged".to_string(),
+            "--".to_string(),
+        ]
+    };
+    args.extend(paths);
+    run_git_cli(&repo_path, &args).map(|_| ())
 }
 
 #[tauri::command]
 pub fn git_discard(repo_path: String, paths: Vec<String>) -> Result<(), String> {
     let repo = open_repo(&repo_path)?;
-
-    for path in &paths {
-        let workdir = repo.workdir().ok_or("No working directory")?;
-        let full_path = workdir.join(path);
-
-        // Try to restore from index first, then from HEAD
-        let index = repo.index().map_err(|e| format!("Index error: {}", e))?;
-
-        if let Some(entry) = index.get_path(Path::new(path), 0) {
-            let blob = repo
-                .find_blob(entry.id)
-                .map_err(|e| format!("Blob error: {}", e))?;
-            std::fs::write(&full_path, blob.content())
-                .map_err(|e| format!("Write error: {}", e))?;
-        } else if let Ok(content) = get_head_content(&repo, path) {
-            std::fs::write(&full_path, content.as_bytes())
-                .map_err(|e| format!("Write error: {}", e))?;
+    if paths.is_empty() {
+        return Ok(());
+    }
+    paths
+        .iter()
+        .try_for_each(|path| validate_repo_relative_path(path).map(|_| ()))?;
+    let untracked: HashSet<String> = collect_status(&repo)?
+        .untracked
+        .into_iter()
+        .map(|file| file.path)
+        .collect();
+    let tracked: Vec<String> = paths
+        .iter()
+        .filter(|path| !untracked.contains(path.as_str()))
+        .cloned()
+        .collect();
+    if !tracked.is_empty() {
+        let mut args = vec![
+            "restore".to_string(),
+            "--worktree".to_string(),
+            "--".to_string(),
+        ];
+        args.extend(tracked);
+        run_git_cli(&repo_path, &args)?;
+    }
+    for path in paths.into_iter().filter(|path| untracked.contains(path)) {
+        let full_path = worktree_root(&repo)?.join(validate_repo_relative_path(&path)?);
+        let metadata = match std::fs::symlink_metadata(&full_path) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => return Err(format!("Inspect untracked path '{path}' failed: {error}")),
+        };
+        if metadata.is_dir() && !metadata.file_type().is_symlink() {
+            std::fs::remove_dir_all(&full_path)
+                .map_err(|error| format!("Delete untracked directory '{path}' failed: {error}"))?;
         } else {
-            // Untracked file — delete it
-            if full_path.exists() {
-                std::fs::remove_file(&full_path).map_err(|e| format!("Delete error: {}", e))?;
-            }
+            std::fs::remove_file(&full_path)
+                .map_err(|error| format!("Delete untracked file '{path}' failed: {error}"))?;
         }
     }
-
     Ok(())
 }
 
 #[tauri::command]
 pub fn git_commit(repo_path: String, message: String) -> Result<String, String> {
-    let repo = open_repo(&repo_path)?;
-    let mut index = repo.index().map_err(|e| format!("Index error: {}", e))?;
-    let oid = index
-        .write_tree()
-        .map_err(|e| format!("Tree write error: {}", e))?;
-    let tree = repo
-        .find_tree(oid)
-        .map_err(|e| format!("Find tree error: {}", e))?;
+    commit_with_cli(&repo_path, &message, false)
+}
 
-    let sig = repo
-        .signature()
-        .or_else(|_| Signature::now("HysCode User", "user@hyscode.local"))
-        .map_err(|e| format!("Signature error: {}", e))?;
+#[tauri::command]
+pub fn git_commit_amend(repo_path: String, message: String) -> Result<String, String> {
+    commit_with_cli(&repo_path, &message, true)
+}
 
-    let parents: Vec<git2::Commit> = match repo.head() {
-        Ok(head) => {
-            let commit = head
-                .peel_to_commit()
-                .map_err(|e| format!("Peel error: {}", e))?;
-            vec![commit]
+fn commit_with_cli(repo_path: &str, message: &str, amend: bool) -> Result<String, String> {
+    if message.trim().is_empty() {
+        return Err("Commit message is empty".to_string());
+    }
+    let mut args = vec!["commit"];
+    if amend {
+        args.push("--amend");
+    }
+    args.extend(["-m", message]);
+    run_git_cli(repo_path, args).map_err(|error| {
+        if error.contains("Author identity unknown")
+            || error.contains("Please tell me who you are")
+            || error.contains("unable to auto-detect email address")
+        {
+            format!("{error}\nConfigure user.name and user.email in Git Settings.")
+        } else {
+            error
         }
-        Err(ref e) if e.code() == ErrorCode::UnbornBranch => vec![],
-        Err(e) => return Err(format!("HEAD error: {}", e)),
-    };
-
-    let parent_refs: Vec<&git2::Commit> = parents.iter().collect();
-
-    let commit_oid = repo
-        .commit(Some("HEAD"), &sig, &sig, &message, &tree, &parent_refs)
-        .map_err(|e| format!("Commit error: {}", e))?;
-
-    let short = &commit_oid.to_string()[..7];
-    Ok(short.to_string())
+    })?;
+    Ok(run_git_cli(repo_path, ["rev-parse", "--short", "HEAD"])?
+        .trim()
+        .to_string())
 }
 
 #[tauri::command]
@@ -674,7 +1184,7 @@ pub fn git_log_file(
         .map_err(|e| format!("Sort error: {}", e))?;
 
     let mut commits = Vec::new();
-    let mut prev_blob_id = None;
+    let mut tracked_path = file_path;
 
     for oid_result in revwalk {
         if commits.len() >= limit as usize {
@@ -684,19 +1194,30 @@ pub fn git_log_file(
         let commit = repo
             .find_commit(oid)
             .map_err(|e| format!("Commit error: {}", e))?;
-        let tree = commit.tree().map_err(|e| format!("Tree error: {}", e))?;
+        let tree = commit.tree().map_err(|e| format!("Tree error: {e}"))?;
+        let parent_tree = commit.parent(0).ok().and_then(|parent| parent.tree().ok());
+        let mut options = DiffOptions::new();
+        options.include_untracked(false).include_typechange(true);
+        let mut diff = repo
+            .diff_tree_to_tree(parent_tree.as_ref(), Some(&tree), Some(&mut options))
+            .map_err(|e| format!("File history diff error: {e}"))?;
+        diff.find_similar(None)
+            .map_err(|e| format!("File history rename detection failed: {e}"))?;
+        let matching_deltas: Vec<_> = diff
+            .deltas()
+            .filter(|delta| {
+                delta
+                    .new_file()
+                    .path()
+                    .is_some_and(|path| path == Path::new(&tracked_path))
+                    || delta
+                        .old_file()
+                        .path()
+                        .is_some_and(|path| path == Path::new(&tracked_path))
+            })
+            .collect();
 
-        let current_blob_id = tree.get_path(Path::new(&file_path)).ok().map(|e| e.id());
-
-        // Include commit if the file changed (its blob id differs from prev)
-        let changed = match (&prev_blob_id, &current_blob_id) {
-            (None, Some(_)) => true,
-            (Some(_), None) => true,
-            (Some(a), Some(b)) => a != b,
-            (None, None) => false,
-        };
-
-        if changed {
+        if !matching_deltas.is_empty() {
             let hash = oid.to_string();
             let short_hash = hash[..7.min(hash.len())].to_string();
             commits.push(GitCommitInfo {
@@ -707,9 +1228,19 @@ pub fn git_log_file(
                 email: commit.author().email().unwrap_or("").to_string(),
                 timestamp: commit.time().seconds(),
             });
+            for delta in matching_deltas {
+                if delta.status() == Delta::Renamed
+                    && delta
+                        .new_file()
+                        .path()
+                        .is_some_and(|path| path == Path::new(&tracked_path))
+                {
+                    if let Some(old_path) = delta.old_file().path() {
+                        tracked_path = old_path.to_string_lossy().to_string();
+                    }
+                }
+            }
         }
-
-        prev_blob_id = current_blob_id;
     }
 
     Ok(commits)
@@ -787,76 +1318,51 @@ pub fn git_branch_list(repo_path: String) -> Result<Vec<GitBranchInfo>, String> 
 }
 
 #[tauri::command]
-pub fn git_branch_create(repo_path: String, name: String, checkout: bool) -> Result<(), String> {
-    let repo = open_repo(&repo_path)?;
-    let head = repo.head().map_err(|e| format!("HEAD error: {}", e))?;
-    let commit = head
-        .peel_to_commit()
-        .map_err(|e| format!("Peel error: {}", e))?;
-
-    repo.branch(&name, &commit, false)
-        .map_err(|e| format!("Create branch error: {}", e))?;
-
-    if checkout {
-        let refname = format!("refs/heads/{}", name);
-        let obj = repo
-            .revparse_single(&refname)
-            .map_err(|e| format!("Rev parse error: {}", e))?;
-        repo.checkout_tree(&obj, None)
-            .map_err(|e| format!("Checkout tree error: {}", e))?;
-        repo.set_head(&refname)
-            .map_err(|e| format!("Set head error: {}", e))?;
+pub fn git_branch_create(
+    repo_path: String,
+    name: String,
+    checkout: bool,
+    source: Option<String>,
+) -> Result<(), String> {
+    let mut args = if checkout {
+        vec!["switch".to_string(), "-c".to_string(), name]
+    } else {
+        vec!["branch".to_string(), name]
+    };
+    if let Some(source) = source.filter(|value| !value.trim().is_empty()) {
+        args.push(source);
     }
-
-    Ok(())
+    run_git_cli(&repo_path, &args).map(|_| ())
 }
 
 #[tauri::command]
-pub fn git_branch_delete(repo_path: String, name: String) -> Result<(), String> {
-    let repo = open_repo(&repo_path)?;
-    let mut branch = repo
-        .find_branch(&name, BranchType::Local)
-        .map_err(|e| format!("Find branch error: {}", e))?;
-    branch
-        .delete()
-        .map_err(|e| format!("Delete branch error: {}", e))?;
-    Ok(())
+pub fn git_branch_delete(
+    repo_path: String,
+    name: String,
+    force: Option<bool>,
+) -> Result<(), String> {
+    let flag = if force.unwrap_or(false) { "-D" } else { "-d" };
+    run_git_cli(&repo_path, ["branch", flag, name.as_str()]).map(|_| ())
 }
 
 #[tauri::command]
 pub fn git_checkout(repo_path: String, branch: String) -> Result<(), String> {
     let repo = open_repo(&repo_path)?;
-
-    let refname = format!("refs/heads/{}", branch);
-    let obj = repo
-        .revparse_single(&refname)
-        .map_err(|e| format!("Rev parse error: {}", e))?;
-
-    repo.checkout_tree(&obj, None)
-        .map_err(|e| format!("Checkout error: {}", e))?;
-    repo.set_head(&refname)
-        .map_err(|e| format!("Set head error: {}", e))?;
-
-    Ok(())
+    let is_local = repo.find_branch(&branch, BranchType::Local).is_ok();
+    let is_remote = repo.find_branch(&branch, BranchType::Remote).is_ok();
+    if is_local {
+        run_git_cli(&repo_path, ["switch", branch.as_str()]).map(|_| ())
+    } else if is_remote {
+        run_git_cli(&repo_path, ["switch", "--track", branch.as_str()]).map(|_| ())
+    } else {
+        Err(format!("Branch '{branch}' was not found"))
+    }
 }
 
 #[tauri::command]
 pub fn git_remote_list(repo_path: String) -> Result<Vec<GitRemoteInfo>, String> {
     let repo = open_repo(&repo_path)?;
-    let remotes = repo
-        .remotes()
-        .map_err(|e| format!("Remotes error: {}", e))?;
-
-    let mut list = Vec::new();
-    for name in remotes.iter().flatten() {
-        if let Ok(remote) = repo.find_remote(name) {
-            list.push(GitRemoteInfo {
-                name: name.to_string(),
-                url: remote.url().unwrap_or("").to_string(),
-            });
-        }
-    }
-    Ok(list)
+    list_remotes(&repo)
 }
 
 #[tauri::command]
@@ -913,20 +1419,20 @@ pub fn git_ahead_behind(repo_path: String) -> Result<GitAheadBehind, String> {
 }
 
 #[tauri::command]
-pub fn git_stash(repo_path: String, message: Option<String>) -> Result<(), String> {
-    let mut repo = Repository::discover(&repo_path).map_err(|e| format!("Git error: {}", e))?;
-
-    let sig = repo
-        .signature()
-        .or_else(|_| Signature::now("HysCode User", "user@hyscode.local"))
-        .map_err(|e| format!("Signature error: {}", e))?;
-
-    let msg = message.as_deref().unwrap_or("WIP on stash");
-
-    repo.stash_save(&sig, msg, None)
-        .map_err(|e| format!("Stash error: {}", e))?;
-
-    Ok(())
+pub fn git_stash(
+    repo_path: String,
+    message: Option<String>,
+    include_untracked: Option<bool>,
+) -> Result<(), String> {
+    let mut args = vec!["stash".to_string(), "push".to_string()];
+    if include_untracked.unwrap_or(false) {
+        args.push("--include-untracked".to_string());
+    }
+    if let Some(message) = message.filter(|value| !value.trim().is_empty()) {
+        args.push("-m".to_string());
+        args.push(message);
+    }
+    run_git_cli(&repo_path, &args).map(|_| ())
 }
 
 #[tauri::command]
@@ -948,11 +1454,67 @@ pub fn git_stash_list(repo_path: String) -> Result<Vec<GitStashEntry>, String> {
 
 #[tauri::command]
 pub fn git_stash_pop(repo_path: String, index: usize) -> Result<(), String> {
-    let mut repo = Repository::discover(&repo_path).map_err(|e| format!("Git error: {}", e))?;
+    let stash = format!("stash@{{{index}}}");
+    run_git_cli(&repo_path, ["stash", "pop", stash.as_str()]).map(|_| ())
+}
 
-    repo.stash_pop(index, None)
-        .map_err(|e| format!("Stash pop error: {}", e))?;
+#[tauri::command]
+pub fn git_stash_apply(repo_path: String, index: usize) -> Result<(), String> {
+    let stash = format!("stash@{{{index}}}");
+    run_git_cli(&repo_path, ["stash", "apply", stash.as_str()]).map(|_| ())
+}
 
+#[tauri::command]
+pub fn git_config_identity(
+    repo_path: Option<String>,
+    scope: String,
+) -> Result<GitIdentityConfig, String> {
+    let cwd = repo_path.as_deref().unwrap_or(".");
+    let scope_flag = match scope.as_str() {
+        "local" => {
+            if repo_path.is_none() {
+                return Err("Open a repository to read local Git configuration".to_string());
+            }
+            "--local"
+        }
+        "global" => "--global",
+        _ => return Err(format!("Unsupported Git config scope: '{scope}'")),
+    };
+    let read_value = |key: &str| {
+        run_git_cli(cwd, ["config", scope_flag, "--get", key])
+            .ok()
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+    };
+    Ok(GitIdentityConfig {
+        user_name: read_value("user.name"),
+        user_email: read_value("user.email"),
+    })
+}
+
+#[tauri::command]
+pub fn git_config_set_identity(
+    repo_path: Option<String>,
+    scope: String,
+    user_name: String,
+    user_email: String,
+) -> Result<(), String> {
+    let cwd = repo_path.as_deref().unwrap_or(".");
+    let scope_flag = match scope.as_str() {
+        "local" => {
+            if repo_path.is_none() {
+                return Err("Open a repository to update local Git configuration".to_string());
+            }
+            "--local"
+        }
+        "global" => "--global",
+        _ => return Err(format!("Unsupported Git config scope: '{scope}'")),
+    };
+    if user_name.trim().is_empty() || user_email.trim().is_empty() {
+        return Err("Git user name and email are required".to_string());
+    }
+    run_git_cli(cwd, ["config", scope_flag, "user.name", user_name.trim()])?;
+    run_git_cli(cwd, ["config", scope_flag, "user.email", user_email.trim()])?;
     Ok(())
 }
 
@@ -989,8 +1551,7 @@ pub fn git_commit_detail(repo_path: String, hash: String) -> Result<CommitDetail
 
     let mut files: Vec<CommitFileChange> = Vec::new();
 
-    for i in 0..diff.deltas().len() {
-        let delta = diff.get_delta(i).unwrap();
+    for delta in diff.deltas() {
         let path = delta
             .new_file()
             .path()
@@ -1114,16 +1675,35 @@ pub fn git_log_graph(repo_path: String, limit: u32) -> Result<Vec<GraphCommit>, 
     let mut revwalk = repo
         .revwalk()
         .map_err(|e| format!("Revwalk error: {}", e))?;
+    let mut pushed = HashSet::new();
+    for reference in repo
+        .references()
+        .map_err(|e| format!("References error: {e}"))?
+    {
+        let reference = reference.map_err(|e| format!("Reference error: {e}"))?;
+        if let Some(oid) = reference.target() {
+            if pushed.insert(oid) {
+                revwalk
+                    .push(oid)
+                    .map_err(|e| format!("Push reference error: {e}"))?;
+            }
+        } else if let Ok(object) = reference.peel(git2::ObjectType::Commit) {
+            if pushed.insert(object.id()) {
+                revwalk
+                    .push(object.id())
+                    .map_err(|e| format!("Push peeled reference error: {e}"))?;
+            }
+        }
+    }
+    if pushed.is_empty() {
+        return Ok(Vec::new());
+    }
     revwalk
-        .push_head()
-        .map_err(|e| format!("Push head error: {}", e))?;
-    revwalk
-        .set_sorting(Sort::TIME)
+        .set_sorting(Sort::TOPOLOGICAL | Sort::TIME)
         .map_err(|e| format!("Sort error: {}", e))?;
 
     // Collect all refs (branches + tags) → commit mapping
-    let mut ref_map: std::collections::HashMap<String, Vec<String>> =
-        std::collections::HashMap::new();
+    let mut ref_map: HashMap<String, Vec<String>> = HashMap::new();
 
     // Local branches
     if let Ok(branches) = repo.branches(Some(BranchType::Local)) {
@@ -1208,7 +1788,11 @@ pub fn git_log_graph(repo_path: String, limit: u32) -> Result<Vec<GraphCommit>, 
 
 // ── Remote operations (via CLI for auth compatibility) ───────────────────────
 
-fn run_git_cli(repo_path: &str, args: &[&str]) -> Result<String, String> {
+pub(super) fn run_git_cli<I, S>(repo_path: &str, args: I) -> Result<String, String>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<std::ffi::OsStr>,
+{
     let output = cmd("git")
         .args(args)
         .current_dir(repo_path)
@@ -1229,28 +1813,55 @@ pub fn git_push(
     remote: Option<String>,
     branch: Option<String>,
 ) -> Result<String, String> {
-    let r = remote.as_deref().unwrap_or("origin");
-    match branch {
-        Some(b) => run_git_cli(&repo_path, &["push", r, &b]),
-        None => run_git_cli(&repo_path, &["push", r]),
+    match (remote, branch) {
+        (Some(remote), Some(branch)) => {
+            run_git_cli(&repo_path, ["push", remote.as_str(), branch.as_str()])
+        }
+        (Some(remote), None) => run_git_cli(&repo_path, ["push", remote.as_str()]),
+        (None, _) => run_git_cli(&repo_path, ["push"]),
     }
 }
 
 #[tauri::command]
+pub fn git_publish_branch(
+    repo_path: String,
+    remote: String,
+    branch: String,
+) -> Result<String, String> {
+    run_git_cli(
+        &repo_path,
+        ["push", "--set-upstream", remote.as_str(), branch.as_str()],
+    )
+}
+
+#[tauri::command]
 pub fn git_pull(repo_path: String, remote: Option<String>) -> Result<String, String> {
-    let r = remote.as_deref().unwrap_or("origin");
-    run_git_cli(&repo_path, &["pull", r])
+    match remote {
+        Some(remote) => run_git_cli(&repo_path, ["pull", remote.as_str()]),
+        None => run_git_cli(&repo_path, ["pull"]),
+    }
 }
 
 #[tauri::command]
 pub fn git_fetch(repo_path: String, remote: Option<String>) -> Result<String, String> {
-    let r = remote.as_deref().unwrap_or("origin");
-    run_git_cli(&repo_path, &["fetch", r])
+    match remote {
+        Some(remote) => run_git_cli(&repo_path, ["fetch", remote.as_str()]),
+        None => run_git_cli(&repo_path, ["fetch"]),
+    }
+}
+
+#[tauri::command]
+pub fn git_fetch_all(repo_path: String, prune: Option<bool>) -> Result<String, String> {
+    let mut args = vec!["fetch", "--all"];
+    if prune.unwrap_or(false) {
+        args.push("--prune");
+    }
+    run_git_cli(&repo_path, args)
 }
 
 #[tauri::command]
 pub fn git_merge(repo_path: String, branch: String) -> Result<String, String> {
-    run_git_cli(&repo_path, &["merge", &branch])
+    run_git_cli(&repo_path, ["merge", &branch])
 }
 
 #[tauri::command]
@@ -1331,24 +1942,14 @@ pub fn git_tag_create(
     name: String,
     message: Option<String>,
 ) -> Result<(), String> {
-    let repo = open_repo(&repo_path)?;
-    let head = repo.head().map_err(|e| format!("HEAD error: {}", e))?;
-    let target = head
-        .peel(git2::ObjectType::Commit)
-        .map_err(|e| format!("Peel error: {}", e))?;
-
-    if let Some(msg) = message {
-        let sig = repo
-            .signature()
-            .or_else(|_| Signature::now("HysCode User", "user@hyscode.local"))
-            .map_err(|e| format!("Signature error: {}", e))?;
-        repo.tag(&name, &target, &sig, &msg, false)
-            .map_err(|e| format!("Tag error: {}", e))?;
+    if let Some(message) = message.filter(|value| !value.trim().is_empty()) {
+        run_git_cli(
+            &repo_path,
+            ["tag", "-a", name.as_str(), "-m", message.as_str()],
+        )?;
     } else {
-        repo.tag_lightweight(&name, &target, false)
-            .map_err(|e| format!("Tag error: {}", e))?;
+        run_git_cli(&repo_path, ["tag", name.as_str()])?;
     }
-
     Ok(())
 }
 
@@ -1358,6 +1959,7 @@ pub fn git_branch_changes(
     base_branch: Option<String>,
 ) -> Result<Vec<GitFile>, String> {
     let repo = open_repo(&repo_path)?;
+    let worktree = worktree_root(&repo)?.to_path_buf();
     let head = repo.head().map_err(|e| format!("HEAD error: {}", e))?;
     let head_commit = head
         .peel_to_commit()
@@ -1368,14 +1970,24 @@ pub fn git_branch_changes(
     let base_name = match base_branch {
         Some(name) => name,
         None => {
-            let candidates = ["origin/main", "origin/master", "main", "master"];
-            let mut found = None;
-            for c in &candidates {
-                if repo.revparse_single(c).is_ok() {
-                    found = Some(c.to_string());
-                    break;
-                }
-            }
+            let upstream = head
+                .shorthand()
+                .and_then(|name| repo.find_branch(name, BranchType::Local).ok())
+                .and_then(|branch| branch.upstream().ok())
+                .and_then(|branch| branch.name().ok().flatten().map(String::from));
+            let local = ["main", "master"]
+                .into_iter()
+                .find(|name| repo.revparse_single(name).is_ok())
+                .map(String::from);
+            let remote = repo
+                .branches(Some(BranchType::Remote))
+                .ok()
+                .into_iter()
+                .flatten()
+                .flatten()
+                .filter_map(|(branch, _)| branch.name().ok().flatten().map(String::from))
+                .find(|name| name.ends_with("/main") || name.ends_with("/master"));
+            let found = upstream.or(local).or(remote);
             found.ok_or(
                 "Could not determine base branch. Provide one or ensure main/master exists.",
             )?
@@ -1444,6 +2056,7 @@ pub fn git_branch_changes(
             };
             if !path.is_empty() {
                 files.push(GitFile {
+                    absolute_path: worktree.join(&path).to_string_lossy().to_string(),
                     path,
                     status,
                     old_path,
@@ -1458,4 +2071,309 @@ pub fn git_branch_changes(
     .map_err(|e| format!("Diff foreach error: {}", e))?;
 
     Ok(files)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::process::Command;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    struct TestRepository {
+        path: PathBuf,
+    }
+
+    impl TestRepository {
+        fn new() -> Self {
+            let unique = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("system clock")
+                .as_nanos();
+            let path = std::env::temp_dir()
+                .join(format!("hyscode-git-test-{}-{unique}", std::process::id()));
+            std::fs::create_dir_all(&path).expect("create test repository");
+            let repository = Self { path };
+            repository.git(["init", "--initial-branch=main"]);
+            repository.git(["config", "user.name", "HysCode Test"]);
+            repository.git(["config", "user.email", "hyscode@example.invalid"]);
+            repository
+        }
+
+        fn path_string(&self) -> String {
+            self.path.to_string_lossy().to_string()
+        }
+
+        fn write(&self, relative: &str, contents: &[u8]) {
+            let path = self.path.join(relative);
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent).expect("create file parent");
+            }
+            std::fs::write(path, contents).expect("write test file");
+        }
+
+        fn git<const N: usize>(&self, args: [&str; N]) -> String {
+            let output = Command::new("git")
+                .args(args)
+                .current_dir(&self.path)
+                .output()
+                .expect("run git");
+            assert!(
+                output.status.success(),
+                "git failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            String::from_utf8_lossy(&output.stdout).trim().to_string()
+        }
+
+        fn commit_file(&self, path: &str, contents: &[u8], message: &str) {
+            self.write(path, contents);
+            self.git(["add", "--", path]);
+            self.git(["commit", "-m", message]);
+        }
+    }
+
+    impl Drop for TestRepository {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.path);
+        }
+    }
+
+    #[test]
+    fn pathspec_validation_rejects_absolute_and_parent_paths() {
+        assert!(validate_repo_relative_path("../outside.txt").is_err());
+        assert!(validate_repo_relative_path("nested/../../outside.txt").is_err());
+        assert!(validate_repo_relative_path("C:\\outside.txt").is_err());
+        assert!(validate_repo_relative_path("src/lib.rs").is_ok());
+    }
+
+    #[test]
+    fn staged_and_unstaged_content_use_distinct_git_layers() {
+        let repo = TestRepository::new();
+        repo.commit_file("file.txt", b"head\n", "initial");
+        repo.write("file.txt", b"index\n");
+        repo.git(["add", "--", "file.txt"]);
+        repo.write("file.txt", b"worktree\n");
+
+        let staged =
+            git_diff_content(repo.path_string(), "file.txt".into(), "staged".into()).unwrap();
+        let unstaged =
+            git_diff_content(repo.path_string(), "file.txt".into(), "unstaged".into()).unwrap();
+
+        assert_eq!(staged.original.as_deref(), Some("head\n"));
+        assert_eq!(staged.modified.as_deref(), Some("index\n"));
+        assert_eq!(unstaged.original.as_deref(), Some("index\n"));
+        assert_eq!(unstaged.modified.as_deref(), Some("worktree\n"));
+    }
+
+    #[test]
+    fn commit_context_contains_only_staged_content_and_stable_fingerprint() {
+        let repo = TestRepository::new();
+        repo.commit_file("file.txt", b"head\n", "initial");
+        repo.write("file.txt", b"index\n");
+        repo.git(["add", "--", "file.txt"]);
+
+        let staged_context = git_commit_context(repo.path_string()).unwrap();
+        let staged_fingerprint = staged_context.fingerprint.clone();
+        repo.write("file.txt", b"worktree only\n");
+        let worktree_context = git_commit_context(repo.path_string()).unwrap();
+
+        assert_eq!(staged_context.files.len(), 1);
+        assert!(staged_context.files[0]
+            .patch
+            .as_deref()
+            .is_some_and(|patch| patch.contains("+index")));
+        assert!(!staged_context.files[0]
+            .patch
+            .as_deref()
+            .is_some_and(|patch| patch.contains("worktree only")));
+        assert_eq!(worktree_context.fingerprint, staged_fingerprint);
+
+        repo.git(["add", "--", "file.txt"]);
+        assert_ne!(
+            git_staged_fingerprint(repo.path_string()).unwrap(),
+            staged_fingerprint
+        );
+    }
+
+    #[test]
+    fn commit_context_represents_add_delete_rename_and_binary_without_absolute_paths() {
+        let repo = TestRepository::new();
+        repo.commit_file("delete.txt", b"delete me\n", "initial");
+        repo.commit_file("old.txt", b"rename me\n", "rename source");
+        repo.write("added.txt", b"added\n");
+        repo.write("binary.dat", &[0, 159, 146, 150, 0, 1]);
+        repo.git(["add", "--", "added.txt", "binary.dat"]);
+        repo.git(["rm", "--", "delete.txt"]);
+        repo.git(["mv", "old.txt", "new.txt"]);
+
+        let context = git_commit_context(repo.path_string()).unwrap();
+        let paths: Vec<_> = context
+            .files
+            .iter()
+            .map(|file| file.path.as_str())
+            .collect();
+
+        assert_eq!(
+            paths,
+            vec!["added.txt", "binary.dat", "delete.txt", "new.txt"]
+        );
+        assert!(context
+            .files
+            .iter()
+            .any(|file| file.status == "A" && file.path == "added.txt"));
+        assert!(context
+            .files
+            .iter()
+            .any(|file| file.status == "D" && file.path == "delete.txt"));
+        assert!(context.files.iter().any(|file| {
+            file.status == "R"
+                && file.path == "new.txt"
+                && file.old_path.as_deref() == Some("old.txt")
+        }));
+        let binary = context
+            .files
+            .iter()
+            .find(|file| file.path == "binary.dat")
+            .unwrap();
+        assert!(binary.is_binary);
+        assert!(binary.patch.is_none());
+        assert!(context
+            .files
+            .iter()
+            .all(|file| !file.path.contains(repo.path.to_string_lossy().as_ref())));
+    }
+
+    #[test]
+    fn commit_context_balances_patch_budget_and_truncates_unicode_safely() {
+        let repo = TestRepository::new();
+        let content = "á".repeat(COMMIT_CONTEXT_PATCH_BUDGET);
+        repo.write("a.txt", content.as_bytes());
+        repo.write("b.txt", content.as_bytes());
+        repo.git(["add", "--", "a.txt", "b.txt"]);
+
+        let context = git_commit_context(repo.path_string()).unwrap();
+
+        assert_eq!(context.files.len(), 2);
+        assert!(context.files.iter().all(|file| file.patch_truncated));
+        assert!(context.files.iter().all(|file| file
+            .patch
+            .as_ref()
+            .is_some_and(|patch| patch.is_char_boundary(patch.len()))));
+        assert!(context.patch_bytes_included <= COMMIT_CONTEXT_PATCH_BUDGET);
+        assert!(context.patch_bytes_omitted > 0);
+        let included_sizes: Vec<_> = context
+            .files
+            .iter()
+            .map(|file| file.patch.as_ref().map_or(0, String::len))
+            .collect();
+        assert!(included_sizes[0].abs_diff(included_sizes[1]) <= 1);
+    }
+
+    #[test]
+    fn commit_context_supports_unborn_head() {
+        let repo = TestRepository::new();
+        repo.write("first.txt", b"first\n");
+        repo.git(["add", "--", "first.txt"]);
+
+        let context = git_commit_context(repo.path_string()).unwrap();
+
+        assert_eq!(context.files.len(), 1);
+        assert_eq!(context.files[0].status, "A");
+        assert!(context.files[0]
+            .patch
+            .as_deref()
+            .is_some_and(|patch| patch.contains("+first")));
+    }
+
+    #[test]
+    fn snapshot_supports_unborn_head_and_custom_remote_without_upstream() {
+        let repo = TestRepository::new();
+        repo.git([
+            "remote",
+            "add",
+            "hyska",
+            "https://github.com/Hyska-Software/Hyscode.git",
+        ]);
+
+        let snapshot = git_repository_snapshot(repo.path_string()).unwrap();
+
+        assert_eq!(snapshot.head_state, "unborn");
+        assert_eq!(snapshot.current_branch.as_deref(), Some("main"));
+        assert!(snapshot.upstream.is_none());
+        assert_eq!(snapshot.remotes[0].name, "hyska");
+    }
+
+    #[test]
+    fn commit_uses_and_respects_user_hooks() {
+        let repo = TestRepository::new();
+        repo.commit_file("file.txt", b"initial\n", "initial");
+        repo.write("file.txt", b"blocked\n");
+        repo.git(["add", "--", "file.txt"]);
+        repo.write(".git/hooks/pre-commit", b"#!/bin/sh\nexit 1\n");
+
+        let result = git_commit(repo.path_string(), "must be rejected".into());
+
+        assert!(result.is_err());
+        assert_eq!(repo.git(["log", "-1", "--pretty=%s"]), "initial");
+    }
+
+    #[test]
+    fn amend_commit_rewrites_head_with_the_configured_identity() {
+        let repo = TestRepository::new();
+        repo.commit_file("file.txt", b"initial\n", "initial");
+        let original_head = repo.git(["rev-parse", "HEAD"]);
+        repo.write("file.txt", b"amended\n");
+        repo.git(["add", "--", "file.txt"]);
+
+        let short_hash =
+            git_commit_amend(repo.path_string(), "amended message".into()).expect("amend commit");
+
+        assert_ne!(repo.git(["rev-parse", "HEAD"]), original_head);
+        assert_eq!(repo.git(["rev-parse", "--short", "HEAD"]), short_hash);
+        assert_eq!(repo.git(["log", "-1", "--pretty=%s"]), "amended message");
+        assert_eq!(repo.git(["log", "-1", "--pretty=%an"]), "HysCode Test");
+    }
+
+    #[test]
+    fn graph_includes_commits_reachable_only_from_parallel_branches() {
+        let repo = TestRepository::new();
+        repo.commit_file("base.txt", b"base\n", "base");
+        repo.git(["switch", "-c", "parallel"]);
+        repo.commit_file("parallel.txt", b"parallel\n", "parallel commit");
+        let parallel = repo.git(["rev-parse", "HEAD"]);
+        repo.git(["switch", "main"]);
+        repo.commit_file("main.txt", b"main\n", "main commit");
+
+        let graph = git_log_graph(repo.path_string(), 100).unwrap();
+        let hashes: HashSet<_> = graph.iter().map(|commit| commit.hash.as_str()).collect();
+
+        assert!(hashes.contains(parallel.as_str()));
+        assert!(graph
+            .iter()
+            .any(|commit| commit.refs.iter().any(|reference| reference == "parallel")));
+    }
+
+    #[test]
+    fn file_history_skips_unrelated_commits_and_follows_renames() {
+        let repo = TestRepository::new();
+        repo.commit_file("old-name.txt", b"first\n", "add tracked file");
+        repo.commit_file("unrelated.txt", b"other\n", "unrelated change");
+        repo.git(["mv", "old-name.txt", "new-name.txt"]);
+        repo.git(["commit", "-m", "rename tracked file"]);
+        repo.write("new-name.txt", b"second\n");
+        repo.git(["add", "--", "new-name.txt"]);
+        repo.git(["commit", "-m", "modify tracked file"]);
+
+        let history = git_log_file(repo.path_string(), "new-name.txt".into(), 20).unwrap();
+        let messages: Vec<_> = history.iter().map(|commit| commit.message.trim()).collect();
+
+        assert_eq!(
+            messages,
+            vec![
+                "modify tracked file",
+                "rename tracked file",
+                "add tracked file"
+            ]
+        );
+    }
 }
