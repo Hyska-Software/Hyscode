@@ -41,11 +41,11 @@ const THEMES: ThemeOption[] = [
   {
     id: 'hyscode-light',
     name: 'HysCode Light',
-    description: 'Light theme with teal accent — cool neutrals',
+    description: 'Editor-matched light surfaces with a teal accent',
     colors: {
-      bg: '#f7f7f8',
+      bg: '#f1f2f4',
       surface: '#ffffff',
-      sidebar: '#f7f7f8',
+      sidebar: '#f1f2f4',
       accent: '#0d8a6c',
       fg: '#0d0d0f',
       muted: '#6e6e80',
@@ -54,10 +54,10 @@ const THEMES: ThemeOption[] = [
   {
     id: 'nord',
     name: 'Nord',
-    description: 'Cool arctic blues inspired by the polar night',
+    description: 'Editor-matched arctic surfaces with a cyan accent',
     colors: {
-      bg: '#2e3440',
-      surface: '#3b4252',
+      bg: '#292e39',
+      surface: '#2e3440',
       sidebar: '#292e39',
       accent: '#88c0d0',
       fg: '#d8dee9',
@@ -67,7 +67,7 @@ const THEMES: ThemeOption[] = [
   {
     id: 'monokai',
     name: 'Monokai',
-    description: 'Classic warm theme with vibrant colors',
+    description: 'Editor-matched warm surfaces with vibrant accents',
     colors: {
       bg: '#1e1f1c',
       surface: '#272822',
@@ -80,10 +80,10 @@ const THEMES: ThemeOption[] = [
   {
     id: 'dracula',
     name: 'Dracula',
-    description: 'Dark theme with purple-pink tones',
+    description: 'Editor-matched dark surfaces with purple-pink accents',
     colors: {
-      bg: '#282a36',
-      surface: '#2d2f3d',
+      bg: '#21222c',
+      surface: '#282a36',
       sidebar: '#21222c',
       accent: '#bd93f9',
       fg: '#f8f8f2',
@@ -93,10 +93,10 @@ const THEMES: ThemeOption[] = [
   {
     id: 'github-dark',
     name: 'GitHub Dark',
-    description: 'Dark theme inspired by GitHub interface',
+    description: 'Editor-matched GitHub dark surfaces',
     colors: {
-      bg: '#0d1117',
-      surface: '#161b22',
+      bg: '#010409',
+      surface: '#0d1117',
       sidebar: '#010409',
       accent: '#58a6ff',
       fg: '#c9d1d9',

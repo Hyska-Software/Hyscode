@@ -504,17 +504,17 @@ body {
 /* ── Theme: HysCode Light ──────────────────────────────────────────────── */
 .theme-hyscode-light {
   /* shadcn bridge vars — Aurora light (cool neutrals + teal) */
-  --background: #f7f7f8;
+  --background: #f1f2f4;
   --foreground: #0d0d0f;
-  --card: #ffffff;
+  --card: #f7f7f8;
   --card-foreground: #0d0d0f;
   --popover: #ffffff;
   --popover-foreground: #0d0d0f;
   --primary: #0d8a6c;
   --primary-foreground: #ffffff;
-  --secondary: #f0f0f2;
+  --secondary: #e9ebee;
   --secondary-foreground: #0d0d0f;
-  --muted: #f0f0f2;
+  --muted: #f0f1f3;
   --muted-foreground: #6e6e80;
   --accent: #0d8a6c;
   --accent-foreground: #ffffff;
@@ -528,17 +528,17 @@ body {
   --chart-4: #ef4444;
   --chart-5: #6e6e80;
   --radius: 0.625rem;
-  --sidebar: #f7f7f8;
+  --sidebar: #f1f2f4;
   --sidebar-foreground: #0d0d0f;
   --sidebar-primary: #0d8a6c;
   --sidebar-primary-foreground: #ffffff;
-  --sidebar-accent: #f0f0f2;
+  --sidebar-accent: #e7e9ec;
   --sidebar-accent-foreground: #0d0d0f;
   --sidebar-border: rgba(0, 0, 0, 0.08);
   --sidebar-ring: #0d8a6c;
   /* HysCode custom tokens */
   --color-surface: #ffffff;
-  --color-surface-raised: #f0f0f2;
+  --color-surface-raised: #f5f5f5;
   --color-accent-muted: rgba(13, 138, 108, 0.10);
   --color-success: #22c55e;
   --color-warning: #eab308;
@@ -550,23 +550,23 @@ body {
 /* ── Theme: Nord ───────────────────────────────────────────────────────── */
 .theme-nord {
   /* shadcn bridge vars */
-  --background: #2e3440;
+  --background: #292e39;
   --foreground: #d8dee9;
-  --card: #3b4252;
+  --card: #353b49;
   --card-foreground: #d8dee9;
-  --popover: #434c5e;
+  --popover: #3b4252;
   --popover-foreground: #d8dee9;
   --primary: #88c0d0;
   --primary-foreground: #2e3440;
   --secondary: #4c566a;
   --secondary-foreground: #d8dee9;
-  --muted: #4c566a;
+  --muted: #3b4252;
   --muted-foreground: #a0a8b7;
   --accent: #88c0d0;
   --accent-foreground: #2e3440;
   --destructive: #bf616a;
   --border: transparent;
-  --input: #434c5e;
+  --input: #3b4252;
   --ring: #88c0d0;
   --chart-1: #88c0d0;
   --chart-2: #a3be8c;
@@ -578,13 +578,13 @@ body {
   --sidebar-foreground: #d8dee9;
   --sidebar-primary: #88c0d0;
   --sidebar-primary-foreground: #2e3440;
-  --sidebar-accent: #4c566a;
+  --sidebar-accent: #3b4252;
   --sidebar-accent-foreground: #d8dee9;
   --sidebar-border: transparent;
   --sidebar-ring: #88c0d0;
   /* HysCode custom tokens */
-  --color-surface: #3b4252;
-  --color-surface-raised: #434c5e;
+  --color-surface: #2e3440;
+  --color-surface-raised: #3b4252;
   --color-accent-muted: rgba(136, 192, 208, 0.12);
   --color-success: #a3be8c;
   --color-warning: #ebcb8b;
@@ -598,21 +598,21 @@ body {
   /* shadcn bridge vars */
   --background: #1e1f1c;
   --foreground: #f8f8f2;
-  --card: #272822;
+  --card: #2d2e27;
   --card-foreground: #f8f8f2;
-  --popover: #2d2e27;
+  --popover: #33342c;
   --popover-foreground: #f8f8f2;
   --primary: #a6e22e;
   --primary-foreground: #1e1f1c;
   --secondary: #3e3d32;
   --secondary-foreground: #f8f8f2;
-  --muted: #3e3d32;
+  --muted: #34352d;
   --muted-foreground: #8f908a;
   --accent: #f92672;
   --accent-foreground: #ffffff;
   --destructive: #f92672;
   --border: transparent;
-  --input: #2d2e27;
+  --input: #33342c;
   --ring: #f92672;
   --chart-1: #f92672;
   --chart-2: #a6e22e;
@@ -624,7 +624,7 @@ body {
   --sidebar-foreground: #f8f8f2;
   --sidebar-primary: #a6e22e;
   --sidebar-primary-foreground: #1e1f1c;
-  --sidebar-accent: #3e3d32;
+  --sidebar-accent: #34352d;
   --sidebar-accent-foreground: #f8f8f2;
   --sidebar-border: transparent;
   --sidebar-ring: #f92672;
@@ -642,7 +642,7 @@ body {
 /* ── Theme: Dracula ────────────────────────────────────────────────────── */
 .theme-dracula {
   /* shadcn bridge vars */
-  --background: #282a36;
+  --background: #21222c;
   --foreground: #f8f8f2;
   --card: #2d2f3d;
   --card-foreground: #f8f8f2;
@@ -650,9 +650,9 @@ body {
   --popover-foreground: #f8f8f2;
   --primary: #bd93f9;
   --primary-foreground: #282a36;
-  --secondary: #44475a;
+  --secondary: #3a3c4e;
   --secondary-foreground: #f8f8f2;
-  --muted: #44475a;
+  --muted: #343746;
   --muted-foreground: #a0a4b8;
   --accent: #bd93f9;
   --accent-foreground: #282a36;
@@ -670,13 +670,13 @@ body {
   --sidebar-foreground: #f8f8f2;
   --sidebar-primary: #bd93f9;
   --sidebar-primary-foreground: #282a36;
-  --sidebar-accent: #44475a;
+  --sidebar-accent: #343746;
   --sidebar-accent-foreground: #f8f8f2;
   --sidebar-border: transparent;
   --sidebar-ring: #bd93f9;
   /* HysCode custom tokens */
-  --color-surface: #2d2f3d;
-  --color-surface-raised: #343746;
+  --color-surface: #282a36;
+  --color-surface-raised: #2d2f3d;
   --color-accent-muted: rgba(189, 147, 249, 0.12);
   --color-success: #50fa7b;
   --color-warning: #f1fa8c;
@@ -688,7 +688,7 @@ body {
 /* ── Theme: GitHub Dark ────────────────────────────────────────────────── */
 .theme-github-dark {
   /* shadcn bridge vars */
-  --background: #0d1117;
+  --background: #010409;
   --foreground: #c9d1d9;
   --card: #161b22;
   --card-foreground: #c9d1d9;
@@ -698,7 +698,7 @@ body {
   --primary-foreground: #0d1117;
   --secondary: #21262d;
   --secondary-foreground: #c9d1d9;
-  --muted: #21262d;
+  --muted: #1c2128;
   --muted-foreground: #8b949e;
   --accent: #58a6ff;
   --accent-foreground: #0d1117;
@@ -716,13 +716,13 @@ body {
   --sidebar-foreground: #c9d1d9;
   --sidebar-primary: #58a6ff;
   --sidebar-primary-foreground: #0d1117;
-  --sidebar-accent: #21262d;
+  --sidebar-accent: #161b22;
   --sidebar-accent-foreground: #c9d1d9;
   --sidebar-border: transparent;
   --sidebar-ring: #58a6ff;
   /* HysCode custom tokens */
-  --color-surface: #161b22;
-  --color-surface-raised: #1c2128;
+  --color-surface: #0d1117;
+  --color-surface-raised: #161b22;
   --color-accent-muted: rgba(88, 166, 255, 0.10);
   --color-success: #3fb950;
   --color-warning: #d29922;
