@@ -1681,17 +1681,27 @@ pub fn git_log_graph(repo_path: String, limit: u32) -> Result<Vec<GraphCommit>, 
         .map_err(|e| format!("References error: {e}"))?
     {
         let reference = reference.map_err(|e| format!("Reference error: {e}"))?;
-        if let Some(oid) = reference.target() {
+        // Direct refs can point at annotated tag objects (or another non-commit
+        // object). Revwalk only accepts commit OIDs, so always peel the ref
+        // before adding it to the walk and ignore refs that cannot resolve to a
+        // commit.
+        let commit_oid = reference
+            .target()
+            .and_then(|oid| repo.find_object(oid, None).ok())
+            .and_then(|object| object.peel_to_commit().ok())
+            .map(|commit| commit.id())
+            .or_else(|| {
+                reference
+                    .peel(git2::ObjectType::Commit)
+                    .ok()
+                    .map(|object| object.id())
+            });
+
+        if let Some(oid) = commit_oid {
             if pushed.insert(oid) {
                 revwalk
                     .push(oid)
                     .map_err(|e| format!("Push reference error: {e}"))?;
-            }
-        } else if let Ok(object) = reference.peel(git2::ObjectType::Commit) {
-            if pushed.insert(object.id()) {
-                revwalk
-                    .push(object.id())
-                    .map_err(|e| format!("Push peeled reference error: {e}"))?;
             }
         }
     }
@@ -2351,6 +2361,23 @@ mod tests {
         assert!(graph
             .iter()
             .any(|commit| commit.refs.iter().any(|reference| reference == "parallel")));
+    }
+
+    #[test]
+    fn graph_peels_annotated_tags_before_walking() {
+        let repo = TestRepository::new();
+        repo.commit_file("release.txt", b"release\n", "release commit");
+        repo.git(["tag", "-a", "v1.0.0", "-m", "release v1.0.0"]);
+
+        let graph = git_log_graph(repo.path_string(), 100).unwrap();
+
+        assert!(graph.iter().any(|commit| {
+            commit.message.trim() == "release commit"
+                && commit
+                    .refs
+                    .iter()
+                    .any(|reference| reference == "tag:v1.0.0")
+        }));
     }
 
     #[test]

@@ -9,6 +9,8 @@ import type { CustomModel } from '../stores/settings-store';
 import { initProviders } from './init-providers';
 import { getAllEnabledModelsGrouped } from './provider-catalog';
 
+const COMMIT_MESSAGE_MAX_TOKENS = 2_048;
+
 export type CommitMessageTarget = {
   providerId: string;
   providerName: string;
@@ -49,7 +51,7 @@ export function createCommitMessageChatParams(request: CommitMessageProviderRequ
     model: request.modelId,
     messages: [{ role: 'user', content: [{ type: 'text', text: request.userMessage }] }],
     systemPrompt: request.systemPrompt,
-    maxTokens: 256,
+    maxTokens: COMMIT_MESSAGE_MAX_TOKENS,
     maxTurns: 1,
     signal: request.signal,
     onRetry: ({ attempt, delayMs }) => request.onRetry?.(attempt, delayMs),

@@ -29,7 +29,7 @@ describe('commit-message provider targets', () => {
     expect(params).toMatchObject({
       providerId: 'claude-agent',
       model: 'claude',
-      maxTokens: 256,
+      maxTokens: 2048,
       maxTurns: 1,
     });
     expect(params).not.toHaveProperty('tools');
