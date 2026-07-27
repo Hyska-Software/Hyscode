@@ -28,11 +28,12 @@ import {
 } from '@/stores/layout-store';
 import { useSettingsStore } from '@/stores/settings-store';
 import { useFileStore } from '@/stores/file-store';
+import { useEditorStore, type MarkdownViewMode } from '@/stores/editor-store';
 import { useTerminalStore } from '@/stores/terminal-store';
 import { HarnessBridge } from '@/lib/harness-bridge';
 import { tauriFs } from '@/lib/tauri-fs';
 import { defineAllMonacoThemes, getMonacoThemeName } from '@/lib/monaco-themes';
-import { cn } from '@/lib/utils';
+import { cn, getViewerType } from '@/lib/utils';
 import { TabBadge } from '../ui/tab-badge';
 import { RightTabContextMenu } from './right-tab-context-menu';
 import {
@@ -764,39 +765,47 @@ function PreviewTab() {
   const previewFile = useLayoutStore((s) => s.agentPreviewFile);
   const themeId = useSettingsStore((s) => s.themeId);
   const monacoTheme = getMonacoThemeName(themeId);
-  const [content, setContent] = useState<string | null>(null);
+  const rootPath = useFileStore((s) => s.rootPath);
+  const content = useFileStore((s) =>
+    previewFile ? s.fileCache.get(previewFile) : undefined,
+  );
+  const setFileContent = useFileStore((s) => s.setFileContent);
   const [loading, setLoading] = useState(false);
-  const [mdMode, setMdMode] = useState<'preview' | 'code'>('preview');
+  const [error, setError] = useState<string | null>(null);
+  const [mdMode, setMdMode] = useState<MarkdownViewMode>('preview');
+  const [splitRatio, setSplitRatio] = useState(50);
 
   // Reset markdown mode when file changes
   useEffect(() => {
     setMdMode('preview');
+    setSplitRatio(50);
   }, [previewFile]);
 
   useEffect(() => {
     if (!previewFile) {
-      setContent(null);
+      setError(null);
+      return;
+    }
+
+    if (content !== undefined) {
+      setLoading(false);
+      setError(null);
       return;
     }
 
     let cancelled = false;
     setLoading(true);
-
-    // Check file cache first
-    const cached = useFileStore.getState().fileCache.get(previewFile);
-    if (cached !== undefined) {
-      setContent(cached);
-      setLoading(false);
-      return;
-    }
+    setError(null);
 
     tauriFs
       .readFile(previewFile)
       .then((text) => {
-        if (!cancelled) setContent(text);
+        if (!cancelled) setFileContent(previewFile, text);
       })
-      .catch(() => {
-        if (!cancelled) setContent('// Error reading file');
+      .catch((loadError: unknown) => {
+        if (!cancelled) {
+          setError(loadError instanceof Error ? loadError.message : String(loadError));
+        }
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -805,7 +814,7 @@ function PreviewTab() {
     return () => {
       cancelled = true;
     };
-  }, [previewFile]);
+  }, [previewFile, content === undefined, setFileContent]);
 
   if (!previewFile) {
     return (
@@ -818,6 +827,14 @@ function PreviewTab() {
   }
 
   if (loading) return <LoadingSpinner />;
+  if (error) {
+    return (
+      <div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center text-muted-foreground">
+        <span className="text-xs text-foreground">Unable to read this file</span>
+        <span className="text-[10px]">{error}</span>
+      </div>
+    );
+  }
 
   const fileName = previewFile.split(/[\\/]/).pop() ?? previewFile;
   const isMarkdown = /\.mdx?$/i.test(previewFile);
@@ -828,7 +845,24 @@ function PreviewTab() {
         content={content ?? ''}
         mode={mdMode}
         onModeChange={setMdMode}
+        onSplitRatioChange={setSplitRatio}
+        onOpenWorkspaceFile={(path, anchor) => {
+          const fileName = path.split(/[\\/]/).pop() ?? path;
+          useEditorStore.getState().openTab({
+            id: path,
+            filePath: path,
+            fileName,
+            language: detectLang(path),
+            viewerType: getViewerType(fileName),
+            markdownAnchor: anchor ?? undefined,
+          });
+          useLayoutStore.getState().setWorkspaceMode('editor');
+        }}
         language="markdown"
+        filePath={previewFile}
+        rootPath={rootPath}
+        readOnly
+        splitRatio={splitRatio}
       />
     );
   }

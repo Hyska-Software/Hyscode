@@ -22,7 +22,7 @@ import {
 import { DbSchemaViewer } from './viewers/db-schema';
 import { MemoryViewer } from './viewers/memory-viewer';
 import { ExtensionReadmeViewer } from './extension-readme-viewer';
-import { useEditorStore, useFileStore, useSettingsStore } from '../../stores';
+import { useEditorStore, useFileStore, useLayoutStore, useSettingsStore } from '../../stores';
 import { useAgentStore } from '../../stores/agent-store';
 import { useExtensionStore } from '../../stores/extension-store';
 import { tauriFs } from '../../lib/tauri-fs';
@@ -36,6 +36,7 @@ import { defineAllMonacoThemes, getMonacoThemeName } from '../../lib/monaco-them
 import { LspBridge, detectLanguage, detectLspLanguage } from '../../lib/lsp-bridge';
 import { LspMissingBanner } from './lsp-missing-banner';
 import { registerAllLanguages, disableNativeTypeScriptValidation } from '@hyscode/lsp-client';
+import { getViewerType } from '../../lib/utils';
 import type * as monacoEditor from 'monaco-editor';
 
 const MonacoEditor = lazy(() => import('@monaco-editor/react'));
@@ -48,12 +49,38 @@ function EditorLoading() {
   );
 }
 
+function EditorLoadError({ message }: { message: string }) {
+  return (
+    <div className="flex flex-1 flex-col items-center justify-center gap-2 px-6 text-center text-muted-foreground">
+      <p className="text-sm font-medium text-foreground">Unable to read this file</p>
+      <p className="max-w-xl text-xs">{message}</p>
+    </div>
+  );
+}
+
+type FileLoadState =
+  | { status: 'idle' }
+  | { status: 'loading'; path: string }
+  | { status: 'ready'; path: string }
+  | { status: 'error'; path: string; message: string };
+
 export function EditorArea() {
   const tabs = useEditorStore((s) => s.tabs);
   const activeTabId = useEditorStore((s) => s.activeTabId);
+  const activeTab = tabs.find((tab) => tab.id === activeTabId);
   const markDirty = useEditorStore((s) => s.markDirty);
   const setMarkdownMode = useEditorStore((s) => s.setMarkdownMode);
-  const { fileCache, setFileContent, externalConflicts, clearExternalConflict } = useFileStore();
+  const setMarkdownSplitRatio = useEditorStore((s) => s.setMarkdownSplitRatio);
+  const setMarkdownAnchor = useEditorStore((s) => s.setMarkdownAnchor);
+  const setFileContent = useFileStore((s) => s.setFileContent);
+  const clearExternalConflict = useFileStore((s) => s.clearExternalConflict);
+  const rootPath = useFileStore((s) => s.rootPath);
+  const content = useFileStore((s) =>
+    activeTab ? s.fileCache.get(activeTab.filePath) : undefined,
+  );
+  const hasExternalConflict = useFileStore((s) =>
+    activeTab ? s.externalConflicts.has(activeTab.filePath) : false,
+  );
 
   // Editor settings
   const editorFontSize = useSettingsStore((s) => s.fontSize);
@@ -103,9 +130,7 @@ export function EditorArea() {
     monaco.editor.setTheme(getMonacoThemeName(themeId));
   }, [extensionThemesVersion]);
 
-  const activeTab = tabs.find((t) => t.id === activeTabId);
-  const [content, setContent] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [loadState, setLoadState] = useState<FileLoadState>({ status: 'idle' });
   const contentRef = useRef<string | null>(null);
 
   // Agent edit session for the active file (new inline model)
@@ -119,25 +144,14 @@ export function EditorArea() {
       : null,
   );
 
-  // When an active edit session is resolved, reload file content to sync editor
-  const prevEditSessionRef = useRef(editSession);
+  // Keep the imperative save path aligned with the canonical buffer.
   useEffect(() => {
-    const prev = prevEditSessionRef.current;
-    prevEditSessionRef.current = editSession;
-    if (prev && !editSession && activeTab) {
-      const cached = useFileStore.getState().fileCache.get(activeTab.filePath);
-      if (cached !== undefined) {
-        setContent(cached);
-        contentRef.current = cached;
-        // Also update Monaco model if editor is mounted
-        const editor = editorInstanceRef.current;
-        const model = editor?.getModel();
-        if (model && model.getValue() !== cached) {
-          model.setValue(cached);
-        }
-      }
+    if (!activeTab || content === undefined) {
+      contentRef.current = null;
+      return;
     }
-  }, [editSession, activeTab]);
+    contentRef.current = content;
+  }, [activeTab?.filePath, content]);
 
   // ── Editor context menu (right-click) ──────────────────────────────────────
   const [editorCtxMenu, setEditorCtxMenu] = useState<{ x: number; y: number } | null>(null);
@@ -306,7 +320,6 @@ export function EditorArea() {
 
       // Sync cache
       contentRef.current = editSession.newContent;
-      setContent(editSession.newContent);
       if (activeTab) {
         setFileContent(activeTab.filePath, editSession.newContent);
       }
@@ -316,61 +329,57 @@ export function EditorArea() {
   // Viewer types that are handled as text (Monaco / markdown)
   const isTextViewer =
     !activeTab ||
-    (activeTab.type !== 'commit' &&
+    (activeTab.type === 'file' &&
       (activeTab.viewerType === 'code' || activeTab.viewerType === 'markdown'));
 
   // Load file content when active tab changes (only for text-based viewers)
   useEffect(() => {
     if (!activeTab || !isTextViewer) {
-      setContent(null);
       contentRef.current = null;
-      setLoading(false);
+      setLoadState({ status: 'idle' });
       return;
     }
 
     // Untitled files start with empty content — no disk read
     if (activeTab.filePath.startsWith('untitled:')) {
-      const cached = fileCache.get(activeTab.filePath) ?? '';
-      setContent(cached);
-      contentRef.current = cached;
-      setLoading(false);
+      if (content === undefined) setFileContent(activeTab.filePath, '');
+      setLoadState({ status: 'ready', path: activeTab.filePath });
       return;
     }
 
-    const cached = fileCache.get(activeTab.filePath);
-    if (cached !== undefined) {
-      setContent(cached);
-      contentRef.current = cached;
-      setLoading(false);
+    if (content !== undefined) {
+      setLoadState({ status: 'ready', path: activeTab.filePath });
       return;
     }
 
     let cancelled = false;
-    setLoading(true);
+    const requestedPath = activeTab.filePath;
+    setLoadState({ status: 'loading', path: requestedPath });
 
     tauriFs
-      .readFile(activeTab.filePath)
+      .readFile(requestedPath)
       .then((text) => {
         if (!cancelled) {
-          setFileContent(activeTab.filePath, text);
-          setContent(text);
+          setFileContent(requestedPath, text);
           contentRef.current = text;
+          setLoadState({ status: 'ready', path: requestedPath });
         }
       })
-      .catch(() => {
+      .catch((error: unknown) => {
         if (!cancelled) {
-          setContent('// Error reading file');
-          contentRef.current = '// Error reading file';
+          contentRef.current = null;
+          setLoadState({
+            status: 'error',
+            path: requestedPath,
+            message: error instanceof Error ? error.message : String(error),
+          });
         }
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
       });
 
     return () => {
       cancelled = true;
     };
-  }, [activeTab?.filePath]);
+  }, [activeTab?.filePath, isTextViewer, content === undefined, setFileContent]);
 
   // Track previous active tab for LSP close notifications
   const prevTabRef = useRef<{ filePath: string; language: string } | null>(null);
@@ -398,14 +407,14 @@ export function EditorArea() {
     }
 
     // Open new document
-    if (activeTab && isTextViewer && content !== null) {
+    if (activeTab && isTextViewer && content !== undefined) {
       const lang = detectLspLanguage(activeTab.filePath) ?? activeTab.language ?? 'plaintext';
       LspBridge.onFileOpened(activeTab.filePath, lang, content).catch(() => {});
       prevTabRef.current = { filePath: activeTab.filePath, language: lang };
     } else {
       prevTabRef.current = null;
     }
-  }, [activeTab?.filePath, isTextViewer, content !== null]);
+  }, [activeTab?.filePath, isTextViewer, content !== undefined]);
 
   const handleEditorChange = useCallback(
     (value: string | undefined) => {
@@ -456,8 +465,52 @@ export function EditorArea() {
     return () => window.removeEventListener('keydown', handler);
   }, [activeTab?.id, activeTab?.filePath, activeTab?.fileName, markDirty, saveCurrentFile]);
 
+  const handleOpenWorkspaceFile = useCallback(
+    (path: string, anchor: string | null) => {
+      const fileName = path.split(/[\\/]/).pop() ?? path;
+      useEditorStore.getState().openTab({
+        id: path,
+        filePath: path,
+        fileName,
+        language: detectLanguage(path),
+        viewerType: getViewerType(fileName),
+        markdownAnchor: anchor ?? undefined,
+      });
+      useLayoutStore.getState().setWorkspaceMode('editor');
+    },
+    [],
+  );
+
+  const handleTextEditorMount = useCallback(
+    (
+      editor: monacoEditor.editor.IStandaloneCodeEditor | null,
+      monaco: typeof monacoEditor | null,
+    ) => {
+      editorInstanceRef.current = editor;
+      monacoInstanceRef.current = monaco;
+      setEditorVersion((version) => version + 1);
+      if (!editor || !monaco) return;
+
+      editor.updateOptions({ contextmenu: false });
+      const domNode = editor.getDomNode();
+      if (domNode) {
+        domNode.addEventListener('contextmenu', (event: MouseEvent) => {
+          event.preventDefault();
+          event.stopPropagation();
+          setEditorCtxMenu({ x: event.clientX, y: event.clientY });
+        });
+      }
+    },
+    [],
+  );
+
   const hasOpenTabs = tabs.length > 0;
-  const hasExternalConflict = Boolean(activeTab?.filePath && externalConflicts.has(activeTab.filePath));
+  const loading =
+    loadState.status === 'loading' && loadState.path === activeTab?.filePath;
+  const loadError =
+    loadState.status === 'error' && loadState.path === activeTab?.filePath
+      ? loadState.message
+      : null;
 
   return (
     <div className="flex h-full flex-col">
@@ -488,6 +541,8 @@ export function EditorArea() {
               onModeChange={(mode) => setMarkdownMode(activeTab.id, mode)}
               language="markdown"
               filePath={activeTab.id}
+              rootPath={rootPath}
+              readOnly
             />
           ) : activeTab.type === 'extension-readme' && activeTab.extensionReadmeProps ? (
             <ExtensionReadmeViewer {...activeTab.extensionReadmeProps} />
@@ -550,14 +605,23 @@ export function EditorArea() {
           ) : activeTab.viewerType === 'markdown' ? (
             loading ? (
               <EditorLoading />
+            ) : loadError ? (
+              <EditorLoadError message={loadError} />
             ) : (
               <MarkdownViewer
                 content={content ?? ''}
                 mode={activeTab.markdownMode ?? 'preview'}
                 onModeChange={(mode) => setMarkdownMode(activeTab.id, mode)}
+                onSplitRatioChange={(ratio) => setMarkdownSplitRatio(activeTab.id, ratio)}
                 onChange={handleEditorChange}
+                onEditorMount={handleTextEditorMount}
+                onOpenWorkspaceFile={handleOpenWorkspaceFile}
                 language={activeTab.language}
                 filePath={activeTab.filePath}
+                rootPath={rootPath}
+                splitRatio={activeTab.markdownSplitRatio ?? 50}
+                requestedAnchor={activeTab.markdownAnchor}
+                onAnchorHandled={() => setMarkdownAnchor(activeTab.id, undefined)}
               />
             )
           ) : activeTab.viewerType === 'image' ? (
@@ -576,6 +640,8 @@ export function EditorArea() {
             <DatabaseViewer filePath={activeTab.filePath} />
           ) : loading ? (
             <EditorLoading />
+          ) : loadError ? (
+            <EditorLoadError message={loadError} />
           ) : (
             <>
               <div className="flex-1 overflow-hidden">
@@ -587,24 +653,7 @@ export function EditorArea() {
                     onChange={handleEditorChange}
                     theme={monacoTheme}
                     onMount={(editor, monaco) => {
-                      editorInstanceRef.current = editor;
-                      monacoInstanceRef.current = monaco;
-                      setEditorVersion((v) => v + 1);
-
-                      console.log('[EditorArea] Monaco mounted, inlineSuggest options:', editor.getOption(monaco.editor.EditorOption.inlineSuggest));
-
-                      // Disable Monaco's built-in context menu so we show our own
-                      editor.updateOptions({ contextmenu: false });
-
-                      // Intercept right-click on the editor's DOM
-                      const domNode = editor.getDomNode();
-                      if (domNode) {
-                        domNode.addEventListener('contextmenu', (e: MouseEvent) => {
-                          e.preventDefault();
-                          e.stopPropagation();
-                          setEditorCtxMenu({ x: e.clientX, y: e.clientY });
-                        });
-                      }
+                      handleTextEditorMount(editor, monaco);
                     }}
                     beforeMount={(monaco) => {
                       defineAllMonacoThemes(monaco);

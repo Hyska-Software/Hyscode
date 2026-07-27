@@ -48,6 +48,18 @@ interface FileState {
   getParentPath: (path: string) => string | undefined;
 }
 
+export type ExternalFileUpdateDecision = 'ignore-agent-edit' | 'mark-conflict' | 'reload' | 'ignore-uncached';
+
+export function decideExternalFileUpdate(input: {
+  hasAgentEdit: boolean;
+  isDirty: boolean;
+  isCached: boolean;
+}): ExternalFileUpdateDecision {
+  if (input.hasAgentEdit) return 'ignore-agent-edit';
+  if (input.isDirty) return 'mark-conflict';
+  return input.isCached ? 'reload' : 'ignore-uncached';
+}
+
 function entriesToNodes(entries: { name: string; path: string; is_dir: boolean; size: number }[]): FileNode[] {
   return entries.map((e) => ({
     name: e.name,
@@ -333,13 +345,17 @@ export const useFileStore = create<FileState>()(
               const hasAgentEdit = agentModule.useAgentStore.getState().agentEditSessions.some((session) =>
                 session.filePath === path && (session.phase === 'streaming' || session.phase === 'pending_review'),
               );
-              if (hasAgentEdit) continue;
               const tab = editorModule.useEditorStore.getState().tabs.find((item) => item.filePath === path);
-              if (tab?.isDirty) {
+              const decision = decideExternalFileUpdate({
+                hasAgentEdit,
+                isDirty: tab?.isDirty ?? false,
+                isCached: get().fileCache.has(path),
+              });
+              if (decision === 'ignore-agent-edit' || decision === 'ignore-uncached') continue;
+              if (decision === 'mark-conflict') {
                 set((state) => { state.externalConflicts.add(path); });
                 continue;
               }
-              if (!get().fileCache.has(path)) continue;
               try {
                 const content = await tauriFs.readFile(path);
                 set((state) => {

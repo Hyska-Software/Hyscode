@@ -8,7 +8,9 @@ HysCode is a desktop IDE powered by AI agents. Agents write, edit, and execute c
 
 não use o Prettier
 
-## Issue → Branch → PR Loop (mandatory)
+## Issue → Branch → PR Loop (FAÇA APENAS SE O USUARIO PEDIR EXPLICITAMENTE)
+
+  ### todo o texto gerado deve ser em ingles para padronização
 
 **Todo trabalho, mesmo chores, começa por issue.** O sistema é canônico e está
 documentado em [`docs/WORKFLOW.md`](docs/WORKFLOW.md) e operacionalizado em

@@ -2,6 +2,8 @@ import { create } from 'zustand';
 import { immer } from 'zustand/middleware/immer';
 import type { ViewerType } from '../lib/utils';
 
+export type MarkdownViewMode = 'preview' | 'code' | 'split';
+
 export interface Tab {
   id: string;
   filePath: string;
@@ -12,7 +14,9 @@ export interface Tab {
   isPreview: boolean;
   type: 'file' | 'diff' | 'terminal' | 'commit' | 'history' | 'release-notes' | 'extension-readme' | 'git-graph' | 'db-schema' | 'memory';
   viewerType: ViewerType;
-  markdownMode?: 'preview' | 'code';
+  markdownMode?: MarkdownViewMode;
+  markdownSplitRatio?: number;
+  markdownAnchor?: string;
   diffProps?: {
     filePath: string;
     staged: boolean;
@@ -78,7 +82,7 @@ let untitledCounter = 0;
 interface EditorState {
   tabs: Tab[];
   activeTabId: string | null;
-  openTab: (tab: Omit<Tab, 'isDirty' | 'isPinned' | 'isPreview' | 'type' | 'diffProps' | 'viewerType' | 'markdownMode'> & { type?: Tab['type']; diffProps?: Tab['diffProps']; viewerType?: ViewerType; markdownMode?: Tab['markdownMode'] }) => void;
+  openTab: (tab: Omit<Tab, 'isDirty' | 'isPinned' | 'isPreview' | 'type' | 'diffProps' | 'viewerType' | 'markdownMode' | 'markdownSplitRatio'> & { type?: Tab['type']; diffProps?: Tab['diffProps']; viewerType?: ViewerType; markdownMode?: MarkdownViewMode; markdownSplitRatio?: number }) => void;
   openUntitled: () => void;
   openTerminalTab: (sessionId: string, name: string) => void;
   openCommitTab: (hash: string, shortHash: string, message: string) => void;
@@ -98,7 +102,9 @@ interface EditorState {
   reorderTabs: (fromIndex: number, toIndex: number) => void;
   pinTab: (id: string) => void;
   unpinTab: (id: string) => void;
-  setMarkdownMode: (id: string, mode: 'preview' | 'code') => void;
+  setMarkdownMode: (id: string, mode: MarkdownViewMode) => void;
+  setMarkdownSplitRatio: (id: string, ratio: number) => void;
+  setMarkdownAnchor: (id: string, anchor: string | undefined) => void;
 }
 
 export const useEditorStore = create<EditorState>()(
@@ -110,6 +116,9 @@ export const useEditorStore = create<EditorState>()(
       set((state) => {
         const existing = state.tabs.find((t) => t.id === tab.id);
         if (existing) {
+          if (tab.markdownAnchor !== undefined) {
+            existing.markdownAnchor = tab.markdownAnchor;
+          }
           state.activeTabId = existing.id;
           return;
         }
@@ -447,6 +456,18 @@ export const useEditorStore = create<EditorState>()(
       set((state) => {
         const tab = state.tabs.find((t) => t.id === id);
         if (tab) tab.markdownMode = mode;
+      }),
+
+    setMarkdownSplitRatio: (id, ratio) =>
+      set((state) => {
+        const tab = state.tabs.find((t) => t.id === id);
+        if (tab) tab.markdownSplitRatio = Math.min(80, Math.max(20, ratio));
+      }),
+
+    setMarkdownAnchor: (id, anchor) =>
+      set((state) => {
+        const tab = state.tabs.find((t) => t.id === id);
+        if (tab) tab.markdownAnchor = anchor;
       }),
   })),
 );

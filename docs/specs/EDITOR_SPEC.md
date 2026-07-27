@@ -90,6 +90,8 @@ interface Tab {
   language: string;                       // Monaco language ID
   isDirty: boolean;                       // has unsaved changes
   isPreview: boolean;                     // single-click preview (italic title)
+  markdownMode?: 'preview' | 'code' | 'split';
+  markdownSplitRatio?: number;             // editor width percentage, 20–80
   viewState: editor.ICodeEditorViewState; // cursor, scroll position
 }
 ```
@@ -99,6 +101,11 @@ interface Tab {
 ## Virtual File System
 
 The Editor operates on a **virtual file system** that caches file contents in memory and syncs with disk via Tauri commands.
+
+The cached text buffer is the canonical source for every open text document. Monaco, Markdown
+Preview, Split view, save operations, agent edits, and clean external-file updates must consume
+the same buffer; UI-local copies must not become independent document state. A read failure is
+represented as an error state and never inserted into the editable buffer.
 
 ```typescript
 interface VirtualFS {
@@ -118,6 +125,30 @@ interface VirtualFS {
   invalidateCache(path: string): void;
 }
 ```
+
+### Markdown document modes
+
+Markdown files opened from the file tree support three per-tab modes:
+
+- **Preview** renders the current in-memory buffer, including unsaved edits.
+- **Code** edits the canonical buffer in Monaco.
+- **Split** displays Code on the left and the live Preview on the right. It starts at 50/50,
+  has independent scrolling, and exposes a mouse-resizable divider whose ratio is retained in
+  tab state.
+
+Soft line breaks and consecutive empty source lines remain visually distinct while the buffer
+changes.
+
+The agent workspace uses the same Markdown viewer and buffer but keeps its Code and Split panes
+read-only. Clean file-watcher updates replace the cached buffer and appear immediately in both
+workspaces. If the editor buffer is dirty, the watcher preserves it and reports an external
+conflict.
+
+Markdown document navigation is workspace-aware: fragments scroll inside the Preview, relative
+file links open a HysCode editor tab, and `http`, `https`, and `mailto` links open through the
+operating system. Relative images resolve from the document directory. Local targets outside the
+workspace and unsupported URL schemes are blocked. MDX is rendered as Markdown only; JSX and raw
+HTML are not executed.
 
 ### External Change Detection
 When a file is modified outside HysCode (e.g., by git, another editor):
