@@ -1,27 +1,23 @@
-import { useEffect } from 'react';
+import { useEffect, useMemo } from 'react';
 import { ActivityBar } from './activity-bar';
 import { SidebarContent } from './sidebar-content';
 import { useExtensionStore } from '../../stores/extension-store';
 import { useLayoutStore } from '../../stores/layout-store';
 import { useSettingsStore } from '../../stores';
+import type { SidebarViewId } from '../../stores/layout-store';
+import {
+  createSidebarViewDescriptors,
+  getVisibleSidebarViewIds,
+  isBuiltinSidebarViewId,
+  orderSidebarViewDescriptors,
+  resolveActiveSidebarView,
+} from '../../lib/activity-bar-model';
 
-const builtinViewLabels: Record<BuiltinSidebarView, string> = {
-  files: 'Explorer',
-  search: 'Search',
-  git: 'Source Control',
-  skills: 'Skills',
-  extensions: 'Extensions',
-  agent: 'Agent',
-  devices: 'Devices',
-  docker: 'Docker',
-  memories: 'Memories',
-};
-
-export type BuiltinSidebarView = 'files' | 'search' | 'git' | 'skills' | 'extensions' | 'agent' | 'devices' | 'docker' | 'memories';
+export type BuiltinSidebarView = SidebarViewId;
 export type SidebarView = BuiltinSidebarView | (string & {});
 
 export function isBuiltinView(view: string): view is BuiltinSidebarView {
-  return view in builtinViewLabels;
+  return isBuiltinSidebarViewId(view);
 }
 
 export function Sidebar() {
@@ -30,30 +26,37 @@ export function Sidebar() {
   const extensionViews = useExtensionStore((s) => s.contributions.views);
   const visibleSidebarTabs = useSettingsStore((s) => s.visibleSidebarTabs);
   const visibleExtensionViews = useSettingsStore((s) => s.visibleExtensionViews);
+  const sidebarViewOrder = useSettingsStore((s) => s.sidebarViewOrder);
+  const setSidebarViewVisible = useSettingsStore((s) => s.setSidebarViewVisible);
   const activityBarPosition = useSettingsStore((s) => s.activityBarPosition);
+  const descriptors = useMemo(() => createSidebarViewDescriptors(extensionViews), [extensionViews]);
+  const availableIds = useMemo(() => descriptors.map((descriptor) => descriptor.id), [descriptors]);
+  const orderedDescriptors = useMemo(
+    () => orderSidebarViewDescriptors(descriptors, sidebarViewOrder),
+    [descriptors, sidebarViewOrder],
+  );
+  const visibleIds = useMemo(
+    () =>
+      getVisibleSidebarViewIds(sidebarViewOrder, availableIds, {
+        builtin: visibleSidebarTabs,
+        extension: visibleExtensionViews,
+      }),
+    [availableIds, sidebarViewOrder, visibleExtensionViews, visibleSidebarTabs],
+  );
 
-  // If active view gets hidden, fall back to first visible one
+  // Keep one available view visible and ensure the active view remains valid.
   useEffect(() => {
-    if (isBuiltinView(activeView)) {
-      if (!visibleSidebarTabs[activeView]) {
-        const fallback = (Object.keys(visibleSidebarTabs) as BuiltinSidebarView[]).find(
-          (id) => visibleSidebarTabs[id],
-        );
-        if (fallback) setActiveView(fallback);
-      }
-    } else {
-      // Extension view
-      if (visibleExtensionViews[activeView] === false) {
-        const fallback = extensionViews.find((v) => visibleExtensionViews[v.id] !== false);
-        if (fallback) setActiveView(fallback.id);
-      }
+    if (visibleIds.length === 0) {
+      setSidebarViewVisible('files', true, availableIds);
+      setActiveView('files');
+      return;
     }
-  }, [activeView, visibleSidebarTabs, visibleExtensionViews, extensionViews, setActiveView]);
+    const nextActiveView = resolveActiveSidebarView(activeView, visibleIds);
+    if (nextActiveView && nextActiveView !== activeView) setActiveView(nextActiveView);
+  }, [activeView, availableIds, setActiveView, setSidebarViewVisible, visibleIds]);
 
   const getViewLabel = (view: SidebarView): string => {
-    if (isBuiltinView(view)) return builtinViewLabels[view];
-    const extView = extensionViews.find((v) => v.id === view);
-    return extView?.name ?? view;
+    return orderedDescriptors.find((descriptor) => descriptor.id === view)?.label ?? view;
   };
 
   const isTop = activityBarPosition === 'top';

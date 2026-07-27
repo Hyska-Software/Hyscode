@@ -4,6 +4,10 @@ import { useExtensionStore } from '../../../stores/extension-store';
 import { useSettingsStore } from '../../../stores';
 import type { ConfigurationContribution } from '@hyscode/extension-api';
 import { SettingInput, SettingSelect, SettingSlider, SettingToggle } from '../controls';
+import {
+  createSidebarViewDescriptors,
+  getVisibleSidebarViewIds,
+} from '../../../lib/activity-bar-model';
 
 interface ExtConfigEntry {
   extensionName: string;
@@ -159,8 +163,15 @@ function ConfigProperty({
 
 function ViewsSection() {
   const extensionViews = useExtensionStore((s) => s.contributions.views);
+  const visibleSidebarTabs = useSettingsStore((s) => s.visibleSidebarTabs);
   const visibleExtensionViews = useSettingsStore((s) => s.visibleExtensionViews);
-  const setSettings = useSettingsStore((s) => s.set);
+  const sidebarViewOrder = useSettingsStore((s) => s.sidebarViewOrder);
+  const setSidebarViewVisible = useSettingsStore((s) => s.setSidebarViewVisible);
+  const availableIds = createSidebarViewDescriptors(extensionViews).map((view) => view.id);
+  const visibleIds = getVisibleSidebarViewIds(sidebarViewOrder, availableIds, {
+    builtin: visibleSidebarTabs,
+    extension: visibleExtensionViews,
+  });
 
   if (extensionViews.length === 0) return null;
 
@@ -172,7 +183,7 @@ function ViewsSection() {
   }
 
   const toggleView = (viewId: string, visible: boolean) => {
-    setSettings('visibleExtensionViews', { ...visibleExtensionViews, [viewId]: visible });
+    setSidebarViewVisible(viewId, visible, availableIds);
   };
 
   return (
@@ -197,6 +208,7 @@ function ViewsSection() {
             <div className="px-3 py-2 space-y-1.5">
               {views.map((view) => {
                 const isVisible = visibleExtensionViews[view.id] !== false;
+                const isLastVisible = isVisible && visibleIds.length <= 1;
                 return (
                   <div key={view.id} className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
@@ -210,10 +222,21 @@ function ViewsSection() {
                     </div>
                     <button
                       onClick={() => toggleView(view.id, !isVisible)}
+                      disabled={isLastVisible}
                       className={`relative h-4 w-7 rounded-full transition-colors ${
-                        isVisible ? 'bg-primary' : 'bg-muted'
+                        isLastVisible
+                          ? 'cursor-not-allowed bg-primary opacity-50'
+                          : isVisible
+                            ? 'bg-primary'
+                            : 'bg-muted'
                       }`}
-                      title={isVisible ? 'Hide from sidebar' : 'Show in sidebar'}
+                      title={
+                        isLastVisible
+                          ? 'At least one sidebar view must remain visible'
+                          : isVisible
+                            ? 'Hide from sidebar'
+                            : 'Show in sidebar'
+                      }
                     >
                       <span
                         className={`absolute top-0.5 left-0.5 h-3 w-3 rounded-full bg-foreground transition-transform ${

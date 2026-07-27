@@ -10,21 +10,16 @@ import {
   DropdownMenuSubTrigger,
   DropdownMenuSubContent,
 } from '../ui/dropdown-menu';
-import { useLayoutStore, type SidebarViewId } from '../../stores/layout-store';
+import { useLayoutStore } from '../../stores/layout-store';
 import { useSettingsStore } from '../../stores';
 import { useCommandStore } from '../../stores/command-store';
-
-const VIEW_LABELS: Record<SidebarViewId, string> = {
-  files: 'Explorer',
-  search: 'Search',
-  git: 'Source Control',
-  skills: 'Skills',
-  extensions: 'Extensions',
-  agent: 'Agent',
-  devices: 'Devices',
-  docker: 'Docker',
-  memories: 'Memories',
-};
+import { useExtensionStore } from '../../stores/extension-store';
+import {
+  createSidebarViewDescriptors,
+  getVisibleSidebarViewIds,
+  isSidebarViewVisible,
+  orderSidebarViewDescriptors,
+} from '../../lib/activity-bar-model';
 
 export function ViewMenu() {
   const workspaceMode = useLayoutStore((s) => s.workspaceMode);
@@ -46,7 +41,19 @@ export function ViewMenu() {
   const wordWrap = useSettingsStore((s) => s.wordWrap);
   const lineNumbers = useSettingsStore((s) => s.lineNumbers);
   const visibleSidebarTabs = useSettingsStore((s) => s.visibleSidebarTabs);
+  const sidebarViewOrder = useSettingsStore((s) => s.sidebarViewOrder);
   const activityBarPosition = useSettingsStore((s) => s.activityBarPosition);
+  const visibleExtensionViews = useSettingsStore((s) => s.visibleExtensionViews);
+  const setSidebarViewVisible = useSettingsStore((s) => s.setSidebarViewVisible);
+  const extensionViews = useExtensionStore((s) => s.contributions.views);
+  const descriptors = createSidebarViewDescriptors(extensionViews);
+  const availableIds = descriptors.map((descriptor) => descriptor.id);
+  const orderedDescriptors = orderSidebarViewDescriptors(descriptors, sidebarViewOrder);
+  const visibility = {
+    builtin: visibleSidebarTabs,
+    extension: visibleExtensionViews,
+  };
+  const visibleIds = getVisibleSidebarViewIds(sidebarViewOrder, availableIds, visibility);
 
   const executeCommand = useCommandStore((s) => s.executeCommand);
 
@@ -137,18 +144,21 @@ export function ViewMenu() {
         <DropdownMenuSub>
           <DropdownMenuSubTrigger>Sidebar Tabs</DropdownMenuSubTrigger>
           <DropdownMenuSubContent className="w-48">
-            {(Object.keys(VIEW_LABELS) as SidebarViewId[]).map((id) => (
-              <DropdownMenuCheckboxItem
-                key={id}
-                checked={visibleSidebarTabs[id]}
-                onCheckedChange={(checked) =>
-                  setSettings('visibleSidebarTabs', { ...visibleSidebarTabs, [id]: checked })
-                }
-                disabled={id === 'files'}
-              >
-                {VIEW_LABELS[id]}
-              </DropdownMenuCheckboxItem>
-            ))}
+            {orderedDescriptors.map((view) => {
+              const visible = isSidebarViewVisible(view.id, visibility);
+              return (
+                <DropdownMenuCheckboxItem
+                  key={view.id}
+                  checked={visible}
+                  onCheckedChange={(checked) =>
+                    setSidebarViewVisible(view.id, checked, availableIds)
+                  }
+                  disabled={visible && visibleIds.length <= 1}
+                >
+                  {view.label}
+                </DropdownMenuCheckboxItem>
+              );
+            })}
           </DropdownMenuSubContent>
         </DropdownMenuSub>
 
@@ -156,15 +166,17 @@ export function ViewMenu() {
         <DropdownMenuSub>
           <DropdownMenuSubTrigger>Sidebar Views</DropdownMenuSubTrigger>
           <DropdownMenuSubContent className="w-48">
-            {(Object.keys(VIEW_LABELS) as SidebarViewId[])
-              .filter((id) => visibleSidebarTabs[id])
-              .map((id) => (
+            {orderedDescriptors
+              .filter((view) => isSidebarViewVisible(view.id, visibility))
+              .map((view) => (
                 <DropdownMenuItem
-                  key={id}
-                  onClick={() => focusSidebarView(id)}
-                  className={sidebarActiveView === id ? 'bg-primary text-primary-foreground' : ''}
+                  key={view.id}
+                  onClick={() => focusSidebarView(view.id)}
+                  className={
+                    sidebarActiveView === view.id ? 'bg-primary text-primary-foreground' : ''
+                  }
                 >
-                  {VIEW_LABELS[id]}
+                  {view.label}
                 </DropdownMenuItem>
               ))}
           </DropdownMenuSubContent>

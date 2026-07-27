@@ -142,6 +142,17 @@ export const SETTINGS_DEFAULTS = {
     docker: true,
     memories: true,
   },
+  sidebarViewOrder: [
+    'files',
+    'search',
+    'git',
+    'skills',
+    'extensions',
+    'agent',
+    'memories',
+    'devices',
+    'docker',
+  ],
   visibleExtensionViews: {},
 } as const;
 

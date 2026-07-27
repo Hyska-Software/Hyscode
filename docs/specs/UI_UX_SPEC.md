@@ -136,6 +136,11 @@ Total viewport
 - Active indicator: 2px left border in blue-500
 - Tooltip on hover: panel name
 - Icons: Phosphor Icons (regular weight, strokeWidth 1.5)
+- Views nativas e contribuídas por extensões compartilham uma única ordem global persistida
+- Drag-and-drop reordena qualquer view; a direção acompanha a barra à esquerda ou no topo
+- Clique direito em qualquer ponto da barra abre a lista de visibilidade e a ação de restaurar
+- Qualquer view pode ser ocultada, mas ao menos uma view deve permanecer visível
+- O botão de Settings permanece fixo no final da barra e não participa da ordenação
 
 ### File Tree
 

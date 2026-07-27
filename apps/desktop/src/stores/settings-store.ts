@@ -5,6 +5,13 @@ import type { AgentType, ToolCategory } from '@hyscode/agent-harness';
 import type { AgentMode } from './agent-store';
 import type { SidebarViewId } from './layout-store';
 import { SETTINGS_DEFAULTS } from './settings-store-defaults';
+import {
+  DEFAULT_SIDEBAR_VIEW_ORDER,
+  canHideSidebarView,
+  createDefaultSidebarViewOrder,
+  isBuiltinSidebarViewId,
+  normalizeSidebarViewOrder,
+} from '../lib/activity-bar-model';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -216,6 +223,8 @@ interface SettingsState {
   agentCenterPanelMode: 'chat' | 'terminal';
   /** Which builtin sidebar tabs are visible in the ActivityBar */
   visibleSidebarTabs: Record<SidebarViewId, boolean>;
+  /** Global order for builtin and extension-contributed ActivityBar views */
+  sidebarViewOrder: string[];
   /** Which extension-contributed sidebar views are visible */
   visibleExtensionViews: Record<string, boolean>;
 
@@ -228,6 +237,9 @@ interface SettingsState {
 
   // ─ Actions ─
   set: <K extends keyof SettingsState>(key: K, value: SettingsState[K]) => void;
+  setSidebarViewOrder: (order: string[]) => void;
+  setSidebarViewVisible: (id: string, visible: boolean, availableIds: string[]) => boolean;
+  resetSidebarViews: (availableIds: string[]) => void;
   setThemeId: (id: ThemeId) => void;
   setIconThemeId: (id: string) => void;
   setActiveProvider: (providerId: string, modelId: string) => void;
@@ -275,10 +287,13 @@ export function migrateSettingsState(persistedState: unknown, version: number): 
 
 export const useSettingsStore = create<SettingsState>()(
   persist(
-    immer((set) => ({
+    immer((set, get) => ({
       ...(SETTINGS_DEFAULTS as unknown as Omit<
         SettingsState,
         | 'set'
+        | 'setSidebarViewOrder'
+        | 'setSidebarViewVisible'
+        | 'resetSidebarViews'
         | 'setThemeId'
         | 'setIconThemeId'
         | 'setActiveProvider'
@@ -313,6 +328,42 @@ export const useSettingsStore = create<SettingsState>()(
       set: (key, value) =>
         set((state) => {
           (state as Record<string, unknown>)[key as string] = value;
+        }),
+
+      setSidebarViewOrder: (order) =>
+        set((state) => {
+          state.sidebarViewOrder = normalizeSidebarViewOrder(order, []);
+        }),
+
+      setSidebarViewVisible: (id, visible, availableIds) => {
+        const state = get();
+        if (
+          !visible &&
+          !canHideSidebarView(id, state.sidebarViewOrder, availableIds, {
+            builtin: state.visibleSidebarTabs,
+            extension: state.visibleExtensionViews,
+          })
+        ) {
+          return false;
+        }
+
+        set((draft) => {
+          if (isBuiltinSidebarViewId(id)) {
+            draft.visibleSidebarTabs[id] = visible;
+          } else {
+            draft.visibleExtensionViews[id] = visible;
+          }
+        });
+        return true;
+      },
+
+      resetSidebarViews: (availableIds) =>
+        set((state) => {
+          state.sidebarViewOrder = createDefaultSidebarViewOrder(availableIds);
+          for (const id of DEFAULT_SIDEBAR_VIEW_ORDER) {
+            state.visibleSidebarTabs[id as SidebarViewId] = true;
+          }
+          state.visibleExtensionViews = {};
         }),
 
       setThemeId: (id) =>

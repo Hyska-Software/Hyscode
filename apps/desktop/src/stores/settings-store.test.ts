@@ -1,7 +1,19 @@
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+vi.hoisted(() => {
+  const values = new Map<string, string>();
+  Object.defineProperty(globalThis, 'localStorage', {
+    configurable: true,
+    value: {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => values.set(key, value),
+      removeItem: (key: string) => values.delete(key),
+    },
+  });
+});
 
 import { SETTINGS_DEFAULTS } from './settings-store-defaults';
-import { migrateSettingsState } from './settings-store';
+import { migrateSettingsState, useSettingsStore } from './settings-store';
 
 describe('agent interaction limit settings', () => {
   it('starts disabled for new installations', () => {
@@ -24,5 +36,73 @@ describe('agent interaction limit settings', () => {
 
     expect(migrated.interactionLimitEnabled).toBe(true);
     expect(migrated.maxIterations).toBe(40);
+  });
+});
+
+describe('activity bar settings', () => {
+  beforeEach(() => {
+    useSettingsStore.setState({
+      sidebarViewOrder: [...SETTINGS_DEFAULTS.sidebarViewOrder],
+      visibleSidebarTabs: { ...SETTINGS_DEFAULTS.visibleSidebarTabs },
+      visibleExtensionViews: {},
+    });
+  });
+
+  it('prevents every settings surface from hiding the final available view', () => {
+    useSettingsStore.setState({
+      sidebarViewOrder: ['files', 'todo.panel'],
+      visibleSidebarTabs: {
+        ...SETTINGS_DEFAULTS.visibleSidebarTabs,
+        search: false,
+        git: false,
+        skills: false,
+        extensions: false,
+        agent: false,
+        memories: false,
+        devices: false,
+        docker: false,
+      },
+      visibleExtensionViews: { 'todo.panel': false },
+    });
+
+    const changed = useSettingsStore
+      .getState()
+      .setSidebarViewVisible('files', false, ['files', 'todo.panel']);
+
+    expect(changed).toBe(false);
+    expect(useSettingsStore.getState().visibleSidebarTabs.files).toBe(true);
+  });
+
+  it('allows cross-kind visibility changes while another view remains visible', () => {
+    const hidden = useSettingsStore
+      .getState()
+      .setSidebarViewVisible('files', false, ['files', 'todo.panel']);
+
+    expect(hidden).toBe(true);
+    expect(useSettingsStore.getState().visibleSidebarTabs.files).toBe(false);
+    expect(useSettingsStore.getState().visibleExtensionViews['todo.panel']).not.toBe(false);
+  });
+
+  it('restores default order and clears extension visibility overrides', () => {
+    useSettingsStore.setState({
+      sidebarViewOrder: ['todo.panel', 'git', 'files'],
+      visibleSidebarTabs: {
+        ...SETTINGS_DEFAULTS.visibleSidebarTabs,
+        files: false,
+      },
+      visibleExtensionViews: {
+        'todo.panel': false,
+        'unavailable.panel': false,
+      },
+    });
+
+    useSettingsStore.getState().resetSidebarViews(['files', 'git', 'todo.panel']);
+
+    expect(useSettingsStore.getState().sidebarViewOrder).toEqual([
+      ...SETTINGS_DEFAULTS.sidebarViewOrder,
+      'todo.panel',
+    ]);
+    expect(useSettingsStore.getState().visibleSidebarTabs.files).toBe(true);
+    expect(useSettingsStore.getState().visibleExtensionViews).toEqual({});
   });
 });
