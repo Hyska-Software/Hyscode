@@ -133,8 +133,8 @@ Markdown files opened from the file tree support three per-tab modes:
 - **Preview** renders the current in-memory buffer, including unsaved edits.
 - **Code** edits the canonical buffer in Monaco.
 - **Split** displays Code on the left and the live Preview on the right. It starts at 50/50,
-  has independent scrolling, and exposes a mouse-resizable divider whose ratio is retained in
-  tab state.
+  synchronizes vertical scrolling bidirectionally by normalized document progress, and exposes a
+  mouse-resizable divider whose ratio is retained in tab state.
 
 Soft line breaks and consecutive empty source lines remain visually distinct while the buffer
 changes.

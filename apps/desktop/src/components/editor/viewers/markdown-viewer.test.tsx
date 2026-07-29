@@ -1,28 +1,37 @@
 // @vitest-environment jsdom
 
 import { useState } from 'react';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { MarkdownViewMode } from '../../../stores/editor-store';
 import { MarkdownViewer } from './markdown-viewer';
+
+const monacoHarness = vi.hoisted(() => ({
+  onMount: undefined as ((editor: unknown, monaco: unknown) => void) | undefined,
+}));
 
 vi.mock('@monaco-editor/react', () => ({
   default: ({
     value,
     onChange,
     options,
+    onMount,
   }: {
     value: string;
     onChange?: (value: string) => void;
     options?: { readOnly?: boolean };
-  }) => (
-    <textarea
-      aria-label="Markdown source"
-      value={value}
-      readOnly={options?.readOnly}
-      onChange={(event) => onChange?.(event.currentTarget.value)}
-    />
-  ),
+    onMount?: (editor: unknown, monaco: unknown) => void;
+  }) => {
+    monacoHarness.onMount = onMount;
+    return (
+      <textarea
+        aria-label="Markdown source"
+        value={value}
+        readOnly={options?.readOnly}
+        onChange={(event) => onChange?.(event.currentTarget.value)}
+      />
+    );
+  },
 }));
 
 vi.mock('react-resizable-panels', () => ({
@@ -60,7 +69,64 @@ vi.mock('../../../lib/lsp-bridge', () => ({
 
 afterEach(() => {
   cleanup();
+  monacoHarness.onMount = undefined;
+  vi.unstubAllGlobals();
 });
+
+function createFakeEditor() {
+  let scrollTop = 0;
+  let scrollListener: ((event: { scrollTopChanged: boolean }) => void) | undefined;
+  let setScrollTopCalls = 0;
+  return {
+    emitScroll(): void {
+      scrollListener?.({ scrollTopChanged: true });
+    },
+    getLayoutInfo: () => ({ height: 200 }),
+    getScrollHeight: () => 1_000,
+    getScrollTop: () => scrollTop,
+    getSetScrollTopCalls: () => setScrollTopCalls,
+    hasScrollListener: () => scrollListener !== undefined,
+    onDidScrollChange(listener: (event: { scrollTopChanged: boolean }) => void) {
+      scrollListener = listener;
+      return { dispose: () => { scrollListener = undefined; } };
+    },
+    setScrollTop(value: number): void {
+      setScrollTopCalls += 1;
+      scrollTop = value;
+      scrollListener?.({ scrollTopChanged: true });
+    },
+    setUserScrollTop(value: number): void {
+      scrollTop = value;
+    },
+  };
+}
+
+function setPreviewScrollMetrics(container: HTMLElement): void {
+  Object.defineProperties(container, {
+    clientHeight: { configurable: true, value: 200 },
+    scrollHeight: { configurable: true, value: 1_000 },
+  });
+}
+
+function installAnimationFrameQueue(): () => void {
+  const callbacks = new Map<number, FrameRequestCallback>();
+  let nextId = 0;
+  vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
+    nextId += 1;
+    callbacks.set(nextId, callback);
+    return nextId;
+  });
+  vi.stubGlobal('cancelAnimationFrame', (id: number) => {
+    callbacks.delete(id);
+  });
+  return () => {
+    while (callbacks.size > 0) {
+      const current = [...callbacks.entries()];
+      callbacks.clear();
+      for (const [, callback] of current) callback(0);
+    }
+  };
+}
 
 function EditableMarkdownHarness({ initialMode }: { initialMode: MarkdownViewMode }) {
   const [content, setContent] = useState('# Initial');
@@ -148,5 +214,141 @@ describe('MarkdownViewer live modes', () => {
     const source = await screen.findByLabelText('Markdown source');
     expect(source).toHaveProperty('readOnly', true);
     expect(screen.getByText('Read only', { selector: 'span' })).toBeTruthy();
+  });
+
+  it('synchronizes Monaco scrolling to Preview without a reciprocal loop', async () => {
+    const flushAnimationFrames = installAnimationFrameQueue();
+    render(<EditableMarkdownHarness initialMode="split" />);
+    const preview = await screen.findByLabelText('Markdown preview');
+    setPreviewScrollMetrics(preview);
+    const editor = createFakeEditor();
+
+    act(() => {
+      monacoHarness.onMount?.(editor, {});
+    });
+    await waitFor(() => expect(editor.hasScrollListener()).toBe(true));
+
+    act(() => {
+      editor.setUserScrollTop(400);
+      editor.emitScroll();
+      flushAnimationFrames();
+    });
+
+    expect(preview.scrollTop).toBe(400);
+    expect(editor.getSetScrollTopCalls()).toBe(0);
+  });
+
+  it('synchronizes Preview scrolling to Monaco with the latest dimensions', async () => {
+    const flushAnimationFrames = installAnimationFrameQueue();
+    render(<EditableMarkdownHarness initialMode="split" />);
+    const preview = await screen.findByLabelText('Markdown preview');
+    setPreviewScrollMetrics(preview);
+    const editor = createFakeEditor();
+
+    act(() => {
+      monacoHarness.onMount?.(editor, {});
+    });
+    await waitFor(() => expect(editor.hasScrollListener()).toBe(true));
+
+    act(() => {
+      preview.scrollTop = 600;
+      fireEvent.scroll(preview);
+      flushAnimationFrames();
+    });
+
+    expect(editor.getScrollTop()).toBe(600);
+    expect(editor.getSetScrollTopCalls()).toBe(1);
+  });
+
+  it('resynchronizes the latest progress after a Split resize changes Preview height', async () => {
+    const flushAnimationFrames = installAnimationFrameQueue();
+    render(<EditableMarkdownHarness initialMode="split" />);
+    const preview = await screen.findByLabelText('Markdown preview');
+    setPreviewScrollMetrics(preview);
+    const editor = createFakeEditor();
+
+    act(() => {
+      monacoHarness.onMount?.(editor, {});
+    });
+    await waitFor(() => expect(editor.hasScrollListener()).toBe(true));
+
+    act(() => {
+      editor.setUserScrollTop(400);
+      editor.emitScroll();
+      flushAnimationFrames();
+    });
+    expect(preview.scrollTop).toBe(400);
+
+    Object.defineProperty(preview, 'scrollHeight', { configurable: true, value: 1_400 });
+    act(() => {
+      fireEvent.click(screen.getByRole('button', { name: 'Resize split' }));
+    });
+    await waitFor(() => {
+      act(() => {
+        flushAnimationFrames();
+      });
+      expect(preview.scrollTop).toBe(600);
+    });
+  });
+
+  it('resynchronizes the latest progress after Markdown content rerenders', async () => {
+    const flushAnimationFrames = installAnimationFrameQueue();
+    render(<EditableMarkdownHarness initialMode="split" />);
+    const preview = await screen.findByLabelText('Markdown preview');
+    setPreviewScrollMetrics(preview);
+    const editor = createFakeEditor();
+
+    act(() => {
+      monacoHarness.onMount?.(editor, {});
+    });
+    await waitFor(() => expect(editor.hasScrollListener()).toBe(true));
+
+    act(() => {
+      editor.setUserScrollTop(400);
+      editor.emitScroll();
+      flushAnimationFrames();
+    });
+    expect(preview.scrollTop).toBe(400);
+
+    Object.defineProperty(preview, 'scrollHeight', { configurable: true, value: 1_400 });
+    fireEvent.change(screen.getByLabelText('Markdown source'), {
+      target: { value: '# Rerendered content' },
+    });
+    await waitFor(() => {
+      act(() => {
+        flushAnimationFrames();
+      });
+      expect(preview.scrollTop).toBe(600);
+    });
+  });
+
+  it('synchronizes the read-only agent-style Split view', async () => {
+    const flushAnimationFrames = installAnimationFrameQueue();
+    render(
+      <MarkdownViewer
+        content="# Read only"
+        mode="split"
+        onModeChange={vi.fn()}
+        filePath="C:\\workspace\\README.md"
+        rootPath="C:\\workspace"
+        readOnly
+      />,
+    );
+    const preview = await screen.findByLabelText('Markdown preview');
+    setPreviewScrollMetrics(preview);
+    const editor = createFakeEditor();
+
+    act(() => {
+      monacoHarness.onMount?.(editor, {});
+    });
+    await waitFor(() => expect(editor.hasScrollListener()).toBe(true));
+
+    act(() => {
+      editor.setUserScrollTop(200);
+      editor.emitScroll();
+      flushAnimationFrames();
+    });
+
+    expect(preview.scrollTop).toBe(200);
   });
 });
