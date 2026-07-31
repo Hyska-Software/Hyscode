@@ -1,5 +1,12 @@
-import { Harness } from '@hyscode/agent-harness';
-import type { AgentType, Skill, Rule, HarnessEvent } from '@hyscode/agent-harness';
+import { Harness, resolveEffectiveAgentPolicy } from '@hyscode/agent-harness';
+import type {
+  AgentType,
+  Skill,
+  Rule,
+  HarnessEvent,
+  ToolCallRecord,
+  TerminalRuntimeAdapter,
+} from '@hyscode/agent-harness';
 import type { AgentMode, SubAgentState, ToolCallDisplay } from '@/stores/agent-store';
 import { useSettingsStore } from '@/stores/settings-store';
 
@@ -20,9 +27,19 @@ export interface SubAgentRunnerOptions {
     description: string;
   }, signal: AbortSignal) => Promise<boolean>;
   onUpdate: (patch: Partial<SubAgentState>) => void;
+  /** Events that need bridge/store-side handling (file changes, usage, API
+   *  accounting) are forwarded here instead of being dropped. */
+  onBridgeEvent?: (event: HarnessEvent) => void;
   activeSkills: Skill[];
   activeRules: Rule[];
+  /** Visible terminal runtime (shared with the main agent). When omitted the
+   *  sub-agent falls back to invisible one-shot PTYs. */
+  terminalRuntime?: TerminalRuntimeAdapter;
+  /** Track completed terminal commands for the parent's environment context. */
+  onTerminalCommand?: (command: string, output: string, exitCode: number | null) => void;
 }
+
+const MAX_LIVE_OUTPUT_CHARS = 65_536;
 
 // ─── SubAgentRunner ──────────────────────────────────────────────────────────
 
@@ -30,7 +47,7 @@ export interface SubAgentRunnerOptions {
 const SUBAGENT_PREAMBLE = `[SUB-AGENT CONTEXT]
 You are running as an autonomous sub-agent. Rules:
 1. You CANNOT use ask_user — if information is missing, make reasonable assumptions and proceed.
-2. Do NOT read the same file more than twice. If you have already gathered content from a file, use it.
+2. Do NOT read the same file more than three times. If you have already gathered content from a file, use it.
 3. Complete your task fully and return a comprehensive, detailed result as your final text response.
 4. Do NOT spawn additional sub-agents.
 
@@ -46,33 +63,68 @@ Your task:
 export class SubAgentRunner {
   private harness: Harness;
   private onUpdate: SubAgentRunnerOptions['onUpdate'];
+  private onBridgeEvent: SubAgentRunnerOptions['onBridgeEvent'];
   private toolCallCache: ToolCallDisplay[] = [];
   private streamingOutput = '';
   /** Track file read counts to detect read-loop and cancel early */
   private fileReadCounts = new Map<string, number>();
   private static readonly MAX_FILE_READS = 3;
+  private loopCancelledReason: string | null = null;
 
   constructor(options: SubAgentRunnerOptions) {
     this.onUpdate = options.onUpdate;
+    this.onBridgeEvent = options.onBridgeEvent;
 
     const settings = useSettingsStore.getState();
+    const providerId = settings.activeProviderId ?? '';
+    const modelId = settings.activeModelId ?? '';
+
+    // Resolve the sub-agent's approval policy the same way the main agent
+    // does: per-mode defaults + user preferences + custom overrides. This
+    // keeps custom category/tool rules and session-trust working inside
+    // sub-agents instead of silently degrading to handler defaults.
+    const policy = resolveEffectiveAgentPolicy(options.mode as AgentType, modelId, providerId, {
+      approvalMode: settings.subAgentAutoApprove ? 'yolo' : settings.approvalMode,
+      customApproval:
+        settings.approvalMode === 'custom'
+          ? {
+              // Settings store uses: true = auto-approve. Harness uses: true = needs approval.
+              categoryOverrides: Object.fromEntries(
+                Object.entries(settings.customApprovalRules.categoryRules).map(([k, autoApprove]) => [
+                  k,
+                  !autoApprove,
+                ]),
+              ) as Record<string, boolean>,
+              toolOverrides: Object.fromEntries(
+                Object.entries(settings.customApprovalRules.toolRules).map(([k, autoApprove]) => [
+                  k,
+                  !autoApprove,
+                ]),
+              ),
+            }
+          : undefined,
+      maxIterations: settings.subAgentMaxIterations,
+    });
 
     this.harness = new Harness({
       workspacePath: options.workspacePath,
       projectId: options.projectId,
       invoke: options.invoke,
       listen: options.listen,
+      delegationLevel: 1,
       config: {
-        providerId: settings.activeProviderId ?? '',
-        modelId: settings.activeModelId ?? '',
-        maxIterations: settings.subAgentMaxIterations,
-        maxOutputTokens: 16_000,
-        maxInputTokens: 200_000,
-        turnTimeoutMs: 300_000,
-        approval: { mode: settings.subAgentAutoApprove ? 'yolo' : settings.approvalMode },
+        providerId,
+        modelId,
+        maxIterations: policy.maxIterations,
+        maxOutputTokens: policy.maxOutputTokens,
+        maxInputTokens: policy.maxInputTokens,
+        turnTimeoutMs: policy.turnTimeoutMs,
+        approval: policy.approval,
       },
       onEvent: (event: HarnessEvent) => this.handleEvent(event),
       onApprovalRequest: options.onApproval,
+      terminalRuntime: options.terminalRuntime,
+      onTerminalCommand: options.onTerminalCommand,
     });
 
     // Apply agent type — sub-agents never get spawn_subagent (no Harness.registerExternalTool called here)
@@ -87,11 +139,29 @@ export class SubAgentRunner {
     const convId = crypto.randomUUID();
     this.harness.setConversationId(convId);
     this.fileReadCounts.clear();
+    this.loopCancelledReason = null;
 
     const prefixedTask = SUBAGENT_PREAMBLE + task;
 
     try {
-      const { response, toolCalls } = await this.harness.run(prefixedTask, []);
+      const outcome = await this.harness.run(prefixedTask, []);
+
+      // Read-loop guard tripped: report the reason explicitly instead of
+      // returning a generic "Request cancelled." success.
+      if (this.loopCancelledReason) {
+        const msg = `__SUBAGENT_STATUS__:${this.loopCancelledReason}`;
+        this.onUpdate({ status: 'cancelled', output: msg, completedAt: Date.now() });
+        return msg;
+      }
+
+      const { response, toolCalls, status } = outcome;
+
+      // Surface user cancellations as 'cancelled' instead of a false 'done'.
+      if (status === 'cancelled' || status === 'cancelled_partial') {
+        const msg = response || 'Request cancelled.';
+        this.onUpdate({ status: 'cancelled', output: msg, completedAt: Date.now() });
+        return msg;
+      }
 
       // When max_iterations is hit the response may be empty — synthesize a
       // fallback from the gathered tool call history so the parent gets context.
@@ -106,11 +176,16 @@ export class SubAgentRunner {
     }
   }
 
+  /** Trust a tool for the rest of this sub-agent's session (scoped router). */
+  trustTool(toolName: string): void {
+    this.harness.getToolRouter()?.trustToolForSession?.(toolName);
+  }
+
   /**
    * Build a synthetic summary from tool call records when the agent hit
    * max_iterations without producing a final text response.
    */
-  private buildFallbackOutput(toolCalls: import('@hyscode/agent-harness').ToolCallRecord[]): string {
+  private buildFallbackOutput(toolCalls: ToolCallRecord[]): string {
     if (!toolCalls.length) {
       return '__SUBAGENT_STATUS__:reached max iterations without producing output. No tool calls were made.';
     }
@@ -140,6 +215,20 @@ export class SubAgentRunner {
     this.harness.cancel();
   }
 
+  /** Extract the file paths involved in a read-style tool call. */
+  private extractReadPaths(event: HarnessEvent): string[] {
+    if (event.type !== 'tool_call_start') return [];
+    if (event.toolName === 'read_file' || event.toolName === 'gather_context') {
+      const path = String((event.input as Record<string, unknown>)?.path ?? '');
+      return path ? [path] : [];
+    }
+    if (event.toolName === 'read_multiple_files') {
+      const paths = (event.input as Record<string, unknown>)?.paths;
+      return Array.isArray(paths) ? paths.map((p) => String(p)).filter(Boolean) : [];
+    }
+    return [];
+  }
+
   private handleEvent(event: HarnessEvent): void {
     switch (event.type) {
       case 'tool_call_start': {
@@ -154,15 +243,14 @@ export class SubAgentRunner {
         this.onUpdate({ toolCalls: [...this.toolCallCache] });
 
         // Detect file-read loop: same file read more than MAX_FILE_READS times
-        if (event.toolName === 'read_file' || event.toolName === 'gather_context') {
-          const filePath = String((event.input as Record<string, unknown>)?.path ?? '');
-          if (filePath) {
-            const count = (this.fileReadCounts.get(filePath) ?? 0) + 1;
-            this.fileReadCounts.set(filePath, count);
-            if (count > SubAgentRunner.MAX_FILE_READS) {
-              // Cancel the sub-agent — it's looping on file reads
-              this.harness.cancel();
-            }
+        for (const filePath of this.extractReadPaths(event)) {
+          const count = (this.fileReadCounts.get(filePath) ?? 0) + 1;
+          this.fileReadCounts.set(filePath, count);
+          if (count > SubAgentRunner.MAX_FILE_READS) {
+            this.loopCancelledReason =
+              `cancelled — read-loop guard: stopped after reading "${filePath}" ${count} times. ` +
+              `Gather the file once with gather_context and reuse the content instead of re-reading it.`;
+            this.harness.cancel();
           }
         }
         break;
@@ -182,11 +270,39 @@ export class SubAgentRunner {
         this.onUpdate({ toolCalls: [...this.toolCallCache] });
         break;
       }
+      case 'terminal_progress': {
+        const progress = event.progress;
+        this.toolCallCache = this.toolCallCache.map((tc) =>
+          tc.id === progress.toolCallId
+            ? {
+                ...tc,
+                terminalId: progress.terminalId,
+                terminalState: progress.state,
+                liveOutput: `${tc.liveOutput ?? ''}${progress.chunk}`.slice(-MAX_LIVE_OUTPUT_CHARS),
+              }
+            : tc,
+        );
+        this.onUpdate({ toolCalls: [...this.toolCallCache] });
+        break;
+      }
       case 'stream_chunk': {
         if (event.chunk.type === 'text_delta') {
-          this.streamingOutput += event.chunk.text;
+          this.streamingOutput = (this.streamingOutput + event.chunk.text).slice(
+            -MAX_LIVE_OUTPUT_CHARS,
+          );
           this.onUpdate({ output: this.streamingOutput });
         }
+        // Usage chunks are forwarded so the parent turn's token accounting
+        // includes sub-agent spend.
+        if (event.chunk.type === 'usage') {
+          this.onBridgeEvent?.(event);
+        }
+        break;
+      }
+      // Bridge-side events: file-change review pipeline and API accounting.
+      case 'file_change_pending':
+      case 'api_request_sent': {
+        this.onBridgeEvent?.(event);
         break;
       }
     }
