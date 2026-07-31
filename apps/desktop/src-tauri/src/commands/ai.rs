@@ -78,7 +78,7 @@ fn provider_key_name(provider: &str) -> String {
 }
 
 /// Get the auth header for a provider
-fn get_auth_header(provider: &str, api_key: &str) -> (String, String) {
+fn get_auth_header(provider: &str, api_key: &str, url: &str) -> (String, String) {
     match provider {
         "anthropic" => ("x-api-key".to_string(), api_key.to_string()),
         "gemini" => {
@@ -88,6 +88,12 @@ fn get_auth_header(provider: &str, api_key: &str) -> (String, String) {
         "github-copilot" => {
             // Copilot uses Bearer token with the short-lived Copilot token
             ("Authorization".to_string(), format!("Bearer {}", api_key))
+        }
+        // OpenCode Zen/Go expose an Anthropic-compatible /v1/messages endpoint
+        // (MiniMax, Qwen, Claude models) that authenticates with x-api-key,
+        // while the OpenAI-compatible endpoints use Authorization: Bearer.
+        "opencode-zen" | "opencode-go" if url.ends_with("/v1/messages") => {
+            ("x-api-key".to_string(), api_key.to_string())
         }
         // OpenAI, OpenRouter, and others use Bearer token
         _ => ("Authorization".to_string(), format!("Bearer {}", api_key)),
@@ -187,7 +193,7 @@ pub async fn ai_stream_request(
 
         // Inject auth header from keychain
         if let Some(ref key) = current_api_key {
-            let (header_name, header_value) = get_auth_header(&request.provider, key);
+            let (header_name, header_value) = get_auth_header(&request.provider, key, &request.url);
             req_builder = req_builder.header(header_name.as_str(), header_value.as_str());
         }
 
@@ -227,7 +233,8 @@ pub async fn ai_stream_request(
                         retry_builder = retry_builder.header(key.as_str(), value.as_str());
                     }
                     if let Some(ref key) = current_api_key {
-                        let (header_name, header_value) = get_auth_header(&request.provider, key);
+                        let (header_name, header_value) =
+                            get_auth_header(&request.provider, key, &request.url);
                         retry_builder =
                             retry_builder.header(header_name.as_str(), header_value.as_str());
                     }

@@ -104,6 +104,7 @@ describe('provider model catalogs', () => {
     expect(modelIds(new OpenCodeGoProvider('key'))).toEqual(
       expect.arrayContaining([
         'grok-4.5',
+        'gpt-5.6-luna',
         'glm-5.2',
         'kimi-k3',
         'kimi-k2.7-code',

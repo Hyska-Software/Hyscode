@@ -1,11 +1,15 @@
 import type { AIModel, ChatParams, StreamChunk, FetchImpl, ThinkingVariants } from '../types';
 import { OpenAIProvider } from './openai';
 import { AnthropicProvider } from './anthropic';
+import { chatResponsesAPI } from './openai-responses';
 
 // ─── Model Routing ──────────────────────────────────────────────────────────
+// GPT models use the OpenAI Responses API at /zen/go/v1/responses.
 // MiniMax and Qwen models use the Anthropic message format at /zen/go/v1/messages.
 // All other models use OpenAI-compatible chat completions at /zen/go/v1/chat/completions.
-// Source: https://dev.opencode.ai/docs/go (last updated Jun 30, 2026)
+// Source: https://dev.opencode.ai/docs/go (last updated Jul 31, 2026)
+
+const GO_GPT_MODELS = new Set(['gpt-5.6-luna']);
 
 const GO_ANTHROPIC_MODELS = new Set([
   'minimax-m3',
@@ -82,6 +86,15 @@ const THINKING_HY3: ThinkingVariants = {
   kind: 'openai',
   levels: ['none', 'low', 'medium', 'high'],
   defaultLevel: 'medium',
+};
+
+/** GPT full ladder + standard/pro mode: gpt-5.6-luna (Responses API) */
+const THINKING_OPENAI_FULL_PRO: ThinkingVariants = {
+  kind: 'openai',
+  levels: ['none', 'low', 'medium', 'high', 'xhigh', 'max'],
+  defaultLevel: 'medium',
+  modes: ['standard', 'pro'],
+  defaultMode: 'standard',
 };
 
 // ─── Static Model List ──────────────────────────────────────────────────────
@@ -191,7 +204,7 @@ const GO_MODELS: AIModel[] = [
   },
   {
     id: 'deepseek-v4-flash',
-    name: 'DeepSeek V4 Flash (Go)',
+    name: 'DeepSeek V4 Flash NEW (Go)',
     provider: 'opencode-go',
     contextWindow: 1_000_000,
     maxOutputTokens: 8_192,
@@ -210,6 +223,19 @@ const GO_MODELS: AIModel[] = [
     supportsStreaming: true,
     supportsVision: false,
     thinkingVariants: THINKING_HY3,
+  },
+
+  // ── OpenAI Responses API models (/zen/go/v1/responses) ───────────────────
+  {
+    id: 'gpt-5.6-luna',
+    name: 'GPT 5.6 Luna (Go)',
+    provider: 'opencode-go',
+    contextWindow: 1_050_000,
+    maxOutputTokens: 128_000,
+    supportsTools: true,
+    supportsStreaming: true,
+    supportsVision: true,
+    thinkingVariants: THINKING_OPENAI_FULL_PRO,
   },
 
   // ── Anthropic-compatible models (/zen/go/v1/messages) ────────────────────
@@ -339,7 +365,16 @@ export class OpenCodeGoProvider extends OpenAIProvider {
   }
 
   override async *chat(params: ChatParams): AsyncIterable<StreamChunk> {
-    if (GO_ANTHROPIC_MODELS.has(params.model)) {
+    if (GO_GPT_MODELS.has(params.model)) {
+      // Route GPT models through the OpenAI Responses API
+      yield* chatResponsesAPI(params, {
+        providerId: this.id,
+        providerName: this.name,
+        apiKey: this.apiKey,
+        baseUrl: this.baseUrl,
+        fetchImpl: this.fetchImpl,
+      });
+    } else if (GO_ANTHROPIC_MODELS.has(params.model)) {
       // Route MiniMax and Qwen models through the Anthropic message format
       yield* this.anthropicDelegate.chat(params);
     } else {
