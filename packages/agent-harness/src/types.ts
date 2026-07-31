@@ -44,6 +44,9 @@ export interface ToolExecutionContext {
   toolCallId: string;
   /** Aborted when the owning turn is cancelled or times out. */
   signal: AbortSignal;
+  /** 0 = main agent, >0 = nested delegation depth (sub-agents). Tools can
+   *  use this to reject interactions that only make sense at the top level. */
+  delegationLevel?: number;
   /** Invoke a Tauri command */
   invoke: <T>(cmd: string, args?: Record<string, unknown>) => Promise<T>;
   /** Listen to a Tauri event. Returns an unlisten function. */

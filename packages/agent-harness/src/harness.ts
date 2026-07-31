@@ -118,6 +118,9 @@ export interface HarnessOptions {
   /** Memory manager — enables persistent cross-session knowledge. */
   memoryManager?: MemoryManager;
   hasDirtyBuffers?: () => boolean;
+  /** 0 = main agent (default), >0 = nested delegation depth. Exposed to tools
+   *  via ToolExecutionContext.delegationLevel. */
+  delegationLevel?: number;
 }
 
 export class Harness {
@@ -177,6 +180,7 @@ export class Harness {
   private memoryExtractor = new MemoryExtractor();
   private memoryContextProvider: MemoryContextProvider | null = null;
   private hasDirtyBuffers: (() => boolean) | undefined;
+  private delegationLevel = 0;
 
   constructor(options: HarnessOptions) {
     this.config = { ...DEFAULT_HARNESS_CONFIG, ...options.config };
@@ -188,6 +192,7 @@ export class Harness {
     this.skillLoader = options.skillLoader ?? null;
     this.ruleLoader = options.ruleLoader ?? null;
     this.hasDirtyBuffers = options.hasDirtyBuffers;
+    this.delegationLevel = options.delegationLevel ?? 0;
 
     // Agent terminal integration
     this.agentTerminalPtyId = options.agentTerminalPtyId;
@@ -270,6 +275,11 @@ export class Harness {
     this._effectivePolicy = null; // Invalidate cached policy
     const agentDef = getAgentDefinition(type);
     this.contextManager.setAgent(agentDef);
+  }
+
+  /** Get the currently active agent type (single source of truth). */
+  getAgentType(): AgentType {
+    return this.agentType;
   }
 
   setConversationId(id: string): void {
@@ -1083,6 +1093,7 @@ export class Harness {
         conversationId: this.conversationId,
         toolCallId: '', // set per-call below
         signal: activeTurn.signal,
+        delegationLevel: this.delegationLevel,
         invoke: this.invoke,
         listen: this.listen,
         projectId: this.projectId,

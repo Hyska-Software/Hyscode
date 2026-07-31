@@ -1315,7 +1315,15 @@ The target agent will receive your context summary to continue the work seamless
   ['target_mode', 'reason', 'context_summary'],
   'meta',
   true, // always requires user approval
-  async (input, _ctx) => {
+  async (input, ctx) => {
+    if (ctx.delegationLevel && ctx.delegationLevel > 0) {
+      return {
+        success: false,
+        output: '',
+        error:
+          'request_mode_switch is not available inside sub-agents. Include your recommendation in your final result and let the parent agent decide.',
+      };
+    }
     const targetMode = String(input.target_mode);
     const reason = String(input.reason);
     const contextSummary = String(input.context_summary);
@@ -1574,6 +1582,14 @@ Each question can have predefined options (numbered choices) and/or allow free-f
   'meta',
   false,
   async (input, ctx) => {
+    if (ctx.delegationLevel && ctx.delegationLevel > 0) {
+      return {
+        success: false,
+        output: '',
+        error:
+          'ask_user is not available inside sub-agents. Make reasonable assumptions and proceed with your task — do not ask the user.',
+      };
+    }
     if (!ctx.askUser) {
       return {
         success: false,
