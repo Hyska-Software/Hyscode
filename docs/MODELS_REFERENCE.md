@@ -11,6 +11,7 @@ Assinatura de baixo custo: **US$ 5 no primeiro mês, depois US$ 10/mês**. Acess
 | Nome | ID do modelo | Janela de contexto | Entrada | Saída | Cache read | Cache write | Tipos de pensamento |
 |---|---|---|---|---|---|---|---|
 | Grok 4.5 | `grok-4.5` | 500K | $2.00 | $6.00 | $0.30 | – | reasoning model (low/medium/high) |
+| GPT 5.6 Luna | `gpt-5.6-luna` | 1.05M | $0.20 | $1.20 | $0.02 | $0.25 | none/low/med/high/xhigh/max + standard/pro |
 | GLM-5.2 | `glm-5.2` | 1M | $1.40 | $4.40 | $0.26 | – | thinking model |
 | GLM-5.1 | `glm-5.1` | 1M | $1.40 | $4.40 | $0.26 | – | thinking model |
 | Kimi K3 | `kimi-k3` | 1M | $3.00 | $15.00 | $0.30 | – | reasoning (low/medium/high) |
@@ -28,7 +29,7 @@ Assinatura de baixo custo: **US$ 5 no primeiro mês, depois US$ 10/mês**. Acess
 | DeepSeek V4 Flash | `deepseek-v4-flash` | 1M | $0.14 | $0.28 | $0.0028 | – | reasoning (low/medium/high) |
 | Hy3 | `hy3` | 1M | $0.14 | $0.58 | $0.035 | – | thinking |
 
-**Endpoint unificado:** `https://opencode.ai/zen/go/v1/chat/completions` (modelos OpenAI-compatible) ou `https://opencode.ai/zen/go/v1/messages` (modelos Anthropic-compatible). No config do OpenCode, o ID usa o prefixo `opencode-go/<model-id>`.
+**Endpoint unificado:** `https://opencode.ai/zen/go/v1/chat/completions` (modelos OpenAI-compatible), `https://opencode.ai/zen/go/v1/messages` (modelos Anthropic-compatible) ou `https://opencode.ai/zen/go/v1/responses` (GPT 5.6 Luna). No config do OpenCode, o ID usa o prefixo `opencode-go/<model-id>`.
 
 ---
 
@@ -105,8 +106,8 @@ Gateway de IA curado pela equipe OpenCode, **pay-as-you-go** por 1M tokens. Incl
 | Nome | ID do modelo | Janela de contexto | Entrada | Saída | Cache read | Cache write | Tipos de pensamento |
 |---|---|---|---|---|---|---|---|
 | GPT 5.6 Sol | `gpt-5.6-sol` | 1.05M (272K short ctx) | $5.00 / $10.00 (>272K) | $30.00 / $45.00 | $0.50 / $1.00 | $6.25 / $12.50 | none/low/med/high/xhigh/max + standard/pro mode |
-| GPT 5.6 Terra | `gpt-5.6-terra` | 1.05M | $2.50 / $5.00 (>272K) | $15.00 / $22.50 | $0.25 / $0.50 | $3.125 / $6.25 | none/low/med/high/xhigh/max + standard/pro |
-| GPT 5.6 Luna | `gpt-5.6-luna` | 1.05M | $1.00 / $2.00 (>272K) | $6.00 / $9.00 | $0.10 / $0.20 | $1.25 / $2.50 | none/low/med/high/xhigh/max + standard/pro |
+| GPT 5.6 Terra | `gpt-5.6-terra` | 1.05M | $2.00 / $4.00 (>272K) | $12.00 / $18.00 | $0.20 / $0.40 | $2.50 / $5.00 | none/low/med/high/xhigh/max + standard/pro |
+| GPT 5.6 Luna | `gpt-5.6-luna` | 1.05M | $0.20 / $0.40 (>272K) | $1.20 / $1.80 | $0.02 / $0.04 | $0.25 / $0.50 | none/low/med/high/xhigh/max + standard/pro |
 | GPT 5.5 | `gpt-5.5` | 1M (272K short ctx) | $5.00 / $10.00 (>272K) | $30.00 / $45.00 | $0.50 / $1.00 | – | none/low/med/high/xhigh/max |
 | GPT 5.5 Pro | `gpt-5.5-pro` | 1M | $30.00 | $180.00 | $30.00 | – | none/low/med/high/xhigh/max |
 | GPT 5.4 | `gpt-5.4` | 1M | $2.50 / $5.00 (>272K) | $15.00 / $22.50 | $0.25 / $0.50 | – | none/low/med/high/xhigh/max |

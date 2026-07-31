@@ -17,6 +17,7 @@ import {
   SpreadsheetViewer,
   DocxViewer,
   PptxViewer,
+
   DatabaseViewer,
 } from './viewers';
 import { DbSchemaViewer } from './viewers/db-schema';

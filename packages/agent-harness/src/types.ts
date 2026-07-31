@@ -514,6 +514,7 @@ type HarnessEventPayload =
       type: 'turn_end';
       reason: TurnTerminalStatus;
       error?: string;
+      errorDetails?: ProviderErrorDetails;
       tokenUsage: TokenUsage;
     }
   | {

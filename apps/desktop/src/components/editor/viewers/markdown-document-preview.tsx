@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { readFile } from '@tauri-apps/plugin-fs';
 import ReactMarkdown from 'react-markdown';
 import remarkBreaks from 'remark-breaks';
@@ -24,6 +24,7 @@ interface MarkdownDocumentPreviewProps {
   requestedAnchor?: string;
   onAnchorHandled?: () => void;
   onOpenWorkspaceFile?: (path: string, anchor: string | null) => void;
+  onScrollContainerChange?: (container: HTMLDivElement | null) => void;
 }
 
 interface LocalMarkdownImageProps {
@@ -156,8 +157,16 @@ export function MarkdownDocumentPreview({
   requestedAnchor,
   onAnchorHandled,
   onOpenWorkspaceFile,
+  onScrollContainerChange,
 }: MarkdownDocumentPreviewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const setContainerRef = useCallback(
+    (container: HTMLDivElement | null) => {
+      containerRef.current = container;
+      onScrollContainerChange?.(container);
+    },
+    [onScrollContainerChange],
+  );
   useEffect(() => {
     if (!requestedAnchor) return;
     const frame = requestAnimationFrame(() => {
@@ -229,7 +238,11 @@ export function MarkdownDocumentPreview({
   );
 
   return (
-    <div ref={containerRef} className="h-full overflow-auto p-6">
+    <div
+      ref={setContainerRef}
+      aria-label="Markdown preview"
+      className="h-full overflow-auto p-6"
+    >
       <article className="markdown-preview cursor-text select-text">
         <ReactMarkdown
           remarkPlugins={[remarkGfm, remarkMath, remarkBreaks, remarkPreserveBlankLines]}

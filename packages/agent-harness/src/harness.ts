@@ -5,6 +5,7 @@
 import {
   type Message,
   type TokenUsage,
+  type ProviderErrorDetails,
   getProviderRegistry,
   normalizeProviderError,
   ProviderError,
@@ -628,6 +629,8 @@ export class Harness {
     let lastToolCallSignature = '';
     let verificationForced = false;
     let terminalStatus: TurnStatus = 'complete';
+    /** Error details from the last failed iteration, surfaced on turn_end */
+    let iterationErrorDetails: ProviderErrorDetails | null = null;
     const tokenUsage: TokenUsage = {
       inputTokens: 0,
       outputTokens: 0,
@@ -928,6 +931,7 @@ export class Harness {
           this.config.providerId,
           semanticContentReceived ? 'streaming' : 'connecting',
         );
+        iterationErrorDetails = providerError.toDetails();
         if (semanticContentReceived) {
           iterationFailureStatus = 'recoverable_error';
           finalResponse = assistantText || providerError.userMessage;
@@ -1334,6 +1338,7 @@ export class Harness {
         : terminalError
           ? finalResponse
           : undefined,
+      terminalError ? (iterationErrorDetails ?? undefined) : undefined,
     );
 
     const turnRecord = this.buildTurnRecord(stopReason, iteration, turnStart);
@@ -1638,9 +1643,14 @@ export class Harness {
     });
   }
 
-  private finishTurn(status: TurnStatus, tokenUsage: TokenUsage, error?: string): void {
+  private finishTurn(
+    status: TurnStatus,
+    tokenUsage: TokenUsage,
+    error?: string,
+    errorDetails?: ProviderErrorDetails,
+  ): void {
     if (!this.turnController.finish(status)) return;
-    this.emit({ type: 'turn_end', reason: status, error, tokenUsage });
+    this.emit({ type: 'turn_end', reason: status, error, errorDetails, tokenUsage });
   }
 
   // ─── Turn Record Builder ────────────────────────────────────────────

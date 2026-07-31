@@ -1,4 +1,4 @@
-import { Suspense, lazy, useCallback, useEffect } from 'react';
+import { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react';
 import { Code, Columns2, Eye, Loader2 } from 'lucide-react';
 import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels';
 import { useSettingsStore } from '../../../stores';
@@ -38,6 +38,18 @@ interface MarkdownCodeEditorProps {
   readOnly: boolean;
   onChange?: (value: string) => void;
   onEditorMount?: MarkdownViewerProps['onEditorMount'];
+}
+
+type ScrollSource = 'editor' | 'preview';
+
+interface PendingScroll {
+  source: ScrollSource;
+  progress: number;
+}
+
+function getScrollProgress(scrollTop: number, scrollRange: number): number | null {
+  if (scrollRange <= 0) return null;
+  return Math.min(1, Math.max(0, scrollTop / scrollRange));
 }
 
 function MarkdownCodeEditor({
@@ -156,6 +168,96 @@ export function MarkdownViewer({
   readOnly = false,
   splitRatio = 50,
 }: MarkdownViewerProps) {
+  const editorRef = useRef<monacoEditor.editor.IStandaloneCodeEditor | null>(null);
+  const syncFrameRef = useRef<number | null>(null);
+  const unlockFrameRef = useRef<number | null>(null);
+  const isApplyingScrollRef = useRef(false);
+  const lastScrollRef = useRef<PendingScroll | null>(null);
+  const [splitEditor, setSplitEditor] = useState<
+    monacoEditor.editor.IStandaloneCodeEditor | null
+  >(null);
+  const [previewContainer, setPreviewContainer] = useState<HTMLDivElement | null>(null);
+
+  const scheduleSync = useCallback(
+    (source: ScrollSource, progress: number | null) => {
+      if (mode !== 'split' || progress === null) return;
+      lastScrollRef.current = { source, progress };
+      if (syncFrameRef.current !== null) return;
+
+      syncFrameRef.current = requestAnimationFrame(() => {
+        syncFrameRef.current = null;
+        const pending = lastScrollRef.current;
+        const editor = editorRef.current;
+        const preview = previewContainer;
+        if (!pending || !editor || !preview) return;
+
+        isApplyingScrollRef.current = true;
+        if (pending.source === 'editor') {
+          const previewRange = preview.scrollHeight - preview.clientHeight;
+          if (previewRange > 0) preview.scrollTop = pending.progress * previewRange;
+        } else {
+          const editorRange = editor.getScrollHeight() - editor.getLayoutInfo().height;
+          if (editorRange > 0) editor.setScrollTop(pending.progress * editorRange);
+        }
+
+        if (unlockFrameRef.current !== null) cancelAnimationFrame(unlockFrameRef.current);
+        unlockFrameRef.current = requestAnimationFrame(() => {
+          isApplyingScrollRef.current = false;
+          unlockFrameRef.current = null;
+        });
+      });
+    },
+    [mode, previewContainer],
+  );
+
+  const handleEditorMount = useCallback(
+    (
+      editor: monacoEditor.editor.IStandaloneCodeEditor | null,
+      monaco: typeof monacoEditor | null,
+    ) => {
+      editorRef.current = editor;
+      setSplitEditor(editor);
+      onEditorMount?.(editor, monaco);
+    },
+    [onEditorMount],
+  );
+
+  useEffect(() => {
+    if (mode !== 'split' || !previewContainer || !splitEditor) return;
+    const editor = splitEditor;
+
+    const editorSubscription = editor.onDidScrollChange((event) => {
+      if (!event.scrollTopChanged || isApplyingScrollRef.current) return;
+      const scrollRange = editor.getScrollHeight() - editor.getLayoutInfo().height;
+      scheduleSync('editor', getScrollProgress(editor.getScrollTop(), scrollRange));
+    });
+    const handlePreviewScroll = () => {
+      if (isApplyingScrollRef.current) return;
+      const scrollRange = previewContainer.scrollHeight - previewContainer.clientHeight;
+      scheduleSync('preview', getScrollProgress(previewContainer.scrollTop, scrollRange));
+    };
+    previewContainer.addEventListener('scroll', handlePreviewScroll, { passive: true });
+
+    return () => {
+      editorSubscription.dispose();
+      previewContainer.removeEventListener('scroll', handlePreviewScroll);
+    };
+  }, [mode, previewContainer, scheduleSync, splitEditor]);
+
+  useEffect(() => {
+    if (mode !== 'split') return;
+    const lastScroll = lastScrollRef.current;
+    if (lastScroll) scheduleSync(lastScroll.source, lastScroll.progress);
+  }, [content, mode, scheduleSync, splitRatio]);
+
+  useEffect(
+    () => () => {
+      if (syncFrameRef.current !== null) cancelAnimationFrame(syncFrameRef.current);
+      if (unlockFrameRef.current !== null) cancelAnimationFrame(unlockFrameRef.current);
+    },
+    [],
+  );
+
   const handleLayout = useCallback(
     (sizes: number[]) => {
       const editorRatio = sizes[0];
@@ -171,7 +273,7 @@ export function MarkdownViewer({
       language={language}
       readOnly={readOnly}
       onChange={onChange}
-      onEditorMount={onEditorMount}
+      onEditorMount={handleEditorMount}
     />
   );
   const preview = (
@@ -182,6 +284,7 @@ export function MarkdownViewer({
       requestedAnchor={requestedAnchor}
       onAnchorHandled={onAnchorHandled}
       onOpenWorkspaceFile={onOpenWorkspaceFile}
+      onScrollContainerChange={setPreviewContainer}
     />
   );
 
