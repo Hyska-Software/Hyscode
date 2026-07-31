@@ -454,6 +454,7 @@ interface TauriCommands {
       errors?: string;
       loopWarnings?: string;
       durationMs: number;
+      parentTurnId?: string | null;
     };
     ret: void;
   };
@@ -477,6 +478,7 @@ interface TauriCommands {
       loop_warnings: string | null;
       duration_ms: number;
       created_at: string;
+      parent_turn_id: string | null;
     }>;
   };
 

@@ -8,6 +8,7 @@ import {
   estimateToolDefinitionTokens,
   estimateSystemPromptTokens,
 } from '@hyscode/ai-providers';
+import { resolveWorkspacePath } from './path-policy';
 import type {
   ContextSource,
   ContextSnapshot,
@@ -40,6 +41,7 @@ export class ContextManager {
   private turnNumber = 0;
   private currentTurnStart = 0;
   private costOptimization = true;
+  private workspacePath = '';
 
   // ─── Gathered Context (agent-managed) ─────────────────────────────
   // Files the agent autonomously decides are important to keep in context.
@@ -54,6 +56,10 @@ export class ContextManager {
 
   setCostOptimization(enabled: boolean): void {
     this.costOptimization = enabled;
+  }
+
+  setWorkspacePath(path: string): void {
+    this.workspacePath = path;
   }
 
   setSystemPrompt(prompt: string | null): void {
@@ -135,7 +141,8 @@ export class ContextManager {
    */
   addGatheredFile(path: string, content: string, relevance: number, reason: string): number {
     const tokenEstimate = Math.ceil(content.length / 4);
-    this.gatheredFiles.set(path, {
+    const key = normalizePath(path, this.workspacePath);
+    this.gatheredFiles.set(key, {
       path,
       content,
       relevance: Math.max(0, Math.min(1, relevance)),
@@ -148,9 +155,18 @@ export class ContextManager {
     return tokenEstimate;
   }
 
+  /** Append a bounded excerpt to an existing gathered file without replacing it. */
+  appendGatheredFile(path: string, content: string, relevance: number, reason: string): number {
+    const key = normalizePath(path, this.workspacePath);
+    const existing = this.gatheredFiles.get(key);
+    if (!existing) return this.addGatheredFile(path, content, relevance, reason);
+    const merged = `${existing.content}\n\n${content}`.slice(-12_000);
+    return this.addGatheredFile(existing.path, merged, Math.max(existing.relevance, relevance), reason);
+  }
+
   /** Remove a file from gathered context. Returns true if it existed. */
   removeGatheredFile(path: string): boolean {
-    return this.gatheredFiles.delete(path);
+    return this.gatheredFiles.delete(normalizePath(path, this.workspacePath));
   }
 
   /** Get all gathered files, sorted by relevance (highest first). */
@@ -165,7 +181,7 @@ export class ContextManager {
 
   /** Check if a file is already gathered. */
   hasGatheredFile(path: string): boolean {
-    return this.gatheredFiles.has(path);
+    return this.gatheredFiles.has(normalizePath(path, this.workspacePath));
   }
 
   /** Get total tokens used by gathered files. */
@@ -376,7 +392,7 @@ export class ContextManager {
     }
 
     const history = includedFrames.flat();
-    const includedReadPaths = collectReadPaths(history);
+    const includedReadPaths = collectReadPaths(history, this.workspacePath);
     const stableContextMessages: Message[] = [];
     const volatileContextMessages: Message[] = [];
     const checkpointMessages: Message[] = [];
@@ -406,7 +422,7 @@ export class ContextManager {
         priority: 'medium' as const,
         content: `<gathered_file path="${entry.path}" version="${entry.version}">\n${entry.content}\n</gathered_file>`,
         tokenEstimate: entry.tokenEstimate,
-        identity: `file:${normalizePath(entry.path)}`,
+        identity: `file:${normalizePath(entry.path, this.workspacePath)}`,
         version: entry.version,
         origin: 'automatic' as const,
       })),
@@ -432,7 +448,8 @@ export class ContextManager {
         ]) + CONTEXT_WRAPPER_TOKEN_ALLOWANCE;
       const isReadDuplicate =
         source.type === 'gathered_file' && includedReadPaths.has(identity.replace(/^file:/, ''));
-      const isSuperseded = this.costOptimization && isSourceSuperseded(source, currentTurnMessages);
+      const isSuperseded =
+        this.costOptimization && isSourceSuperseded(source, currentTurnMessages, this.workspacePath);
       if (
         seen.has(`${identity}:${source.version ?? hashContent(source.content)}`) ||
         isReadDuplicate ||
@@ -553,8 +570,12 @@ export class ContextManager {
   }
 }
 
-function normalizePath(path: string): string {
-  return path.replace(/\\/g, '/').toLowerCase();
+function normalizePath(path: string, workspacePath = ''): string {
+  try {
+    return resolveWorkspacePath(path, workspacePath).replace(/\\/g, '/').toLowerCase();
+  } catch {
+    return path.replace(/\\/g, '/').toLowerCase();
+  }
 }
 
 function hashContent(content: string): string {
@@ -563,23 +584,28 @@ function hashContent(content: string): string {
   return (hash >>> 0).toString(36);
 }
 
-function collectReadPaths(messages: Message[]): Set<string> {
+function collectReadPaths(messages: Message[], workspacePath: string): Set<string> {
   const paths = new Set<string>();
   for (const message of messages) {
     for (const content of message.content) {
+      if (content.type !== 'tool_call') continue;
       if (
-        content.type === 'tool_call' &&
-        content.name === 'read_file' &&
+        (content.name === 'read_file' || content.name === 'gather_context') &&
         typeof content.input.path === 'string'
       ) {
-        paths.add(normalizePath(content.input.path));
+        paths.add(normalizePath(content.input.path, workspacePath));
+      }
+      if (content.name === 'read_multiple_files' && Array.isArray(content.input.paths)) {
+        for (const path of content.input.paths) {
+          if (typeof path === 'string') paths.add(normalizePath(path, workspacePath));
+        }
       }
     }
   }
   return paths;
 }
 
-function isSourceSuperseded(source: ContextSource, messages: Message[]): boolean {
+function isSourceSuperseded(source: ContextSource, messages: Message[], workspacePath: string): boolean {
   if (source.origin !== 'environment' && source.id !== '__context_hints__') return false;
   const calls = messages
     .flatMap((message) => message.content)
@@ -588,7 +614,11 @@ function isSourceSuperseded(source: ContextSource, messages: Message[]): boolean
         content.type === 'tool_call',
     );
   if (source.id === '__context_hints__') {
-    return calls.some((call) => ['find_files', 'search_code', 'read_file'].includes(call.name));
+    return calls.some((call) =>
+      ['find_files', 'search_code', 'read_file', 'read_multiple_files', 'gather_context'].includes(
+        call.name,
+      ),
+    );
   }
   if (source.id === 'env-tree') {
     return calls.some((call) =>
@@ -602,10 +632,23 @@ function isSourceSuperseded(source: ContextSource, messages: Message[]): boolean
     return calls.some((call) => call.name === 'run_terminal_command');
   }
   if (source.id === 'env-active-file') {
-    const sourcePath = normalizePath(String(source.metadata?.filePath ?? ''));
-    return calls.some(
-      (call) =>
-        call.name === 'read_file' && normalizePath(String(call.input.path ?? '')) === sourcePath,
+    const sourcePath = normalizePath(String(source.metadata?.filePath ?? ''), workspacePath);
+    return calls.some((call) => callReadsPath(call, sourcePath, workspacePath));
+  }
+  return false;
+}
+
+function callReadsPath(
+  call: Extract<Message['content'][number], { type: 'tool_call' }>,
+  sourcePath: string,
+  workspacePath: string,
+): boolean {
+  if ((call.name === 'read_file' || call.name === 'gather_context') && call.input.path) {
+    return normalizePath(String(call.input.path), workspacePath) === sourcePath;
+  }
+  if (call.name === 'read_multiple_files' && Array.isArray(call.input.paths)) {
+    return call.input.paths.some(
+      (path) => normalizePath(String(path), workspacePath) === sourcePath,
     );
   }
   return false;

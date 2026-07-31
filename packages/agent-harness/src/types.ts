@@ -56,11 +56,18 @@ export interface ToolExecutionContext {
   /** Access to gathered-context operations (set by harness) */
   gatheredContext?: {
     add(path: string, content: string, relevance: number, reason: string): number;
+    append(path: string, content: string, relevance: number, reason: string): number;
     remove(path: string): boolean;
     has(path: string): boolean;
     getAll(): GatheredContextEntry[];
     getTokens(): number;
     clear(): void;
+  };
+  /** Raw file content cache shared by read_file, read_multiple_files and gather_context. */
+  readCache?: {
+    get(path: string): string | undefined;
+    set(path: string, content: string): void;
+    delete(path: string): void;
   };
   /** Ask the user a set of questions. Pauses the agent loop until answered. */
   askUser?: (questions: AgentQuestion[], title?: string) => Promise<AgentQuestionAnswer[]>;
@@ -658,6 +665,8 @@ export interface AgentTask {
 export interface TurnRecord {
   id: string;
   conversationId: string;
+  /** Parent turn when this record belongs to a delegated child turn. */
+  parentTurnId?: string;
   /** Agent mode used for this turn */
   mode: AgentType;
   /** Number of LLM iterations within this turn */

@@ -190,6 +190,11 @@ export class HarnessBridge {
   >();
   /** Active sub-agent runners keyed by their id (toolCallId of spawn_subagent). */
   private _subAgentRunners = new Map<string, SubAgentRunner>();
+  private memoryManager: MemoryManager | null = null;
+  private externalMcpTools = new Map<
+    string,
+    { handler: ToolHandler; serverId: string; agentSafe: boolean }
+  >();
   private mutationSnapshots = new Map<string, MutationSnapshot>();
   private activeTurnTabId: string | null = null;
   private activeTurnConversationId: string | null = null;
@@ -237,6 +242,7 @@ export class HarnessBridge {
 
     // Instantiate MemoryManager (bridges to Tauri SQLite memory commands)
     const memoryManager = new MemoryManager(tauriInvokeRaw);
+    this.memoryManager = memoryManager;
 
     // Trigger one-time relevance decay on startup (best-effort, non-blocking)
     memoryManager.decayRelevance(projectId).catch(() => {});
@@ -1325,7 +1331,7 @@ Investigate the error, fix the underlying issue in the affected files, and verif
       definition: {
         name: 'spawn_subagent',
         description:
-          'Delegate a focused subtask to a specialized sub-agent. The parent waits for the sub-agent to finish and then receives its result. Use this to apply a specialist agent (for example review or debug) to a self-contained subtask. Not available in chat mode.',
+          'Delegate a focused subtask to a specialized sub-agent. The parent waits for the sub-agent to finish and then receives its result. Delegated calls are currently executed sequentially, so do not promise parallel execution. Use this to apply a specialist agent (for example review or debug) to a self-contained subtask. Not available in chat mode.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -1413,6 +1419,8 @@ Investigate the error, fix the underlying issue in the affected files, and verif
           modeSkillNames.has(s.frontmatter.name),
         );
 
+        const environmentContext = await bridge.buildEnvironmentContext();
+        const parentConversationId = store.conversationId ?? undefined;
         const runner = new SubAgentRunner({
           id: subAgentId,
           task,
@@ -1431,6 +1439,16 @@ Investigate the error, fix the underlying issue in the affected files, and verif
           onBridgeEvent: (event) => bridge.handleSubAgentEvent(subAgentId, event),
           activeSkills: skills,
           activeRules: bridge.harness.getActiveRules(),
+          parentHarness: bridge.harness,
+          conversationId: parentConversationId,
+          parentTurnId: bridge.activeTurnId ?? undefined,
+          environmentContext,
+          delegationChain: store.delegationChain,
+          memoryManager: bridge.memoryManager ?? undefined,
+          externalTools: bridge.getAgentSafeExternalTools(),
+          onTurnRecord: (record) => {
+            void bridge.persistTurnRecord(record);
+          },
           // Visible terminal runtime so sub-agent commands are watchable, and
           // command tracking so parent environment context stays fresh.
           terminalRuntime: desktopTerminalRuntime,
@@ -1461,10 +1479,17 @@ Investigate the error, fix the underlying issue in the affected files, and verif
       const mcpBridge = McpBridge.get();
       const mcpTools = mcpBridge.getTools();
 
+      for (const toolName of this.externalMcpTools.keys()) this.harness.unregisterTool(toolName);
+      this.externalMcpTools.clear();
+
       let registered = 0;
       for (const tool of mcpTools) {
         const serverId = tool.serverId;
         const toolName = `mcp__${serverId}__${tool.name}`;
+        const server = useSettingsStore
+          .getState()
+          .mcpServers.find((candidate) => candidate.id === serverId);
+        const agentSafe = server?.agentSafe === true;
 
         const handler: ToolHandler = {
           definition: {
@@ -1497,6 +1522,7 @@ Investigate the error, fix the underlying issue in the affected files, and verif
         };
 
         this.harness.registerExternalTool(handler);
+        this.externalMcpTools.set(toolName, { handler, serverId, agentSafe });
         registered++;
       }
 
@@ -1506,6 +1532,20 @@ Investigate the error, fix the underlying issue in the affected files, and verif
     } catch {
       // McpBridge may not be initialized yet — that's fine, MCP tools are optional
     }
+  }
+
+  /** Return only MCP handlers explicitly approved for delegated agents. */
+  private getAgentSafeExternalTools(): ToolHandler[] {
+    const settings = useSettingsStore.getState();
+    return [...this.externalMcpTools.values()]
+      .filter(
+        (entry) =>
+          entry.agentSafe ||
+          settings.mcpServers.some(
+            (server) => server.id === entry.serverId && server.agentSafe === true,
+          ),
+      )
+      .map((entry) => entry.handler);
   }
 
   // ─── Event Handling ─────────────────────────────────────────────────
@@ -2248,12 +2288,8 @@ Investigate the error, fix the underlying issue in the affected files, and verif
 
   // ─── Environment Context Assembly ───────────────────────────────────
 
-  /**
-   * Build and inject a deterministic environment context package.
-   * Gives the agent awareness of: active file, selection, directory tree,
-   * git state, and last terminal command — reducing discovery errors.
-   */
-  private async injectEnvironmentContext(): Promise<void> {
+  /** Build a deterministic environment context package for any child turn. */
+  private async buildEnvironmentContext(): Promise<EnvironmentContext> {
     const env: EnvironmentContext = {
       workspacePath: this.harness.getWorkspacePath() as string,
     };
@@ -2345,7 +2381,12 @@ Investigate the error, fix the underlying issue in the affected files, and verif
       };
     }
 
-    this.harness.injectEnvironmentContext(env);
+    return env;
+  }
+
+  /** Build and inject the environment context for the main harness turn. */
+  private async injectEnvironmentContext(): Promise<void> {
+    this.harness.injectEnvironmentContext(await this.buildEnvironmentContext());
   }
 
   /**
@@ -2506,7 +2547,7 @@ ${hints.map((h) => `- ${h}`).join('\n')}
     recordAlreadyCommitted = false,
   ): Promise<void> {
     const store = useAgentStore.getState();
-    const conversationId = store.conversationId;
+    const conversationId = record.conversationId || store.conversationId;
     if (!conversationId) return;
 
     try {
@@ -2522,11 +2563,12 @@ ${hints.map((h) => `- ${h}`).join('\n')}
           tokenTotal: record.tokenUsage?.totalTokens ?? 0,
           tokenCacheRead: record.tokenUsage?.cacheReadTokens ?? 0,
           tokenCacheWrite: record.tokenUsage?.cacheWriteTokens ?? 0,
-          stopReason: record.stopReason,
+           stopReason: record.stopReason === 'loop_detected' ? 'error' : record.stopReason,
           verificationPerformed: record.verificationPerformed,
           verificationForced: record.verificationForced,
           filesModified: JSON.stringify(record.filesModified),
-          durationMs: record.durationMs,
+           durationMs: record.durationMs,
+           parentTurnId: record.parentTurnId ?? null,
           timestamp: record.timestamp,
         });
       }
@@ -2550,13 +2592,14 @@ ${hints.map((h) => `- ${h}`).join('\n')}
             tokenTotal: record.trace.tokenUsage.totalTokens,
             tokenCacheRead: record.trace.tokenUsage.cacheReadTokens ?? 0,
             tokenCacheWrite: record.trace.tokenUsage.cacheWriteTokens ?? 0,
-            stopReason: record.trace.stopReason,
+             stopReason: record.trace.stopReason === 'loop_detected' ? 'error' : record.trace.stopReason,
             verificationPerformed: record.trace.verificationPerformed,
             verificationForced: record.trace.verificationForced,
             filesModified: JSON.stringify(record.trace.filesModified),
             errors: JSON.stringify(record.trace.errors),
             loopWarnings: JSON.stringify(record.trace.loopWarnings),
-            durationMs: record.trace.durationMs,
+             durationMs: record.trace.durationMs,
+             parentTurnId: record.trace.parentTurnId ?? record.parentTurnId ?? null,
           });
         } catch {
           console.warn('[HarnessBridge] Failed to persist trace');

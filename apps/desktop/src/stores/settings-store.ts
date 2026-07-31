@@ -67,6 +67,8 @@ export interface McpServerConfig {
   /** For WebSocket: url */
   wsUrl?: string;
   enabled: boolean;
+  /** Allow this server's tools to be exposed to delegated sub-agents. */
+  agentSafe: boolean;
 }
 
 /** Per-category / per-tool overrides for the 'custom' approval mode */
@@ -279,6 +281,12 @@ export function migrateSettingsState(persistedState: unknown, version: number): 
   if (version < 2) {
     delete state.gitUserName;
     delete state.gitUserEmail;
+  }
+  if (version < 3 && Array.isArray(state.mcpServers)) {
+    state.mcpServers = (state.mcpServers as Array<Record<string, unknown>>).map((server) => ({
+      ...server,
+      agentSafe: server.agentSafe === true,
+    }));
   }
   return state;
 }
@@ -520,7 +528,7 @@ export const useSettingsStore = create<SettingsState>()(
     {
       name: 'hyscode-settings',
       storage: createJSONStorage(() => localStorage),
-      version: 2,
+      version: 3,
       migrate: migrateSettingsState,
       partialize: (state) => {
         // Exclude transient UI state and action functions from persistence

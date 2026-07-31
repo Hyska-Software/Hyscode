@@ -1,4 +1,4 @@
-import { Harness, resolveEffectiveAgentPolicy } from '@hyscode/agent-harness';
+import { DelegatedRunner, Harness, resolveEffectiveAgentPolicy, SUB_AGENT_PREAMBLE } from '@hyscode/agent-harness';
 import type {
   AgentType,
   Skill,
@@ -6,7 +6,12 @@ import type {
   HarnessEvent,
   ToolCallRecord,
   TerminalRuntimeAdapter,
+  EnvironmentContext,
+  MemoryManager,
+  ToolHandler,
+  TurnRecord,
 } from '@hyscode/agent-harness';
+import type { TokenUsage } from '@hyscode/ai-providers';
 import type { AgentMode, SubAgentState, ToolCallDisplay } from '@/stores/agent-store';
 import { useSettingsStore } from '@/stores/settings-store';
 
@@ -37,23 +42,21 @@ export interface SubAgentRunnerOptions {
   terminalRuntime?: TerminalRuntimeAdapter;
   /** Track completed terminal commands for the parent's environment context. */
   onTerminalCommand?: (command: string, output: string, exitCode: number | null) => void;
+  /** Parent harness used to create a child with the same runtime environment. */
+  parentHarness?: Harness;
+  /** Parent conversation keeps memory provenance and terminal ownership correct. */
+  conversationId?: string;
+  parentTurnId?: string;
+  environmentContext?: EnvironmentContext;
+  delegationChain?: ReadonlyArray<{ fromMode: string; toMode: string; reason: string }>;
+  memoryManager?: MemoryManager;
+  externalTools?: ToolHandler[];
+  onTurnRecord?: (record: TurnRecord) => void;
 }
 
 const MAX_LIVE_OUTPUT_CHARS = 65_536;
 
 // ─── SubAgentRunner ──────────────────────────────────────────────────────────
-
-/** Prepended to every sub-agent task to enforce autonomous execution rules */
-const SUBAGENT_PREAMBLE = `[SUB-AGENT CONTEXT]
-You are running as an autonomous sub-agent. Rules:
-1. You CANNOT use ask_user — if information is missing, make reasonable assumptions and proceed.
-2. Do NOT read the same file more than three times. If you have already gathered content from a file, use it.
-3. Complete your task fully and return a comprehensive, detailed result as your final text response.
-4. Do NOT spawn additional sub-agents.
-
-Your task:
-
-`;
 
 /**
  * Runs a focused subtask using a fresh Harness instance.
@@ -62,18 +65,25 @@ Your task:
  */
 export class SubAgentRunner {
   private harness: Harness;
+  private delegatedRunner?: DelegatedRunner;
   private onUpdate: SubAgentRunnerOptions['onUpdate'];
   private onBridgeEvent: SubAgentRunnerOptions['onBridgeEvent'];
+  private onTurnRecord: SubAgentRunnerOptions['onTurnRecord'];
   private toolCallCache: ToolCallDisplay[] = [];
   private streamingOutput = '';
-  /** Track file read counts to detect read-loop and cancel early */
-  private fileReadCounts = new Map<string, number>();
-  private static readonly MAX_FILE_READS = 3;
-  private loopCancelledReason: string | null = null;
+  private tokenUsage: TokenUsage = {
+    inputTokens: 0,
+    outputTokens: 0,
+    totalTokens: 0,
+  };
 
   constructor(options: SubAgentRunnerOptions) {
     this.onUpdate = options.onUpdate;
     this.onBridgeEvent = options.onBridgeEvent;
+    this.onTurnRecord = options.onTurnRecord;
+    this.optionsConversationId = options.conversationId ?? crypto.randomUUID();
+    this.optionsParentTurnId = options.parentTurnId;
+    this.optionsEnvironmentContext = options.environmentContext;
 
     const settings = useSettingsStore.getState();
     const providerId = settings.activeProviderId ?? '';
@@ -106,26 +116,45 @@ export class SubAgentRunner {
       maxIterations: settings.subAgentMaxIterations,
     });
 
-    this.harness = new Harness({
-      workspacePath: options.workspacePath,
-      projectId: options.projectId,
-      invoke: options.invoke,
-      listen: options.listen,
-      delegationLevel: 1,
-      config: {
-        providerId,
-        modelId,
-        maxIterations: policy.maxIterations,
-        maxOutputTokens: policy.maxOutputTokens,
-        maxInputTokens: policy.maxInputTokens,
-        turnTimeoutMs: policy.turnTimeoutMs,
-        approval: policy.approval,
-      },
-      onEvent: (event: HarnessEvent) => this.handleEvent(event),
-      onApprovalRequest: options.onApproval,
-      terminalRuntime: options.terminalRuntime,
-      onTerminalCommand: options.onTerminalCommand,
-    });
+    const childConfig = {
+      providerId,
+      modelId,
+      maxIterations: policy.maxIterations,
+      maxOutputTokens: policy.maxOutputTokens,
+      maxInputTokens: policy.maxInputTokens,
+      turnTimeoutMs: policy.turnTimeoutMs,
+      approval: policy.approval,
+    };
+    const onEvent = (event: HarnessEvent): void => this.handleEvent(event);
+    if (options.parentHarness) {
+      this.delegatedRunner = new DelegatedRunner({
+        parentHarness: options.parentHarness,
+        mode: options.mode as AgentType,
+        config: childConfig,
+        conversationId: this.optionsConversationId,
+        environmentContext: options.environmentContext,
+        delegationChain: options.delegationChain,
+        activeSkills: options.activeSkills,
+        activeRules: options.activeRules,
+        externalTools: options.externalTools,
+        onEvent,
+      });
+      this.harness = this.delegatedRunner.getHarness();
+    } else {
+      this.harness = new Harness({
+        workspacePath: options.workspacePath,
+        projectId: options.projectId,
+        invoke: options.invoke,
+        listen: options.listen,
+        delegationLevel: 1,
+        config: childConfig,
+        onEvent,
+        onApprovalRequest: options.onApproval,
+        terminalRuntime: options.terminalRuntime,
+        onTerminalCommand: options.onTerminalCommand,
+        memoryManager: options.memoryManager,
+      });
+    }
 
     // Apply agent type — sub-agents never get spawn_subagent (no Harness.registerExternalTool called here)
     this.harness.setAgentType(options.mode as AgentType);
@@ -133,33 +162,43 @@ export class SubAgentRunner {
     // Inherit active skills and rules from the parent context
     this.harness.setActiveSkills(options.activeSkills);
     this.harness.setActiveRules(options.activeRules);
+    this.harness.setDelegationChain(options.delegationChain ?? []);
   }
 
   async run(task: string): Promise<string> {
-    const convId = crypto.randomUUID();
+    const convId = this.optionsConversationId;
     this.harness.setConversationId(convId);
-    this.fileReadCounts.clear();
-    this.loopCancelledReason = null;
-
-    const prefixedTask = SUBAGENT_PREAMBLE + task;
+    if (this.optionsEnvironmentContext && !this.delegatedRunner) {
+      this.harness.injectEnvironmentContext(this.optionsEnvironmentContext);
+    }
+    this.tokenUsage = { inputTokens: 0, outputTokens: 0, totalTokens: 0 };
 
     try {
-      const outcome = await this.harness.run(prefixedTask, []);
-
-      // Read-loop guard tripped: report the reason explicitly instead of
-      // returning a generic "Request cancelled." success.
-      if (this.loopCancelledReason) {
-        const msg = `__SUBAGENT_STATUS__:${this.loopCancelledReason}`;
-        this.onUpdate({ status: 'cancelled', output: msg, completedAt: Date.now() });
-        return msg;
-      }
+      const outcome = this.delegatedRunner
+        ? await this.delegatedRunner.run(task)
+        : await this.harness.run(SUB_AGENT_PREAMBLE + task, []);
+      const record: TurnRecord = {
+        ...outcome.turnRecord,
+        conversationId: convId,
+        parentTurnId: this.optionsParentTurnId,
+        trace: outcome.turnRecord.trace
+          ? { ...outcome.turnRecord.trace, conversationId: convId, parentTurnId: this.optionsParentTurnId }
+          : undefined,
+      };
+      this.onTurnRecord?.(record);
 
       const { response, toolCalls, status } = outcome;
 
       // Surface user cancellations as 'cancelled' instead of a false 'done'.
       if (status === 'cancelled' || status === 'cancelled_partial') {
         const msg = response || 'Request cancelled.';
-        this.onUpdate({ status: 'cancelled', output: msg, completedAt: Date.now() });
+        this.onUpdate({
+          status: 'cancelled',
+          stopReason: status,
+          output: msg,
+          tokenUsage: this.tokenUsage,
+          completedAt: Date.now(),
+        });
         return msg;
       }
 
@@ -167,11 +206,23 @@ export class SubAgentRunner {
       // fallback from the gathered tool call history so the parent gets context.
       const finalOutput = response || this.buildFallbackOutput(toolCalls);
 
-      this.onUpdate({ status: 'done', output: finalOutput, completedAt: Date.now() });
+      this.onUpdate({
+        status: status === 'complete' ? 'done' : 'error',
+        stopReason: status,
+        output: finalOutput,
+        tokenUsage: this.tokenUsage,
+        completedAt: Date.now(),
+      });
       return finalOutput;
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      this.onUpdate({ status: 'error', output: msg, completedAt: Date.now() });
+      this.onUpdate({
+        status: 'error',
+        stopReason: 'error',
+        output: msg,
+        tokenUsage: this.tokenUsage,
+        completedAt: Date.now(),
+      });
       throw err;
     }
   }
@@ -215,20 +266,6 @@ export class SubAgentRunner {
     this.harness.cancel();
   }
 
-  /** Extract the file paths involved in a read-style tool call. */
-  private extractReadPaths(event: HarnessEvent): string[] {
-    if (event.type !== 'tool_call_start') return [];
-    if (event.toolName === 'read_file' || event.toolName === 'gather_context') {
-      const path = String((event.input as Record<string, unknown>)?.path ?? '');
-      return path ? [path] : [];
-    }
-    if (event.toolName === 'read_multiple_files') {
-      const paths = (event.input as Record<string, unknown>)?.paths;
-      return Array.isArray(paths) ? paths.map((p) => String(p)).filter(Boolean) : [];
-    }
-    return [];
-  }
-
   private handleEvent(event: HarnessEvent): void {
     switch (event.type) {
       case 'tool_call_start': {
@@ -242,17 +279,6 @@ export class SubAgentRunner {
         this.toolCallCache = [...this.toolCallCache, tc];
         this.onUpdate({ toolCalls: [...this.toolCallCache] });
 
-        // Detect file-read loop: same file read more than MAX_FILE_READS times
-        for (const filePath of this.extractReadPaths(event)) {
-          const count = (this.fileReadCounts.get(filePath) ?? 0) + 1;
-          this.fileReadCounts.set(filePath, count);
-          if (count > SubAgentRunner.MAX_FILE_READS) {
-            this.loopCancelledReason =
-              `cancelled — read-loop guard: stopped after reading "${filePath}" ${count} times. ` +
-              `Gather the file once with gather_context and reuse the content instead of re-reading it.`;
-            this.harness.cancel();
-          }
-        }
         break;
       }
       case 'tool_call_result': {
@@ -260,7 +286,11 @@ export class SubAgentRunner {
           tc.id === event.toolCallId
             ? {
                 ...tc,
-                status: (event.result.success ? 'success' : 'error') as ToolCallDisplay['status'],
+                status: event.result.success
+                  ? 'success'
+                  : event.result.error?.toLowerCase().includes('cancel')
+                    ? 'cancelled'
+                    : 'error',
                 output: event.result.output,
                 error: event.result.error,
                 completedAt: Date.now(),
@@ -295,6 +325,7 @@ export class SubAgentRunner {
         // Usage chunks are forwarded so the parent turn's token accounting
         // includes sub-agent spend.
         if (event.chunk.type === 'usage') {
+          this.applyUsage(event.chunk.usage);
           this.onBridgeEvent?.(event);
         }
         break;
@@ -306,5 +337,36 @@ export class SubAgentRunner {
         break;
       }
     }
+  }
+
+  private optionsConversationId: string;
+  private optionsParentTurnId?: string;
+  private optionsEnvironmentContext?: EnvironmentContext;
+
+  private applyUsage(usage: TokenUsage): void {
+    const current = this.tokenUsage;
+    const inputTokens = current.inputTokens + usage.inputTokens;
+    const outputTokens = current.outputTokens + usage.outputTokens;
+    const totalTokens =
+      usage.totalTokens > 0 ? current.totalTokens + usage.totalTokens : inputTokens + outputTokens;
+    const effectiveInput = Math.max(0, usage.inputTokens - (usage.cacheReadTokens ?? 0));
+    this.tokenUsage = {
+      inputTokens,
+      outputTokens,
+      totalTokens,
+      requestCount: (current.requestCount ?? 0) + 1,
+      lastInputTokens: usage.inputTokens,
+      lastEffectiveInputTokens: effectiveInput,
+      peakInputTokens: Math.max(current.peakInputTokens ?? 0, usage.inputTokens),
+      peakEffectiveInputTokens: Math.max(current.peakEffectiveInputTokens ?? 0, effectiveInput),
+      cacheReadTokens: (current.cacheReadTokens ?? 0) + (usage.cacheReadTokens ?? 0),
+      cacheWriteTokens: (current.cacheWriteTokens ?? 0) + (usage.cacheWriteTokens ?? 0),
+      reasoningTokens: (current.reasoningTokens ?? 0) + (usage.reasoningTokens ?? 0),
+      retryCount: (current.retryCount ?? 0) + (usage.retryCount ?? 0),
+      estimatedCostUsd: (current.estimatedCostUsd ?? 0) + (usage.estimatedCostUsd ?? 0),
+      possibleDuplicateCharge:
+        Boolean(current.possibleDuplicateCharge) || Boolean(usage.possibleDuplicateCharge),
+    };
+    this.onUpdate({ tokenUsage: this.tokenUsage });
   }
 }

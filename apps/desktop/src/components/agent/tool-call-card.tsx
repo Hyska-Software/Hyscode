@@ -91,6 +91,8 @@ function mapStatus(tc: ToolCallDisplay): AgentStatus {
       return 'success';
     case 'error':
       return 'error';
+    case 'cancelled':
+      return 'cancelled';
     default:
       return 'pending';
   }

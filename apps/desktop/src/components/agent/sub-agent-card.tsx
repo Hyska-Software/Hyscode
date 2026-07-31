@@ -86,6 +86,12 @@ export const SubAgentCard = memo(function SubAgentCard({ input, toolCallId }: Su
           </div>
         </div>
       )}
+      {subAgent?.tokenUsage && (
+        <p className="pt-1 text-[10px] text-muted-foreground">
+          {subAgent.tokenUsage.totalTokens.toLocaleString()} tokens ·{' '}
+          {subAgent.tokenUsage.requestCount ?? 0} request(s)
+        </p>
+      )}
     </div>
   );
 

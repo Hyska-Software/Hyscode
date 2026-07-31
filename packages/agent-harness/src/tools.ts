@@ -95,6 +95,7 @@ export const readFileTool = defineTool(
     try {
       const filePath = resolvePath(input.path as string, ctx.workspacePath);
       const content = await ctx.invoke<string>('read_file', { path: filePath });
+      ctx.readCache?.set(filePath, content);
       const lines = content.split('\n');
 
       // Apply line range / limit
@@ -1386,8 +1387,11 @@ Assign relevance: 0.8-1.0 = files you will modify, 0.5-0.7 = important reference
       const relevance = Math.max(0, Math.min(1, Number(input.relevance) || 0.5));
       const reason = String(input.reason || 'Agent gathered this file');
 
-      // Read file content
-      const content = await ctx.invoke<string>('read_file', { path: filePath });
+      // Reuse the latest raw read when available. This keeps gather_context
+      // from consuming another read-loop budget entry and avoids duplicate I/O.
+      const content =
+        ctx.readCache?.get(filePath) ?? (await ctx.invoke<string>('read_file', { path: filePath }));
+      ctx.readCache?.set(filePath, content);
       const tokenEstimate = ctx.gatheredContext.add(filePath, content, relevance, reason);
 
       const totalTokens = ctx.gatheredContext.getTokens();
@@ -2255,11 +2259,15 @@ export const readMultipleFilesTool = defineTool(
       const paths = input.paths as string[];
       const maxLines = (input.max_lines_per_file as number) || 200;
       const outputs: string[] = [];
+      const successfulPaths: string[] = [];
+      const failedPaths: string[] = [];
 
-      for (const p of paths) {
+      for (const p of new Set(paths)) {
         try {
           const filePath = resolvePath(p, ctx.workspacePath);
-          const content = await ctx.invoke<string>('read_file', { path: filePath });
+          const content =
+            ctx.readCache?.get(filePath) ?? (await ctx.invoke<string>('read_file', { path: filePath }));
+          ctx.readCache?.set(filePath, content);
           const lines = content.split('\n');
           const truncated = lines.length > maxLines;
           const shown = truncated ? lines.slice(0, maxLines) : lines;
@@ -2267,12 +2275,18 @@ export const readMultipleFilesTool = defineTool(
           outputs.push(
             `--- ${p} ---\n${numbered}${truncated ? `\n... (${lines.length - maxLines} more lines)` : ''}`,
           );
+          successfulPaths.push(p);
         } catch (err) {
           outputs.push(`--- ${p} ---\nError: ${String(err)}`);
+          failedPaths.push(p);
         }
       }
 
-      return { success: true, output: outputs.join('\n\n') };
+      return {
+        success: true,
+        output: outputs.join('\n\n'),
+        metadata: { successfulPaths, failedPaths },
+      };
     } catch (err) {
       return { success: false, output: '', error: String(err) };
     }

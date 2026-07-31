@@ -631,13 +631,20 @@ export function AiTab() {
             <div className="flex flex-col">
               <span className="text-[12px] text-foreground">{server.name}</span>
               <span className="text-[10px] text-muted-foreground">
-                {server.transport} · {server.enabled ? 'enabled' : 'disabled'}
+                {server.transport} · {server.enabled ? 'enabled' : 'disabled'} ·{' '}
+                {server.agentSafe ? 'sub-agents allowed' : 'parent only'}
               </span>
             </div>
             <div className="flex items-center gap-1">
               <SettingToggle
                 checked={server.enabled}
                 onChange={(v) => store.updateMcpServer(server.id, { enabled: v })}
+                aria-label={`Enable ${server.name}`}
+              />
+              <SettingToggle
+                checked={server.agentSafe === true}
+                onChange={(v) => store.updateMcpServer(server.id, { agentSafe: v })}
+                aria-label={`Allow ${server.name} for sub-agents`}
               />
               <button
                 onClick={() => store.removeMcpServer(server.id)}

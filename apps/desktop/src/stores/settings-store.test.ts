@@ -37,6 +37,15 @@ describe('agent interaction limit settings', () => {
     expect(migrated.interactionLimitEnabled).toBe(true);
     expect(migrated.maxIterations).toBe(40);
   });
+
+  it('defaults existing MCP servers to parent-only access', () => {
+    const migrated = migrateSettingsState(
+      { mcpServers: [{ id: 'server', name: 'Server', enabled: true }] },
+      2,
+    ) as { mcpServers: Array<{ agentSafe: boolean }> };
+
+    expect(migrated.mcpServers[0].agentSafe).toBe(false);
+  });
 });
 
 describe('activity bar settings', () => {

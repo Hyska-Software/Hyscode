@@ -4,6 +4,7 @@
 // from the deepagents harness engineering approach.
 
 import type { AgentType, ToolCallRecord } from './types';
+import { resolveWorkspacePath } from './path-policy';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -20,6 +21,8 @@ export interface MiddlewareContext {
   assistantText: string;
   /** Conversation ID */
   conversationId: string;
+  /** Workspace used to canonicalize file-oriented middleware state. */
+  workspacePath?: string;
 }
 
 /**
@@ -272,12 +275,12 @@ function compactMatchingLines(
   return `${unique.join('\n')}\n\n... [${Math.max(0, lines.length - unique.length)} lines omitted from ${toolName}; rerun with a narrower query for full detail] ...`;
 }
 // ─── Auto-Gather Middleware ─────────────────────────────────────────────────
-// In build/debug modes, automatically promotes read_file results to gathered
+// In implementation and analysis modes, automatically promotes read_file results to gathered
 // context with medium relevance. This ensures files the agent reads are kept
 // in working memory without requiring explicit gather_context calls.
 
 /** Modes where auto-gather is active */
-const AUTO_GATHER_MODES: Set<AgentType> = new Set(['build', 'debug']);
+const AUTO_GATHER_MODES: Set<AgentType> = new Set(['build', 'debug', 'review', 'plan']);
 
 /** Files with these extensions get auto-gathered at slightly higher relevance */
 const HIGH_VALUE_EXTENSIONS = new Set(['.ts', '.tsx', '.rs', '.toml', '.json', '.md']);
@@ -287,6 +290,7 @@ export class AutoGatherMiddleware implements PostToolHook {
 
   private gatheredContext: {
     add(path: string, content: string, relevance: number, reason: string): number;
+    append(path: string, content: string, relevance: number, reason: string): number;
     remove(path: string): boolean;
     has(path: string): boolean;
     getTokens(): number;
@@ -302,7 +306,10 @@ export class AutoGatherMiddleware implements PostToolHook {
     if (!AUTO_GATHER_MODES.has(ctx.mode)) return null;
     if (!this.gatheredContext) return null;
 
-    const filePath = String(record.input.path ?? record.input.filePath ?? '');
+    const rawFilePath = String(record.input.path ?? record.input.filePath ?? '');
+    const filePath = rawFilePath && ctx.workspacePath
+      ? resolveWorkspacePath(rawFilePath, ctx.workspacePath)
+      : rawFilePath;
     if (
       ['write_file', 'edit_file', 'replace_lines', 'insert_lines', 'delete_file'].includes(toolName)
     ) {
@@ -316,9 +323,6 @@ export class AutoGatherMiddleware implements PostToolHook {
 
     if (!filePath) return null;
 
-    // Don't re-gather if already in working memory
-    if (this.gatheredContext.has(filePath)) return null;
-
     // Keep a bounded excerpt. The full result already exists in the protocol
     // frame and is not duplicated while that frame remains in the window.
     const content = compactFileOutput(record.output.output, toolName).slice(0, 6000);
@@ -327,7 +331,11 @@ export class AutoGatherMiddleware implements PostToolHook {
     const ext = filePath.includes('.') ? filePath.slice(filePath.lastIndexOf('.')) : '';
     const relevance = HIGH_VALUE_EXTENSIONS.has(ext) ? 0.5 : 0.35;
 
-    this.gatheredContext.add(filePath, content, relevance, 'auto-gathered from read_file');
+    if (this.gatheredContext.has(filePath)) {
+      this.gatheredContext.append(filePath, content, relevance, 'auto-gathered range from read_file');
+    } else {
+      this.gatheredContext.add(filePath, content, relevance, 'auto-gathered from read_file');
+    }
 
     return null; // No injection needed — the file is silently added to working memory
   }

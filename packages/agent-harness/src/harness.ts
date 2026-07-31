@@ -58,6 +58,8 @@ import { MemoryExtractor } from './memory-extractor';
 import { MemoryContextProvider } from './memory-context-provider';
 import { TurnController } from './turn-controller';
 import { selectToolPlan, type ToolSelectionDecision } from './tool-selection';
+import type { ChildHarnessOptions, HarnessEnvironment } from './environment';
+import { ReadLoopMiddleware } from './read-loop';
 import {
   RequestPreparation,
   estimateActualCost,
@@ -161,6 +163,7 @@ export class Harness {
   private postToolHooks: PostToolHook[] = [];
   private loopDetection = new LoopDetectionMiddleware();
   private autoGather = new AutoGatherMiddleware();
+  private readLoop = new ReadLoopMiddleware('');
 
   // ─── Session Context ──────────────────────────────────────────────
   private delegationChain: Array<{ fromMode: string; toMode: string; reason: string }> = [];
@@ -181,10 +184,13 @@ export class Harness {
   private memoryContextProvider: MemoryContextProvider | null = null;
   private hasDirtyBuffers: (() => boolean) | undefined;
   private delegationLevel = 0;
+  private environment: HarnessEnvironment;
+  private readCache = new Map<string, string>();
 
   constructor(options: HarnessOptions) {
     this.config = { ...DEFAULT_HARNESS_CONFIG, ...options.config };
     this.workspacePath = options.workspacePath;
+    this.readLoop = new ReadLoopMiddleware(this.workspacePath);
     this.projectId = options.projectId;
     this.invoke = options.invoke;
     this.listen = options.listen;
@@ -193,6 +199,24 @@ export class Harness {
     this.ruleLoader = options.ruleLoader ?? null;
     this.hasDirtyBuffers = options.hasDirtyBuffers;
     this.delegationLevel = options.delegationLevel ?? 0;
+    this.environment = {
+      workspacePath: options.workspacePath,
+      projectId: options.projectId,
+      invoke: options.invoke,
+      listen: options.listen,
+      onApprovalRequest: options.onApprovalRequest,
+      onModeSwitchRequest: options.onModeSwitchRequest,
+      onUserQuestionRequest: options.onUserQuestionRequest,
+      sddDb: options.sddDb,
+      savePlanFile: options.savePlanFile,
+      skillLoader: options.skillLoader,
+      ruleLoader: options.ruleLoader,
+      agentTerminalPtyId: options.agentTerminalPtyId,
+      onTerminalCommand: options.onTerminalCommand,
+      terminalRuntime: options.terminalRuntime,
+      memoryManager: options.memoryManager,
+      hasDirtyBuffers: options.hasDirtyBuffers,
+    };
 
     // Agent terminal integration
     this.agentTerminalPtyId = options.agentTerminalPtyId;
@@ -201,6 +225,7 @@ export class Harness {
 
     // Initialize context manager
     this.contextManager = new ContextManager();
+    this.contextManager.setWorkspacePath(this.workspacePath);
     this.contextManager.setCostOptimization(this.config.costOptimization);
 
     // Initialize tool router
@@ -243,6 +268,7 @@ export class Harness {
     // Register post-tool hooks
     this.postToolHooks.push(this.loopDetection);
     this.postToolHooks.push(this.autoGather);
+    this.postToolHooks.push(this.readLoop);
 
     // Initialize SDD engine if database provided
     if (options.sddDb) {
@@ -282,8 +308,44 @@ export class Harness {
     return this.agentType;
   }
 
+  /** Return the nesting depth used to constrain child-only tools. */
+  getDelegationLevel(): number {
+    return this.delegationLevel;
+  }
+
+  /**
+   * Create a child harness with the same runtime environment and a fresh
+   * execution state. External tools are opt-in so parent-only tools such as
+   * spawn_subagent cannot leak into a child turn.
+   */
+  createChild(options: ChildHarnessOptions): Harness {
+    const child = new Harness({
+      ...this.environment,
+      config: {
+        ...this.config,
+        ...options.config,
+      },
+      onEvent: options.onEvent,
+      delegationLevel: this.delegationLevel + 1,
+      sddDb: undefined,
+      savePlanFile: undefined,
+    });
+
+    child.setAgentType(options.agentType);
+    child.setConversationId(this.conversationId);
+    child.setActiveSkills(this.activeSkills);
+    child.setActiveRules(this.activeRules);
+    child.setDelegationChain(this.delegationChain);
+    for (const tool of options.externalTools ?? []) child.registerExternalTool(tool);
+    return child;
+  }
+
   setConversationId(id: string): void {
     this.conversationId = id;
+  }
+
+  getConversationId(): string {
+    return this.conversationId;
   }
 
   cancel(): void {
@@ -565,6 +627,8 @@ export class Harness {
     this.toolCallHistory = [];
     this.loopDetection.resetCounts();
     this.contextManager.clearGatheredFiles();
+    this.readCache.clear();
+    this.readLoop.reset();
     this.contextManager.beginTurn();
     const turnStart = Date.now();
 
@@ -1039,6 +1103,7 @@ export class Harness {
             toolCallHistory: this.toolCallHistory,
             assistantText,
             conversationId: this.conversationId,
+            workspacePath: this.workspacePath,
           };
           for (const hook of this.preCompletionHooks) {
             const injection = hook.check(mwCtx);
@@ -1099,6 +1164,11 @@ export class Harness {
         projectId: this.projectId,
         memoryManager: this.memoryManager ?? undefined,
         hasDirtyBuffers: this.hasDirtyBuffers,
+        readCache: {
+          get: (path) => this.readCache.get(normalizeCachePath(path)),
+          set: (path, content) => this.readCache.set(normalizeCachePath(path), content),
+          delete: (path) => this.readCache.delete(normalizeCachePath(path)),
+        },
         onFileChange: (change) => {
           if (!activeTurn.signal.aborted) this.emit({ type: 'file_change_pending', change });
         },
@@ -1119,6 +1189,8 @@ export class Harness {
             });
             return tokens;
           },
+          append: (path, content, relevance, reason) =>
+            this.contextManager.appendGatheredFile(path, content, relevance, reason),
           remove: (path) => {
             const removed = this.contextManager.removeGatheredFile(path);
             if (removed) this.emit({ type: 'context_dropped', filePath: path });
@@ -1159,6 +1231,7 @@ export class Harness {
 
         const record = await this.toolRouter.execute(tc.name, tc.id, tc.input, executionContext);
         this.toolCallHistory.push(record);
+        this.invalidateReadCache(tc.name, tc.input);
 
         // Record tool call in trace
         this.traceRecorder.recordToolCall(record);
@@ -1306,6 +1379,7 @@ export class Harness {
           toolCallHistory: this.toolCallHistory,
           assistantText,
           conversationId: this.conversationId,
+          workspacePath: this.workspacePath,
         };
         for (const hook of this.postToolHooks) {
           const injection = hook.afterTool(tc.name, record, mwCtx);
@@ -1563,6 +1637,26 @@ export class Harness {
     }
   }
 
+  private invalidateReadCache(toolName: string, input: Record<string, unknown>): void {
+    const mutationTools = new Set([
+      'write_file',
+      'create_file',
+      'edit_file',
+      'replace_lines',
+      'insert_lines',
+      'delete_file',
+      'delete_path',
+      'rename_file',
+      'rename_path',
+      'copy_file',
+      'copy_path',
+    ]);
+    if (!mutationTools.has(toolName)) return;
+    for (const value of [input.path, input.filePath, input.from, input.to]) {
+      if (typeof value === 'string') this.readCache.delete(normalizeCachePath(value, this.workspacePath));
+    }
+  }
+
   private emit(event: HarnessEvent): void {
     const iteration = event.iteration ?? (this.currentIteration || undefined);
     this.eventHandler?.({
@@ -1748,7 +1842,9 @@ export class Harness {
         tokenEstimate: Math.ceil(content.length / 4),
         origin: 'environment',
         identity: id,
-        expiresAfterTurn: this.contextManager.getTurnNumber(),
+         // The source is injected before the next turn begins. Expiring at
+         // the current turn would remove it immediately in a fresh child.
+         expiresAfterTurn: this.contextManager.getTurnNumber() + 1,
         metadata,
       });
     };
@@ -1820,4 +1916,12 @@ function initialOutputBudget(mode: AgentType, maximum: number): number {
     review: 6_000,
   };
   return Math.min(maximum, defaults[mode]);
+}
+
+function normalizeCachePath(path: string, workspacePath = ''): string {
+  const normalized = path.replace(/\\/g, '/').toLowerCase();
+  if (!workspacePath || normalized.startsWith('/') || /^[a-z]:\//.test(normalized)) {
+    return normalized;
+  }
+  return `${workspacePath.replace(/\\/g, '/').replace(/\/$/, '').toLowerCase()}/${normalized}`;
 }

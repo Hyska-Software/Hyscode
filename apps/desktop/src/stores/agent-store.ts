@@ -39,8 +39,10 @@ export interface SubAgentState {
   task: string;
   mode: AgentMode;
   status: 'running' | 'done' | 'error' | 'cancelled';
+  stopReason?: import('@hyscode/agent-harness').TurnStatus;
   output: string;
   toolCalls: ToolCallDisplay[];
+  tokenUsage?: TokenUsage;
   startedAt: number;
   completedAt?: number;
 }
@@ -129,7 +131,7 @@ export interface ToolCallDisplay {
   id: string;
   name: string;
   input: Record<string, unknown>;
-  status: 'pending' | 'approved' | 'running' | 'cancelling' | 'success' | 'error';
+  status: 'pending' | 'approved' | 'running' | 'cancelling' | 'success' | 'error' | 'cancelled';
   output?: string;
   error?: string;
   startedAt?: number;

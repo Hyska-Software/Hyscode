@@ -156,6 +156,7 @@ You can delegate focused subtasks to specialized sub-agents using the \`spawn_su
 ### When to use sub-agents
 - You need a **specialist perspective** on part of the task (e.g. you just implemented a feature and want a dedicated Review agent to audit it).
 - The task has **multiple independent sub-tasks** that do not depend on each other (they can be spawned in separate calls, sequentially or as the natural flow demands).
+- Delegated tool calls are currently executed sequentially by the harness. Do not promise parallel execution to the user.
 - You are mid-implementation and encounter a **deep bug** best handled by a Debug specialist.
 - You want a **Plan agent** to generate an architecture doc before you start writing code.
 
