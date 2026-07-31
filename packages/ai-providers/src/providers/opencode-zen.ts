@@ -1,16 +1,15 @@
 import type { AIModel, ChatParams, StreamChunk, FetchImpl, ThinkingVariants } from '../types';
-import { ProviderError } from '../types';
-import { OpenAIProvider, toOpenAIMessages, toOpenAITools } from './openai';
+import { OpenAIProvider } from './openai';
 import { AnthropicProvider } from './anthropic';
 import { GeminiProvider } from './gemini';
-import { parseSSEStream } from '../retry';
+import { chatResponsesAPI } from './openai-responses';
 
 // ─── Model Routing ──────────────────────────────────────────────────────────
 // Claude models use the Anthropic message format at /zen/v1/messages.
 // Gemini models use the Google Gemini API format at /zen/v1/models/<model>.
 // GPT models use the OpenAI Responses API at /zen/v1/responses.
 // All other models use OpenAI-compatible chat completions at /zen/v1/chat/completions.
-// Source: https://dev.opencode.ai/docs/zen (last updated Jun 30, 2026)
+// Source: https://dev.opencode.ai/docs/zen (last updated Jul 31, 2026)
 
 const ZEN_ANTHROPIC_MODELS = new Set([
   'claude-fable-5',
@@ -198,7 +197,7 @@ const THINKING_ALWAYS_ON: ThinkingVariants = {
 };
 
 // ─── Static Model List ──────────────────────────────────────────────────────
-// Sourced from https://dev.opencode.ai/docs/zen — models and pricing as of June 2026.
+// Sourced from https://dev.opencode.ai/docs/zen — models and pricing as of July 2026.
 // The listModels() method attempts to refresh this list from the live API.
 
 const ZEN_MODELS: AIModel[] = [
@@ -368,9 +367,9 @@ const ZEN_MODELS: AIModel[] = [
     supportsTools: true,
     supportsStreaming: true,
     supportsVision: true,
-    inputPricePerMToken: 2.5,
-    outputPricePerMToken: 15,
-    cachedInputPricePerMToken: 0.25,
+    inputPricePerMToken: 2,
+    outputPricePerMToken: 12,
+    cachedInputPricePerMToken: 0.2,
     thinkingVariants: THINKING_OPENAI_FULL_PRO,
   },
   {
@@ -382,9 +381,9 @@ const ZEN_MODELS: AIModel[] = [
     supportsTools: true,
     supportsStreaming: true,
     supportsVision: true,
-    inputPricePerMToken: 1,
-    outputPricePerMToken: 6,
-    cachedInputPricePerMToken: 0.1,
+    inputPricePerMToken: 0.2,
+    outputPricePerMToken: 1.2,
+    cachedInputPricePerMToken: 0.02,
     thinkingVariants: THINKING_OPENAI_FULL_PRO,
   },
   {
@@ -998,144 +997,6 @@ export class OpenCodeZenProvider extends OpenAIProvider {
     }
   }
 
-  /**
-   * Routes GPT models through the OpenAI Responses API endpoint.
-   * The Responses API uses a different wire format from chat completions.
-   */
-  private async *chatResponsesAPI(params: ChatParams): AsyncIterable<StreamChunk> {
-    const messages = toOpenAIMessages(
-      params.messages,
-      params.systemPrompt,
-      this.requiresReasoningContent,
-    );
-
-    const body: Record<string, unknown> = {
-      model: params.model,
-      input: messages,
-      stream: true,
-    };
-
-    if (params.tools?.length) body.tools = toOpenAITools(params.tools);
-    if (params.maxTokens) body.max_output_tokens = params.maxTokens;
-    if (params.temperature !== undefined) body.temperature = params.temperature;
-    if (params.topP !== undefined) body.top_p = params.topP;
-    if (params.stopSequences?.length) body.stop = params.stopSequences;
-    if (params.thinking?.enabled && params.thinking.level && params.thinking.level !== 'disabled') {
-      const effort = params.thinking.level === 'enabled' ? 'medium' : params.thinking.level;
-      const reasoning: Record<string, unknown> = { effort };
-      // GPT-5.6 family supports reasoning.mode = standard (default) | pro
-      if (params.thinking.mode) reasoning.mode = params.thinking.mode;
-      body.reasoning = reasoning;
-    }
-
-    const response = await this.fetchImpl(`${this.baseUrl}/responses`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${this.apiKey}`,
-      },
-      body: JSON.stringify(body),
-      signal: params.signal,
-    });
-
-    if (!response.ok) {
-      const errorBody = await response.text().catch(() => '');
-      const retryAfterHeader = response.headers.get('Retry-After');
-      const retryAfterMs = retryAfterHeader ? parseFloat(retryAfterHeader) * 1_000 : undefined;
-      throw new ProviderError(
-        `OpenCode Zen Responses API error: ${response.status} ${errorBody}`,
-        this.id,
-        response.status,
-        [429, 500, 502, 503].includes(response.status),
-        retryAfterMs,
-      );
-    }
-
-    let currentToolCallId = '';
-
-    for await (const data of parseSSEStream(response, params.signal)) {
-      const chunks = this.parseResponsesChunk(data, currentToolCallId);
-      for (const chunk of chunks) {
-        if (chunk.type === 'tool_call_start') {
-          currentToolCallId = chunk.id;
-        }
-        yield chunk;
-      }
-    }
-  }
-
-  /**
-   * Parse a single SSE data chunk from the OpenAI Responses API.
-   */
-  private parseResponsesChunk(data: string, currentToolId: string): StreamChunk[] {
-    let parsed: Record<string, unknown>;
-    try {
-      parsed = JSON.parse(data);
-    } catch (error) {
-      throw new ProviderError(
-        `Malformed OpenCode SSE event: ${error instanceof Error ? error.message : String(error)}`,
-        'opencode-zen',
-        undefined,
-        false,
-        undefined,
-        'invalid_response',
-        'parsing',
-      );
-    }
-
-    const eventType = parsed.type as string;
-
-    switch (eventType) {
-      case 'response.output_text.delta': {
-        const delta = parsed.delta as string | undefined;
-        if (delta) return [{ type: 'text_delta', text: delta }];
-        break;
-      }
-      case 'response.content_part.added': {
-        const part = parsed.part as Record<string, unknown> | undefined;
-        if (part?.type === 'output_text' && part.text) {
-          return [{ type: 'text_delta', text: part.text as string }];
-        }
-        break;
-      }
-      case 'response.output_item.added': {
-        const item = parsed.item as Record<string, unknown> | undefined;
-        if (item?.type === 'function_call') {
-          const name = (item.name as string) ?? '';
-          const callId = (item.call_id as string) ?? `call_${Date.now()}`;
-          return [{ type: 'tool_call_start', id: callId, name }];
-        }
-        break;
-      }
-      case 'response.tool_call_arguments.delta': {
-        const delta = parsed.delta as string | undefined;
-        if (delta) {
-          return [{ type: 'tool_call_delta', id: currentToolId, input: delta }];
-        }
-        break;
-      }
-      case 'response.completed': {
-        const resp = parsed.response as Record<string, unknown> | undefined;
-        const usage = resp?.usage as Record<string, unknown> | undefined;
-        const chunks: StreamChunk[] = [];
-        if (usage) {
-          chunks.push({
-            type: 'usage',
-            usage: {
-              inputTokens: (usage.input_tokens as number) ?? 0,
-              outputTokens: (usage.output_tokens as number) ?? 0,
-              totalTokens: (usage.total_tokens as number) ?? 0,
-            },
-          });
-        }
-        chunks.push({ type: 'done', stopReason: 'end_turn' });
-        return chunks;
-      }
-    }
-
-    return [];
-  }
-
   override async *chat(params: ChatParams): AsyncIterable<StreamChunk> {
     if (ZEN_ANTHROPIC_MODELS.has(params.model)) {
       // Route Claude and Anthropic-compatible Qwen models through the Anthropic message format
@@ -1145,7 +1006,13 @@ export class OpenCodeZenProvider extends OpenAIProvider {
       yield* this.geminiDelegate.chat(params);
     } else if (ZEN_GPT_MODELS.has(params.model)) {
       // Route GPT models through the OpenAI Responses API
-      yield* this.chatResponsesAPI(params);
+      yield* chatResponsesAPI(params, {
+        providerId: this.id,
+        providerName: this.name,
+        apiKey: this.apiKey,
+        baseUrl: this.baseUrl,
+        fetchImpl: this.fetchImpl,
+      });
     } else {
       // All other models (Kimi, MiniMax, GLM, DeepSeek, Grok, free tier) use OpenAI-compatible chat completions
       yield* super.chat(params);

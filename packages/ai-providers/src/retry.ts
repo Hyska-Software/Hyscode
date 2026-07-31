@@ -120,7 +120,7 @@ export async function* parseSSEStream(
 
   function extractFrameData(frame: string): string | null {
     const dataLines: string[] = [];
-    for (const line of frame.split('\n')) {
+    for (const line of frame.split(/\r?\n/)) {
       const trimmed = line.trimEnd();
       if (trimmed.startsWith(':')) continue; // SSE comment
       if (trimmed.startsWith('data:')) {
@@ -133,11 +133,12 @@ export async function* parseSSEStream(
   }
 
   function* processBuffer(): Iterable<string> {
-    // Extract complete SSE event frames (separated by \n\n).
-    let frameEnd: number;
-    while ((frameEnd = buffer.indexOf('\n\n')) !== -1) {
-      const frame = buffer.slice(0, frameEnd);
-      buffer = buffer.slice(frameEnd + 2);
+    // Extract complete SSE event frames. Per the SSE spec, frames are separated
+    // by a blank line, which may use LF (\n\n) or CRLF (\r\n\r\n) endings.
+    let frameMatch: RegExpExecArray | null;
+    while ((frameMatch = /\r?\n\r?\n/.exec(buffer)) !== null) {
+      const frame = buffer.slice(0, frameMatch.index);
+      buffer = buffer.slice(frameMatch.index + frameMatch[0].length);
 
       const data = extractFrameData(frame);
       if (data === null) continue;

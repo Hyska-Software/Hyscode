@@ -173,14 +173,45 @@ export class ProviderRegistry {
       yield withRetryUsage(stream.first.value, retryCount);
     }
 
-    while (true) {
-      let result: IteratorResult<StreamChunk>;
+    // Track how many chunks have been delivered to the caller. A mid-stream
+    // connection break before the FIRST chunk is retried once — the caller
+    // received nothing, so a fresh attempt cannot duplicate content. Breaks
+    // after content started streaming are surfaced as-is (the harness handles
+    // partial-response recovery).
+    let chunksDelivered = 0;
+    let result: IteratorResult<StreamChunk>;
+    if (stream.first.done) {
+      result = { done: true as const, value: undefined };
+    } else {
+      chunksDelivered++;
+      result = stream.first;
+    }
+
+    while (!result.done) {
       try {
         result = await stream.asyncIter.next();
       } catch (error) {
-        throw normalizeProviderError(error, provider.id, 'streaming');
+        const providerError = normalizeProviderError(error, provider.id, 'streaming');
+        if (
+          chunksDelivered === 0 &&
+          retryCount < 1 &&
+          (providerError.kind === 'stream_interrupted' || providerError.kind === 'connection')
+        ) {
+          retryCount++;
+          onRetry?.({ attempt: retryCount, error: providerError });
+          const retryIter = provider.chat({ ...chatParams, model });
+          stream.asyncIter = retryIter[Symbol.asyncIterator]();
+          try {
+            result = await stream.asyncIter.next();
+          } catch (retryError) {
+            throw normalizeProviderError(retryError, provider.id, 'connecting');
+          }
+          continue;
+        }
+        throw providerError;
       }
       if (result.done) break;
+      chunksDelivered++;
       yield withRetryUsage(result.value, retryCount);
     }
   }

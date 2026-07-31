@@ -307,7 +307,11 @@ export function classifyProviderErrorKind(message: string, statusCode?: number):
     /overload|unavailable/.test(value)
   )
     return 'unavailable';
-  if (/stream|body.*read|connection.*(closed|reset)|unexpected eof/.test(value))
+  if (
+    /\bstream(?:ing)?\s*(?:read|error|interrupted|interrupt|closed|reset|eof|failed)|connection.*(closed|reset)|unexpected eof|decoding response body|body.*read/.test(
+      value,
+    )
+  )
     return 'stream_interrupted';
   if (/json|protocol|malformed|invalid response|parse/.test(value)) return 'invalid_response';
   if (/network|fetch|connect|dns|http request failed/.test(value)) return 'connection';

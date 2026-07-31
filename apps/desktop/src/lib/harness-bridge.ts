@@ -1759,7 +1759,10 @@ Investigate the error, fix the underlying issue in the affected files, and verif
 
       case 'turn_end': {
         if (event.reason === 'error' && event.error) {
-          this.debug(`ERRO na iteração: ${event.error}`);
+          const technical = event.errorDetails?.technicalMessage;
+          this.debug(
+            `ERRO na iteração: ${event.error}${technical && technical !== event.error ? ` → ${technical}` : ''}`,
+          );
           if (!useAgentStore.getState().recoverableError) {
             store.setRecoverableError({
               error: {
