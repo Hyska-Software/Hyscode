@@ -38,7 +38,7 @@ export interface SubAgentState {
   id: string;
   task: string;
   mode: AgentMode;
-  status: 'running' | 'done' | 'error';
+  status: 'running' | 'done' | 'error' | 'cancelled';
   output: string;
   toolCalls: ToolCallDisplay[];
   startedAt: number;

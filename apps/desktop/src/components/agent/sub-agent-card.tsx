@@ -21,6 +21,7 @@ function mapStatus(status: string): AgentStatus {
     case 'running': return 'running';
     case 'done': return 'success';
     case 'error': return 'error';
+    case 'cancelled': return 'cancelled';
     default: return 'running';
   }
 }

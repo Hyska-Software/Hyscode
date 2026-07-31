@@ -1,4 +1,4 @@
-import { Check, CircleDashed, Loader2, X, MinusCircle } from "lucide-react";
+import { Check, CircleDashed, Loader2, X, MinusCircle, Ban } from "lucide-react";
 import { cn } from "../../lib/cn";
 import type { AgentStatus } from "./types";
 
@@ -18,6 +18,8 @@ export function StatusIcon({ status, className }: StatusIconProps) {
       return <X className={cn("size-4 text-danger-500", className)} />;
     case "skipped":
       return <MinusCircle className={cn("size-4 text-muted-foreground", className)} />;
+    case "cancelled":
+      return <Ban className={cn("size-4 text-muted-foreground", className)} />;
     case "pending":
     default:
       return <CircleDashed className={cn("size-4 text-muted-foreground", className)} />;
