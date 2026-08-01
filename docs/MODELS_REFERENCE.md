@@ -288,18 +288,18 @@ Tier **Batch** oferece 50% de desconto sobre o Standard; tier **Priority** (ex.:
 
 ## 6. Codex (provedor sidecar)
 
-Agente de codificação da OpenAI rodando via **Codex CLI instalado pelo usuário** (`npm install -g @openai/codex` — não é embutido no instalador do HysCode; o app detecta no PATH/`~/.codex/bin` e exibe o comando de instalação se ausente). Autenticação: API key OpenAI (pay-as-you-go) **ou** login ChatGPT via `codex login` (planos Plus/Pro/Business/Edu/Enterprise). Reasoning effort: `minimal` / `low` / `medium` / `high` / `xhigh`. Preços indicativos de referência — confirmar na [página de preços da API OpenAI](https://openai.com/api/pricing/).
+Agente de codificação da OpenAI rodando via **Codex CLI instalado pelo usuário** (`npm install -g @openai/codex` — não é embutido no instalador do HysCode; o app detecta no PATH/`~/.codex/bin` e exibe o comando de instalação se ausente). Autenticação: API key OpenAI (pay-as-you-go) **ou** login ChatGPT via `codex login` (planos Plus/Pro/Business/Edu/Enterprise). Reasoning effort: `minimal` / `low` / `medium` / `high` / `xhigh`. Preços oficiais da API OpenAI (USD por 1M tokens, consultados em 2026-08 na [documentação de modelos](https://developers.openai.com/api/docs/models)).
 
-| Nome | ID do modelo | Janela de contexto | Entrada | Saída | Cache read |
+| Nome | ID do modelo | Janela de contexto | Entrada | Cache read | Saída |
 |---|---|---|---|---|---|
-| GPT 5.6 Sol | `gpt-5.6-sol` | 400K | $2.50 | $10.00 | $0.25 |
-| GPT 5.6 Terra | `gpt-5.6-terra` | 400K | $1.25 | $10.00 | $0.125 |
-| GPT 5.6 Luna | `gpt-5.6-luna` | 400K | $0.50 | $4.00 | $0.05 |
-| GPT 5.5 | `gpt-5.5` | 400K | $1.25 | $10.00 | $0.125 |
-| GPT 5.4 | `gpt-5.4` | 400K | $1.25 | $10.00 | $0.125 |
-| GPT 5.4 Mini | `gpt-5.4-mini` | 400K | $0.40 | $1.60 | $0.04 |
+| GPT 5.6 Sol | `gpt-5.6-sol` | 1.05M | $5.00 | $0.50 | $30.00 |
+| GPT 5.6 Terra | `gpt-5.6-terra` | 1.05M | $2.00 | $0.20 | $12.00 |
+| GPT 5.6 Luna | `gpt-5.6-luna` | 1.05M | $0.20 | $0.02 | $1.20 |
+| GPT 5.5 | `gpt-5.5` | 1.05M | $5.00 | $0.50 | $30.00 |
+| GPT 5.4 | `gpt-5.4` | 1.05M | $2.50 | $0.25 | $15.00 |
+| GPT 5.4 Mini | `gpt-5.4-mini` | 400K | $0.75 | $0.075 | $4.50 |
 
-> **Nota**: no login ChatGPT, `gpt-5.4`/`gpt-5.4-mini` são aposentados em 2026-08-31 (substituir por `gpt-5.6-terra`/`gpt-5.6-luna`). `gpt-5.3-codex-spark` existe apenas para ChatGPT Pro (sem API) — não listado no catálogo.
+> **Nota**: no login ChatGPT, `gpt-5.4`/`gpt-5.4-mini` são aposentados em 2026-08-31 (substituir por `gpt-5.6-terra`/`gpt-5.6-luna`). `gpt-5.3-codex-spark` existe apenas para ChatGPT Pro (sem API) — não listado no catálogo. Prompts com >272K tokens de entrada são cobrados a 2x entrada e 1.5x saída (famílias 5.6/5.5/5.4); `gpt-5.4-mini` tem máximo de 272K tokens de entrada.
 
 ---
 

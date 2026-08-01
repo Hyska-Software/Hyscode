@@ -12,7 +12,12 @@ import type { AIProvider, AIModel, ChatParams, StreamChunk, ThinkingConfig } fro
 // Codex CLI (`~/.codex/auth.json`). The CLI itself is not bundled — the
 // settings UI checks for it and shows the install command when missing.
 
-const CODEX_CONTEXT_WINDOW = 400_000;
+// Official specs (developers.openai.com/api/docs/models, 2026-08):
+// - gpt-5.6-sol/terra/luna, gpt-5.5 and gpt-5.4: 1.05M context window
+// - gpt-5.4-mini: 400K context window
+// Pricing per 1M tokens (input / cached input / output).
+const CODEX_FULL_CONTEXT_WINDOW = 1_050_000;
+const CODEX_MINI_CONTEXT_WINDOW = 400_000;
 const CODEX_MAX_OUTPUT = 128_000;
 
 const CODEX_REASONING_VARIANTS = {
@@ -26,84 +31,84 @@ export const CODEX_MODELS: AIModel[] = [
     id: 'gpt-5.6-sol',
     name: 'GPT 5.6 Sol (Codex)',
     provider: 'codex',
-    contextWindow: CODEX_CONTEXT_WINDOW,
+    contextWindow: CODEX_FULL_CONTEXT_WINDOW,
     maxOutputTokens: CODEX_MAX_OUTPUT,
     supportsTools: true,
     supportsStreaming: true,
     supportsVision: false,
-    inputPricePerMToken: 2.5,
-    outputPricePerMToken: 10,
-    cachedInputPricePerMToken: 0.25,
+    inputPricePerMToken: 5,
+    outputPricePerMToken: 30,
+    cachedInputPricePerMToken: 0.5,
     thinkingVariants: CODEX_REASONING_VARIANTS,
   },
   {
     id: 'gpt-5.6-terra',
     name: 'GPT 5.6 Terra (Codex)',
     provider: 'codex',
-    contextWindow: CODEX_CONTEXT_WINDOW,
+    contextWindow: CODEX_FULL_CONTEXT_WINDOW,
     maxOutputTokens: CODEX_MAX_OUTPUT,
     supportsTools: true,
     supportsStreaming: true,
     supportsVision: false,
-    inputPricePerMToken: 1.25,
-    outputPricePerMToken: 10,
-    cachedInputPricePerMToken: 0.125,
+    inputPricePerMToken: 2,
+    outputPricePerMToken: 12,
+    cachedInputPricePerMToken: 0.2,
     thinkingVariants: CODEX_REASONING_VARIANTS,
   },
   {
     id: 'gpt-5.6-luna',
     name: 'GPT 5.6 Luna (Codex)',
     provider: 'codex',
-    contextWindow: CODEX_CONTEXT_WINDOW,
+    contextWindow: CODEX_FULL_CONTEXT_WINDOW,
     maxOutputTokens: CODEX_MAX_OUTPUT,
     supportsTools: true,
     supportsStreaming: true,
     supportsVision: false,
-    inputPricePerMToken: 0.5,
-    outputPricePerMToken: 4,
-    cachedInputPricePerMToken: 0.05,
+    inputPricePerMToken: 0.2,
+    outputPricePerMToken: 1.2,
+    cachedInputPricePerMToken: 0.02,
     thinkingVariants: CODEX_REASONING_VARIANTS,
   },
   {
     id: 'gpt-5.5',
     name: 'GPT 5.5 (Codex)',
     provider: 'codex',
-    contextWindow: CODEX_CONTEXT_WINDOW,
+    contextWindow: CODEX_FULL_CONTEXT_WINDOW,
     maxOutputTokens: CODEX_MAX_OUTPUT,
     supportsTools: true,
     supportsStreaming: true,
     supportsVision: false,
-    inputPricePerMToken: 1.25,
-    outputPricePerMToken: 10,
-    cachedInputPricePerMToken: 0.125,
+    inputPricePerMToken: 5,
+    outputPricePerMToken: 30,
+    cachedInputPricePerMToken: 0.5,
     thinkingVariants: CODEX_REASONING_VARIANTS,
   },
   {
     id: 'gpt-5.4',
     name: 'GPT 5.4 (Codex)',
     provider: 'codex',
-    contextWindow: CODEX_CONTEXT_WINDOW,
+    contextWindow: CODEX_FULL_CONTEXT_WINDOW,
     maxOutputTokens: CODEX_MAX_OUTPUT,
     supportsTools: true,
     supportsStreaming: true,
     supportsVision: false,
-    inputPricePerMToken: 1.25,
-    outputPricePerMToken: 10,
-    cachedInputPricePerMToken: 0.125,
+    inputPricePerMToken: 2.5,
+    outputPricePerMToken: 15,
+    cachedInputPricePerMToken: 0.25,
     thinkingVariants: CODEX_REASONING_VARIANTS,
   },
   {
     id: 'gpt-5.4-mini',
     name: 'GPT 5.4 Mini (Codex)',
     provider: 'codex',
-    contextWindow: CODEX_CONTEXT_WINDOW,
+    contextWindow: CODEX_MINI_CONTEXT_WINDOW,
     maxOutputTokens: CODEX_MAX_OUTPUT,
     supportsTools: true,
     supportsStreaming: true,
     supportsVision: false,
-    inputPricePerMToken: 0.4,
-    outputPricePerMToken: 1.6,
-    cachedInputPricePerMToken: 0.04,
+    inputPricePerMToken: 0.75,
+    outputPricePerMToken: 4.5,
+    cachedInputPricePerMToken: 0.075,
     thinkingVariants: CODEX_REASONING_VARIANTS,
   },
 ];
@@ -178,6 +183,11 @@ export class CodexProvider implements AIProvider {
       return;
     }
 
+    // Never forward an empty model id — the Codex SDK treats an empty string
+    // as "no --model flag", which would make the CLI silently use its own
+    // default model instead of the selection.
+    const model = params.model || CODEX_MODELS[0].id;
+
     // Flatten messages to a single prompt; Codex runs its own agentic loop.
     const prompt = params.messages
       .map((m) => {
@@ -192,7 +202,7 @@ export class CodexProvider implements AIProvider {
 
     yield* this.invoke({
       apiKey: this.apiKey || undefined,
-      model: params.model,
+      model,
       systemPrompt: params.systemPrompt,
       prompt,
       reasoningEffort: resolveReasoningEffort(params.thinking),
