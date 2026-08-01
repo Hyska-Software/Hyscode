@@ -9,6 +9,7 @@ pub mod fs;
 pub mod git;
 pub mod github_oauth;
 pub mod github_pr;
+pub mod github_repos;
 pub mod keychain;
 pub mod lsp;
 pub mod notifications;

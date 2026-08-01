@@ -23,9 +23,12 @@ import { useExtensionStore } from './stores/extension-store';
 import { useCommandStore } from './stores/command-store';
 import { useKeybindingStore } from './stores/keybinding-store';
 import { useGitStore } from './stores/git-store';
+import { useGithubStore } from './stores/github-store';
 import { useTerminalStore } from './stores/terminal-store';
 import { useUpdateStore } from './stores/update-store';
 import { useOnboardingStore } from './stores/onboarding-store';
+import { CloneRepositoryDialog } from './components/git/clone-repository-dialog';
+import { PublishRepositoryDialog } from './components/git/publish-repository-dialog';
 import { useEffect, useRef, useCallback } from 'react';
 import { pickFolder, pickFile } from './lib/tauri-dialog';
 import { initProviders } from './lib/init-providers';
@@ -271,6 +274,10 @@ export function App() {
   const openTab = useEditorStore((s) => s.openTab);
   const closeTab = useEditorStore((s) => s.closeTab);
   const hasCompletedOnboarding = useOnboardingStore((s) => s.hasCompletedOnboarding);
+  const cloneDialogOpen = useGithubStore((s) => s.cloneDialogOpen);
+  const publishDialogOpen = useGithubStore((s) => s.publishDialogOpen);
+  const closeCloneDialog = useGithubStore((s) => s.closeCloneDialog);
+  const closePublishDialog = useGithubStore((s) => s.closePublishDialog);
 
   // Project lifecycle: open a new project with state save/restore
   const handleOpenProject = useCallback(
@@ -515,6 +522,24 @@ export function App() {
       'Initialize Repository',
       async () => {
         await useGitStore.getState().initRepo();
+      },
+      { category: 'Git' },
+    );
+
+    builtin(
+      'git.clone',
+      'Clone Repository…',
+      async () => {
+        useGithubStore.getState().openCloneDialog();
+      },
+      { category: 'Git' },
+    );
+
+    builtin(
+      'github.publishRepository',
+      'Publish to GitHub…',
+      async () => {
+        useGithubStore.getState().openPublishDialog();
       },
       { category: 'Git' },
     );
@@ -967,6 +992,8 @@ export function App() {
     <TooltipProvider>
       {!hasCompletedOnboarding && <OnboardingWizard />}
       {!rootPath ? <WelcomePage /> : <IDE />}
+      <CloneRepositoryDialog open={cloneDialogOpen} onClose={closeCloneDialog} />
+      <PublishRepositoryDialog open={publishDialogOpen} onClose={closePublishDialog} />
       <DialogProvider />
     </TooltipProvider>
   );

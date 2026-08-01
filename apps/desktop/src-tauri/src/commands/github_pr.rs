@@ -150,14 +150,8 @@ pub async fn github_create_pull_request(
         payload.head = format!("{head_owner}:{}", payload.head);
     }
 
-    // 2. A repository-scoped token is distinct from Copilot authentication.
-    let token = {
-        let store = keychain.0.lock().map_err(|e| e.to_string())?;
-        store
-            .get("hyscode:github_token")
-            .cloned()
-            .ok_or("No repository GitHub token found. Add one in Settings → Git.")?
-    };
+    // 2. Repository access: account OAuth token first, then manual PAT.
+    let token = super::github_repos::resolve_github_token(&keychain.0)?;
 
     // 3. Build request
     let client = reqwest::Client::builder()

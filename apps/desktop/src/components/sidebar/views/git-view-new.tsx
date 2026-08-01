@@ -36,8 +36,12 @@ import {
   GitPullRequest,
   GitFork as GraphIcon,
   Check,
+  Github,
+  PlusCircle,
+  Link2,
 } from 'lucide-react';
 import { useGitStore, useEditorStore } from '../../../stores';
+import { useGithubStore } from '../../../stores/github-store';
 import { useSettingsStore } from '../../../stores/settings-store';
 import { getViewerType } from '../../../lib/utils';
 import { detectLanguage } from '../../../lib/lsp-bridge';
@@ -92,6 +96,10 @@ export function GitView() {
   const amendCommit = useGitStore((s) => s.amendCommit);
   const setCommitMessage = useGitStore((s) => s.setCommitMessage);
   const initRepo = useGitStore((s) => s.initRepo);
+  const addRemote = useGitStore((s) => s.addRemote);
+  const removeRemote = useGitStore((s) => s.removeRemote);
+  const openCloneDialog = useGithubStore((s) => s.openCloneDialog);
+  const openPublishDialog = useGithubStore((s) => s.openPublishDialog);
   const stashChanges = useGitStore((s) => s.stashChanges);
   const popStash = useGitStore((s) => s.popStash);
   const applyStash = useGitStore((s) => s.applyStash);
@@ -242,9 +250,14 @@ export function GitView() {
       await runOp('Push', () => push());
       return;
     }
+    if (remotes.length === 0) {
+      setShowMenu(false);
+      openPublishDialog();
+      return;
+    }
     const remote = await chooseRemote();
     if (remote) await runOp('Publish Branch', () => publishBranch(remote));
-  }, [chooseRemote, publishBranch, push, runOp, upstream]);
+  }, [chooseRemote, openPublishDialog, publishBranch, push, remotes.length, runOp, upstream]);
   const handlePull = useCallback(() => runOp('Pull', () => pull()), [runOp, pull]);
   const handleFetch = useCallback(() => runOp('Fetch', () => fetchRemote()), [runOp, fetchRemote]);
   const handlePushTo = useCallback(async () => {
@@ -262,6 +275,38 @@ export function GitView() {
   const handleFetchPrune = useCallback(
     () => runOp('Fetch & Prune', () => fetchAll(true)),
     [fetchAll, runOp],
+  );
+
+  const handleAddRemote = useCallback(async () => {
+    setShowMenu(false);
+    const defaultName = remotes.some((remote) => remote.name === 'origin') ? '' : 'origin';
+    const name = await promptInput({
+      title: 'Add Remote',
+      placeholder: defaultName || 'remote name',
+      defaultValue: defaultName,
+    });
+    if (!name) return;
+    const url = await promptInput({
+      title: `Remote URL for "${name}"`,
+      placeholder: 'https://github.com/owner/repo.git',
+    });
+    if (!url) return;
+    await runOp('Add Remote', () => addRemote(name, url));
+  }, [addRemote, remotes, runOp]);
+
+  const handleRemoveRemote = useCallback(
+    async (name: string) => {
+      setShowMenu(false);
+      const confirmed = await promptConfirm({
+        title: `Remove remote "${name}"?`,
+        description: 'The remote will be removed from this repository. This does not delete the remote repository.',
+        confirmLabel: 'Remove',
+        danger: true,
+      });
+      if (!confirmed) return;
+      await runOp('Remove Remote', () => removeRemote(name));
+    },
+    [removeRemote, runOp],
   );
 
   const handleCommit = useCallback(
@@ -550,6 +595,13 @@ export function GitView() {
       <div className="flex flex-col items-center justify-center py-12 text-center text-muted-foreground">
         <GitBranch className="mb-3 h-8 w-8 opacity-30" />
         <p className="text-xs">Open a folder to view source control</p>
+        <button
+          onClick={openCloneDialog}
+          className="mt-3 flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-[11px] text-white hover:bg-primary/80 transition-colors"
+        >
+          <GitBranch className="h-3 w-3" />
+          Clone Repository
+        </button>
       </div>
     );
   }
@@ -584,12 +636,21 @@ export function GitView() {
       <div className="flex flex-col items-center justify-center py-12 text-center text-muted-foreground">
         <GitBranch className="mb-3 h-8 w-8 opacity-30" />
         <p className="text-xs">Not a Git repository</p>
-        <button
-          onClick={() => void runOp('Initialize Repository', initRepo)}
-          className="mt-3 rounded-md bg-primary px-3 py-1.5 text-[11px] text-white hover:bg-primary/80 transition-colors"
-        >
-          Initialize Repository
-        </button>
+        <div className="mt-3 flex items-center gap-2">
+          <button
+            onClick={() => void runOp('Initialize Repository', initRepo)}
+            className="rounded-md bg-primary px-3 py-1.5 text-[11px] text-white hover:bg-primary/80 transition-colors"
+          >
+            Initialize Repository
+          </button>
+          <button
+            onClick={openCloneDialog}
+            className="flex items-center gap-1.5 rounded-md border border-border bg-background px-3 py-1.5 text-[11px] text-foreground hover:bg-muted transition-colors"
+          >
+            <GitBranch className="h-3 w-3" />
+            Clone Repository
+          </button>
+        </div>
       </div>
     );
   }
@@ -665,6 +726,39 @@ export function GitView() {
               >
                 {/* Remote */}
                 <MenuSection label="Remote">
+                  <MenuBtn
+                    icon={Github}
+                    label="Publish to GitHub…"
+                    onClick={() => {
+                      setShowMenu(false);
+                      openPublishDialog();
+                    }}
+                  />
+                  <MenuBtn
+                    icon={PlusCircle}
+                    label="Add Remote…"
+                    onClick={() => void handleAddRemote()}
+                  />
+                  {remotes.length > 0 && <MenuDivider />}
+                  {remotes.map((remote) => (
+                    <div
+                      key={remote.name}
+                      className="group flex items-center gap-1 rounded-md px-1.5 py-1 hover:bg-muted transition-colors"
+                    >
+                      <Link2 className="h-3 w-3 shrink-0 text-muted-foreground" />
+                      <div className="min-w-0 flex-1 leading-tight">
+                        <p className="truncate text-[11px] text-foreground">{remote.name}</p>
+                        <p className="truncate text-[9px] text-muted-foreground">{remote.url}</p>
+                      </div>
+                      <button
+                        onClick={() => void handleRemoveRemote(remote.name)}
+                        title={`Remove remote ${remote.name}`}
+                        className="flex h-5 w-5 shrink-0 items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 hover:text-destructive"
+                      >
+                        <Trash2 className="h-3 w-3" />
+                      </button>
+                    </div>
+                  ))}
                   <MenuBtn icon={ArrowUp} label="Push" onClick={handlePush} />
                   <MenuBtn icon={ArrowUp} label="Push To…" onClick={handlePushTo} />
                   <MenuBtn icon={ArrowDown} label="Pull" onClick={handlePull} />

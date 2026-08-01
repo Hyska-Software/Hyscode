@@ -16,9 +16,12 @@ import {
   Loader2,
   Copy,
   ExternalLink,
+  Github,
+  GitBranch,
 } from 'lucide-react';
 import { useOnboardingStore, ONBOARDING_TOTAL_STEPS } from '../../stores/onboarding-store';
 import { useSettingsStore } from '../../stores/settings-store';
+import { useGithubStore } from '../../stores/github-store';
 import { BrandMark } from '../brand-mark';
 import { tauriInvoke } from '../../lib/tauri-invoke';
 import { reinitProvider } from '../../lib/init-providers';
@@ -646,7 +649,148 @@ function StepEditor({ visible }: { visible: boolean }) {
   );
 }
 
+// ── GitHub account step (optional, uses the same store as Settings → Git) ─────
+
+function StepGitHub({ visible }: { visible: boolean }) {
+  const authStatus = useGithubStore((s) => s.authStatus);
+  const user = useGithubStore((s) => s.user);
+  const deviceFlow = useGithubStore((s) => s.deviceFlow);
+  const authError = useGithubStore((s) => s.authError);
+  const checkAuth = useGithubStore((s) => s.checkAuth);
+  const startLogin = useGithubStore((s) => s.startLogin);
+  const cancelLogin = useGithubStore((s) => s.cancelLogin);
+  const logout = useGithubStore((s) => s.logout);
+  const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    if (authStatus === 'unknown') void checkAuth();
+  }, [authStatus, checkAuth]);
+
+  const copyCode = async (code: string) => {
+    await navigator.clipboard.writeText(code);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  return (
+    <div
+      className={`flex flex-col gap-5 transition-all duration-500 ${
+        visible ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-3'
+      }`}
+    >
+      <div className="flex flex-col gap-0.5">
+        <h2 className="text-sm font-semibold text-foreground">Connect GitHub</h2>
+        <p className="text-[11px] text-muted-foreground">
+          Optional — clone, publish and manage public and private repositories from the editor.
+          Changeable anytime in Settings → Git.
+        </p>
+      </div>
+
+      <div className="flex flex-col gap-3 rounded-lg border border-border bg-surface-raised p-4">
+        {authStatus === 'checking' || authStatus === 'unknown' ? (
+          <div className="flex items-center gap-2 py-1 text-[11px] text-muted-foreground">
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            Checking GitHub authentication…
+          </div>
+        ) : authStatus === 'signed-in' && user ? (
+          <div className="flex items-center gap-3">
+            <img
+              src={user.avatar_url}
+              alt=""
+              className="h-10 w-10 rounded-full border border-border"
+            />
+            <div className="flex flex-col leading-tight">
+              <span className="text-[12px] font-medium text-foreground">
+                {user.name ?? user.login}
+              </span>
+              <span className="text-[11px] text-muted-foreground">@{user.login}</span>
+            </div>
+            <div className="ml-auto flex items-center gap-2">
+              <span className="flex items-center gap-1.5 rounded-md border border-success/30 bg-success/10 px-2 py-1 text-[10px] font-medium text-success">
+                <Check className="h-3 w-3" />
+                Connected
+              </span>
+              <button
+                onClick={() => void logout()}
+                className="flex items-center gap-1 rounded-md px-2 py-1 text-[10px] text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors"
+              >
+                <LogOut className="h-3 w-3" />
+                Disconnect
+              </button>
+            </div>
+          </div>
+        ) : deviceFlow ? (
+          <div className="flex flex-col gap-2">
+            <p className="text-[11px] text-muted-foreground">
+              Copy this code, then open GitHub to authorize:
+            </p>
+            <div className="flex items-center gap-2">
+              <code className="flex-1 rounded-md bg-muted px-3 py-1.5 text-center font-mono text-sm font-bold tracking-[0.3em] text-foreground">
+                {deviceFlow.userCode}
+              </code>
+              <button
+                onClick={() => copyCode(deviceFlow.userCode)}
+                className="flex h-8 w-8 items-center justify-center rounded-md border border-border bg-muted text-muted-foreground hover:text-foreground transition-colors"
+              >
+                {copied ? (
+                  <Check className="h-3.5 w-3.5 text-success" />
+                ) : (
+                  <Copy className="h-3.5 w-3.5" />
+                )}
+              </button>
+            </div>
+            <a
+              href={deviceFlow.verificationUri}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center justify-center gap-1 rounded-md border border-border bg-surface px-3 py-1.5 text-[11px] text-primary hover:bg-surface-raised transition-colors"
+            >
+              <ExternalLink className="h-3 w-3" />
+              {deviceFlow.verificationUri}
+            </a>
+            <div className="flex items-center justify-center gap-1.5 text-[11px] text-muted-foreground">
+              <Loader2 className="h-3 w-3 animate-spin" />
+              Waiting for authorization…
+              <button
+                onClick={cancelLogin}
+                className="text-[10px] underline-offset-2 hover:text-foreground hover:underline"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="flex flex-col gap-3">
+            <button
+              onClick={() => void startLogin()}
+              className="flex items-center justify-center gap-1.5 rounded-md bg-primary px-3 py-2 text-[12px] font-medium text-white hover:bg-primary/90 transition-colors"
+            >
+              <Github className="h-4 w-4" />
+              Sign in with GitHub
+            </button>
+            <p className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
+              <GitBranch className="h-3 w-3 shrink-0" />
+              Grants access to your repositories (public and private) for clone, publish and pull
+              requests.
+            </p>
+            {authError && <p className="text-[11px] text-destructive">{authError}</p>}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function StepDone({ visible }: { visible: boolean }) {
+  const githubUser = useGithubStore((s) => s.user);
+
+  const doneItems = [
+    { label: 'Theme configured', icon: Palette },
+    { label: 'AI provider connected', icon: Brain },
+    { label: 'Editor personalized', icon: Type },
+    ...(githubUser ? [{ label: 'GitHub account connected', icon: Github }] : []),
+  ];
+
   return (
     <div
       className={`flex flex-col items-center gap-6 text-center transition-all duration-500 ${
@@ -665,11 +809,7 @@ function StepDone({ visible }: { visible: boolean }) {
       </div>
 
       <div className="flex w-full max-w-xs flex-col gap-1">
-        {[
-          { label: 'Theme configured', icon: Palette },
-          { label: 'AI provider connected', icon: Brain },
-          { label: 'Editor personalized', icon: Type },
-        ].map(({ label, icon: Icon }) => (
+        {doneItems.map(({ label, icon: Icon }) => (
           <div key={label} className="flex items-center gap-2.5 rounded-lg bg-surface-raised border border-border px-3 py-2">
             <div className="flex h-4 w-4 items-center justify-center rounded bg-success/10">
               <Check className="h-2.5 w-2.5 text-success" />
@@ -689,6 +829,7 @@ const STEPS = [
   { label: 'Welcome', icon: Sparkles, component: StepWelcome },
   { label: 'Theme', icon: Palette, component: StepTheme },
   { label: 'AI', icon: Brain, component: StepAI },
+  { label: 'GitHub', icon: Github, component: StepGitHub },
   { label: 'Editor', icon: Type, component: StepEditor },
   { label: 'Done', icon: Rocket, component: StepDone },
 ];

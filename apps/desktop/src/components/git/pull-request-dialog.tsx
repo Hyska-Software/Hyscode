@@ -44,8 +44,12 @@ export function PullRequestDialog({ open, onClose }: PullRequestDialogProps) {
   useEffect(() => {
     if (!open) return;
     let cancelled = false;
-    void Promise.all([useGitStore.getState().fetchBranches(), tauriInvoke('github_has_token', {})])
-      .then(([, tokenAvailable]) => {
+    void Promise.all([
+      useGitStore.getState().fetchBranches(),
+      tauriInvoke('github_has_token', {}),
+      tauriInvoke('github_account_is_authenticated', {}),
+    ])
+      .then(([, tokenAvailable, accountAvailable]) => {
         if (cancelled) return;
         const git = useGitStore.getState();
         const localBranches = git.branches.filter((branch) => !branch.is_remote);
@@ -59,7 +63,7 @@ export function PullRequestDialog({ open, onClose }: PullRequestDialogProps) {
         setBaseBranch(mainLike?.name ?? firstOther?.name ?? '');
         setBaseRemote(preferredRemote);
         setHeadRemote(git.upstream?.remote ?? preferredRemote);
-        setHasToken(tokenAvailable);
+        setHasToken(tokenAvailable || accountAvailable);
         setTitle('');
         setBody('');
         setResult(null);
@@ -298,7 +302,7 @@ export function PullRequestDialog({ open, onClose }: PullRequestDialogProps) {
           {!hasToken && (
             <div className="flex items-center gap-1.5 rounded-md border border-warning/20 bg-warning/5 px-2 py-1.5 text-[10px] text-warning">
               <AlertCircle className="h-3 w-3 shrink-0" />
-              <span>Add a repository GitHub token in Settings → Git.</span>
+              <span>Sign in with GitHub or add a repository token in Settings → Git.</span>
             </div>
           )}
 

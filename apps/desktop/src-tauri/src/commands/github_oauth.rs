@@ -61,29 +61,31 @@ struct CopilotTokenResponse {
 // public and used by all third-party Copilot-compatible editors.
 const COPILOT_CLIENT_ID: &str = "Iv1.b507a08c87ecfe98";
 
-/// Step 1: Start the GitHub OAuth Device Flow.
-/// Returns device_code, user_code, and verification_uri for the user.
-#[tauri::command]
-pub async fn github_oauth_start() -> Result<DeviceFlowResponse, String> {
-    eprintln!(
-        "[CopilotAuth] github_oauth_start called with client_id: {}...",
-        &COPILOT_CLIENT_ID[..COPILOT_CLIENT_ID.len().min(8)]
-    );
+// The HysCode OAuth App client ID (Device Flow). Public by design — the device
+// flow uses a public client, no client secret is required.
+const HYSCODE_GITHUB_CLIENT_ID: &str = "Ov23liocJmHgYeWjn8MU";
+
+// Scopes required for full repository operations:
+// - `repo`        : clone/publish/push/pull public and private repositories
+// - `read:user`   : fetch the authenticated user profile
+// - `workflow`    : push changes to `.github/workflows/*` files (GitHub refuses
+//                   workflow updates from OAuth tokens without this scope)
+const GITHUB_ACCOUNT_SCOPE: &str = "repo read:user workflow";
+
+// ── Shared device flow helpers ───────────────────────────────────────────────
+
+async fn start_device_flow(client_id: &str, scope: &str) -> Result<DeviceFlowResponse, String> {
     let client = reqwest::Client::new();
 
     let resp = client
         .post("https://github.com/login/device/code")
         .header("Accept", "application/json")
-        .form(&[
-            ("client_id", COPILOT_CLIENT_ID),
-            ("scope", "copilot read:user"),
-        ])
+        .form(&[("client_id", client_id), ("scope", scope)])
         .send()
         .await
         .map_err(|e| format!("Failed to start device flow: {}", e))?;
 
     let status = resp.status();
-    eprintln!("[CopilotAuth] github_oauth_start HTTP status: {}", status);
 
     if !status.is_success() {
         return Err(format!(
@@ -97,8 +99,6 @@ pub async fn github_oauth_start() -> Result<DeviceFlowResponse, String> {
         .await
         .map_err(|e| format!("Failed to parse device flow response: {}", e))?;
 
-    eprintln!("[CopilotAuth] github_oauth_start completed");
-
     Ok(DeviceFlowResponse {
         device_code: data.device_code,
         user_code: data.user_code,
@@ -108,15 +108,10 @@ pub async fn github_oauth_start() -> Result<DeviceFlowResponse, String> {
     })
 }
 
-/// Step 2: Poll GitHub to check if user has authorized the device.
-/// Returns the access_token on success, or an error with "authorization_pending" if still waiting.
-#[tauri::command]
-pub async fn github_oauth_poll(
-    keychain: State<'_, KeychainState>,
-    device_code: String,
+async fn poll_device_flow(
+    client_id: &str,
+    device_code: &str,
 ) -> Result<OAuthTokenResponse, String> {
-    eprintln!("[CopilotAuth] github_oauth_poll called");
-
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(30))
         .build()
@@ -126,8 +121,8 @@ pub async fn github_oauth_poll(
         .post("https://github.com/login/oauth/access_token")
         .header("Accept", "application/json")
         .form(&[
-            ("client_id", COPILOT_CLIENT_ID),
-            ("device_code", device_code.as_str()),
+            ("client_id", client_id),
+            ("device_code", device_code),
             ("grant_type", "urn:ietf:params:oauth:grant-type:device_code"),
         ])
         .send()
@@ -135,7 +130,6 @@ pub async fn github_oauth_poll(
         .map_err(|e| format!("Failed to poll OAuth: {}", e))?;
 
     let status = resp.status();
-    eprintln!("[CopilotAuth] github_oauth_poll HTTP status: {}", status);
 
     if !status.is_success() {
         return Err(format!(
@@ -152,10 +146,6 @@ pub async fn github_oauth_poll(
         .map_err(|e| format!("Failed to parse OAuth response: {}", e))?;
 
     if let Some(ref err) = data.error {
-        eprintln!(
-            "[CopilotAuth] github_oauth_poll GitHub error: {} — desc: {:?}",
-            err, data.error_description
-        );
         return Err(match err.as_str() {
             "authorization_pending" => "authorization_pending".to_string(),
             "slow_down" => "slow_down".to_string(),
@@ -172,9 +162,40 @@ pub async fn github_oauth_poll(
     let token_type = data.token_type.unwrap_or_else(|| "bearer".to_string());
     let scope = data.scope.clone().unwrap_or_default();
 
+    Ok(OAuthTokenResponse {
+        access_token,
+        token_type,
+        scope,
+    })
+}
+
+/// Step 1: Start the GitHub OAuth Device Flow.
+/// Returns device_code, user_code, and verification_uri for the user.
+#[tauri::command]
+pub async fn github_oauth_start() -> Result<DeviceFlowResponse, String> {
+    eprintln!(
+        "[CopilotAuth] github_oauth_start called with client_id: {}...",
+        &COPILOT_CLIENT_ID[..COPILOT_CLIENT_ID.len().min(8)]
+    );
+    let result = start_device_flow(COPILOT_CLIENT_ID, "copilot read:user").await;
+    eprintln!("[CopilotAuth] github_oauth_start completed");
+    result
+}
+
+/// Step 2: Poll GitHub to check if user has authorized the device.
+/// Returns the access_token on success, or an error with "authorization_pending" if still waiting.
+#[tauri::command]
+pub async fn github_oauth_poll(
+    keychain: State<'_, KeychainState>,
+    device_code: String,
+) -> Result<OAuthTokenResponse, String> {
+    eprintln!("[CopilotAuth] github_oauth_poll called");
+
+    let resp = poll_device_flow(COPILOT_CLIENT_ID, &device_code).await?;
+
     eprintln!(
         "[CopilotAuth] github_oauth_poll SUCCESS — scope: {:?}, token_type: {}",
-        scope, token_type
+        resp.scope, resp.token_type
     );
 
     // Store the long-lived access token in keychain
@@ -182,17 +203,13 @@ pub async fn github_oauth_poll(
         let mut store = keychain.0.lock().map_err(|e| e.to_string())?;
         store.insert(
             "hyscode:github_copilot_access_token".to_string(),
-            access_token.clone(),
+            resp.access_token.clone(),
         );
         super::keychain::persist_keychain_ref(&store);
         eprintln!("[CopilotAuth] github_oauth_poll — access_token stored in keychain");
     }
 
-    Ok(OAuthTokenResponse {
-        access_token,
-        token_type,
-        scope,
-    })
+    Ok(resp)
 }
 
 /// Exchange the long-lived GitHub access token for a short-lived Copilot API token.
@@ -326,4 +343,79 @@ pub async fn github_copilot_is_authenticated(
 ) -> Result<bool, String> {
     let store = keychain.0.lock().map_err(|e| e.to_string())?;
     Ok(store.contains_key("hyscode:github_copilot_access_token"))
+}
+
+// ─── GitHub Account (Device Flow) ────────────────────────────────────────────
+// Full GitHub account login for repository operations. Uses the HysCode OAuth
+// App client ID with `repo read:user` scopes. The token is stored as
+// `hyscode:github_access_token` and reused by the GitHub REST commands.
+
+/// Step 1: Start the device flow for the HysCode GitHub account.
+#[tauri::command]
+pub async fn github_account_oauth_start() -> Result<DeviceFlowResponse, String> {
+    eprintln!("[GitHubAccount] github_account_oauth_start");
+    start_device_flow(HYSCODE_GITHUB_CLIENT_ID, GITHUB_ACCOUNT_SCOPE).await
+}
+
+/// Step 2: Poll for authorization and store the account access token.
+#[tauri::command]
+pub async fn github_account_oauth_poll(
+    keychain: State<'_, KeychainState>,
+    device_code: String,
+) -> Result<OAuthTokenResponse, String> {
+    eprintln!("[GitHubAccount] github_account_oauth_poll");
+
+    let resp = poll_device_flow(HYSCODE_GITHUB_CLIENT_ID, &device_code).await?;
+
+    eprintln!(
+        "[GitHubAccount] github_account_oauth_poll SUCCESS — scope: {:?}",
+        resp.scope
+    );
+
+    {
+        let mut store = keychain.0.lock().map_err(|e| e.to_string())?;
+        store.insert(
+            "hyscode:github_access_token".to_string(),
+            resp.access_token.clone(),
+        );
+        store.insert(
+            "hyscode:github_access_scope".to_string(),
+            resp.scope.clone(),
+        );
+        super::keychain::persist_keychain_ref(&store);
+        eprintln!(
+            "[GitHubAccount] access_token stored in keychain — scope: {:?}",
+            resp.scope
+        );
+    }
+
+    Ok(resp)
+}
+
+/// Check if the GitHub account is authenticated (has a stored access token).
+#[tauri::command]
+pub async fn github_account_is_authenticated(
+    keychain: State<'_, KeychainState>,
+) -> Result<bool, String> {
+    let store = keychain.0.lock().map_err(|e| e.to_string())?;
+    Ok(store.contains_key("hyscode:github_access_token"))
+}
+
+/// Return the scopes granted to the stored GitHub access token, if any.
+#[tauri::command]
+pub async fn github_account_scopes(
+    keychain: State<'_, KeychainState>,
+) -> Result<Option<String>, String> {
+    let store = keychain.0.lock().map_err(|e| e.to_string())?;
+    Ok(store.get("hyscode:github_access_scope").cloned())
+}
+
+/// Disconnect the GitHub account — remove the stored access token.
+#[tauri::command]
+pub async fn github_account_disconnect(keychain: State<'_, KeychainState>) -> Result<(), String> {
+    let mut store = keychain.0.lock().map_err(|e| e.to_string())?;
+    store.remove("hyscode:github_access_token");
+    store.remove("hyscode:github_access_scope");
+    super::keychain::persist_keychain_ref(&store);
+    Ok(())
 }
