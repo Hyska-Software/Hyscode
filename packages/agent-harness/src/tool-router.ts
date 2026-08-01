@@ -15,6 +15,7 @@ import {
   SAFE_TOOLS,
   DESTRUCTIVE_TOOLS,
   CATEGORY_RISK,
+  GIT_WORKTREE_SWEEPING_TOOLS,
 } from './types';
 
 export class ToolRouter {
@@ -162,14 +163,7 @@ export class ToolRouter {
       return record;
     }
 
-    const dirtyUnsafeGitTools = new Set([
-      'git_checkout',
-      'git_pull',
-      'git_stash',
-      'git_merge',
-      'git_reset',
-    ]);
-    if (dirtyUnsafeGitTools.has(toolName) && context.hasDirtyBuffers?.()) {
+    if (GIT_WORKTREE_SWEEPING_TOOLS.has(toolName) && context.hasDirtyBuffers?.()) {
       const record: ToolCallRecord = {
         id: toolCallId,
         toolName,
@@ -265,7 +259,7 @@ export class ToolRouter {
   getToolRiskLevel(toolName: string, handler: ToolHandler): ToolRiskLevel {
     if (SAFE_TOOLS.has(toolName)) return 'safe';
     if (DESTRUCTIVE_TOOLS.has(toolName)) return 'destructive';
-    return CATEGORY_RISK[handler.category] ?? 'moderate';
+    return handler.riskLevel ?? CATEGORY_RISK[handler.category] ?? 'moderate';
   }
 
   /** Mark a tool as trusted for the current session (session-trust mode) */

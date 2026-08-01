@@ -13,6 +13,7 @@
 // (mode_policies table) — the bridge loads overrides at startup.
 
 import type { AgentType, ApprovalMode, ToolCategory } from './types';
+import { GIT_MUTATION_TOOLS } from './types';
 
 // ─── Policy Type ────────────────────────────────────────────────────────────
 
@@ -65,14 +66,7 @@ const DEFAULT_POLICIES: Record<AgentType, ModePolicy> = {
         'read_terminal_output',
         'stop_terminal_process',
         'run_code',
-        'git_commit',
-        'git_add',
-        'git_push',
-        'git_pull',
-        'git_checkout',
-        'git_merge',
-        'git_reset',
-        'git_stash',
+        ...GIT_MUTATION_TOOLS,
         'docker_run',
         'create_skill',
       ],
@@ -122,14 +116,7 @@ const DEFAULT_POLICIES: Record<AgentType, ModePolicy> = {
         'read_terminal_output',
         'stop_terminal_process',
         'run_code',
-        'git_commit',
-        'git_add',
-        'git_push',
-        'git_pull',
-        'git_checkout',
-        'git_merge',
-        'git_reset',
-        'git_stash',
+        ...GIT_MUTATION_TOOLS,
         'docker_run',
         'create_skill',
       ],
@@ -168,14 +155,7 @@ const DEFAULT_POLICIES: Record<AgentType, ModePolicy> = {
         'read_terminal_output',
         'stop_terminal_process',
         'run_code',
-        'git_commit',
-        'git_add',
-        'git_push',
-        'git_pull',
-        'git_checkout',
-        'git_merge',
-        'git_reset',
-        'git_stash',
+        ...GIT_MUTATION_TOOLS,
         'docker_run',
         'create_skill',
       ],

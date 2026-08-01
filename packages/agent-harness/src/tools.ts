@@ -8,9 +8,11 @@ import type {
   ToolResult,
   ToolExecutionContext,
   ToolCategory,
+  ToolRiskLevel,
   AgentQuestion,
   MemoryType,
 } from './types';
+import { CATEGORY_RISK } from './types';
 import { resolveWorkspacePath } from './path-policy';
 import { normalizeTerminalOutput } from './terminal-protocol';
 import { stopCommand, TerminalCommandRunner } from './terminal-command-runner';
@@ -25,13 +27,20 @@ function defineTool(
   category: ToolCategory,
   requiresApproval: boolean,
   execute: (input: Record<string, unknown>, ctx: ToolExecutionContext) => Promise<ToolResult>,
+  riskLevel?: ToolRiskLevel,
 ): ToolHandler {
   const definition: ToolDefinition = {
     name,
     description,
     inputSchema: { type: 'object', properties, required },
   };
-  return { definition, category, requiresApproval, execute };
+  return {
+    definition,
+    category,
+    requiresApproval,
+    riskLevel: riskLevel ?? CATEGORY_RISK[category],
+    execute,
+  };
 }
 
 function resolvePath(path: string, workspacePath: string): string {
@@ -793,6 +802,7 @@ export const gitStatusTool = defineTool(
       return { success: false, output: '', error: String(err) };
     }
   },
+  'safe',
 );
 
 export const gitDiffTool = defineTool(
@@ -833,6 +843,7 @@ export const gitDiffTool = defineTool(
       return { success: false, output: '', error: String(err) };
     }
   },
+  'safe',
 );
 
 export const gitCommitTool = defineTool(
@@ -954,6 +965,7 @@ export const gitLogTool = defineTool(
       return { success: false, output: '', error: String(err) };
     }
   },
+  'safe',
 );
 
 export const gitCheckoutTool = defineTool(
@@ -2005,6 +2017,7 @@ export const gitFetchTool = defineTool(
       };
     }
   },
+  'safe',
 );
 
 export const gitStashTool = defineTool(
@@ -2132,6 +2145,7 @@ export const gitBlameTool = defineTool(
       };
     }
   },
+  'safe',
 );
 
 export const gitShowTool = defineTool(
@@ -2173,6 +2187,7 @@ export const gitShowTool = defineTool(
       };
     }
   },
+  'safe',
 );
 
 // ─── Project Tools ──────────────────────────────────────────────────────────

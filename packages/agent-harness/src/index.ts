@@ -65,7 +65,14 @@ export type {
   MemoryQuery,
   MemoryExtraction,
 } from './types';
-export { DEFAULT_HARNESS_CONFIG, SAFE_TOOLS, DESTRUCTIVE_TOOLS, CATEGORY_RISK } from './types';
+export {
+  DEFAULT_HARNESS_CONFIG,
+  SAFE_TOOLS,
+  DESTRUCTIVE_TOOLS,
+  CATEGORY_RISK,
+  GIT_MUTATION_TOOLS,
+  GIT_WORKTREE_SWEEPING_TOOLS,
+} from './types';
 
 // ─── Core Modules ───────────────────────────────────────────────────────────
 export { Harness } from './harness';
