@@ -19,52 +19,8 @@ import { FileActivity, isFileMutation } from './file-activity';
 import { MarkdownContent } from './markdown-renderer';
 import { HarnessBridge } from '@/lib/harness-bridge';
 import { useSettingsStore } from '@/stores/settings-store';
-import { ThinkingBlock as AuroraThinkingBlock, TypingIndicator as AuroraTypingIndicator } from '@hyscode/ui';
-
-// ─── Thinking Block (Aurora-styled, collapsible) ────────────────────────────
-
-const ThinkingBlock = memo(function ThinkingBlock({
-  content,
-  isStreaming,
-  defaultOpen = false,
-}: {
-  content: string;
-  isStreaming?: boolean;
-  defaultOpen?: boolean;
-}) {
-  const wordCount = content.split(/\s+/).filter(Boolean).length;
-  const label = (
-    <span className="flex items-center gap-1.5">
-      <span className="text-[10px] font-medium text-muted-foreground">Thinking</span>
-      {isStreaming && (
-        <span className="flex items-center gap-[3px]">
-          <span className="agent-dot-bounce h-1 w-1 rounded-full bg-primary/50" />
-          <span className="agent-dot-bounce h-1 w-1 rounded-full bg-primary/50" style={{ animationDelay: '0.16s' }} />
-          <span className="agent-dot-bounce h-1 w-1 rounded-full bg-primary/50" style={{ animationDelay: '0.32s' }} />
-        </span>
-      )}
-      {!isStreaming && content && (
-        <span className="text-[9px] font-normal text-muted-foreground/60">
-          {wordCount} words
-        </span>
-      )}
-    </span>
-  );
-  return (
-    <AuroraThinkingBlock
-      label={label}
-      thinking={isStreaming}
-      defaultOpen={defaultOpen}
-      className="agent-fade-in text-[11px]"
-    >
-      <div className="border-l border-border pl-3 pt-1 pb-1">
-        <p className="whitespace-pre-wrap leading-[1.72] text-foreground/60">
-          {content}
-        </p>
-      </div>
-    </AuroraThinkingBlock>
-  );
-});
+import { ThinkingBlock } from './thinking-block';
+import { TypingIndicator as AuroraTypingIndicator } from '@hyscode/ui';
 
 // ─── Streaming Indicator ──────────────────────────────────────────────────────
 
@@ -174,6 +130,7 @@ const MessageItem = memo(function MessageItem({
   isActivelyStreaming,
 }: MessageItemProps) {
   const hasToolCalls = (msg.toolCalls?.length ?? 0) > 0;
+  const thinkingCollapsedByDefault = useSettingsStore((s) => s.thinkingCollapsedByDefault);
 
   // Skip empty assistant messages that have no content, thinking, tool calls, or error
   const isEmptyAssistant =
@@ -251,7 +208,9 @@ const MessageItem = memo(function MessageItem({
                   <ThinkingBlock
                     content={msg.thinking}
                     isStreaming={isActivelyStreaming && !msg.content?.trim()}
-                    defaultOpen={isActivelyStreaming || !msg.content?.trim()}
+                    defaultOpen={
+                      !thinkingCollapsedByDefault && (isActivelyStreaming || !msg.content?.trim())
+                    }
                   />
                 )}
 

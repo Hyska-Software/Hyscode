@@ -81,6 +81,29 @@ content cache, and `gather_context` reuses that cache when possible.
 Review and plan turns also use automatic gathered excerpts so context remains
 available after older protocol frames are compacted.
 
+### Parallel Delegation
+
+Only `spawn_subagent` batches run concurrently. A batch composed entirely of
+parallel-safe tools executes with one immutable execution context per call and
+`Promise.allSettled`, preserving the original tool-call order in the transcript.
+All other tool batches stay sequential.
+
+The desktop coordinator (`SubAgentCoordinator`) enforces the app-level policy:
+
+- `review` children hold a shared workspace lease and run in parallel, bounded
+  by `subAgentMaxConcurrent` (default 2, max 4).
+- `build`, `debug`, and `plan` children hold an exclusive workspace lease and
+  queue behind running children. Once an exclusive child is queued, new shared
+  children wait until it completes.
+- Queued children are visible in the UI with their queue position and can be
+  cancelled before they start.
+
+Concurrent children receive isolated resources: unique approval ids routed to
+the owning child router, a dedicated visible terminal session per child
+(`ownerId`), serialized mutation-snapshot capture per path, and per-child token
+usage. Parent cancellation cancels queued children immediately and aborts all
+active runners.
+
 ### Turn Lifecycle
 
 Every run has a unique `turnId` and one terminal outcome: `complete`,

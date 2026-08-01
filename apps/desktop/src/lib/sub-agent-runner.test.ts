@@ -101,6 +101,39 @@ function readLoopProvider(): AIProvider {
   };
 }
 
+function manyChunksProvider(): AIProvider {
+  return {
+    id: 'desktop-subagent-test',
+    name: 'Desktop sub-agent test provider',
+    models: [model],
+    isConfigured: () => true,
+    listModels: async () => [model],
+    async *chat(_params: ChatParams): AsyncIterable<StreamChunk> {
+      for (let index = 0; index < 20; index++) {
+        yield { type: 'text_delta', text: `chunk-${index} ` };
+      }
+      yield { type: 'done', stopReason: 'end_turn' };
+    },
+  };
+}
+
+function thinkingProvider(): AIProvider {
+  return {
+    id: 'desktop-subagent-test',
+    name: 'Desktop sub-agent test provider',
+    models: [model],
+    isConfigured: () => true,
+    listModels: async () => [model],
+    async *chat(_params: ChatParams): AsyncIterable<StreamChunk> {
+      for (let index = 0; index < 5; index++) {
+        yield { type: 'thinking_delta', text: `reasoning-${index} ` };
+      }
+      yield { type: 'text_delta', text: 'final answer' };
+      yield { type: 'done', stopReason: 'end_turn' };
+    },
+  };
+}
+
 function runnerOptions(
   updates: Array<Partial<SubAgentState>>,
   bridgeEvents: Array<{ type: string }>,
@@ -157,5 +190,48 @@ describe('SubAgentRunner', () => {
     expect(result).toBe('completed after range reads');
     expect(updates.at(-1)?.status).toBe('done');
     expect(updates.at(-1)?.stopReason).toBe('complete');
+  });
+
+  it('coalesces streamed output updates instead of updating once per chunk', async () => {
+    vi.useFakeTimers();
+    try {
+      getProviderRegistry().register(manyChunksProvider());
+      const updates: Array<Partial<SubAgentState>> = [];
+      const bridgeEvents: Array<{ type: string }> = [];
+      const records: Array<SubAgentState['tokenUsage']> = [];
+
+      const runner = new SubAgentRunner(runnerOptions(updates, bridgeEvents, records));
+      const result = await runner.run('Stream a long response.');
+
+      expect(result).toContain('chunk-19');
+      const outputUpdates = updates.filter((patch) => patch.output !== undefined);
+      // One coalesced flush + the final terminal update, not one per chunk.
+      expect(outputUpdates.length).toBeLessThanOrEqual(2);
+      expect(updates.at(-1)?.output).toContain('chunk-19');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('captures thinking deltas, coalesces them, and persists the final reasoning', async () => {
+    vi.useFakeTimers();
+    try {
+      getProviderRegistry().register(thinkingProvider());
+      const updates: Array<Partial<SubAgentState>> = [];
+      const bridgeEvents: Array<{ type: string }> = [];
+      const records: Array<SubAgentState['tokenUsage']> = [];
+
+      const runner = new SubAgentRunner(runnerOptions(updates, bridgeEvents, records));
+      const result = await runner.run('Reason about the module.');
+
+      expect(result).toBe('final answer');
+      const thinkingUpdates = updates.filter((patch) => patch.thinking !== undefined);
+      // One coalesced flush + the final terminal update.
+      expect(thinkingUpdates.length).toBeLessThanOrEqual(2);
+      expect(updates.at(-1)?.thinking).toContain('reasoning-4');
+      expect(updates.at(-1)?.output).toBe('final answer');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

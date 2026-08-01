@@ -184,6 +184,7 @@ export class Harness {
   private memoryContextProvider: MemoryContextProvider | null = null;
   private hasDirtyBuffers: (() => boolean) | undefined;
   private delegationLevel = 0;
+  private ownerId: string | null = null;
   private environment: HarnessEnvironment;
   private readCache = new Map<string, string>();
 
@@ -311,6 +312,16 @@ export class Harness {
   /** Return the nesting depth used to constrain child-only tools. */
   getDelegationLevel(): number {
     return this.delegationLevel;
+  }
+
+  /** Set the stable owner id (sub-agent id) used to isolate per-owner resources. */
+  setOwnerId(id: string | null): void {
+    this.ownerId = id;
+  }
+
+  /** Get the stable owner id of this harness execution context. */
+  getOwnerId(): string | null {
+    return this.ownerId;
   }
 
   /**
@@ -1159,6 +1170,7 @@ export class Harness {
         toolCallId: '', // set per-call below
         signal: activeTurn.signal,
         delegationLevel: this.delegationLevel,
+        ownerId: this.ownerId ?? undefined,
         invoke: this.invoke,
         listen: this.listen,
         projectId: this.projectId,
@@ -1225,11 +1237,41 @@ export class Harness {
       // Wire auto-gather middleware to the gathered context interface
       this.autoGather.setGatheredContext(executionContext.gatheredContext!);
 
-      for (const tc of toolCalls) {
-        // Set the per-call toolCallId before execution
-        executionContext.toolCallId = tc.id;
+      // ── Tool execution ──
+      // Batches composed entirely of parallel-safe tools (delegation) execute
+      // concurrently with per-call execution contexts. Everything else stays
+      // sequential so filesystem/terminal/approval state cannot race.
+      const canRunInParallel =
+        toolCalls.length > 1 && toolCalls.every((tc) => this.isParallelTool(tc.name));
+      const records: ToolCallRecord[] = new Array(toolCalls.length);
 
-        const record = await this.toolRouter.execute(tc.name, tc.id, tc.input, executionContext);
+      if (canRunInParallel) {
+        await Promise.allSettled(
+          toolCalls.map(async (tc, index) => {
+            const perCallContext: ToolExecutionContext = {
+              ...executionContext,
+              toolCallId: tc.id,
+            };
+            records[index] = await this.toolRouter.execute(tc.name, tc.id, tc.input, perCallContext);
+          }),
+        );
+      } else {
+        for (let index = 0; index < toolCalls.length; index++) {
+          const tc = toolCalls[index];
+          // Set the per-call toolCallId before execution
+          executionContext.toolCallId = tc.id;
+          records[index] = await this.toolRouter.execute(
+            tc.name,
+            tc.id,
+            tc.input,
+            executionContext,
+          );
+        }
+      }
+
+      for (let index = 0; index < toolCalls.length; index++) {
+        const tc = toolCalls[index];
+        const record = records[index];
         this.toolCallHistory.push(record);
         this.invalidateReadCache(tc.name, tc.input);
 
@@ -1635,6 +1677,11 @@ export class Harness {
       this.contextManager.setAgent(getAgentDefinition(originalType));
       this.contextManager.setSystemPrompt(originalPromptOverride);
     }
+  }
+
+  /** Whether a tool opted into concurrent execution within a single batch. */
+  private isParallelTool(toolName: string): boolean {
+    return this.toolRouter.getHandler(toolName)?.parallel === true;
   }
 
   private invalidateReadCache(toolName: string, input: Record<string, unknown>): void {

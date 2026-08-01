@@ -52,9 +52,14 @@ export interface SubAgentRunnerOptions {
   memoryManager?: MemoryManager;
   externalTools?: ToolHandler[];
   onTurnRecord?: (record: TurnRecord) => void;
+  /** Register the owner of a unique approval id (approvalId -> subAgentId). */
+  onApprovalOwner?: (approvalId: string, subAgentId: string) => void;
 }
 
 const MAX_LIVE_OUTPUT_CHARS = 65_536;
+
+/** Throttle window for high-frequency UI updates (streaming text, tool rows). */
+const UPDATE_INTERVAL_MS = 50;
 
 // ─── SubAgentRunner ──────────────────────────────────────────────────────────
 
@@ -71,11 +76,17 @@ export class SubAgentRunner {
   private onTurnRecord: SubAgentRunnerOptions['onTurnRecord'];
   private toolCallCache: ToolCallDisplay[] = [];
   private streamingOutput = '';
+  private thinkingText = '';
   private tokenUsage: TokenUsage = {
     inputTokens: 0,
     outputTokens: 0,
     totalTokens: 0,
   };
+  /** Pending high-frequency UI updates, flushed at most every UPDATE_INTERVAL_MS. */
+  private flushTimer: ReturnType<typeof setTimeout> | null = null;
+  private pendingToolCallsFlush = false;
+  private pendingOutputFlush = false;
+  private pendingThinkingFlush = false;
 
   constructor(options: SubAgentRunnerOptions) {
     this.onUpdate = options.onUpdate;
@@ -125,6 +136,17 @@ export class SubAgentRunner {
       turnTimeoutMs: policy.turnTimeoutMs,
       approval: policy.approval,
     };
+    // Unique approval ids prevent collisions when two children emit the same
+    // provider tool-call id (e.g. "call_1"). The bridge learns the owner so
+    // trust actions and dialogs route to the correct child.
+    const onApproval = async (
+      pending: { id: string; toolName: string; input: Record<string, unknown>; description: string },
+      signal: AbortSignal,
+    ): Promise<boolean> => {
+      const uniqueId = `${options.id}:${pending.id}`;
+      options.onApprovalOwner?.(uniqueId, options.id);
+      return options.onApproval({ ...pending, id: uniqueId }, signal);
+    };
     const onEvent = (event: HarnessEvent): void => this.handleEvent(event);
     if (options.parentHarness) {
       this.delegatedRunner = new DelegatedRunner({
@@ -149,7 +171,7 @@ export class SubAgentRunner {
         delegationLevel: 1,
         config: childConfig,
         onEvent,
-        onApprovalRequest: options.onApproval,
+        onApprovalRequest: onApproval,
         terminalRuntime: options.terminalRuntime,
         onTerminalCommand: options.onTerminalCommand,
         memoryManager: options.memoryManager,
@@ -158,6 +180,8 @@ export class SubAgentRunner {
 
     // Apply agent type — sub-agents never get spawn_subagent (no Harness.registerExternalTool called here)
     this.harness.setAgentType(options.mode as AgentType);
+    // Stable owner id isolates per-child terminal sessions.
+    this.harness.setOwnerId(options.id);
 
     // Inherit active skills and rules from the parent context
     this.harness.setActiveSkills(options.activeSkills);
@@ -172,6 +196,7 @@ export class SubAgentRunner {
       this.harness.injectEnvironmentContext(this.optionsEnvironmentContext);
     }
     this.tokenUsage = { inputTokens: 0, outputTokens: 0, totalTokens: 0 };
+    this.thinkingText = '';
 
     try {
       const outcome = this.delegatedRunner
@@ -189,6 +214,9 @@ export class SubAgentRunner {
 
       const { response, toolCalls, status } = outcome;
 
+      // Deliver any pending streamed updates before the terminal status lands.
+      this.flushUpdates();
+
       // Surface user cancellations as 'cancelled' instead of a false 'done'.
       if (status === 'cancelled' || status === 'cancelled_partial') {
         const msg = response || 'Request cancelled.';
@@ -196,6 +224,7 @@ export class SubAgentRunner {
           status: 'cancelled',
           stopReason: status,
           output: msg,
+          thinking: this.thinkingText,
           tokenUsage: this.tokenUsage,
           completedAt: Date.now(),
         });
@@ -210,16 +239,19 @@ export class SubAgentRunner {
         status: status === 'complete' ? 'done' : 'error',
         stopReason: status,
         output: finalOutput,
+        thinking: this.thinkingText,
         tokenUsage: this.tokenUsage,
         completedAt: Date.now(),
       });
       return finalOutput;
     } catch (err) {
+      this.flushUpdates();
       const msg = err instanceof Error ? err.message : String(err);
       this.onUpdate({
         status: 'error',
         stopReason: 'error',
         output: msg,
+        thinking: this.thinkingText,
         tokenUsage: this.tokenUsage,
         completedAt: Date.now(),
       });
@@ -276,51 +308,53 @@ export class SubAgentRunner {
           status: 'running',
           startedAt: Date.now(),
         };
-        this.toolCallCache = [...this.toolCallCache, tc];
-        this.onUpdate({ toolCalls: [...this.toolCallCache] });
-
+        this.toolCallCache.push(tc);
+        this.scheduleToolCallsUpdate();
         break;
       }
       case 'tool_call_result': {
-        this.toolCallCache = this.toolCallCache.map((tc) =>
-          tc.id === event.toolCallId
-            ? {
-                ...tc,
-                status: event.result.success
-                  ? 'success'
-                  : event.result.error?.toLowerCase().includes('cancel')
-                    ? 'cancelled'
-                    : 'error',
-                output: event.result.output,
-                error: event.result.error,
-                completedAt: Date.now(),
-              }
-            : tc,
-        );
-        this.onUpdate({ toolCalls: [...this.toolCallCache] });
+        this.replaceToolCall(event.toolCallId, {
+          status: event.result.success
+            ? 'success'
+            : event.result.error?.toLowerCase().includes('cancel')
+              ? 'cancelled'
+              : 'error',
+          output: event.result.output,
+          error: event.result.error,
+          completedAt: Date.now(),
+        });
+        this.scheduleToolCallsUpdate();
         break;
       }
       case 'terminal_progress': {
         const progress = event.progress;
-        this.toolCallCache = this.toolCallCache.map((tc) =>
-          tc.id === progress.toolCallId
-            ? {
-                ...tc,
-                terminalId: progress.terminalId,
-                terminalState: progress.state,
-                liveOutput: `${tc.liveOutput ?? ''}${progress.chunk}`.slice(-MAX_LIVE_OUTPUT_CHARS),
-              }
-            : tc,
-        );
-        this.onUpdate({ toolCalls: [...this.toolCallCache] });
+        const liveOutput = this.toolCallCache.find(
+          (tc) => tc.id === progress.toolCallId,
+        )?.liveOutput;
+        const nextLive = (liveOutput ?? '') + progress.chunk;
+        this.replaceToolCall(progress.toolCallId, {
+          terminalId: progress.terminalId,
+          terminalState: progress.state,
+          liveOutput:
+            nextLive.length > MAX_LIVE_OUTPUT_CHARS
+              ? nextLive.slice(-MAX_LIVE_OUTPUT_CHARS)
+              : nextLive,
+        });
+        this.scheduleToolCallsUpdate();
         break;
       }
       case 'stream_chunk': {
         if (event.chunk.type === 'text_delta') {
-          this.streamingOutput = (this.streamingOutput + event.chunk.text).slice(
-            -MAX_LIVE_OUTPUT_CHARS,
-          );
-          this.onUpdate({ output: this.streamingOutput });
+          const next = this.streamingOutput + event.chunk.text;
+          this.streamingOutput =
+            next.length > MAX_LIVE_OUTPUT_CHARS ? next.slice(-MAX_LIVE_OUTPUT_CHARS) : next;
+          this.scheduleOutputUpdate();
+        }
+        if (event.chunk.type === 'thinking_delta') {
+          const next = this.thinkingText + event.chunk.text;
+          this.thinkingText =
+            next.length > MAX_LIVE_OUTPUT_CHARS ? next.slice(-MAX_LIVE_OUTPUT_CHARS) : next;
+          this.scheduleThinkingUpdate();
         }
         // Usage chunks are forwarded so the parent turn's token accounting
         // includes sub-agent spend.
@@ -337,6 +371,60 @@ export class SubAgentRunner {
         break;
       }
     }
+  }
+
+  /** Replace a single tool-call entry with a fresh object so memoized rows
+   *  re-render only for the call that actually changed. */
+  private replaceToolCall(toolCallId: string, patch: Partial<ToolCallDisplay>): void {
+    const index = this.toolCallCache.findIndex((tc) => tc.id === toolCallId);
+    if (index < 0) return;
+    this.toolCallCache[index] = { ...this.toolCallCache[index], ...patch };
+  }
+
+  // ─── Throttled UI updates ──────────────────────────────────────────────
+  // High-frequency events (streaming deltas, tool progress) are coalesced
+  // into at most one store update per UPDATE_INTERVAL_MS instead of one per
+  // chunk, which keeps the card responsive under heavy output.
+
+  private scheduleToolCallsUpdate(): void {
+    this.pendingToolCallsFlush = true;
+    this.scheduleFlush();
+  }
+
+  private scheduleOutputUpdate(): void {
+    this.pendingOutputFlush = true;
+    this.scheduleFlush();
+  }
+
+  private scheduleThinkingUpdate(): void {
+    this.pendingThinkingFlush = true;
+    this.scheduleFlush();
+  }
+
+  private scheduleFlush(): void {
+    if (this.flushTimer) return;
+    this.flushTimer = setTimeout(() => this.flushUpdates(), UPDATE_INTERVAL_MS);
+  }
+
+  private flushUpdates(): void {
+    if (this.flushTimer) {
+      clearTimeout(this.flushTimer);
+      this.flushTimer = null;
+    }
+    const patch: Partial<SubAgentState> = {};
+    if (this.pendingToolCallsFlush) {
+      patch.toolCalls = this.toolCallCache.slice();
+      this.pendingToolCallsFlush = false;
+    }
+    if (this.pendingOutputFlush) {
+      patch.output = this.streamingOutput;
+      this.pendingOutputFlush = false;
+    }
+    if (this.pendingThinkingFlush) {
+      patch.thinking = this.thinkingText;
+      this.pendingThinkingFlush = false;
+    }
+    if (Object.keys(patch).length > 0) this.onUpdate(patch);
   }
 
   private optionsConversationId: string;

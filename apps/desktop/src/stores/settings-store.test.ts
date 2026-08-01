@@ -21,6 +21,14 @@ describe('agent interaction limit settings', () => {
     expect(SETTINGS_DEFAULTS.maxIterations).toBe(25);
   });
 
+  it('defaults sub-agent concurrency to two parallel runs', () => {
+    expect(SETTINGS_DEFAULTS.subAgentMaxConcurrent).toBe(2);
+  });
+
+  it('keeps thinking blocks expanded by default', () => {
+    expect(SETTINGS_DEFAULTS.thinkingCollapsedByDefault).toBe(false);
+  });
+
   it('disables the limit when migrating legacy persisted settings', () => {
     const migrated = migrateSettingsState({ maxIterations: 75 }, 0) as Record<string, unknown>;
 

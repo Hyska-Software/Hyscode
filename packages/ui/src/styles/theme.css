@@ -95,3 +95,13 @@
   .animate-scale-in { animation: aurora-scale-in 0.15s var(--ease-out-soft); }
   .animate-slide-up { animation: aurora-slide-up 0.2s var(--ease-out-soft); }
 }
+
+/* Smooth entry for expandable details content (e.g. sub-agent cards). */
+@keyframes aurora-details-open {
+  from { opacity: 0; transform: translateY(-4px) scale(0.995); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@utility animate-details-open {
+  animation: aurora-details-open 0.28s var(--ease-out-soft);
+}

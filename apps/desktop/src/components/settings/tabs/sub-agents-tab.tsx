@@ -54,6 +54,19 @@ export function SubAgentsTab() {
         </SettingRow>
 
         <SettingRow
+          label="Max Concurrent"
+          description="How many sub-agents run at the same time. Build/debug/plan runs take an exclusive workspace lease, so they may wait for a slot. Review runs execute in parallel."
+        >
+          <SettingSlider
+            value={store.subAgentMaxConcurrent}
+            onChange={(v) => store.set('subAgentMaxConcurrent', v)}
+            min={1}
+            max={4}
+            disabled={!store.subAgentEnabled}
+          />
+        </SettingRow>
+
+        <SettingRow
           label="Auto-approve Sub-agent Tools"
           description="Sub-agents skip the approval dialog — all their tool calls are automatically approved"
         >

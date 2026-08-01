@@ -38,13 +38,19 @@ export interface SubAgentState {
   id: string;
   task: string;
   mode: AgentMode;
-  status: 'running' | 'done' | 'error' | 'cancelled';
+  status: 'queued' | 'running' | 'done' | 'error' | 'cancelled' | 'cancelling';
   stopReason?: import('@hyscode/agent-harness').TurnStatus;
   output: string;
+  /** Reasoning/thinking text streamed by the model, rendered like the chat's. */
+  thinking?: string;
   toolCalls: ToolCallDisplay[];
   tokenUsage?: TokenUsage;
   startedAt: number;
   completedAt?: number;
+  /** Position in the concurrency queue (1-based) while queued. */
+  queuePosition?: number;
+  /** Whether the child holds a shared or exclusive workspace lease. */
+  resourceMode?: 'shared' | 'exclusive';
 }
 
 /** All per-conversation state fields (mirrored to flat AgentState fields for active tab). */
@@ -193,6 +199,8 @@ export interface PendingApproval {
   toolName: string;
   input: Record<string, unknown>;
   description: string;
+  /** Owning sub-agent id when the approval belongs to a child run. */
+  ownerSubAgentId?: string;
 }
 
 export type FileChangeStatus = 'pending' | 'accepted' | 'rejected';

@@ -96,7 +96,7 @@ export const SETTINGS_DEFAULTS = {
 
   // ─ Thinking / Reasoning ─
   thinkingSettings: {},
-
+  thinkingCollapsedByDefault: false,
   // ─ MCP Servers ─
   mcpServers: [],
 
@@ -125,6 +125,7 @@ export const SETTINGS_DEFAULTS = {
   subAgentDefaultMode: 'build',
   subAgentMaxIterations: 20,
   subAgentAutoApprove: false,
+  subAgentMaxConcurrent: 2,
 
   // ─ Layout tabs ─
   activityBarPosition: 'left',

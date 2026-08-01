@@ -183,6 +183,8 @@ interface SettingsState {
   // ─ Thinking / Reasoning ─
   /** Per-model thinking configuration: key = "providerId::modelId" */
   thinkingSettings: Record<string, ModelThinkingConfig>;
+  /** When true, thinking blocks render collapsed by default everywhere. */
+  thinkingCollapsedByDefault: boolean;
 
   // ─ MCP Servers ─
   mcpServers: McpServerConfig[];
@@ -217,6 +219,8 @@ interface SettingsState {
   subAgentMaxIterations: number;
   /** When true, sub-agent tool calls are auto-approved (yolo mode inside sub-agent). */
   subAgentAutoApprove: boolean;
+  /** Maximum sub-agents running at once (1-4, default 2). */
+  subAgentMaxConcurrent: number;
 
   // ─ Layout tabs ─
   activityBarPosition: ActivityBarPosition;

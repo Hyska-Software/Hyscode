@@ -50,6 +50,7 @@ import type {
 import { computeDiffHunks } from './compute-diff';
 import { buildTurnSummary } from './turn-summary';
 import { SubAgentRunner } from './sub-agent-runner';
+import { SubAgentCoordinator, type SubAgentResourceMode } from './sub-agent-coordinator';
 import { eventBelongsToOwner } from './turn-event-ownership';
 import { configureProviderResilience } from './init-providers';
 
@@ -190,6 +191,14 @@ export class HarnessBridge {
   >();
   /** Active sub-agent runners keyed by their id (toolCallId of spawn_subagent). */
   private _subAgentRunners = new Map<string, SubAgentRunner>();
+  /** Maps unique approval ids to their owning sub-agent id. */
+  private _approvalOwner = new Map<string, string>();
+  /** True when the current parent turn spawned at least one sub-agent. */
+  private _turnHadSubAgents = false;
+  /** Bounds concurrent child execution and serializes workspace-exclusive modes. */
+  private subAgentCoordinator: SubAgentCoordinator;
+  /** In-flight mutation snapshot captures, keyed by canonical path. */
+  private mutationSnapshotPromises = new Map<string, Promise<void>>();
   private memoryManager: MemoryManager | null = null;
   private externalMcpTools = new Map<
     string,
@@ -222,9 +231,25 @@ export class HarnessBridge {
     });
   }
 
+  /** Drop approval-owner registrations that belong to a finished sub-agent. */
+  private clearSubAgentApprovalOwners(subAgentId: string): void {
+    for (const [approvalId, ownerId] of this._approvalOwner) {
+      if (ownerId === subAgentId) this._approvalOwner.delete(approvalId);
+    }
+  }
+
   private constructor(workspacePath: string, projectId: string, homePath: string) {
     this._projectId = projectId;
     const settings = useSettingsStore.getState();
+    this.subAgentCoordinator = new SubAgentCoordinator(
+      settings.subAgentMaxConcurrent ?? 2,
+      (positions) => {
+        const agentStore = useAgentStore.getState();
+        for (const { id, queuePosition } of positions) {
+          agentStore.updateSubAgent(id, { queuePosition });
+        }
+      },
+    );
     window.addEventListener('offline', () => {
       if (useAgentStore.getState().isStreaming) {
         useAgentStore
@@ -509,6 +534,7 @@ export class HarnessBridge {
     // Reset per-turn credit counter
     useAgentStore.getState().resetApiRequestCount();
     useAgentStore.getState().setTokenUsage(null);
+    this._turnHadSubAgents = false;
 
     // Map store.mode → ConversationMode for the harness
     let harnessMode: ConversationMode = 'agent';
@@ -794,12 +820,25 @@ export class HarnessBridge {
         }
       }
     });
-    // Cancel all active sub-agent runners first
+    // Cancel queued children first so they never start.
+    this.subAgentCoordinator.cancelAllQueued();
+    // Cancel all active sub-agent runners.
     for (const runner of this._subAgentRunners.values()) {
       runner.cancel();
     }
     this._subAgentRunners.clear();
+    this._approvalOwner.clear();
     this.harness.cancel();
+  }
+
+  /** Cancel a single sub-agent: queued children never start; active ones abort. */
+  cancelSubAgent(id: string): void {
+    const runner = this._subAgentRunners.get(id);
+    if (runner) {
+      runner.cancel();
+      return;
+    }
+    this.subAgentCoordinator.cancelQueued((candidate) => candidate === id);
   }
 
   /** Pause SDD execution after the current task finishes */
@@ -1055,11 +1094,14 @@ Investigate the error, fix the underlying issue in the affected files, and verif
   }
 
   /** Mark a tool as trusted for the current session (session-trust mode).
-   *  When `toolCallId` belongs to an active sub-agent, the trust is applied to
-   *  that sub-agent's own tool router (the one that issued the approval). */
+   *  When `toolCallId` belongs to an active sub-agent approval, the trust is
+   *  applied to that sub-agent's own tool router (the one that issued it). */
   trustToolForSession(toolName: string, toolCallId?: string): void {
     if (toolCallId) {
-      const runner = this._subAgentRunners.get(toolCallId);
+      const ownerId = this._approvalOwner.get(toolCallId);
+      const runner = ownerId
+        ? this._subAgentRunners.get(ownerId)
+        : this._subAgentRunners.get(toolCallId);
       if (runner) {
         runner.trustTool(toolName);
         this.debug(`🔓 Tool trusted for sub-agent session: ${toolName}`);
@@ -1331,7 +1373,7 @@ Investigate the error, fix the underlying issue in the affected files, and verif
       definition: {
         name: 'spawn_subagent',
         description:
-          'Delegate a focused subtask to a specialized sub-agent. The parent waits for the sub-agent to finish and then receives its result. Delegated calls are currently executed sequentially, so do not promise parallel execution. Use this to apply a specialist agent (for example review or debug) to a self-contained subtask. Not available in chat mode.',
+          'Delegate a focused subtask to a specialized sub-agent. The parent waits for the sub-agent to finish and then receives its result. Multiple spawn_subagent calls in one response run concurrently (review runs in parallel; build/debug/plan wait for an exclusive workspace slot). Use this to apply a specialist agent (for example review or debug) to a self-contained subtask. Not available in chat mode.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -1352,6 +1394,8 @@ Investigate the error, fix the underlying issue in the affected files, and verif
       } satisfies ToolDefinition,
       category: 'meta' as ToolCategory,
       requiresApproval: false,
+      // Delegation batches are the only tool calls allowed to run concurrently.
+      parallel: true,
       execute: async (
         input: Record<string, unknown>,
         ctx: ToolExecutionContext,
@@ -1401,72 +1445,90 @@ Investigate the error, fix the underlying issue in the affected files, and verif
           );
         }
 
+        // Review children are read-only and may run in parallel. Build, debug
+        // and plan children mutate the workspace and take an exclusive lease.
+        const resourceMode: SubAgentResourceMode = mode === 'review' ? 'shared' : 'exclusive';
         const subAgent: SubAgentState = {
           id: subAgentId,
           task,
           mode,
-          status: 'running',
+          status: 'queued',
           output: '',
           toolCalls: [],
           startedAt: Date.now(),
+          queuePosition: bridge.subAgentCoordinator.queueLength + 1,
+          resourceMode,
         };
         store.addSubAgent(subAgent);
+        bridge._turnHadSubAgents = true;
 
-        // Inherit skills scoped to the sub-agent's mode (not the parent's).
-        const activeForMode = useSkillsStore.getState().getActiveForMode(mode as AgentType);
-        const modeSkillNames = new Set(activeForMode.map((s) => s.name));
-        const skills = (bridge.harness.getSkillLoader()?.getAll() ?? []).filter((s) =>
-          modeSkillNames.has(s.frontmatter.name),
+        return bridge.subAgentCoordinator
+          .submit(subAgentId, mode, resourceMode, async () => {
+            store.updateSubAgent(subAgentId, { status: 'running', queuePosition: undefined });
+
+          // Inherit skills scoped to the sub-agent's mode (not the parent's).
+          const activeForMode = useSkillsStore.getState().getActiveForMode(mode as AgentType);
+          const modeSkillNames = new Set(activeForMode.map((s) => s.name));
+          const skills = (bridge.harness.getSkillLoader()?.getAll() ?? []).filter((s) =>
+            modeSkillNames.has(s.frontmatter.name),
+          );
+
+          const environmentContext = await bridge.buildEnvironmentContext();
+          const parentConversationId = store.conversationId ?? undefined;
+          const runner = new SubAgentRunner({
+            id: subAgentId,
+            task,
+            mode,
+            workspacePath: bridge.harness.getWorkspacePath(),
+            projectId: bridge._projectId,
+            // Route through the shared invoke: buffered dirty-file reads + mutation
+            // snapshots so sub-agent edits are reviewable/revertable.
+            invoke: (cmd, args) => bridge.invokeForHarness(cmd, args),
+            listen: async (event: string, handler: (payload: unknown) => void) => {
+              const unlisten = await tauriListen(event, (e) => handler(e.payload));
+              return unlisten;
+            },
+            onApproval: (pending, signal) => bridge.handleApprovalRequest(pending, signal),
+            onApprovalOwner: (approvalId, ownerId) => {
+              bridge._approvalOwner.set(approvalId, ownerId);
+            },
+            onUpdate: (patch) => store.updateSubAgent(subAgentId, patch),
+            onBridgeEvent: (event) => bridge.handleSubAgentEvent(subAgentId, event),
+            activeSkills: skills,
+            activeRules: bridge.harness.getActiveRules(),
+            parentHarness: bridge.harness,
+            conversationId: parentConversationId,
+            parentTurnId: bridge.activeTurnId ?? undefined,
+            environmentContext,
+            delegationChain: store.delegationChain,
+            memoryManager: bridge.memoryManager ?? undefined,
+            externalTools: bridge.getAgentSafeExternalTools(),
+            onTurnRecord: (record) => {
+              void bridge.persistTurnRecord(record);
+            },
+            // Visible terminal runtime so sub-agent commands are watchable, and
+            // command tracking so parent environment context stays fresh.
+            terminalRuntime: desktopTerminalRuntime,
+            onTerminalCommand: (command, output, exitCode) =>
+              bridge.recordTerminalCommand(command, output, exitCode),
+          });
+
+          bridge._subAgentRunners.set(subAgentId, runner);
+
+          try {
+            return await runner.run(task);
+          } finally {
+            bridge._subAgentRunners.delete(subAgentId);
+            bridge.clearSubAgentApprovalOwners(subAgentId);
+          }
+        })
+        .then(
+          (output) => ({ success: true, output }),
+          (err) => {
+            const msg = err instanceof Error ? err.message : String(err);
+            return { success: false, output: '', error: msg };
+          },
         );
-
-        const environmentContext = await bridge.buildEnvironmentContext();
-        const parentConversationId = store.conversationId ?? undefined;
-        const runner = new SubAgentRunner({
-          id: subAgentId,
-          task,
-          mode,
-          workspacePath: bridge.harness.getWorkspacePath(),
-          projectId: bridge._projectId,
-          // Route through the shared invoke: buffered dirty-file reads + mutation
-          // snapshots so sub-agent edits are reviewable/revertable.
-          invoke: (cmd, args) => bridge.invokeForHarness(cmd, args),
-          listen: async (event: string, handler: (payload: unknown) => void) => {
-            const unlisten = await tauriListen(event, (e) => handler(e.payload));
-            return unlisten;
-          },
-          onApproval: (pending, signal) => bridge.handleApprovalRequest(pending, signal),
-          onUpdate: (patch) => store.updateSubAgent(subAgentId, patch),
-          onBridgeEvent: (event) => bridge.handleSubAgentEvent(subAgentId, event),
-          activeSkills: skills,
-          activeRules: bridge.harness.getActiveRules(),
-          parentHarness: bridge.harness,
-          conversationId: parentConversationId,
-          parentTurnId: bridge.activeTurnId ?? undefined,
-          environmentContext,
-          delegationChain: store.delegationChain,
-          memoryManager: bridge.memoryManager ?? undefined,
-          externalTools: bridge.getAgentSafeExternalTools(),
-          onTurnRecord: (record) => {
-            void bridge.persistTurnRecord(record);
-          },
-          // Visible terminal runtime so sub-agent commands are watchable, and
-          // command tracking so parent environment context stays fresh.
-          terminalRuntime: desktopTerminalRuntime,
-          onTerminalCommand: (command, output, exitCode) =>
-            bridge.recordTerminalCommand(command, output, exitCode),
-        });
-
-        bridge._subAgentRunners.set(subAgentId, runner);
-
-        try {
-          const output = await runner.run(task);
-          return { success: true, output };
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : String(err);
-          return { success: false, output: '', error: msg };
-        } finally {
-          bridge._subAgentRunners.delete(subAgentId);
-        }
       },
     };
 
@@ -1832,8 +1894,10 @@ Investigate the error, fix the underlying issue in the affected files, and verif
         }
         // Authoritative reconciliation: the harness's final tokenUsage is the
         // source of truth. Overwrite any per-iteration accumulation in the
-        // store so the UI shows the exact turn total.
-        if (event.tokenUsage) {
+        // store so the UI shows the exact turn total. When the turn spawned
+        // sub-agents, their usage chunks were already folded into the store
+        // total, so keep the accumulated value instead of losing child spend.
+        if (event.tokenUsage && !this._turnHadSubAgents) {
           useAgentStore.getState().setTokenUsage(event.tokenUsage);
         }
         store.setTerminalStatus(event.reason);
@@ -2131,6 +2195,7 @@ Investigate the error, fix the underlying issue in the affected files, and verif
       toolName: pending.toolName,
       input: pending.input,
       description: pending.description,
+      ownerSubAgentId: this._approvalOwner.get(pending.id),
     };
     useAgentStore.getState().addPendingApproval(approval);
 
@@ -2718,22 +2783,38 @@ ${hints.map((h) => `- ${h}`).join('\n')}
 
   private async captureMutationSnapshot(path: string): Promise<void> {
     if (this.mutationSnapshots.has(path)) return;
-    let diskBefore: string | null = null;
-    try {
-      diskBefore = await tauriInvokeRaw<string>('read_file', { path });
-    } catch {
-      // New file or directory.
+    // Serialize concurrent captures of the same path: two children writing
+    // the same file must not both capture and overwrite the baseline.
+    const inFlight = this.mutationSnapshotPromises.get(path);
+    if (inFlight) {
+      await inFlight;
+      return;
     }
-    const tab = useEditorStore
-      .getState()
-      .tabs.find((item) => item.filePath === path && item.type === 'file');
-    const bufferBefore = useFileStore.getState().getFileContent(path) ?? diskBefore;
-    this.mutationSnapshots.set(path, {
-      diskBefore,
-      bufferBefore,
-      wasDirty: tab?.isDirty ?? false,
-      tabId: tab?.id ?? null,
-    });
+    const capture = (async () => {
+      if (this.mutationSnapshots.has(path)) return;
+      let diskBefore: string | null = null;
+      try {
+        diskBefore = await tauriInvokeRaw<string>('read_file', { path });
+      } catch {
+        // New file or directory.
+      }
+      const tab = useEditorStore
+        .getState()
+        .tabs.find((item) => item.filePath === path && item.type === 'file');
+      const bufferBefore = useFileStore.getState().getFileContent(path) ?? diskBefore;
+      this.mutationSnapshots.set(path, {
+        diskBefore,
+        bufferBefore,
+        wasDirty: tab?.isDirty ?? false,
+        tabId: tab?.id ?? null,
+      });
+    })();
+    this.mutationSnapshotPromises.set(path, capture);
+    try {
+      await capture;
+    } finally {
+      this.mutationSnapshotPromises.delete(path);
+    }
   }
 
   private async restoreMutationSnapshot(

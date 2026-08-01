@@ -460,6 +460,15 @@ export function AiTab() {
                 }
               />
             </SettingRow>
+            <SettingRow
+              label="Collapse thinking by default"
+              description="Show thinking blocks closed by default in the agent chat and sub-agent cards. They can still be expanded manually."
+            >
+              <SettingToggle
+                checked={store.thinkingCollapsedByDefault}
+                onChange={(v) => store.set('thinkingCollapsedByDefault', v)}
+              />
+            </SettingRow>
             {thinkingConfig.enabled && (
               <>
                 <SettingRow label="Thinking level" description="Control how deeply the model reasons">

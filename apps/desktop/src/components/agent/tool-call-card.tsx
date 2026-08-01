@@ -570,7 +570,11 @@ function ToolCallCard({ toolCall }: { toolCall: ToolCallDisplay }) {
 
 // ─── Compact Tool Call Row (Aurora ToolCall) ──────────────────────────────────
 
-export function CompactToolCallRow({ toolCall }: { toolCall: ToolCallDisplay }) {
+export const CompactToolCallRow = memo(function CompactToolCallRow({
+  toolCall,
+}: {
+  toolCall: ToolCallDisplay;
+}) {
   const [expanded, setExpanded] = useState(false);
   const ToolIcon = TOOL_ICON_MAP[toolCall.name] ?? Wrench;
   const fileName = getFileNameFromToolCall(toolCall);
@@ -631,7 +635,7 @@ export function CompactToolCallRow({ toolCall }: { toolCall: ToolCallDisplay }) 
       )}
     </div>
   );
-}
+});
 
 // ─── Tool Call Group ──────────────────────────────────────────────────────────
 
