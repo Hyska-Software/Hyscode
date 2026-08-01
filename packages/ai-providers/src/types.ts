@@ -80,6 +80,12 @@ export interface ProviderCapabilities {
   reasoningReplay: ReasoningReplayMode;
   nativeTokenCounting: boolean;
   acceptsPromptCacheKey: boolean;
+  /**
+   * True for agentic sidecar providers (Codex, Claude Agent): tool calls in
+   * the stream are executed internally by the provider and are informational
+   * evidence — the harness must NOT route them through its own tool router.
+   */
+  agenticToolExecution?: boolean;
 }
 
 // ─── Stream Chunks ──────────────────────────────────────────────────────────

@@ -1053,6 +1053,47 @@ export class Harness {
         break;
       }
 
+      // Agentic sidecar providers (Codex, Claude Agent) execute their tools
+      // internally — tool calls in the stream are informational evidence, not
+      // requests for the harness to route. Surface them as cards and end the
+      // iteration normally.
+      if (provider?.capabilities?.agenticToolExecution && toolCalls.length > 0) {
+        for (const tc of toolCalls) {
+          this.emit({
+            type: 'tool_call_start',
+            toolCallId: tc.id,
+            toolName: tc.name,
+            input: tc.input,
+          });
+          const record: ToolCallRecord = {
+            id: tc.id,
+            toolName: tc.name,
+            input: tc.input,
+            output: {
+              success: true,
+              output: '',
+              metadata: { note: 'Executed by the agent internally' },
+            },
+            durationMs: 0,
+            approved: true,
+            timestamp: new Date().toISOString(),
+          };
+          this.toolCallHistory.push(record);
+          this.traceRecorder.recordToolCall(record);
+          this.emit({
+            type: 'tool_call_result',
+            toolCallId: tc.id,
+            toolName: tc.name,
+            result: record.output,
+            durationMs: 0,
+          });
+        }
+        this.traceRecorder.setHadToolCalls(true);
+        this.traceRecorder.endIteration();
+        finalResponse = assistantText;
+        break;
+      }
+
       // If no tool calls, we're done — the LLM gave a final text response.
       // IMPORTANT: Do NOT check stopReason here. Some providers (Ollama, Gemini)
       // return 'end_turn' even when tool calls are present. The presence of

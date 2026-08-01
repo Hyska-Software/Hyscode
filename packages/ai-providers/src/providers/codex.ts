@@ -145,6 +145,14 @@ export class CodexProvider implements AIProvider {
   readonly name = 'Codex (Agent)';
   models: AIModel[] = [...CODEX_MODELS];
 
+  readonly capabilities = {
+    promptCache: 'automatic' as const,
+    reasoningReplay: 'none' as const,
+    nativeTokenCounting: true,
+    acceptsPromptCacheKey: false,
+    agenticToolExecution: true,
+  };
+
   private apiKey: string;
   private invoke: CodexInvoke | null;
   private authDetected: boolean;

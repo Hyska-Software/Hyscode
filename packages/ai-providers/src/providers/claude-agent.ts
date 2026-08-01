@@ -112,6 +112,14 @@ export class ClaudeAgentProvider implements AIProvider {
   readonly name = 'Claude Agent';
   models: AIModel[] = [...CLAUDE_AGENT_MODELS];
 
+  readonly capabilities = {
+    promptCache: 'automatic' as const,
+    reasoningReplay: 'none' as const,
+    nativeTokenCounting: true,
+    acceptsPromptCacheKey: false,
+    agenticToolExecution: true,
+  };
+
   private apiKey: string;
   private invoke: ClaudeAgentInvoke | null;
 
