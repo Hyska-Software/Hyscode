@@ -208,6 +208,7 @@ export class TerminalCommandRunner {
       forceNew: Boolean(input.forceNew) || background,
       sessionName: input.sessionName,
       background,
+      ownerId: ctx.ownerId,
     });
     const windows = typeof navigator !== 'undefined' && navigator.userAgent?.includes('Win');
     const nonce = crypto.randomUUID().replace(/-/g, '');

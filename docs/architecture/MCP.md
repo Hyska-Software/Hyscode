@@ -84,6 +84,9 @@ interface McpServerConfig {
 
   // Capability gating
   capabilities: McpCapabilities;
+
+  // Delegation gating (desktop settings)
+  agentSafe: boolean;                       // expose tools to sub-agents when true
 }
 
 interface McpCapabilities {
@@ -93,6 +96,12 @@ interface McpCapabilities {
   timeoutMs: number;                      // default: 30000
 }
 ```
+
+MCP tools are registered in the parent harness by default. A delegated child
+receives only tools from servers with `agentSafe: true`; the approval policy
+still applies to every received MCP tool. This is separate from transport
+capabilities because it controls which agent execution contexts may invoke the
+server, not which protocol methods the server exposes.
 
 ---
 

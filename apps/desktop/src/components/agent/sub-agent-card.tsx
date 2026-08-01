@@ -1,10 +1,11 @@
-import { memo, useEffect, useRef } from 'react';
+import { memo, useEffect, useState } from 'react';
+import { ExternalLink } from 'lucide-react';
 import { SubagentCard as AuroraSubagentCard } from '@hyscode/ui';
 import type { AgentStatus } from '@hyscode/ui';
-import type { AgentMode, ToolCallDisplay } from '@/stores/agent-store';
+import type { AgentMode } from '@/stores/agent-store';
 import { useAgentStore } from '@/stores/agent-store';
-import { CompactToolCallRow } from './tool-call-card';
-import { MarkdownContent } from './markdown-renderer';
+import { useEditorStore } from '@/stores/editor-store';
+import { SubAgentDetails, formatDuration, formatTokens } from './sub-agent-details';
 
 // ─── Mode Config ─────────────────────────────────────────────────────────────
 
@@ -18,9 +19,12 @@ const MODE_LABELS: Record<AgentMode, string> = {
 
 function mapStatus(status: string): AgentStatus {
   switch (status) {
-    case 'running': return 'running';
+    case 'queued': return 'pending';
+    case 'running':
+    case 'cancelling': return 'running';
     case 'done': return 'success';
     case 'error': return 'error';
+    case 'cancelled': return 'cancelled';
     default: return 'running';
   }
 }
@@ -37,53 +41,58 @@ export const SubAgentCard = memo(function SubAgentCard({ input, toolCallId }: Su
   const mode = (input.mode as AgentMode) ?? 'build';
   const subAgent = useAgentStore((s) => s.subAgents.find((a) => a.id === toolCallId));
   const status = subAgent?.status ?? 'running';
-  const toolCalls: ToolCallDisplay[] = subAgent?.toolCalls ?? [];
-  const output = subAgent?.output ?? '';
   const isRunning = status === 'running';
-  const scrollRef = useRef<HTMLDivElement>(null);
 
+  // Live elapsed-time ticker while the sub-agent is running.
+  const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
-    if (isRunning && scrollRef.current && toolCalls.length > 0) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-    }
-  }, [toolCalls.length, isRunning]);
+    if (!isRunning) return;
+    setNow(Date.now());
+    const interval = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(interval);
+  }, [isRunning]);
 
   const name = MODE_LABELS[mode] ?? MODE_LABELS.build;
 
+  // ── Collapsed-header metadata: duration + token usage ──
+  const durationMs = subAgent?.completedAt
+    ? subAgent.completedAt - subAgent.startedAt
+    : isRunning && subAgent
+      ? now - subAgent.startedAt
+      : null;
+  const durationText = durationMs != null ? formatDuration(durationMs) : '';
+  const usage = subAgent?.tokenUsage;
+  const metaParts: string[] = [];
+  if (durationText) metaParts.push(durationText);
+  if (usage && usage.totalTokens > 0) {
+    metaParts.push(`${formatTokens(usage.totalTokens)} tok`);
+    if (usage.requestCount) metaParts.push(`${usage.requestCount} req`);
+  }
+  const meta = metaParts.length > 0 ? metaParts.join(' · ') : null;
+
+  const openInEditor = () => {
+    if (!subAgent) return;
+    const conversationId =
+      subAgent.conversationId ?? useAgentStore.getState().conversationId ?? '';
+    useEditorStore.getState().openSubAgentTab(subAgent, conversationId);
+  };
+
   const result = (
     <div className="mt-1 space-y-1 border-l border-border pl-3">
-      {toolCalls.length > 0 && (
-        <div ref={scrollRef} className="max-h-[320px] space-y-0.5 overflow-y-auto py-1">
-          {toolCalls.map((tc) => (
-            <CompactToolCallRow key={tc.id} toolCall={tc} />
-          ))}
-          {isRunning && (
-            <div className="flex items-center gap-1.5 py-1 text-[10px] text-muted-foreground">
-              <span className="flex gap-0.5">
-                <span className="agent-dot-bounce h-1 w-1 rounded-full bg-primary/40" />
-                <span className="agent-dot-bounce h-1 w-1 rounded-full bg-primary/40" style={{ animationDelay: '0.16s' }} />
-                <span className="agent-dot-bounce h-1 w-1 rounded-full bg-primary/40" style={{ animationDelay: '0.32s' }} />
-              </span>
-              working...
-            </div>
-          )}
-        </div>
+      {subAgent && (
+        <button
+          onClick={openInEditor}
+          className="flex items-center gap-1 rounded px-1 py-0.5 text-[10px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+          title="Open sub-agent execution in an editor tab"
+        >
+          <ExternalLink className="h-2.5 w-2.5" />
+          Open in editor
+        </button>
       )}
-      {output && (
-        <div className="pt-2">
-          <p className="mb-1.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
-            {isRunning ? 'Streaming output' : 'Result'}
-          </p>
-          <div className="max-h-[400px] overflow-y-auto">
-            {output.startsWith('__SUBAGENT_STATUS__:') ? (
-              <p className="text-[11px] italic text-muted-foreground">
-                {output.replace('__SUBAGENT_STATUS__:', '')}
-              </p>
-            ) : (
-              <MarkdownContent content={output} className="text-xs leading-[1.65]" />
-            )}
-          </div>
-        </div>
+      {subAgent ? (
+        <SubAgentDetails subAgent={subAgent} isRunning={isRunning} />
+      ) : (
+        <p className="text-[11px] italic text-muted-foreground">Sub-agent state not found.</p>
       )}
     </div>
   );
@@ -94,6 +103,7 @@ export const SubAgentCard = memo(function SubAgentCard({ input, toolCallId }: Su
         name={name}
         task={task}
         status={mapStatus(status)}
+        meta={meta}
         result={result}
         defaultOpen={true}
       />

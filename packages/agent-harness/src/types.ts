@@ -34,6 +34,9 @@ export interface ToolHandler {
   definition: ToolDefinition;
   category: ToolCategory;
   requiresApproval: boolean;
+  /** When true, multiple calls of this tool may run concurrently in one batch.
+   *  Only delegation tools such as spawn_subagent should opt in. */
+  parallel?: boolean;
   execute: (input: Record<string, unknown>, context: ToolExecutionContext) => Promise<ToolResult>;
 }
 
@@ -44,6 +47,12 @@ export interface ToolExecutionContext {
   toolCallId: string;
   /** Aborted when the owning turn is cancelled or times out. */
   signal: AbortSignal;
+  /** 0 = main agent, >0 = nested delegation depth (sub-agents). Tools can
+   *  use this to reject interactions that only make sense at the top level. */
+  delegationLevel?: number;
+  /** Stable owner of this execution context (sub-agent id for children).
+   *  Used to isolate terminal sessions and other per-owner resources. */
+  ownerId?: string;
   /** Invoke a Tauri command */
   invoke: <T>(cmd: string, args?: Record<string, unknown>) => Promise<T>;
   /** Listen to a Tauri event. Returns an unlisten function. */
@@ -53,11 +62,18 @@ export interface ToolExecutionContext {
   /** Access to gathered-context operations (set by harness) */
   gatheredContext?: {
     add(path: string, content: string, relevance: number, reason: string): number;
+    append(path: string, content: string, relevance: number, reason: string): number;
     remove(path: string): boolean;
     has(path: string): boolean;
     getAll(): GatheredContextEntry[];
     getTokens(): number;
     clear(): void;
+  };
+  /** Raw file content cache shared by read_file, read_multiple_files and gather_context. */
+  readCache?: {
+    get(path: string): string | undefined;
+    set(path: string, content: string): void;
+    delete(path: string): void;
   };
   /** Ask the user a set of questions. Pauses the agent loop until answered. */
   askUser?: (questions: AgentQuestion[], title?: string) => Promise<AgentQuestionAnswer[]>;
@@ -85,6 +101,9 @@ export type TerminalAcquireRequest = {
   forceNew: boolean;
   sessionName?: string;
   background: boolean;
+  /** Owner (sub-agent id) that must own the acquired session. When set, the
+   *  runtime must not reuse a session owned by a different owner. */
+  ownerId?: string;
 };
 
 export type TerminalBinding = {
@@ -655,6 +674,8 @@ export interface AgentTask {
 export interface TurnRecord {
   id: string;
   conversationId: string;
+  /** Parent turn when this record belongs to a delegated child turn. */
+  parentTurnId?: string;
   /** Agent mode used for this turn */
   mode: AgentType;
   /** Number of LLM iterations within this turn */

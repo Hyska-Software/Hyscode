@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { immer } from 'zustand/middleware/immer';
 import type { ViewerType } from '../lib/utils';
+import type { SubAgentState } from './agent-store';
 
 export type MarkdownViewMode = 'preview' | 'code' | 'split';
 
@@ -12,7 +13,7 @@ export interface Tab {
   isDirty: boolean;
   isPinned: boolean;
   isPreview: boolean;
-  type: 'file' | 'diff' | 'terminal' | 'commit' | 'history' | 'release-notes' | 'extension-readme' | 'git-graph' | 'db-schema' | 'memory';
+  type: 'file' | 'diff' | 'terminal' | 'commit' | 'history' | 'release-notes' | 'extension-readme' | 'git-graph' | 'db-schema' | 'memory' | 'sub-agent';
   viewerType: ViewerType;
   markdownMode?: MarkdownViewMode;
   markdownSplitRatio?: number;
@@ -49,6 +50,14 @@ export interface Tab {
   memoryProps?: {
     memoryId: string;
     title: string;
+  };
+
+  /** Sub-agent execution viewer props when type === 'sub-agent' */
+  subAgentProps?: {
+    subAgentId: string;
+    conversationId: string;
+    /** Frozen snapshot used when the owning chat tab is closed. */
+    snapshot: SubAgentState;
   };
 
   /** DB Schema diagram props */
@@ -90,6 +99,7 @@ interface EditorState {
   openGitGraphTab: () => void;
   openDbSchemaTab: (sourceFile?: string | null, diagramId?: string) => void;
   openMemoryTab: (memoryId: string, title: string) => void;
+  openSubAgentTab: (subAgent: SubAgentState, conversationId: string) => void;
   openReleaseNotesTab: (version: string, body: string) => void;
   openExtensionReadmeTab: (props: { extensionName: string; displayName: string; readmeContent: string; iconUrl?: string | null; version?: string; publisher?: string; description?: string; enabled?: boolean; categories?: string[]; activationEvents?: string[]; installedAt?: string; hasMain?: boolean; contributions?: { label: string; count: number }[] }) => void;
   closeTab: (id: string) => void;
@@ -309,6 +319,37 @@ export const useEditorStore = create<EditorState>()(
           type: 'memory',
           viewerType: 'code',
           memoryProps: { memoryId, title },
+        };
+        state.tabs.push(newTab);
+        state.activeTabId = id;
+      }),
+
+    openSubAgentTab: (subAgent, conversationId) =>
+      set((state) => {
+        const id = `subagent:${subAgent.id}`;
+        const existing = state.tabs.find((t) => t.id === id);
+        if (existing) {
+          state.activeTabId = existing.id;
+          return;
+        }
+        const modeLabel: Record<string, string> = {
+          build: 'Build sub-agent',
+          review: 'Review sub-agent',
+          debug: 'Debug sub-agent',
+          plan: 'Plan sub-agent',
+          chat: 'Chat sub-agent',
+        };
+        const newTab: Tab = {
+          id,
+          filePath: id,
+          fileName: modeLabel[subAgent.mode] ?? 'Sub-agent',
+          language: 'plaintext',
+          isDirty: false,
+          isPinned: false,
+          isPreview: false,
+          type: 'sub-agent',
+          viewerType: 'code',
+          subAgentProps: { subAgentId: subAgent.id, conversationId, snapshot: subAgent },
         };
         state.tabs.push(newTab);
         state.activeTabId = id;

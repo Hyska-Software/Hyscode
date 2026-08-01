@@ -53,6 +53,57 @@ Unlimited turns still stop on normal model completion, explicit cancellation,
 request timeout, repeated-call loop detection, or provider failure. Sub-agents
 retain their separate interaction-limit setting.
 
+### Delegated Child Turns
+
+Delegation uses `Harness.createChild()` rather than reconstructing a second
+runtime in the desktop layer. A child receives the parent environment for
+filesystem access, dirty-buffer protection, approvals, terminal sessions,
+memory, skills, and rules. Parent-only external tools are not inherited by
+default; the caller must explicitly pass an allow-list such as MCP tools from
+servers marked `agentSafe`.
+
+Children increment `ToolExecutionContext.delegationLevel`. This lets tools
+reject top-level interactions such as `ask_user` and `request_mode_switch`
+without relying only on prompt instructions. Child turns use the parent
+conversation ID so memory provenance, terminal ownership, and observability
+remain attached to the real conversation. Their records and traces may carry a
+`parent_turn_id` for querying delegated work independently.
+
+### Read Reuse Policy
+
+Large reviews commonly read separate line ranges from the same source file.
+The harness therefore tracks canonical paths and read spans instead of applying
+a file-wide read count. Non-overlapping ranges are allowed. Repeated
+successful overlapping reads produce a context warning rather than cancelling
+the child turn. `read_file` and `read_multiple_files` populate a per-turn raw
+content cache, and `gather_context` reuses that cache when possible.
+
+Review and plan turns also use automatic gathered excerpts so context remains
+available after older protocol frames are compacted.
+
+### Parallel Delegation
+
+Only `spawn_subagent` batches run concurrently. A batch composed entirely of
+parallel-safe tools executes with one immutable execution context per call and
+`Promise.allSettled`, preserving the original tool-call order in the transcript.
+All other tool batches stay sequential.
+
+The desktop coordinator (`SubAgentCoordinator`) enforces the app-level policy:
+
+- `review` children hold a shared workspace lease and run in parallel, bounded
+  by `subAgentMaxConcurrent` (default 2, max 4).
+- `build`, `debug`, and `plan` children hold an exclusive workspace lease and
+  queue behind running children. Once an exclusive child is queued, new shared
+  children wait until it completes.
+- Queued children are visible in the UI with their queue position and can be
+  cancelled before they start.
+
+Concurrent children receive isolated resources: unique approval ids routed to
+the owning child router, a dedicated visible terminal session per child
+(`ownerId`), serialized mutation-snapshot capture per path, and per-child token
+usage. Parent cancellation cancels queued children immediately and aborts all
+active runners.
+
 ### Turn Lifecycle
 
 Every run has a unique `turnId` and one terminal outcome: `complete`,

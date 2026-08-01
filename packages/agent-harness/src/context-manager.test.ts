@@ -89,6 +89,41 @@ describe('ContextManager protocol framing', () => {
     expect(snapshot.tokenBreakdown.deduplicated).toBeGreaterThan(0);
   });
 
+  it('canonicalizes relative and absolute read paths for gathered-file deduplication', () => {
+    const context = new ContextManager();
+    context.setWorkspacePath('C:/workspace');
+    context.addGatheredFile('C:/workspace/src/a.ts', 'const value = 1;', 0.5, 'read');
+    context.setHistory([
+      { role: 'user', content: [{ type: 'text', text: 'inspect' }] },
+      {
+        role: 'assistant',
+        content: [
+          { type: 'tool_call', id: 'read-1', name: 'read_file', input: { path: 'src/a.ts' } },
+        ],
+      },
+      {
+        role: 'tool',
+        content: [{ type: 'tool_result', toolCallId: 'read-1', output: 'fresh content' }],
+      },
+    ]);
+
+    const snapshot = context.buildSnapshot([], 2_000, 100);
+
+    expect(snapshot.entries.find((entry) => entry.id === 'gathered:C:/workspace/src/a.ts')).toMatchObject({
+      included: false,
+      reason: 'duplicate',
+    });
+  });
+
+  it('merges excerpts when a file is gathered from multiple ranges', () => {
+    const context = new ContextManager();
+    context.appendGatheredFile('src/a.ts', 'lines 1-10', 0.5, 'first range');
+    context.appendGatheredFile('src/a.ts', 'lines 11-20', 0.5, 'second range');
+
+    expect(context.getGatheredFiles()[0]?.content).toContain('lines 1-10');
+    expect(context.getGatheredFiles()[0]?.content).toContain('lines 11-20');
+  });
+
   it('expires turn-scoped automatic sources', () => {
     const context = new ContextManager();
     context.beginTurn();

@@ -92,7 +92,9 @@ export function ApprovalDialog({ approval }: ApprovalDialogProps) {
 
   const handleTrustTool = () => {
     HarnessBridge.get().resolveApproval(approval.id, true);
-    HarnessBridge.get().trustToolForSession(approval.toolName);
+    // Scope the trust to the owning agent: sub-agent approvals trust the
+    // sub-agent's router, main approvals trust the main router.
+    HarnessBridge.get().trustToolForSession(approval.toolName, approval.id);
     // Switch to session-trust mode if not already
     if (approvalMode === 'manual') {
       useSettingsStore.getState().set('approvalMode', 'session-trust');

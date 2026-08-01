@@ -58,6 +58,8 @@ export interface Trace {
   id: string;
   /** Conversation this trace belongs to */
   conversationId: string;
+  /** Parent turn when this trace belongs to a delegated child turn. */
+  parentTurnId?: string;
   /** Agent mode */
   mode: AgentType;
   /** Provider + model used */

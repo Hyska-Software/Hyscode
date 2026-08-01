@@ -35,6 +35,7 @@ pub fn open_database(app_dir: &std::path::Path) -> Connection {
     apply_migration_010(&conn);
     apply_migration_011(&conn);
     apply_migration_012(&conn);
+    apply_migration_013(&conn);
     conn
 }
 
@@ -117,6 +118,40 @@ fn apply_migration_012(conn: &Connection) {
         conn.execute_batch("ALTER TABLE messages ADD COLUMN turn_summary TEXT")
             .unwrap_or_else(|error| panic!("failed to add messages.turn_summary: {error}"));
     }
+}
+
+/// Migration 013: link delegated turn records and traces to their parent turn.
+fn apply_migration_013(conn: &Connection) {
+    let additions: &[(&str, &str, &str)] = &[
+        (
+            "turn_records",
+            "parent_turn_id",
+            "ALTER TABLE turn_records ADD COLUMN parent_turn_id TEXT",
+        ),
+        (
+            "traces",
+            "parent_turn_id",
+            "ALTER TABLE traces ADD COLUMN parent_turn_id TEXT",
+        ),
+    ];
+    for (table, column, ddl) in additions {
+        let exists: bool = conn
+            .query_row(
+                "SELECT COUNT(*) > 0 FROM pragma_table_info(?1) WHERE name = ?2",
+                params![table, column],
+                |row| row.get(0),
+            )
+            .unwrap_or(false);
+        if !exists {
+            conn.execute_batch(ddl)
+                .unwrap_or_else(|e| panic!("failed to add column {table}.{column}: {e}"));
+        }
+    }
+    conn.execute_batch(
+        "CREATE INDEX IF NOT EXISTS idx_turn_records_parent ON turn_records(parent_turn_id);
+         CREATE INDEX IF NOT EXISTS idx_traces_parent ON traces(parent_turn_id);",
+    )
+    .expect("failed to index delegated turn records");
 }
 
 // ─── Row types ──────────────────────────────────────────────────────────────
@@ -387,11 +422,12 @@ pub fn db_create_turn_record(
     verification_forced: bool,
     files_modified: Option<String>,
     duration_ms: i64,
+    parent_turn_id: Option<String>,
 ) -> Result<(), String> {
     let conn = state.0.lock().map_err(|e| e.to_string())?;
     conn.execute(
-        "INSERT INTO turn_records (id, conversation_id, mode, iterations, tool_calls, token_input, token_output, token_total, token_cache_read, token_cache_write, stop_reason, verification_performed, verification_forced, files_modified, duration_ms)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
+        "INSERT INTO turn_records (id, conversation_id, mode, iterations, tool_calls, token_input, token_output, token_total, token_cache_read, token_cache_write, stop_reason, verification_performed, verification_forced, files_modified, duration_ms, parent_turn_id)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
         params![
             id,
             conversation_id,
@@ -408,6 +444,7 @@ pub fn db_create_turn_record(
             verification_forced as i64,
             files_modified,
             duration_ms,
+            parent_turn_id,
         ],
     )
     .map_err(|e| e.to_string())?;
@@ -606,6 +643,7 @@ pub struct TraceRow {
     pub loop_warnings: Option<String>,
     pub duration_ms: i64,
     pub created_at: String,
+    pub parent_turn_id: Option<String>,
 }
 
 #[tauri::command]
@@ -633,11 +671,12 @@ pub fn db_create_trace(
     errors: Option<String>,
     loop_warnings: Option<String>,
     duration_ms: i64,
+    parent_turn_id: Option<String>,
 ) -> Result<(), String> {
     let conn = state.0.lock().map_err(|e| e.to_string())?;
     conn.execute(
-        "INSERT INTO traces (id, conversation_id, mode, provider, model, system_prompt_hash, system_prompt_preview, system_prompt_tokens, tool_count, iterations, token_input, token_output, token_total, token_cache_read, token_cache_write, stop_reason, verification_performed, verification_forced, files_modified, errors, loop_warnings, duration_ms)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22)",
+        "INSERT INTO traces (id, conversation_id, mode, provider, model, system_prompt_hash, system_prompt_preview, system_prompt_tokens, tool_count, iterations, token_input, token_output, token_total, token_cache_read, token_cache_write, stop_reason, verification_performed, verification_forced, files_modified, errors, loop_warnings, duration_ms, parent_turn_id)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23)",
         params![
             id,
             conversation_id,
@@ -661,6 +700,7 @@ pub fn db_create_trace(
             errors,
             loop_warnings,
             duration_ms,
+            parent_turn_id,
         ],
     )
     .map_err(|e| e.to_string())?;
@@ -677,7 +717,7 @@ pub fn db_list_traces(
         .prepare(
             "SELECT id, conversation_id, mode, provider, model, system_prompt_hash, iterations,
                     token_input, token_output, stop_reason, verification_performed, verification_forced,
-                    files_modified, errors, loop_warnings, duration_ms, created_at
+                    files_modified, errors, loop_warnings, duration_ms, created_at, parent_turn_id
              FROM traces
              WHERE conversation_id = ?1
              ORDER BY created_at DESC",
@@ -703,6 +743,7 @@ pub fn db_list_traces(
                 loop_warnings: row.get(14)?,
                 duration_ms: row.get(15)?,
                 created_at: row.get(16)?,
+                parent_turn_id: row.get(17)?,
             })
         })
         .map_err(|e| e.to_string())?

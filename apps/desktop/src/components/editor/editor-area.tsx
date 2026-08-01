@@ -23,6 +23,7 @@ import {
 import { DbSchemaViewer } from './viewers/db-schema';
 import { MemoryViewer } from './viewers/memory-viewer';
 import { ExtensionReadmeViewer } from './extension-readme-viewer';
+import { SubAgentTabView } from './sub-agent-tab';
 import { useEditorStore, useFileStore, useLayoutStore, useSettingsStore } from '../../stores';
 import { useAgentStore } from '../../stores/agent-store';
 import { useExtensionStore } from '../../stores/extension-store';
@@ -535,6 +536,12 @@ export function EditorArea() {
             <DbSchemaViewer sourceFile={activeTab.dbSchemaProps?.sourceFile ?? null} />
           ) : activeTab.type === 'memory' && activeTab.memoryProps ? (
             <MemoryViewer memoryId={activeTab.memoryProps.memoryId} />
+          ) : activeTab.type === 'sub-agent' && activeTab.subAgentProps ? (
+            <SubAgentTabView
+              subAgentId={activeTab.subAgentProps.subAgentId}
+              conversationId={activeTab.subAgentProps.conversationId}
+              snapshot={activeTab.subAgentProps.snapshot}
+            />
           ) : activeTab.type === 'release-notes' && activeTab.releaseNotesProps ? (
             <MarkdownViewer
               content={activeTab.releaseNotesProps.body}

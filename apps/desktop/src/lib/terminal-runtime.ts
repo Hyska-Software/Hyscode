@@ -36,6 +36,9 @@ function normalizeTerminalOutput(output: string, maxChars: number): string {
 export class DesktopTerminalRuntime implements TerminalRuntimeAdapter {
   async acquire(request: TerminalAcquireRequest): Promise<TerminalBinding> {
     const store = useTerminalStore.getState();
+    // Children pass an ownerId (sub-agent id) so every concurrent child gets a
+    // dedicated visible terminal session instead of racing for the parent's.
+    const isolationKey = request.ownerId ?? request.conversationId;
     let session = request.forceNew
       ? undefined
       : request.sessionName
@@ -43,9 +46,9 @@ export class DesktopTerminalRuntime implements TerminalRuntimeAdapter {
             (item) =>
               item.isAgentSession &&
               item.name === request.sessionName &&
-              item.ownerConversationId === request.conversationId,
+              item.ownerConversationId === isolationKey,
           )
-        : store.findHealthyAgentSession(request.conversationId);
+        : store.findHealthyAgentSession(isolationKey);
 
     if (session?.activeToolCallId && session.activeToolCallId !== request.toolCallId) {
       session = undefined;
@@ -54,7 +57,7 @@ export class DesktopTerminalRuntime implements TerminalRuntimeAdapter {
       const sessionId = store.ensureAgentSession({
         name: request.sessionName,
         reuseHealthy: false,
-        conversationId: request.conversationId,
+        conversationId: isolationKey,
         cwd: request.cwd,
       });
       session = useTerminalStore.getState().sessions.find((item) => item.id === sessionId);

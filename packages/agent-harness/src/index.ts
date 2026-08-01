@@ -69,6 +69,10 @@ export { DEFAULT_HARNESS_CONFIG, SAFE_TOOLS, DESTRUCTIVE_TOOLS, CATEGORY_RISK } 
 // ─── Core Modules ───────────────────────────────────────────────────────────
 export { Harness } from './harness';
 export type { HarnessOptions } from './harness';
+export type { ChildHarnessOptions, HarnessEnvironment } from './environment';
+export { DelegatedRunner, SUB_AGENT_PREAMBLE } from './delegated-runner';
+export type { DelegatedRunnerOptions } from './delegated-runner';
+export { ReadLoopMiddleware } from './read-loop';
 
 export { ContextManager } from './context-manager';
 export { RequestPreparation, estimateActualCost } from './request-preparation';

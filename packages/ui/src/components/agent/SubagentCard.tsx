@@ -10,6 +10,8 @@ export interface SubagentCardProps {
   /** The subagent task, e.g. "Explore auth flow". */
   task?: ReactNode;
   status?: AgentStatus;
+  /** Extra summary metadata (duration, tokens) shown in the collapsed header. */
+  meta?: ReactNode;
   /** Collapsible result payload. */
   result?: ReactNode;
   defaultOpen?: boolean;
@@ -22,6 +24,7 @@ export function SubagentCard({
   description,
   task,
   status = "running",
+  meta,
   result,
   defaultOpen = false,
   className,
@@ -31,18 +34,25 @@ export function SubagentCard({
     <div className={cn("rounded-lg   bg-card", className)}>
       <details open={defaultOpen} className="group">
         <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2 [&::-webkit-details-marker]:hidden">
-          <span className="flex size-5 items-center justify-center rounded bg-info-500/10 text-info-600 dark:text-info-400 [&_svg]:size-3.5">
+          <span className="flex size-5 shrink-0 items-center justify-center rounded bg-info-500/10 text-info-600 dark:text-info-400 [&_svg]:size-3.5">
             <Bot />
           </span>
-          <span className="text-sm font-medium text-foreground">{name}</span>
-          {task && <span className="truncate text-xs text-muted-foreground">— {task}</span>}
-          <span className="ml-auto flex items-center gap-1.5 text-xs text-muted-foreground">
+          <span className="min-w-0 truncate text-sm font-medium text-foreground">{name}</span>
+          {task && (
+            <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">— {task}</span>
+          )}
+          {meta && (
+            <span className="group-open:hidden flex shrink-0 items-center gap-1 text-[11px] tabular-nums text-muted-foreground">
+              {meta}
+            </span>
+          )}
+          <span className="ml-auto flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground">
             <StatusIcon status={status} className="size-3.5" />
             <span className="capitalize">{status}</span>
           </span>
           {hasResult && (
             <svg
-              className="size-4 text-neutral-400 transition group-open:rotate-90"
+              className="size-4 shrink-0 text-neutral-400 transition group-open:rotate-90"
               viewBox="0 0 24 24"
               fill="none"
               stroke="currentColor"
@@ -52,7 +62,11 @@ export function SubagentCard({
             </svg>
           )}
         </summary>
-        {hasResult && <div className="  px-3 py-2 text-sm text-foreground">{result}</div>}
+        {hasResult && (
+          <div className="group-open:animate-details-open px-3 py-2 text-sm text-foreground">
+            {result}
+          </div>
+        )}
       </details>
       {!hasResult && description && (
         <p className="px-3 pb-2 -mt-1 text-xs text-muted-foreground">{description}</p>

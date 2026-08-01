@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import type { McpServerConfig } from '@/stores/settings-store';
-import { SettingInput, SettingSegmented } from '../controls';
+import { SettingInput, SettingSegmented, SettingToggle } from '../controls';
 
 interface McpServerFormProps {
   onSave: (server: McpServerConfig) => void;
@@ -15,6 +15,7 @@ export function McpServerForm({ onSave, onCancel }: McpServerFormProps) {
   const [args, setArgs] = useState('');
   const [url, setUrl] = useState('');
   const [wsUrl, setWsUrl] = useState('');
+  const [agentSafe, setAgentSafe] = useState(false);
 
   const handleSubmit = () => {
     if (!name.trim()) return;
@@ -24,6 +25,7 @@ export function McpServerForm({ onSave, onCancel }: McpServerFormProps) {
       name: name.trim(),
       transport,
       enabled: true,
+      agentSafe,
     };
 
     if (transport === 'stdio') {
@@ -106,6 +108,13 @@ export function McpServerForm({ onSave, onCancel }: McpServerFormProps) {
             />
           </Field>
         )}
+
+        <Field label="Sub-agent access">
+          <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
+            <SettingToggle checked={agentSafe} onChange={setAgentSafe} />
+            <span>Allow delegated agents to use this server</span>
+          </div>
+        </Field>
 
         {/* Actions */}
         <div className="flex items-center gap-2 pt-1">
