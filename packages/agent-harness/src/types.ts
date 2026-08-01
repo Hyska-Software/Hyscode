@@ -34,6 +34,10 @@ export interface ToolHandler {
   definition: ToolDefinition;
   category: ToolCategory;
   requiresApproval: boolean;
+  /** Risk classification for approval routing. Built-in tools declare it via
+   *  `defineTool` (defaulting to `CATEGORY_RISK[category]`); the router and
+   *  the bridge consume it so no separate name-based registry can drift. */
+  riskLevel?: ToolRiskLevel;
   /** When true, multiple calls of this tool may run concurrently in one batch.
    *  Only delegation tools such as spawn_subagent should opt in. */
   parallel?: boolean;
@@ -220,6 +224,12 @@ export const SAFE_TOOLS = new Set([
   'grep_search',
   'web_search',
   'web_fetch',
+  'git_status',
+  'git_diff',
+  'git_log',
+  'git_show',
+  'git_blame',
+  'git_fetch',
   'docker_list_containers',
   'docker_list_images',
   'docker_container_logs',
@@ -231,8 +241,36 @@ export const DESTRUCTIVE_TOOLS = new Set([
   'respond_terminal_input',
   'stop_terminal_process',
   'git_commit',
+  'git_add',
   'git_push',
+  'git_pull',
+  'git_checkout',
+  'git_merge',
+  'git_reset',
+  'git_stash',
   'delete_file',
+]);
+
+/** Git operations that mutate repository state. Single source of truth for
+ *  mode policies, agent definitions and the router — keep the list here. */
+export const GIT_MUTATION_TOOLS = new Set([
+  'git_commit',
+  'git_add',
+  'git_push',
+  'git_pull',
+  'git_checkout',
+  'git_merge',
+  'git_reset',
+  'git_stash',
+]);
+
+/** Git operations that sweep the worktree and are blocked while the editor
+ *  has unsaved buffers (a subset of `GIT_MUTATION_TOOLS`). */
+export const GIT_WORKTREE_SWEEPING_TOOLS = new Set([
+  'git_checkout',
+  'git_pull',
+  'git_stash',
+  'git_merge',
   'git_reset',
 ]);
 

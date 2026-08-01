@@ -8,9 +8,11 @@ import type {
   ToolResult,
   ToolExecutionContext,
   ToolCategory,
+  ToolRiskLevel,
   AgentQuestion,
   MemoryType,
 } from './types';
+import { CATEGORY_RISK } from './types';
 import { resolveWorkspacePath } from './path-policy';
 import { normalizeTerminalOutput } from './terminal-protocol';
 import { stopCommand, TerminalCommandRunner } from './terminal-command-runner';
@@ -25,17 +27,40 @@ function defineTool(
   category: ToolCategory,
   requiresApproval: boolean,
   execute: (input: Record<string, unknown>, ctx: ToolExecutionContext) => Promise<ToolResult>,
+  riskLevel?: ToolRiskLevel,
 ): ToolHandler {
   const definition: ToolDefinition = {
     name,
     description,
     inputSchema: { type: 'object', properties, required },
   };
-  return { definition, category, requiresApproval, execute };
+  return {
+    definition,
+    category,
+    requiresApproval,
+    riskLevel: riskLevel ?? CATEGORY_RISK[category],
+    execute,
+  };
 }
 
 function resolvePath(path: string, workspacePath: string): string {
   return resolveWorkspacePath(path, workspacePath);
+}
+
+/** Resolve a path for git commands: enforce workspace containment on the
+ *  absolute form (so escapes are rejected here), but emit a repo-relative
+ *  path — the convention the Rust git commands validate. */
+function resolveRepoRelativePath(path: string, workspacePath: string): string {
+  const resolved = resolvePath(path, workspacePath).replace(/\\/g, '/');
+  const workspace = workspacePath.replace(/\\/g, '/').replace(/\/+$/, '');
+  if (
+    resolved.length > workspace.length &&
+    resolved.slice(0, workspace.length).toLowerCase() === workspace.toLowerCase() &&
+    resolved[workspace.length] === '/'
+  ) {
+    return resolved.slice(workspace.length + 1);
+  }
+  return resolved;
 }
 
 // ─── Browser Tool Helpers ────────────────────────────────────────────────────
@@ -777,6 +802,7 @@ export const gitStatusTool = defineTool(
       return { success: false, output: '', error: String(err) };
     }
   },
+  'safe',
 );
 
 export const gitDiffTool = defineTool(
@@ -795,11 +821,9 @@ export const gitDiffTool = defineTool(
   async (input, ctx) => {
     try {
       const staged = (input.staged as boolean) ?? false;
-      const filePath = input.path
-        ? resolvePath(input.path as string, ctx.workspacePath)
-        : undefined;
 
-      if (filePath) {
+      if (input.path) {
+        const filePath = resolveRepoRelativePath(input.path as string, ctx.workspacePath);
         const diff = await ctx.invoke<string>('git_diff_file', {
           repoPath: ctx.workspacePath,
           filePath,
@@ -808,32 +832,18 @@ export const gitDiffTool = defineTool(
         return { success: true, output: diff || 'No changes.' };
       }
 
-      // Full diff — get status then diff each file
-      const result = await ctx.invoke<{
-        staged: Array<{ path: string }>;
-        unstaged: Array<{ path: string }>;
-      }>('git_status', { repoPath: ctx.workspacePath });
-
-      const filesToDiff = staged ? result.staged : result.unstaged;
-      const diffs: string[] = [];
-      for (const file of filesToDiff) {
-        try {
-          const diff = await ctx.invoke<string>('git_diff_file', {
-            repoPath: ctx.workspacePath,
-            filePath: file.path,
-            staged,
-          });
-          if (diff) diffs.push(diff);
-        } catch {
-          // Skip files that can't be diffed
-        }
-      }
-
-      return { success: true, output: diffs.join('\n') || 'No changes.' };
+      // Single pass in the backend: status + per-file diffs were N+1 invokes,
+      // each reopening the repository, with no shared truncation budget.
+      const diff = await ctx.invoke<string>('git_uncommitted_diff', {
+        repoPath: ctx.workspacePath,
+        staged,
+      });
+      return { success: true, output: diff || 'No changes.' };
     } catch (err) {
       return { success: false, output: '', error: String(err) };
     }
   },
+  'safe',
 );
 
 export const gitCommitTool = defineTool(
@@ -855,7 +865,7 @@ export const gitCommitTool = defineTool(
       const paths = input.paths as string[] | undefined;
 
       if (paths && paths.length > 0) {
-        const resolved = paths.map((p) => resolvePath(p, ctx.workspacePath));
+        const resolved = paths.map((p) => resolveRepoRelativePath(p, ctx.workspacePath));
         await ctx.invoke('git_add', {
           repoPath: ctx.workspacePath,
           paths: resolved,
@@ -891,7 +901,7 @@ export const gitAddTool = defineTool(
     try {
       const paths = input.paths as string[] | undefined;
       if (paths && paths.length > 0) {
-        const resolved = paths.map((p) => resolvePath(p, ctx.workspacePath));
+        const resolved = paths.map((p) => resolveRepoRelativePath(p, ctx.workspacePath));
         await ctx.invoke('git_add', {
           repoPath: ctx.workspacePath,
           paths: resolved,
@@ -928,7 +938,9 @@ export const gitLogTool = defineTool(
   async (input, ctx) => {
     try {
       const limit = (input.max_count as number) || 20;
-      const file = input.file ? resolvePath(input.file as string, ctx.workspacePath) : undefined;
+      const file = input.file
+        ? resolveRepoRelativePath(input.file as string, ctx.workspacePath)
+        : undefined;
 
       if (file) {
         const commits = await ctx.invoke<
@@ -953,6 +965,7 @@ export const gitLogTool = defineTool(
       return { success: false, output: '', error: String(err) };
     }
   },
+  'safe',
 );
 
 export const gitCheckoutTool = defineTool(
@@ -2004,6 +2017,7 @@ export const gitFetchTool = defineTool(
       };
     }
   },
+  'safe',
 );
 
 export const gitStashTool = defineTool(
@@ -2116,7 +2130,7 @@ export const gitBlameTool = defineTool(
   false,
   async (input, ctx) => {
     try {
-      const filePath = resolvePath(input.path as string, ctx.workspacePath);
+      const filePath = resolveRepoRelativePath(input.path as string, ctx.workspacePath);
       const result = await ctx.invoke<string>('git_blame', {
         repoPath: ctx.workspacePath,
         filePath,
@@ -2131,6 +2145,7 @@ export const gitBlameTool = defineTool(
       };
     }
   },
+  'safe',
 );
 
 export const gitShowTool = defineTool(
@@ -2172,6 +2187,7 @@ export const gitShowTool = defineTool(
       };
     }
   },
+  'safe',
 );
 
 // ─── Project Tools ──────────────────────────────────────────────────────────
