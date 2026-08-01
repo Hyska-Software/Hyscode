@@ -37,34 +37,40 @@ function resolvePath(path: string, workspacePath: string): string {
   return resolveWorkspacePath(path, workspacePath);
 }
 
-/** SSRF protection: check if a hostname resolves to a private/internal address. */
-function isPrivateHost(hostname: string): boolean {
-  if (
-    hostname === 'localhost' ||
-    hostname === '127.0.0.1' ||
-    hostname === '0.0.0.0' ||
-    hostname === '::1' ||
-    hostname === '[::1]'
-  ) {
-    return true;
-  }
+// ─── Browser Tool Helpers ────────────────────────────────────────────────────
+// SSRF protection lives in the Rust backend (DNS-resolving, fail-closed).
+// This side only keeps a cheap scheme check; the backend is the authority.
 
-  // IPv4 private ranges (RFC1918 + loopback + link-local)
-  if (hostname.startsWith('127.')) return true;
-  if (hostname.startsWith('10.')) return true;
-  if (hostname.startsWith('192.168.')) return true;
-  if (hostname.startsWith('169.254.')) return true;
-  if (hostname.startsWith('172.')) {
-    const secondOctet = parseInt(hostname.split('.')[1] || '0', 10);
-    if (secondOctet >= 16 && secondOctet <= 31) return true;
+/** Maps backend error codes ("[engine_blocked] …") to friendly agent-facing text. */
+function browserErrorMessage(err: unknown): string {
+  const msg = String(err);
+  const match = msg.match(/^\[([a-z_]+)\]\s*([\s\S]*)$/);
+  if (!match) return msg;
+  const [, code, detail] = match;
+  switch (code) {
+    case 'engine_blocked':
+      return 'The search engine blocked the request (CAPTCHA/anomaly) and is cooling down for ~45s. Do not retry the same query immediately — wait, then rephrase it, or use web_fetch on a known URL instead.';
+    case 'private_address':
+      return 'Fetching internal/private addresses is not allowed.';
+    case 'unsupported_scheme':
+      return 'Only http and https URLs are allowed.';
+    case 'http_status':
+      return `The server returned an HTTP error: ${detail}`;
+    case 'redirect_limit':
+      return `Too many redirects while following the URL: ${detail}`;
+    case 'invalid_redirect':
+      return `A redirect target was blocked: ${detail}`;
+    case 'dns_resolution':
+      return `Could not resolve the hostname: ${detail}`;
+    case 'network':
+      return `Network request failed: ${detail}`;
+    case 'empty_query':
+      return 'The search query cannot be empty.';
+    case 'invalid_url':
+      return `Invalid URL: ${detail}`;
+    default:
+      return msg;
   }
-
-  // IPv6 unique local addresses (fc00::/7)
-  if (hostname.toLowerCase().startsWith('fc') || hostname.toLowerCase().startsWith('fd')) {
-    return true;
-  }
-
-  return false;
 }
 
 // ─── Filesystem Tools ───────────────────────────────────────────────────────
@@ -1043,7 +1049,7 @@ export const getDiagnosticsTool = defineTool(
 
 export const webFetchTool = defineTool(
   'web_fetch',
-  'Fetch and read the full content of any web page or API endpoint. Extracts clean readable text (removes ads, scripts, nav). Returns title, URL, HTTP status, and the page text. Use this to read documentation, blog posts, GitHub source code, Stack Overflow answers, or any web content. Call this tool directly — it works.',
+  'Fetch and read the content of a web page or API endpoint. Extracts clean readable text (removes ads, scripts, nav). Returns title, URL, HTTP status, and the page text. Fails with an error on HTTP 4xx/5xx responses and on blocked/private addresses. Use this to read documentation, blog posts, GitHub source code, Stack Overflow answers, or any web content.',
   {
     url: {
       type: 'string',
@@ -1062,7 +1068,8 @@ export const webFetchTool = defineTool(
       const url = input.url as string;
       const maxLen = (input.max_length as number) || 10_000;
 
-      // Validate URL to prevent SSRF — only allow http/https
+      // Cheap client-side scheme check only. Full SSRF validation (DNS
+      // resolution, redirects, private ranges) happens in the Rust backend.
       let parsed: URL;
       try {
         parsed = new URL(url);
@@ -1072,16 +1079,6 @@ export const webFetchTool = defineTool(
 
       if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
         return { success: false, output: '', error: 'Only http and https URLs are allowed.' };
-      }
-
-      // Block internal/private IPs (SSRF protection)
-      const hostname = parsed.hostname;
-      if (isPrivateHost(hostname)) {
-        return {
-          success: false,
-          output: '',
-          error: 'Fetching internal/private addresses is not allowed.',
-        };
       }
 
       const result = await ctx.invoke<{
@@ -1112,14 +1109,14 @@ export const webFetchTool = defineTool(
         metadata: { url, length: result.length, truncated: result.truncated },
       };
     } catch (err) {
-      return { success: false, output: '', error: String(err) };
+      return { success: false, output: '', error: browserErrorMessage(err) };
     }
   },
 );
 
 export const webSearchTool = defineTool(
   'web_search',
-  'Search the web using DuckDuckGo. Returns a list of search results with titles, URLs, and snippets. Use this to find documentation, error solutions, API references, or general information. This tool is fully functional — call it directly. After getting results, use web_fetch to read the full content of a specific page.',
+  'Search the web. Returns a list of search results with titles, URLs, and snippets. Use this to find documentation, error solutions, API references, or general information. After getting results, use web_fetch to read the full content of a specific page.',
   {
     query: { type: 'string', description: 'The search query. Be specific for better results.' },
     max_results: {
@@ -1133,7 +1130,7 @@ export const webSearchTool = defineTool(
   async (input, ctx) => {
     try {
       const query = input.query as string;
-      const maxResults = Math.min(Math.max(1, (input.max_results as number) || 5), 10);
+      const maxResults = Math.min(Math.max(1, (input.max_results as number) ?? 5), 10);
 
       const result = await ctx.invoke<{
         query: string;
@@ -1165,7 +1162,7 @@ export const webSearchTool = defineTool(
         metadata: { query: result.query, resultCount: result.results.length },
       };
     } catch (err) {
-      return { success: false, output: '', error: String(err) };
+      return { success: false, output: '', error: browserErrorMessage(err) };
     }
   },
 );

@@ -10,6 +10,7 @@ import {
   resolveEffectiveAgentPolicy,
   effectivePolicyConfig,
   MemoryManager,
+  SAFE_TOOLS,
 } from '@hyscode/agent-harness';
 import type {
   HarnessEvent,
@@ -2159,19 +2160,11 @@ Investigate the error, fix the underlying issue in the affected files, and verif
       return true;
     }
 
-    // Smart: auto-approve safe tools, ask for moderate/destructive
+    // Smart: auto-approve safe tools, ask for moderate/destructive.
+    // The safe set is shared with the harness (SAFE_TOOLS) so approval
+    // behavior can never drift from the tool's declared risk.
     if (mode === 'smart') {
-      const safeTools = new Set([
-        'read_file',
-        'list_directory',
-        'search_files',
-        'search_text',
-        'get_file_info',
-        'list_code_symbols',
-        'get_diagnostics',
-        'grep_search',
-      ]);
-      if (safeTools.has(pending.toolName)) {
+      if (SAFE_TOOLS.has(pending.toolName)) {
         this.debug(`✅ Smart auto-approved (safe): ${pending.toolName}`);
         return true;
       }

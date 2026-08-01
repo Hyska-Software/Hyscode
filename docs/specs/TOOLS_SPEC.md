@@ -501,7 +501,7 @@ answers, and other sensitive values cannot be supplied by the agent and must be 
 
 ### 12. web_search
 
-**Category**: browser | **Approval**: no
+**Category**: browser | **Approval**: no | **Engine**: provider abstraction (`SearchProvider` trait, Rust) — default DuckDuckGo HTML, no API key. 
 
 ```json
 {
@@ -516,13 +516,50 @@ answers, and other sensitive values cannot be supplied by the agent and must be 
       },
       "max_results": {
         "type": "integer",
-        "description": "Maximum number of results to return (default: 5)"
+        "description": "Maximum number of results to return (default: 5, clamped to 1–10 in the backend)"
       }
     },
     "required": ["query"]
   }
 }
 ```
+
+**Behavior**:
+- Primary endpoint is `html.duckduckgo.com`; on blocked/empty/errored responses one fallback attempt goes to `lite.duckduckgo.com` (blocked less often).
+- Result URLs are decoded from DuckDuckGo's `uddg=` redirect parameter (trailing `rut`/tracking params dropped, protocol-relative links made absolute).
+- Zero-result responses that look like an anti-bot/anomaly page surface as `engine_blocked` errors — never as "no results found".
+- After an engine block, a ~45s cooldown makes further `web_search` calls fail fast (no hammering the engine, no agent retry loops); the error message tells the agent to wait or rephrase.
+- Errors use stable `[code]` prefixes (`engine_blocked`, `http_status`, `private_address`, `dns_resolution`, `network`, `invalid_url`, `unsupported_scheme`, `redirect_limit`, `invalid_redirect`, `empty_query`) so clients can classify failures.
+
+### 12a. web_fetch
+
+**Category**: browser | **Approval**: no
+
+```json
+{
+  "name": "web_fetch",
+  "description": "Fetch and read the content of a web page or API endpoint. Extracts clean readable text. Fails on HTTP 4xx/5xx and on blocked/private addresses.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "url": {
+        "type": "string",
+        "description": "The full URL to fetch"
+      },
+      "max_length": {
+        "type": "integer",
+        "description": "Maximum characters to return (default: 10000, clamped to 100–100000 in the backend)"
+      }
+    },
+    "required": ["url"]
+  }
+}
+```
+
+**Security model** (shared by `web_search` and `web_fetch`):
+- SSRF validation lives **only in the Rust backend** (`commands/security.rs`): http/https schemes only; every URL (including each redirect hop) is DNS-resolved and every resolved address is checked against private/loopback/link-local/ULA/documentation/multicast ranges; IPv4-mapped IPv6 is checked via its embedded IPv4; resolution failures fail closed.
+- Redirects are followed manually (max 5 hops) with per-hop re-validation — a public URL can never redirect into a private address.
+- Response bodies are streamed with a 2 MB hard cap; non-HTML responses are passed through verbatim instead of being HTML-parsed.
 
 ---
 

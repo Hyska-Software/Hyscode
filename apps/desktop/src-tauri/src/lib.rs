@@ -135,7 +135,7 @@ pub fn run() {
             commands::keychain::keychain_has,
             // Browser commands
             commands::browser::web_fetch,
-            commands::browser::web_search,
+            commands::search::web_search,
             // AI streaming commands
             commands::ai::ai_stream_request,
             commands::ai::ai_stream_cancel,

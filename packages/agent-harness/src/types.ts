@@ -210,6 +210,8 @@ export const SAFE_TOOLS = new Set([
   'list_code_symbols',
   'get_diagnostics',
   'grep_search',
+  'web_search',
+  'web_fetch',
   'docker_list_containers',
   'docker_list_images',
   'docker_container_logs',

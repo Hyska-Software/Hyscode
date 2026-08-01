@@ -284,7 +284,10 @@ interface ToolResult {
 | `git_add`                | git        | yes              |
 | `run_code`               | code       | yes              |
 | `web_search`             | browser    | no               |
+| `web_fetch`              | browser    | no               |
 | `mcp_call`               | mcp        | configurable     |
+
+Web tools (`web_search`, `web_fetch`) are classified `safe` (`CATEGORY_RISK`), listed in `SAFE_TOOLS`, and the desktop app's smart-approval mode derives its safe set from `SAFE_TOOLS` so classifications cannot drift.
 
 ### Approval Workflow
 

@@ -1,101 +1,37 @@
-use scraper::{Html, Selector};
-use serde::{Deserialize, Serialize};
+use ego_tree::NodeRef;
+use scraper::{Html, Node, Selector};
+use serde::Serialize;
+use std::time::Duration;
 
-// ─── SSRF / Private Host Protection ───────────────────────────────────────────
+use super::security::{validate_http_url, BrowserError};
 
-fn is_private_host(hostname: &str) -> bool {
-    let host_lower = hostname.to_lowercase();
+// ─── Shared HTTP Client ──────────────────────────────────────────────────────
+// One client builder for every browser command: consistent UA, timeout and
+// redirect policy. Redirects are handled manually so every hop can be
+// re-validated against the SSRF policy (automatic following could redirect
+// a public URL into a private address).
 
-    // localhost variants
-    if host_lower == "localhost"
-        || host_lower.starts_with("localhost.")
-        || host_lower.ends_with(".localhost")
-    {
-        return true;
-    }
+pub const USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36 HysCode-Agent";
 
-    // IPv4 private ranges
-    let ipv4_parts: Vec<&str> = host_lower.split('.').collect();
-    if ipv4_parts.len() == 4 {
-        if let (Ok(a), Ok(b), Ok(c), Ok(d)) = (
-            ipv4_parts[0].parse::<u8>(),
-            ipv4_parts[1].parse::<u8>(),
-            ipv4_parts[2].parse::<u8>(),
-            ipv4_parts[3].parse::<u8>(),
-        ) {
-            // 10.0.0.0/8
-            if a == 10 {
-                return true;
-            }
-            // 172.16.0.0/12
-            if a == 172 && (16..=31).contains(&b) {
-                return true;
-            }
-            // 192.168.0.0/16
-            if a == 192 && b == 168 {
-                return true;
-            }
-            // 127.0.0.0/8 (loopback)
-            if a == 127 {
-                return true;
-            }
-            // 169.254.0.0/16 (link-local)
-            if a == 169 && b == 254 {
-                return true;
-            }
-            // 0.0.0.0
-            if a == 0 && b == 0 && c == 0 && d == 0 {
-                return true;
-            }
-        }
-    }
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
+const MAX_REDIRECTS: u8 = 5;
+/// Hard cap on downloaded body bytes, enforced while streaming, before any
+/// text extraction or truncation happens.
+const MAX_DOWNLOAD_BYTES: usize = 2 * 1024 * 1024;
 
-    // IPv6 loopback / private
-    if host_lower == "::1" || host_lower == "0:0:0:0:0:0:0:1" {
-        return true;
-    }
-    if host_lower.starts_with("fc") || host_lower.starts_with("fd") {
-        return true; // unique local
-    }
-    if host_lower.starts_with("fe80:") {
-        return true; // link-local
-    }
-
-    false
-}
-
-fn validate_url(url: &str) -> Result<url::Url, String> {
-    let parsed = url::Url::parse(url).map_err(|_| "Invalid URL format.".to_string())?;
-
-    if parsed.scheme() != "http" && parsed.scheme() != "https" {
-        return Err("Only http and https URLs are allowed.".to_string());
-    }
-
-    if is_private_host(parsed.host_str().unwrap_or("")) {
-        return Err("Fetching internal/private addresses is not allowed.".to_string());
-    }
-
-    Ok(parsed)
+pub(crate) fn shared_client() -> Result<reqwest::Client, BrowserError> {
+    reqwest::Client::builder()
+        .timeout(REQUEST_TIMEOUT)
+        .user_agent(USER_AGENT)
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .map_err(|e| BrowserError::Network(e.to_string()))
 }
 
 // ─── Web Fetch ──────────────────────────────────────────────────────────────
-
-#[derive(Debug, Deserialize)]
-pub struct WebFetchArgs {
-    url: String,
-    #[serde(default = "default_max_length")]
-    max_length: usize,
-    #[serde(default = "default_include_metadata")]
-    include_metadata: bool,
-}
-
-fn default_max_length() -> usize {
-    10000
-}
-
-fn default_include_metadata() -> bool {
-    true
-}
+// Tauri matches invoke payload keys to parameter names (camelCased), so
+// optional arguments are plain `Option` parameters — a single struct param
+// would force the client to wrap the payload in `{ args: {...} }`.
 
 #[derive(Debug, Serialize)]
 pub struct WebFetchResult {
@@ -115,121 +51,208 @@ pub struct WebFetchMetadata {
 }
 
 #[tauri::command]
-pub async fn web_fetch(args: WebFetchArgs) -> Result<WebFetchResult, String> {
-    let parsed = validate_url(&args.url)?;
-    let url_str = parsed.as_str().to_string();
+pub async fn web_fetch(
+    url: String,
+    max_length: Option<usize>,
+    include_metadata: Option<bool>,
+) -> Result<WebFetchResult, String> {
+    run_web_fetch(
+        url,
+        max_length.unwrap_or(10000),
+        include_metadata.unwrap_or(true),
+    )
+    .await
+    .map_err(|e| e.message())
+}
 
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(30))
-        .user_agent(
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36 HysCode-Agent"
-        )
-        .build()
-        .map_err(|e| format!("Failed to build HTTP client: {}", e))?;
+async fn run_web_fetch(
+    url: String,
+    requested_max_length: usize,
+    include_metadata: bool,
+) -> Result<WebFetchResult, BrowserError> {
+    // Defense in depth: clamp the requested text length before use.
+    let max_length = requested_max_length.clamp(100, 100_000);
 
-    let resp = client
-        .get(&url_str)
-        .send()
-        .await
-        .map_err(|e| format!("Request failed: {}", e))?;
+    let client = shared_client()?;
+    let mut current = validate_http_url(&url).await?;
 
-    let status = resp.status();
-    let content_type = resp
-        .headers()
-        .get("content-type")
-        .and_then(|v| v.to_str().ok())
-        .map(|s| s.to_string());
+    for hop in 0..=MAX_REDIRECTS {
+        let mut resp = client
+            .get(current.clone())
+            .send()
+            .await
+            .map_err(|e| BrowserError::Network(format!("GET {current}: {e}")))?;
 
-    let body = resp
-        .text()
-        .await
-        .map_err(|e| format!("Failed to read response body: {}", e))?;
+        let status = resp.status().as_u16();
+        let content_type = resp
+            .headers()
+            .get("content-type")
+            .and_then(|v| v.to_str().ok())
+            .map(|s| s.to_string());
 
-    // Extract readable text from HTML
-    let extracted = extract_readable_text(&body, &url_str);
-
-    let mut text = extracted.text;
-    let truncated = text.len() > args.max_length;
-    if truncated {
-        // Try to cut at a word boundary
-        let mut cut = args.max_length;
-        while cut > 0 && !text.is_char_boundary(cut) {
-            cut -= 1;
+        // Manual redirect handling: re-validate every hop URL.
+        if let Some(location) = resp.headers().get("location").and_then(|v| v.to_str().ok()) {
+            if hop >= MAX_REDIRECTS {
+                return Err(BrowserError::RedirectLimit(MAX_REDIRECTS));
+            }
+            let next = current
+                .join(location)
+                .map_err(|e| BrowserError::InvalidRedirect(format!("{location}: {e}")))?;
+            current = validate_http_url(next.as_str()).await?;
+            continue;
         }
-        text.truncate(cut);
-        text.push_str(
-            "\n\n[… truncated — use web_fetch again with higher max_length to read more]",
-        );
+
+        let final_url = current;
+
+        // HTTP errors are failures, not content.
+        if !(200..300).contains(&status) {
+            return Err(BrowserError::HttpStatus {
+                status,
+                url: final_url.to_string(),
+            });
+        }
+
+        // Stream the body with a hard cap so huge pages can't exhaust memory.
+        let mut body: Vec<u8> = Vec::new();
+        let mut body_truncated = false;
+        while let Some(chunk) = resp
+            .chunk()
+            .await
+            .map_err(|e| BrowserError::Network(e.to_string()))?
+        {
+            body.extend_from_slice(&chunk);
+            if body.len() > MAX_DOWNLOAD_BYTES {
+                body.truncate(MAX_DOWNLOAD_BYTES);
+                body_truncated = true;
+                break;
+            }
+        }
+        let raw = String::from_utf8_lossy(&body);
+
+        // HTML responses get readable-text extraction; everything else
+        // (JSON, plain text, XML...) is passed through verbatim.
+        let is_html = content_type
+            .as_deref()
+            .map(|ct| ct.contains("html"))
+            .unwrap_or(true);
+        let extracted = if is_html {
+            extract_readable_text(&raw)
+        } else {
+            ExtractedText {
+                title: None,
+                text: raw.to_string(),
+            }
+        };
+
+        let mut text = extracted.text;
+        let truncated = body_truncated || text.len() > max_length;
+        if text.len() > max_length {
+            // Cut at a UTF-8 character boundary.
+            let mut cut = max_length;
+            while cut > 0 && !text.is_char_boundary(cut) {
+                cut -= 1;
+            }
+            text.truncate(cut);
+            text.push_str(
+                "\n\n[… truncated — use web_fetch again with higher max_length to read more]",
+            );
+        }
+
+        let text_len = text.len();
+
+        return Ok(WebFetchResult {
+            title: extracted.title,
+            url: final_url.to_string(),
+            text,
+            length: text_len,
+            truncated,
+            metadata: if include_metadata {
+                Some(WebFetchMetadata {
+                    content_type,
+                    status,
+                })
+            } else {
+                None
+            },
+        });
     }
 
-    let text_len = text.len();
-
-    Ok(WebFetchResult {
-        title: extracted.title,
-        url: url_str,
-        text,
-        length: text_len,
-        truncated,
-        metadata: if args.include_metadata {
-            Some(WebFetchMetadata {
-                content_type,
-                status: status.as_u16(),
-            })
-        } else {
-            None
-        },
-    })
+    Err(BrowserError::RedirectLimit(MAX_REDIRECTS))
 }
+
+// ─── Readable Text Extraction ────────────────────────────────────────────────
+// Single pass over the parsed tree: unwanted subtrees are skipped and
+// block-level elements produce line breaks. No string-replacement tricks,
+// so large documents are handled in O(n) with no risk of mangling content.
 
 struct ExtractedText {
     title: Option<String>,
     text: String,
 }
 
-fn extract_readable_text(html: &str, _url: &str) -> ExtractedText {
+const SKIP_TAGS: [&str; 8] = [
+    "script", "style", "nav", "header", "footer", "aside", "noscript", "iframe",
+];
+
+const BLOCK_TAGS: [&str; 25] = [
+    "p",
+    "div",
+    "section",
+    "article",
+    "main",
+    "header",
+    "footer",
+    "nav",
+    "aside",
+    "li",
+    "ul",
+    "ol",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "h6",
+    "pre",
+    "blockquote",
+    "table",
+    "tr",
+    "br",
+    "hr",
+    "form",
+];
+
+fn extract_readable_text(html: &str) -> ExtractedText {
     let document = Html::parse_document(html);
 
-    // Extract title
-    let title = document
-        .select(&Selector::parse("title").unwrap())
-        .next()
+    let title = Selector::parse("title")
+        .ok()
+        .and_then(|sel| document.select(&sel).next())
         .map(|e| e.text().collect::<String>().trim().to_string())
         .filter(|t| !t.is_empty());
 
-    // Remove script/style/nav/header/footer/aside tags
-    let mut cleaned_html = html.to_string();
-    for tag in [
-        "script", "style", "nav", "header", "footer", "aside", "noscript",
-    ] {
-        let selector = match Selector::parse(tag) {
-            Ok(s) => s,
-            Err(_) => continue,
-        };
-        for element in document.select(&selector) {
-            let outer = element.html();
-            cleaned_html = cleaned_html.replace(&outer, " ");
-        }
+    // Prefer <main>, then <article>, then <body>.
+    let root = Selector::parse("main")
+        .ok()
+        .and_then(|sel| document.select(&sel).next())
+        .or_else(|| {
+            Selector::parse("article")
+                .ok()
+                .and_then(|sel| document.select(&sel).next())
+        })
+        .or_else(|| {
+            Selector::parse("body")
+                .ok()
+                .and_then(|sel| document.select(&sel).next())
+        });
+
+    let mut parts: Vec<String> = Vec::new();
+    if let Some(root_el) = root {
+        collect_readable_text(*root_el, &mut parts);
     }
 
-    // Re-parse after cleaning
-    let cleaned_doc = Html::parse_document(&cleaned_html);
-
-    // Try main/article/main content first, fallback to body
-    let mut text_parts: Vec<String> = Vec::new();
-
-    if let Some(main) = cleaned_doc.select(&Selector::parse("main").unwrap()).next() {
-        text_parts.push(extract_text_from_element(&main));
-    } else if let Some(article) = cleaned_doc
-        .select(&Selector::parse("article").unwrap())
-        .next()
-    {
-        text_parts.push(extract_text_from_element(&article));
-    } else if let Some(body) = cleaned_doc.select(&Selector::parse("body").unwrap()).next() {
-        text_parts.push(extract_text_from_element(&body));
-    }
-
-    let text = text_parts
-        .join("\n\n")
+    let text = parts
+        .join("")
         .lines()
         .map(|l| l.trim())
         .filter(|l| !l.is_empty())
@@ -239,142 +262,84 @@ fn extract_readable_text(html: &str, _url: &str) -> ExtractedText {
     ExtractedText { title, text }
 }
 
-fn extract_text_from_element(element: &scraper::ElementRef) -> String {
-    element
-        .text()
-        .collect::<Vec<_>>()
-        .join(" ")
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ")
-}
-
-// ─── Web Search ─────────────────────────────────────────────────────────────
-
-#[derive(Debug, Deserialize)]
-pub struct WebSearchArgs {
-    query: String,
-    #[serde(default = "default_search_results")]
-    max_results: usize,
-}
-
-fn default_search_results() -> usize {
-    5
-}
-
-#[derive(Debug, Serialize)]
-pub struct WebSearchResult {
-    query: String,
-    results: Vec<SearchResultItem>,
-}
-
-#[derive(Debug, Serialize)]
-pub struct SearchResultItem {
-    title: String,
-    url: String,
-    snippet: String,
-}
-
-#[tauri::command]
-pub async fn web_search(args: WebSearchArgs) -> Result<WebSearchResult, String> {
-    let query = args.query.trim();
-    if query.is_empty() {
-        return Err("Query cannot be empty.".to_string());
-    }
-
-    // Use DuckDuckGo HTML search (no API key required)
-    let encoded = urlencoding::encode(query);
-    let search_url = format!("https://html.duckduckgo.com/html/?q={}", encoded);
-
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(30))
-        .user_agent(
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36"
-        )
-        .build()
-        .map_err(|e| format!("Failed to build HTTP client: {}", e))?;
-
-    let resp = client
-        .get(&search_url)
-        .send()
-        .await
-        .map_err(|e| format!("Search request failed: {}", e))?;
-
-    let status = resp.status();
-    if !status.is_success() {
-        return Err(format!("Search engine returned HTTP {}", status.as_u16()));
-    }
-
-    let html = resp
-        .text()
-        .await
-        .map_err(|e| format!("Failed to read search response: {}", e))?;
-
-    let results = parse_duckduckgo_results(&html, args.max_results);
-
-    Ok(WebSearchResult {
-        query: query.to_string(),
-        results,
-    })
-}
-
-fn parse_duckduckgo_results(html: &str, max_results: usize) -> Vec<SearchResultItem> {
-    let document = Html::parse_document(html);
-    let result_selector = Selector::parse(".result").unwrap();
-    let title_selector = Selector::parse(".result__a").unwrap();
-    let snippet_selector = Selector::parse(".result__snippet").unwrap();
-    let url_selector = Selector::parse(".result__url").unwrap();
-
-    let mut items = Vec::new();
-
-    for result in document.select(&result_selector).take(max_results) {
-        let title = result
-            .select(&title_selector)
-            .next()
-            .map(|e| e.text().collect::<String>().trim().to_string())
-            .unwrap_or_default();
-
-        let snippet = result
-            .select(&snippet_selector)
-            .next()
-            .map(|e| e.text().collect::<String>().trim().to_string())
-            .unwrap_or_default();
-
-        let url = result
-            .select(&url_selector)
-            .next()
-            .map(|e| e.text().collect::<String>().trim().to_string())
-            .unwrap_or_default();
-
-        // Fallback: extract href from title link
-        let url = if url.is_empty() {
-            result
-                .select(&title_selector)
-                .next()
-                .and_then(|e| e.value().attr("href"))
-                .map(|s| {
-                    // DuckDuckGo redirects through //duckduckgo.com/l/?uddg=
-                    if let Some(pos) = s.find("uddg=") {
-                        urlencoding::decode(&s[pos + 5..])
-                            .map(|d| d.to_string())
-                            .unwrap_or_else(|_| s.to_string())
-                    } else {
-                        s.to_string()
-                    }
-                })
-                .unwrap_or_default()
-        } else {
-            url
-        };
-
-        if !title.is_empty() && !url.is_empty() {
-            items.push(SearchResultItem {
-                title,
-                url,
-                snippet,
-            });
+fn collect_readable_text<'a>(node: NodeRef<'a, Node>, out: &mut Vec<String>) {
+    for child in node.children() {
+        match child.value() {
+            Node::Element(el) => {
+                let name = el.name();
+                if SKIP_TAGS.contains(&name) {
+                    continue;
+                }
+                if BLOCK_TAGS.contains(&name) {
+                    out.push("\n".to_string());
+                }
+                collect_readable_text(child, out);
+            }
+            Node::Text(t) => out.push(t.text.to_string()),
+            _ => {}
         }
     }
+}
 
-    items
+// ─── Tests ───────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn extract(html: &str) -> String {
+        extract_readable_text(html).text
+    }
+
+    #[test]
+    fn strips_scripts_styles_and_navigation() {
+        let html = r#"
+            <html><head>
+              <title>Page Title</title>
+              <script>var secret = "x";</script>
+              <style>body { color: red; }</style>
+            </head><body>
+              <nav><a href="/">Home</a><a href="/about">About</a></nav>
+              <header>Site header</header>
+              <main>
+                <p>Hello world.</p>
+                <p>Second paragraph.</p>
+              </main>
+              <footer>Footer text</footer>
+            </body></html>
+        "#;
+        let result = extract_readable_text(html);
+        assert_eq!(result.title.as_deref(), Some("Page Title"));
+        assert_eq!(result.text, "Hello world.\nSecond paragraph.");
+        assert!(!result.text.contains("secret"));
+        assert!(!result.text.contains("Home"));
+        assert!(!result.text.contains("Footer"));
+    }
+
+    #[test]
+    fn falls_back_to_article_then_body() {
+        let article_only =
+            r#"<html><body><article><p>A</p><p>B</p></article><p>C</p></body></html>"#;
+        assert_eq!(extract(article_only), "A\nB");
+
+        let body_only = r#"<html><body><div>Alpha</div><div>Beta</div></body></html>"#;
+        assert_eq!(extract(body_only), "Alpha\nBeta");
+    }
+
+    #[test]
+    fn keeps_inline_text_together() {
+        let html = r#"<html><body><p>Hello <b>bold</b> world!</p></body></html>"#;
+        assert_eq!(extract(html), "Hello bold world!");
+    }
+
+    #[test]
+    fn plain_text_without_markup_is_preserved() {
+        let html = r#"<html><body>{"status":"ok","count":3}</body></html>"#;
+        assert_eq!(extract(html), r#"{"status":"ok","count":3}"#);
+    }
+
+    #[test]
+    fn empty_document_yields_empty_text() {
+        assert_eq!(extract(""), "");
+    }
 }

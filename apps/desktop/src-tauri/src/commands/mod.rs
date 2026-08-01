@@ -13,6 +13,8 @@ pub mod keychain;
 pub mod lsp;
 pub mod notifications;
 pub mod pty;
+pub mod search;
+pub mod security;
 pub mod updater;
 pub mod utils;
 pub mod window;

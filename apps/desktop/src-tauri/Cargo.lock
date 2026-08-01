@@ -2249,11 +2249,12 @@ dependencies = [
 
 [[package]]
 name = "hyscode"
-version = "0.6.1-build.66"
+version = "0.7.0-build.67"
 dependencies = [
  "base64 0.22.1",
  "chrono",
  "dirs 5.0.1",
+ "ego-tree",
  "futures-util",
  "git2",
  "notify",
@@ -2276,6 +2277,7 @@ dependencies = [
  "tauri-plugin-shell",
  "tauri-plugin-sql",
  "tauri-runtime",
+ "thiserror 2.0.18",
  "tokio",
  "unrar",
  "url",
