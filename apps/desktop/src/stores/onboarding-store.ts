@@ -13,7 +13,7 @@ interface OnboardingState {
   resetOnboarding: () => void;
 }
 
-export const ONBOARDING_TOTAL_STEPS = 5;
+export const ONBOARDING_TOTAL_STEPS = 6;
 
 export const useOnboardingStore = create<OnboardingState>()(
   persist(

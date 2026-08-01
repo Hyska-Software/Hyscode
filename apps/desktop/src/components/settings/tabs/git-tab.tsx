@@ -14,6 +14,7 @@ import {
   SettingTextInput,
   SettingToggle,
 } from '../controls';
+import { GithubAccountSection } from './github-account-section';
 
 export function GitTab() {
   const store = useSettingsStore();
@@ -192,8 +193,15 @@ export function GitTab() {
       </SettingSection>
 
       <SettingSection
+        title="GitHub Account"
+        description="Sign in to clone, publish and manage public and private repositories."
+      >
+        <GithubAccountSection />
+      </SettingSection>
+
+      <SettingSection
         title="GitHub Pull Requests"
-        description="A repository-scoped token is stored in the system keychain and is separate from Copilot authentication."
+        description="A repository-scoped token is stored in the system keychain and is separate from Copilot authentication. When no account is signed in, a manual token is used as fallback."
       >
         <SettingRow
           label="Repository Token"

@@ -1,8 +1,10 @@
+use super::keychain::KeychainState;
 use super::utils::cmd;
 use git2::{BranchType, Delta, DiffOptions, ErrorCode, Patch, Repository, Sort, StatusOptions};
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
 use std::path::{Component, Path, PathBuf};
+use tauri::State;
 
 // ── Serializable Types ──────────────────────────────────────────────────────
 
@@ -1817,56 +1819,244 @@ where
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
 }
 
+fn is_github_https_url(url: &str) -> bool {
+    url.starts_with("https://github.com/") || url.starts_with("http://github.com/")
+}
+
+fn github_extraheader(token: &str) -> String {
+    // GitHub's git smart HTTP endpoint requires HTTP Basic auth — Bearer tokens
+    // are only accepted by the REST API (api.github.com). The `x-access-token`
+    // username is the standard pattern used by GitHub Actions and CI systems.
+    use base64::Engine as _;
+    let credentials = base64::engine::general_purpose::STANDARD
+        .encode(format!("x-access-token:{token}"));
+    format!("Authorization: Basic {credentials}")
+}
+
+fn remote_url(repo_path: &str, remote_name: &str) -> Option<String> {
+    let repo = open_repo(repo_path).ok()?;
+    let remote = repo.find_remote(remote_name).ok()?;
+    remote.url().map(String::from)
+}
+
+/// Run a git CLI command, injecting the stored GitHub token as an
+/// `http.extraheader` when the target remote points at github.com. This keeps
+/// private-repository authentication working without persisting credentials in
+/// the repository config. Non-GitHub remotes are left untouched.
+fn run_git_cli_with_github_auth(
+    keychain: &KeychainState,
+    repo_path: &str,
+    remote_hint: Option<&str>,
+    args: Vec<String>,
+) -> Result<String, String> {
+    let mut command = cmd("git");
+
+    let remote_name = remote_hint.map(String::from).or_else(|| {
+        run_git_cli(
+            repo_path,
+            [
+                "rev-parse",
+                "--abbrev-ref",
+                "--symbolic-full-name",
+                "@{upstream}",
+            ],
+        )
+        .ok()
+        .map(|upstream| upstream.trim().split('/').next().unwrap_or("").to_string())
+        .filter(|name| !name.is_empty())
+    });
+
+    if let Some(token) = super::github_repos::github_token_option(&keychain.0) {
+        let is_github = remote_name
+            .as_deref()
+            .and_then(|name| remote_url(repo_path, name))
+            .is_some_and(|url| is_github_https_url(&url));
+        if is_github {
+            command
+                .arg("-c")
+                .arg(format!("http.extraheader={}", github_extraheader(&token)));
+        }
+    }
+
+    let output = command
+        .args(args)
+        .current_dir(repo_path)
+        .output()
+        .map_err(|e| format!("Failed to run git: {}", e))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+        return Err(stderr.trim().to_string());
+    }
+
+    Ok(String::from_utf8_lossy(&output.stdout).to_string())
+}
+
+/// Clone a git repository into `target_path`, creating parent directories as
+/// needed. For github.com HTTPS URLs, the stored GitHub token is injected so
+/// private repositories can be cloned without extra credential configuration.
+#[tauri::command]
+pub fn git_clone(
+    keychain: State<'_, KeychainState>,
+    url: String,
+    target_path: String,
+    branch: Option<String>,
+) -> Result<(), String> {
+    let target = PathBuf::from(&target_path);
+    let parent = target
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .ok_or_else(|| "Invalid target path".to_string())?;
+    if !parent.exists() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| format!("Failed to create target directory: {}", e))?;
+    }
+
+    let mut command = cmd("git");
+    if is_github_https_url(&url) {
+        if let Some(token) = super::github_repos::github_token_option(&keychain.0) {
+            command
+                .arg("-c")
+                .arg(format!("http.extraheader={}", github_extraheader(&token)));
+        }
+    }
+
+    let mut args = vec!["clone".to_string()];
+    if let Some(branch) = branch.filter(|value| !value.trim().is_empty()) {
+        args.push("--branch".to_string());
+        args.push(branch);
+    }
+    args.push(url);
+    args.push(target_path.clone());
+
+    let output = command
+        .args(args)
+        .current_dir(parent)
+        .output()
+        .map_err(|e| format!("Failed to run git clone: {}", e))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+        return Err(stderr.trim().to_string());
+    }
+    Ok(())
+}
+
+/// Add a git remote to the repository.
+#[tauri::command]
+pub fn git_remote_add(repo_path: String, name: String, url: String) -> Result<(), String> {
+    run_git_cli(&repo_path, ["remote", "add", name.as_str(), url.as_str()]).map(|_| ())
+}
+
+/// Remove a git remote from the repository.
+#[tauri::command]
+pub fn git_remote_remove(repo_path: String, name: String) -> Result<(), String> {
+    run_git_cli(&repo_path, ["remote", "remove", name.as_str()]).map(|_| ())
+}
+
+/// Change the URL of a git remote in the repository.
+#[tauri::command]
+pub fn git_remote_set_url(repo_path: String, name: String, url: String) -> Result<(), String> {
+    run_git_cli(
+        &repo_path,
+        ["remote", "set-url", name.as_str(), url.as_str()],
+    )
+    .map(|_| ())
+}
+
 #[tauri::command]
 pub fn git_push(
+    keychain: State<'_, KeychainState>,
     repo_path: String,
     remote: Option<String>,
     branch: Option<String>,
 ) -> Result<String, String> {
     match (remote, branch) {
-        (Some(remote), Some(branch)) => {
-            run_git_cli(&repo_path, ["push", remote.as_str(), branch.as_str()])
+        (Some(remote), Some(branch)) => run_git_cli_with_github_auth(
+            &keychain,
+            &repo_path,
+            Some(&remote),
+            vec!["push".to_string(), remote.clone(), branch],
+        ),
+        (Some(remote), None) => run_git_cli_with_github_auth(
+            &keychain,
+            &repo_path,
+            Some(&remote),
+            vec!["push".to_string(), remote.clone()],
+        ),
+        (None, _) => {
+            run_git_cli_with_github_auth(&keychain, &repo_path, None, vec!["push".to_string()])
         }
-        (Some(remote), None) => run_git_cli(&repo_path, ["push", remote.as_str()]),
-        (None, _) => run_git_cli(&repo_path, ["push"]),
     }
 }
 
 #[tauri::command]
 pub fn git_publish_branch(
+    keychain: State<'_, KeychainState>,
     repo_path: String,
     remote: String,
     branch: String,
 ) -> Result<String, String> {
-    run_git_cli(
+    run_git_cli_with_github_auth(
+        &keychain,
         &repo_path,
-        ["push", "--set-upstream", remote.as_str(), branch.as_str()],
+        Some(&remote),
+        vec![
+            "push".to_string(),
+            "--set-upstream".to_string(),
+            remote.clone(),
+            branch,
+        ],
     )
 }
 
 #[tauri::command]
-pub fn git_pull(repo_path: String, remote: Option<String>) -> Result<String, String> {
+pub fn git_pull(
+    keychain: State<'_, KeychainState>,
+    repo_path: String,
+    remote: Option<String>,
+) -> Result<String, String> {
     match remote {
-        Some(remote) => run_git_cli(&repo_path, ["pull", remote.as_str()]),
-        None => run_git_cli(&repo_path, ["pull"]),
+        Some(remote) => run_git_cli_with_github_auth(
+            &keychain,
+            &repo_path,
+            Some(&remote),
+            vec!["pull".to_string(), remote.clone()],
+        ),
+        None => run_git_cli_with_github_auth(&keychain, &repo_path, None, vec!["pull".to_string()]),
     }
 }
 
 #[tauri::command]
-pub fn git_fetch(repo_path: String, remote: Option<String>) -> Result<String, String> {
+pub fn git_fetch(
+    keychain: State<'_, KeychainState>,
+    repo_path: String,
+    remote: Option<String>,
+) -> Result<String, String> {
     match remote {
-        Some(remote) => run_git_cli(&repo_path, ["fetch", remote.as_str()]),
-        None => run_git_cli(&repo_path, ["fetch"]),
+        Some(remote) => run_git_cli_with_github_auth(
+            &keychain,
+            &repo_path,
+            Some(&remote),
+            vec!["fetch".to_string(), remote.clone()],
+        ),
+        None => {
+            run_git_cli_with_github_auth(&keychain, &repo_path, None, vec!["fetch".to_string()])
+        }
     }
 }
 
 #[tauri::command]
-pub fn git_fetch_all(repo_path: String, prune: Option<bool>) -> Result<String, String> {
-    let mut args = vec!["fetch", "--all"];
+pub fn git_fetch_all(
+    keychain: State<'_, KeychainState>,
+    repo_path: String,
+    prune: Option<bool>,
+) -> Result<String, String> {
+    let mut args = vec!["fetch".to_string(), "--all".to_string()];
     if prune.unwrap_or(false) {
-        args.push("--prune");
+        args.push("--prune".to_string());
     }
-    run_git_cli(&repo_path, args)
+    run_git_cli_with_github_auth(&keychain, &repo_path, None, args)
 }
 
 #[tauri::command]

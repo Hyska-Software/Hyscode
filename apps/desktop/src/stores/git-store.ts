@@ -157,6 +157,10 @@ interface GitState {
   popStash: (index: number) => Promise<void>;
   applyStash: (index: number) => Promise<void>;
   initRepo: () => Promise<void>;
+  cloneRepository: (url: string, targetPath: string, branch?: string | null) => Promise<void>;
+  addRemote: (name: string, url: string) => Promise<void>;
+  removeRemote: (name: string) => Promise<void>;
+  setRemoteUrl: (name: string, url: string) => Promise<void>;
   getFileContent: (
     filePath: string,
     mode?: 'staged' | 'unstaged' | 'conflict',
@@ -534,6 +538,46 @@ export const useGitStore = create<GitState>()(
         }),
       );
       await get().refresh();
+    },
+
+    cloneRepository: async (url, targetPath, branch = null) => {
+      await runGitOperation('clone', () =>
+        tauriInvoke('git_clone', {
+          url,
+          targetPath,
+          branch: branch || null,
+        }),
+      );
+    },
+
+    addRemote: async (name, url) => {
+      const rootPath = getRootPath();
+      if (!rootPath) return;
+      await runGitOperation('remote-add', () =>
+        tauriInvoke('git_remote_add', { repoPath: rootPath, name, url }),
+      );
+      await get().refresh();
+      await get().fetchBranches();
+    },
+
+    removeRemote: async (name) => {
+      const rootPath = getRootPath();
+      if (!rootPath) return;
+      await runGitOperation('remote-remove', () =>
+        tauriInvoke('git_remote_remove', { repoPath: rootPath, name }),
+      );
+      await get().refresh();
+      await get().fetchBranches();
+    },
+
+    setRemoteUrl: async (name, url) => {
+      const rootPath = getRootPath();
+      if (!rootPath) return;
+      await runGitOperation('remote-set-url', () =>
+        tauriInvoke('git_remote_set_url', { repoPath: rootPath, name, url }),
+      );
+      await get().refresh();
+      await get().fetchBranches();
     },
 
     getFileContent: async (filePath, mode = 'unstaged') => {

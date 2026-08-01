@@ -148,6 +148,13 @@ interface TauriCommands {
   git_unstage: { args: { repoPath: string; paths: string[] }; ret: void };
   git_discard: { args: { repoPath: string; paths: string[] }; ret: void };
   git_remote_list: { args: { repoPath: string }; ret: Array<{ name: string; url: string }> };
+  git_clone: {
+    args: { url: string; targetPath: string; branch?: string | null };
+    ret: void;
+  };
+  git_remote_add: { args: { repoPath: string; name: string; url: string }; ret: void };
+  git_remote_remove: { args: { repoPath: string; name: string }; ret: void };
+  git_remote_set_url: { args: { repoPath: string; name: string; url: string }; ret: void };
   git_ahead_behind: { args: { repoPath: string }; ret: { ahead: number; behind: number } };
   git_stash: {
     args: { repoPath: string; message?: string | null; includeUntracked?: boolean | null };
@@ -338,6 +345,96 @@ interface TauriCommands {
   github_copilot_ensure_token: { args: Record<string, never>; ret: string };
   github_copilot_disconnect: { args: Record<string, never>; ret: void };
   github_copilot_is_authenticated: { args: Record<string, never>; ret: boolean };
+
+  // GitHub Account (OAuth Device Flow)
+  github_account_oauth_start: {
+    args: Record<string, never>;
+    ret: {
+      device_code: string;
+      user_code: string;
+      verification_uri: string;
+      expires_in: number;
+      interval: number;
+    };
+  };
+  github_account_oauth_poll: {
+    args: { deviceCode: string };
+    ret: { access_token: string; token_type: string; scope: string };
+  };
+  github_account_is_authenticated: { args: Record<string, never>; ret: boolean };
+  github_account_scopes: { args: Record<string, never>; ret: string | null };
+  github_account_disconnect: { args: Record<string, never>; ret: void };
+  github_account_user: {
+    args: Record<string, never>;
+    ret: {
+      login: string;
+      name: string | null;
+      avatar_url: string;
+      html_url: string;
+    } | null;
+  };
+
+  // GitHub Repository API
+  github_list_repos: {
+    args: { affiliation?: string; visibility?: string };
+    ret: Array<{
+      id: number;
+      name: string;
+      full_name: string;
+      html_url: string;
+      clone_url: string;
+      ssh_url: string;
+      description: string | null;
+      private: boolean;
+      fork: boolean;
+      default_branch: string;
+      owner: { login: string; avatar_url: string };
+      updated_at: string | null;
+    }>;
+  };
+  github_list_orgs: {
+    args: Record<string, never>;
+    ret: Array<{ login: string; avatar_url: string; description: string | null }>;
+  };
+  github_search_repos: {
+    args: { query: string };
+    ret: Array<{
+      id: number;
+      name: string;
+      full_name: string;
+      html_url: string;
+      clone_url: string;
+      ssh_url: string;
+      description: string | null;
+      private: boolean;
+      fork: boolean;
+      default_branch: string;
+      owner: { login: string; avatar_url: string };
+      updated_at: string | null;
+    }>;
+  };
+  github_create_repo: {
+    args: {
+      name: string;
+      description?: string | null;
+      private: boolean;
+      org?: string | null;
+    };
+    ret: {
+      id: number;
+      name: string;
+      full_name: string;
+      html_url: string;
+      clone_url: string;
+      ssh_url: string;
+      description: string | null;
+      private: boolean;
+      fork: boolean;
+      default_branch: string;
+      owner: { login: string; avatar_url: string };
+      updated_at: string | null;
+    };
+  };
 
   // Database: Projects
   db_ensure_project: { args: { id: string; path: string }; ret: void };

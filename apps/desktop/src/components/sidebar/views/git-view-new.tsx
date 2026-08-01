@@ -1,4 +1,5 @@
-import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo, useLayoutEffect } from 'react';
+import { createPortal } from 'react-dom';
 import {
   Button,
   Dialog,
@@ -36,8 +37,12 @@ import {
   GitPullRequest,
   GitFork as GraphIcon,
   Check,
+  Github,
+  PlusCircle,
+  Link2,
 } from 'lucide-react';
 import { useGitStore, useEditorStore } from '../../../stores';
+import { useGithubStore } from '../../../stores/github-store';
 import { useSettingsStore } from '../../../stores/settings-store';
 import { getViewerType } from '../../../lib/utils';
 import { detectLanguage } from '../../../lib/lsp-bridge';
@@ -92,6 +97,10 @@ export function GitView() {
   const amendCommit = useGitStore((s) => s.amendCommit);
   const setCommitMessage = useGitStore((s) => s.setCommitMessage);
   const initRepo = useGitStore((s) => s.initRepo);
+  const addRemote = useGitStore((s) => s.addRemote);
+  const removeRemote = useGitStore((s) => s.removeRemote);
+  const openCloneDialog = useGithubStore((s) => s.openCloneDialog);
+  const openPublishDialog = useGithubStore((s) => s.openPublishDialog);
   const stashChanges = useGitStore((s) => s.stashChanges);
   const popStash = useGitStore((s) => s.popStash);
   const applyStash = useGitStore((s) => s.applyStash);
@@ -129,7 +138,9 @@ export function GitView() {
   const [showAiSettings, setShowAiSettings] = useState(false);
   const [showPrDialog, setShowPrDialog] = useState(false);
   const [showCommitMenu, setShowCommitMenu] = useState(false);
+  const [menuPosition, setMenuPosition] = useState<{ top: number; left: number } | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
   const commitMenuRef = useRef<HTMLDivElement>(null);
   const messageRef = useRef<HTMLTextAreaElement>(null);
 
@@ -171,6 +182,7 @@ export function GitView() {
   useEffect(() => {
     if (!showMenu) return;
     const handler = (e: MouseEvent) => {
+      if (triggerRef.current?.contains(e.target as Node)) return;
       if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
         setShowMenu(false);
       }
@@ -178,6 +190,46 @@ export function GitView() {
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
   }, [showMenu]);
+
+  // Keep the operations menu fully inside the viewport: flip vertically when it
+  // would overflow below the trigger, and clamp horizontally/vertically so the
+  // whole menu is always 100% visible regardless of element size.
+  useLayoutEffect(() => {
+    if (!showMenu) {
+      setMenuPosition(null);
+      return;
+    }
+    const computePosition = () => {
+      const trigger = triggerRef.current;
+      const menu = menuRef.current;
+      if (!trigger || !menu) return;
+      const anchor = trigger.getBoundingClientRect();
+      const menuRect = menu.getBoundingClientRect();
+      const viewportW = window.innerWidth;
+      const viewportH = window.innerHeight;
+      const margin = 8;
+      const gap = 4;
+      let top = anchor.bottom + gap;
+      if (
+        anchor.bottom + gap + menuRect.height > viewportH - margin &&
+        anchor.top - gap - menuRect.height >= margin
+      ) {
+        top = anchor.top - gap - menuRect.height;
+      }
+      const left = anchor.right - menuRect.width;
+      const clampedTop = Math.max(margin, Math.min(top, viewportH - margin - menuRect.height));
+      const clampedLeft = Math.max(margin, Math.min(left, viewportW - margin - menuRect.width));
+      setMenuPosition({ top: clampedTop, left: clampedLeft });
+    };
+    computePosition();
+    const observer = new ResizeObserver(computePosition);
+    if (menuRef.current) observer.observe(menuRef.current);
+    window.addEventListener('resize', computePosition);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('resize', computePosition);
+    };
+  }, [showMenu, remotes]);
 
   useEffect(() => {
     if (!showCommitMenu) return;
@@ -242,9 +294,14 @@ export function GitView() {
       await runOp('Push', () => push());
       return;
     }
+    if (remotes.length === 0) {
+      setShowMenu(false);
+      openPublishDialog();
+      return;
+    }
     const remote = await chooseRemote();
     if (remote) await runOp('Publish Branch', () => publishBranch(remote));
-  }, [chooseRemote, publishBranch, push, runOp, upstream]);
+  }, [chooseRemote, openPublishDialog, publishBranch, push, remotes.length, runOp, upstream]);
   const handlePull = useCallback(() => runOp('Pull', () => pull()), [runOp, pull]);
   const handleFetch = useCallback(() => runOp('Fetch', () => fetchRemote()), [runOp, fetchRemote]);
   const handlePushTo = useCallback(async () => {
@@ -262,6 +319,38 @@ export function GitView() {
   const handleFetchPrune = useCallback(
     () => runOp('Fetch & Prune', () => fetchAll(true)),
     [fetchAll, runOp],
+  );
+
+  const handleAddRemote = useCallback(async () => {
+    setShowMenu(false);
+    const defaultName = remotes.some((remote) => remote.name === 'origin') ? '' : 'origin';
+    const name = await promptInput({
+      title: 'Add Remote',
+      placeholder: defaultName || 'remote name',
+      defaultValue: defaultName,
+    });
+    if (!name) return;
+    const url = await promptInput({
+      title: `Remote URL for "${name}"`,
+      placeholder: 'https://github.com/owner/repo.git',
+    });
+    if (!url) return;
+    await runOp('Add Remote', () => addRemote(name, url));
+  }, [addRemote, remotes, runOp]);
+
+  const handleRemoveRemote = useCallback(
+    async (name: string) => {
+      setShowMenu(false);
+      const confirmed = await promptConfirm({
+        title: `Remove remote "${name}"?`,
+        description: 'The remote will be removed from this repository. This does not delete the remote repository.',
+        confirmLabel: 'Remove',
+        danger: true,
+      });
+      if (!confirmed) return;
+      await runOp('Remove Remote', () => removeRemote(name));
+    },
+    [removeRemote, runOp],
   );
 
   const handleCommit = useCallback(
@@ -550,6 +639,13 @@ export function GitView() {
       <div className="flex flex-col items-center justify-center py-12 text-center text-muted-foreground">
         <GitBranch className="mb-3 h-8 w-8 opacity-30" />
         <p className="text-xs">Open a folder to view source control</p>
+        <button
+          onClick={openCloneDialog}
+          className="mt-3 flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-[11px] text-white hover:bg-primary/80 transition-colors"
+        >
+          <GitBranch className="h-3 w-3" />
+          Clone Repository
+        </button>
       </div>
     );
   }
@@ -584,12 +680,21 @@ export function GitView() {
       <div className="flex flex-col items-center justify-center py-12 text-center text-muted-foreground">
         <GitBranch className="mb-3 h-8 w-8 opacity-30" />
         <p className="text-xs">Not a Git repository</p>
-        <button
-          onClick={() => void runOp('Initialize Repository', initRepo)}
-          className="mt-3 rounded-md bg-primary px-3 py-1.5 text-[11px] text-white hover:bg-primary/80 transition-colors"
-        >
-          Initialize Repository
-        </button>
+        <div className="mt-3 flex items-center gap-2">
+          <button
+            onClick={() => void runOp('Initialize Repository', initRepo)}
+            className="rounded-md bg-primary px-3 py-1.5 text-[11px] text-white hover:bg-primary/80 transition-colors"
+          >
+            Initialize Repository
+          </button>
+          <button
+            onClick={openCloneDialog}
+            className="flex items-center gap-1.5 rounded-md border border-border bg-background px-3 py-1.5 text-[11px] text-foreground hover:bg-muted transition-colors"
+          >
+            <GitBranch className="h-3 w-3" />
+            Clone Repository
+          </button>
+        </div>
       </div>
     );
   }
@@ -652,81 +757,13 @@ export function GitView() {
           </button>
           <div className="relative">
             <button
+              ref={triggerRef}
               onClick={() => setShowMenu(!showMenu)}
               className="flex h-5 w-5 items-center justify-center rounded-sm text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
               title="Git operations"
             >
               <MoreHorizontal className="h-3 w-3" />
             </button>
-            {showMenu && (
-              <div
-                ref={menuRef}
-                className="absolute right-0 top-6 z-50 min-w-[180px] max-h-[400px] overflow-auto rounded-lg border border-border bg-background p-1 shadow-xl"
-              >
-                {/* Remote */}
-                <MenuSection label="Remote">
-                  <MenuBtn icon={ArrowUp} label="Push" onClick={handlePush} />
-                  <MenuBtn icon={ArrowUp} label="Push To…" onClick={handlePushTo} />
-                  <MenuBtn icon={ArrowDown} label="Pull" onClick={handlePull} />
-                  <MenuBtn icon={ArrowDown} label="Pull From…" onClick={handlePullFrom} />
-                  <MenuBtn icon={Download} label="Fetch" onClick={handleFetch} />
-                  <MenuBtn icon={Download} label="Fetch All" onClick={handleFetchAll} />
-                  <MenuBtn icon={Download} label="Fetch All & Prune" onClick={handleFetchPrune} />
-                </MenuSection>
-
-                <MenuDivider />
-
-                {/* Staging */}
-                <MenuSection label="Changes">
-                  <MenuBtn
-                    icon={Plus}
-                    label="Stage All"
-                    onClick={async () => {
-                      await runOp('Stage All', stageAll);
-                    }}
-                  />
-                  <MenuBtn icon={Minus} label="Unstage All" onClick={handleUnstageAll} />
-                  <MenuBtn icon={RotateCcw} label="Discard All" onClick={handleDiscardAll} />
-                </MenuSection>
-
-                <MenuDivider />
-
-                {/* Branch */}
-                <MenuSection label="Branch">
-                  <MenuBtn icon={GitFork} label="Create Branch" onClick={handleCreateBranch} />
-                  <MenuBtn
-                    icon={GitBranch}
-                    label="Checkout Branch"
-                    onClick={handleCheckoutBranch}
-                  />
-                  <MenuBtn icon={Trash2} label="Delete Branch" onClick={handleDeleteBranch} />
-                  <MenuBtn icon={GitMerge} label="Merge Branch" onClick={handleMerge} />
-                </MenuSection>
-
-                <MenuDivider />
-
-                {/* Misc */}
-                <MenuSection label="Other">
-                  <MenuBtn icon={Archive} label="Stash Changes" onClick={handleStash} />
-                  <MenuBtn
-                    icon={Archive}
-                    label="Stash Including Untracked"
-                    onClick={handleStashIncludingUntracked}
-                  />
-                  <MenuBtn icon={Archive} label="Pop Stash" onClick={handlePopStash} />
-                  <MenuBtn icon={Archive} label="Apply Stash" onClick={handleApplyStash} />
-                  <MenuBtn icon={Tag} label="Create Tag" onClick={handleCreateTag} />
-                  <MenuBtn
-                    icon={History}
-                    label="View History"
-                    onClick={() => {
-                      setShowMenu(false);
-                      setPanelMode('log');
-                    }}
-                  />
-                </MenuSection>
-              </div>
-            )}
           </div>
         </div>
       </div>
@@ -1001,6 +1038,115 @@ export function GitView() {
 
       {/* Pull Request Dialog */}
       <PullRequestDialog open={showPrDialog} onClose={() => setShowPrDialog(false)} />
+      {showMenu &&
+        createPortal(
+          <div
+            ref={menuRef}
+            className="fixed z-[9990] min-w-[180px] max-h-[calc(100vh-16px)] overflow-auto rounded-lg border border-border bg-background p-1 shadow-xl"
+            style={
+              menuPosition
+                ? { top: menuPosition.top, left: menuPosition.left }
+                : { top: 0, left: 0, visibility: 'hidden' }
+            }
+          >
+            {/* Remote */}
+            <MenuSection label="Remote">
+              <MenuBtn
+                icon={Github}
+                label="Publish to GitHub…"
+                onClick={() => {
+                  setShowMenu(false);
+                  openPublishDialog();
+                }}
+              />
+              <MenuBtn
+                icon={PlusCircle}
+                label="Add Remote…"
+                onClick={() => void handleAddRemote()}
+              />
+              {remotes.length > 0 && <MenuDivider />}
+              {remotes.map((remote) => (
+                <div
+                  key={remote.name}
+                  className="group flex items-center gap-1 rounded-md px-1.5 py-1 hover:bg-muted transition-colors"
+                >
+                  <Link2 className="h-3 w-3 shrink-0 text-muted-foreground" />
+                  <div className="min-w-0 flex-1 leading-tight">
+                    <p className="truncate text-[11px] text-foreground">{remote.name}</p>
+                    <p className="truncate text-[9px] text-muted-foreground">{remote.url}</p>
+                  </div>
+                  <button
+                    onClick={() => void handleRemoveRemote(remote.name)}
+                    title={`Remove remote ${remote.name}`}
+                    className="flex h-5 w-5 shrink-0 items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 hover:text-destructive"
+                  >
+                    <Trash2 className="h-3 w-3" />
+                  </button>
+                </div>
+              ))}
+              <MenuBtn icon={ArrowUp} label="Push" onClick={handlePush} />
+              <MenuBtn icon={ArrowUp} label="Push To…" onClick={handlePushTo} />
+              <MenuBtn icon={ArrowDown} label="Pull" onClick={handlePull} />
+              <MenuBtn icon={ArrowDown} label="Pull From…" onClick={handlePullFrom} />
+              <MenuBtn icon={Download} label="Fetch" onClick={handleFetch} />
+              <MenuBtn icon={Download} label="Fetch All" onClick={handleFetchAll} />
+              <MenuBtn icon={Download} label="Fetch All & Prune" onClick={handleFetchPrune} />
+            </MenuSection>
+
+            <MenuDivider />
+
+            {/* Staging */}
+            <MenuSection label="Changes">
+              <MenuBtn
+                icon={Plus}
+                label="Stage All"
+                onClick={async () => {
+                  await runOp('Stage All', stageAll);
+                }}
+              />
+              <MenuBtn icon={Minus} label="Unstage All" onClick={handleUnstageAll} />
+              <MenuBtn icon={RotateCcw} label="Discard All" onClick={handleDiscardAll} />
+            </MenuSection>
+
+            <MenuDivider />
+
+            {/* Branch */}
+            <MenuSection label="Branch">
+              <MenuBtn icon={GitFork} label="Create Branch" onClick={handleCreateBranch} />
+              <MenuBtn
+                icon={GitBranch}
+                label="Checkout Branch"
+                onClick={handleCheckoutBranch}
+              />
+              <MenuBtn icon={Trash2} label="Delete Branch" onClick={handleDeleteBranch} />
+              <MenuBtn icon={GitMerge} label="Merge Branch" onClick={handleMerge} />
+            </MenuSection>
+
+            <MenuDivider />
+
+            {/* Misc */}
+            <MenuSection label="Other">
+              <MenuBtn icon={Archive} label="Stash Changes" onClick={handleStash} />
+              <MenuBtn
+                icon={Archive}
+                label="Stash Including Untracked"
+                onClick={handleStashIncludingUntracked}
+              />
+              <MenuBtn icon={Archive} label="Pop Stash" onClick={handlePopStash} />
+              <MenuBtn icon={Archive} label="Apply Stash" onClick={handleApplyStash} />
+              <MenuBtn icon={Tag} label="Create Tag" onClick={handleCreateTag} />
+              <MenuBtn
+                icon={History}
+                label="View History"
+                onClick={() => {
+                  setShowMenu(false);
+                  setPanelMode('log');
+                }}
+              />
+            </MenuSection>
+          </div>,
+          document.body,
+        )}
       {showAiSettings && (
         <AiCommitModelDialog
           commitAiProviderId={commitAiProviderId}

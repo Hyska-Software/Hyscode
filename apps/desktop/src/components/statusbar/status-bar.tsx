@@ -1,6 +1,8 @@
-import { useRef, useState } from 'react';
-import { GitBranch, Circle, Blocks, Zap, Smartphone } from 'lucide-react';
+import { useRef, useState, useEffect } from 'react';
+import { GitBranch, Circle, Blocks, Zap, Smartphone, Github } from 'lucide-react';
 import { useGitStore, useEditorStore, useExtensionStore } from '../../stores';
+import { useGithubStore } from '../../stores/github-store';
+import { useSettingsStore } from '../../stores/settings-store';
 import { useLspStore } from '../../stores/lsp-store';
 import { useDeviceStore } from '../../stores/device-store';
 import { detectLanguage } from '../../lib/lsp-bridge';
@@ -21,6 +23,11 @@ export function StatusBar() {
   const unstaged = useGitStore((s) => s.unstaged);
   const untracked = useGitStore((s) => s.untracked);
   const conflicts = useGitStore((s) => s.conflicts);
+
+  const githubAuthStatus = useGithubStore((s) => s.authStatus);
+  const githubUser = useGithubStore((s) => s.user);
+  const githubCheckAuth = useGithubStore((s) => s.checkAuth);
+  const openSettingsOnTab = useSettingsStore((s) => s.openSettingsOnTab);
 
   const activeTabId = useEditorStore((s) => s.activeTabId);
   const tabs = useEditorStore((s) => s.tabs);
@@ -49,6 +56,13 @@ export function StatusBar() {
     currentBranch,
     repositoryOperation,
   });
+
+  // Resolve the GitHub auth state once on mount so the indicator is accurate.
+  useEffect(() => {
+    if (githubAuthStatus === 'unknown') {
+      void githubCheckAuth();
+    }
+  }, [githubAuthStatus, githubCheckAuth]);
 
   return (
     <>
@@ -90,6 +104,30 @@ export function StatusBar() {
               {connectionState === 'idle' ? 'Ready' : (connectionMessage ?? connectionState)}
             </span>
           </div>
+          {githubAuthStatus === 'signed-in' && githubUser && (
+            <button
+              className="flex items-center gap-1 text-muted-foreground hover:text-foreground transition-colors"
+              title={`GitHub: @${githubUser.login} — click to manage`}
+              onClick={() => openSettingsOnTab('git')}
+            >
+              <img
+                src={githubUser.avatar_url}
+                alt=""
+                className="h-3 w-3 rounded-full"
+              />
+              <span className="max-w-[90px] truncate">@{githubUser.login}</span>
+            </button>
+          )}
+          {githubAuthStatus === 'signed-out' && (
+            <button
+              className="flex items-center gap-1 text-muted-foreground hover:text-primary transition-colors"
+              title="Sign in with GitHub — clone, publish and manage repositories"
+              onClick={() => openSettingsOnTab('git')}
+            >
+              <Github className="h-2.5 w-2.5" />
+              <span>Sign in</span>
+            </button>
+          )}
         </div>
         <div className="flex items-center gap-3 text-muted-foreground">
           {extensionCount > 0 && (

@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
-import { FolderOpen, Clock, Trash2, ArrowRight, Sparkles, Settings, RotateCcw } from 'lucide-react';
+import { FolderOpen, GitBranch, Clock, Trash2, ArrowRight, Sparkles, Settings, RotateCcw } from 'lucide-react';
 import { useProjectStore, useFileStore, useSettingsStore } from '../../stores';
+import { useGithubStore } from '../../stores/github-store';
 import { pickFolder } from '../../lib/tauri-dialog';
 import { switchProject } from '../../lib/project-persistence';
 import type { RecentProject } from '../../stores/project-store';
@@ -14,6 +15,7 @@ export function WelcomePage() {
   const removeRecent = useProjectStore((s) => s.removeRecent);
   const openSettings = useSettingsStore((s) => s.openSettings);
   const resetOnboarding = useOnboardingStore((s) => s.resetOnboarding);
+  const openCloneDialog = useGithubStore((s) => s.openCloneDialog);
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
@@ -120,7 +122,7 @@ export function WelcomePage() {
 
             {/* Two-column layout */}
             <div
-              className={`grid grid-cols-1 gap-4 transition-all duration-700 delay-200 ${
+              className={`grid grid-cols-2 gap-4 transition-all duration-700 delay-200 ${
                 mounted ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-3'
               }`}
             >
@@ -137,6 +139,24 @@ export function WelcomePage() {
                   <p className="font-medium text-foreground">Open Folder</p>
                   <p className="text-xs text-muted-foreground mt-0.5">
                     Browse and select a project directory
+                  </p>
+                </div>
+                <ArrowRight className="relative h-4 w-4 text-muted-foreground opacity-0 transition-all duration-200 group-hover:opacity-100 group-hover:translate-x-0.5" />
+              </button>
+
+              {/* Clone repository CTA */}
+              <button
+                onClick={openCloneDialog}
+                className="group relative flex w-full items-center gap-4 overflow-hidden rounded-xl border border-border bg-surface-raised px-5 py-4 text-left transition-all duration-200 hover:border-primary/40 hover:bg-muted hover:shadow-lg hover:shadow-primary/5"
+              >
+                <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-300 bg-gradient-to-r from-primary/5 to-transparent" />
+                <div className="relative flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary/15">
+                  <GitBranch className="h-5 w-5 text-primary" />
+                </div>
+                <div className="relative flex-1">
+                  <p className="font-medium text-foreground">Clone Repository</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    Clone public or private repositories from GitHub
                   </p>
                 </div>
                 <ArrowRight className="relative h-4 w-4 text-muted-foreground opacity-0 transition-all duration-200 group-hover:opacity-100 group-hover:translate-x-0.5" />

@@ -100,6 +100,10 @@ pub fn run() {
             commands::git::git_tag_create,
             commands::git::git_log_graph,
             commands::git::git_branch_changes,
+            commands::git::git_clone,
+            commands::git::git_remote_add,
+            commands::git::git_remote_remove,
+            commands::git::git_remote_set_url,
             // PTY commands
             commands::pty::pty_spawn,
             commands::pty::pty_write,
@@ -148,6 +152,18 @@ pub fn run() {
             commands::github_oauth::github_copilot_ensure_token,
             commands::github_oauth::github_copilot_disconnect,
             commands::github_oauth::github_copilot_is_authenticated,
+            // GitHub Account commands
+            commands::github_oauth::github_account_oauth_start,
+            commands::github_oauth::github_account_oauth_poll,
+            commands::github_oauth::github_account_is_authenticated,
+            commands::github_oauth::github_account_scopes,
+            commands::github_oauth::github_account_disconnect,
+            // GitHub Repository commands
+            commands::github_repos::github_account_user,
+            commands::github_repos::github_list_repos,
+            commands::github_repos::github_list_orgs,
+            commands::github_repos::github_search_repos,
+            commands::github_repos::github_create_repo,
             // GitHub Pull Request commands
             commands::github_pr::github_create_pull_request,
             commands::github_pr::github_set_token,
