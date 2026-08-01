@@ -77,9 +77,6 @@ export interface ToolExecutionContext {
   };
   /** Ask the user a set of questions. Pauses the agent loop until answered. */
   askUser?: (questions: AgentQuestion[], title?: string) => Promise<AgentQuestionAnswer[]>;
-  /** PTY id of the persistent agent terminal session (if available). When set,
-   *  run_terminal_command writes to this shared PTY instead of spawning a new one. */
-  agentTerminalPtyId?: string;
   /** Callback fired after a terminal command completes (for environment context tracking). */
   onTerminalCommand?: (command: string, output: string, exitCode: number | null) => void;
   /** Desktop adapter that owns visible PTY sessions and conversation isolation. */
@@ -106,10 +103,14 @@ export type TerminalAcquireRequest = {
   ownerId?: string;
 };
 
+export type TerminalFrameLanguage = 'bash' | 'powershell';
+
 export type TerminalBinding = {
   terminalId: string;
   ptyId: string;
   persistent: boolean;
+  /** Shell language the runtime spawned; capture frames must match it. */
+  frameLanguage: TerminalFrameLanguage;
 };
 
 export type TerminalSnapshot = {
@@ -128,6 +129,13 @@ export interface TerminalRuntimeAdapter {
   interrupt(terminalId: string): Promise<void>;
   kill(terminalId: string): Promise<void>;
   release?(terminalId: string, toolCallId: string): void;
+  /** Stream output with replay: the runtime must deliver buffered output that
+   *  arrived before the subscription, not just live chunks. */
+  subscribe?(
+    terminalId: string,
+    onData: (data: string, sequence: number) => void,
+    onExit: (exitCode: number | null) => void,
+  ): Promise<() => void>;
 }
 
 export type TerminalProgress = {

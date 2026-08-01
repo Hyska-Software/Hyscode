@@ -9,6 +9,7 @@ export type {
   TerminalBinding,
   TerminalSnapshot,
   TerminalProgress,
+  TerminalFrameLanguage,
   ToolCallRecord,
   ApprovalMode,
   ApprovalConfig,
@@ -95,6 +96,22 @@ export { getAgentDefinition, getAllAgentDefinitions, getAgentTypes } from './age
 export { getAllBuiltinTools } from './tools';
 export { resolveWorkspacePath } from './path-policy';
 export type { WorkspacePathOptions } from './path-policy';
+
+// ─── Terminal ───────────────────────────────────────────────────────────────
+export { TerminalCommandRunner, stopCommand } from './terminal-command-runner';
+export type { TerminalCommandInput } from './terminal-command-runner';
+export { CommandWatch } from './command-watch';
+export type { CommandWatchConfig, CommandWatchOutcome } from './command-watch';
+export {
+  MAX_CAPTURE_CHARS,
+  buildTerminalFrame,
+  isSensitiveTerminalPrompt,
+  looksLikeTerminalPrompt,
+  normalizeTerminalOutput,
+  parseTerminalFrame,
+  stripAnsi,
+} from './terminal-protocol';
+export type { ParsedTerminalFrame } from './terminal-protocol';
 
 // ─── Memory System ──────────────────────────────────────────────────────────
 export { MemoryManager } from './memory-manager';

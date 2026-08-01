@@ -12,7 +12,8 @@ import type {
   MemoryType,
 } from './types';
 import { resolveWorkspacePath } from './path-policy';
-import { normalizeTerminalSnapshot, TerminalCommandRunner } from './terminal-command-runner';
+import { normalizeTerminalOutput } from './terminal-protocol';
+import { stopCommand, TerminalCommandRunner } from './terminal-command-runner';
 
 // ─── Helper ─────────────────────────────────────────────────────────────────
 
@@ -672,7 +673,7 @@ export const readTerminalOutputTool = defineTool(
       );
       return {
         success: true,
-        output: normalizeTerminalSnapshot(snapshot, (input.max_chars as number) || 16_000),
+        output: normalizeTerminalOutput(snapshot.data, (input.max_chars as number) || 16_000),
         metadata: {
           terminalId,
           sequence: snapshot.toSequence,
@@ -730,13 +731,13 @@ export const stopTerminalProcessTool = defineTool(
   true,
   async (input, ctx) => {
     const terminalId = String(input.terminal_id);
-    if (!ctx.terminal)
-      return { success: false, output: '', error: 'Terminal runtime is unavailable.' };
+    const adapter = ctx.terminal;
+    if (!adapter) return { success: false, output: '', error: 'Terminal runtime is unavailable.' };
     try {
-      await ctx.terminal.interrupt(terminalId);
-      await new Promise((resolve) => setTimeout(resolve, 750));
-      const snapshot = await ctx.terminal.snapshot(terminalId).catch(() => null);
-      if (snapshot?.alive) await ctx.terminal.kill(terminalId);
+      await stopCommand(adapter, terminalId);
+      const snapshot = await adapter.snapshot(terminalId).catch(() => null);
+      if (snapshot?.alive)
+        return { success: false, output: '', error: `Process did not stop: ${terminalId}` };
       return { success: true, output: `Stopped terminal ${terminalId}.`, metadata: { terminalId } };
     } catch (error) {
       return { success: false, output: '', error: String(error) };

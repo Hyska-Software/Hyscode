@@ -111,9 +111,6 @@ export interface HarnessOptions {
   skillLoader?: SkillLoader;
   /** Rule loader config */
   ruleLoader?: RuleLoader;
-  /** PTY id of the persistent agent terminal (managed by the UI). When set,
-   *  run_terminal_command writes to this shared session instead of spawning a new one. */
-  agentTerminalPtyId?: string;
   /** Callback fired after a terminal command finishes (for environment context tracking). */
   onTerminalCommand?: (command: string, output: string, exitCode: number | null) => void;
   terminalRuntime?: TerminalRuntimeAdapter;
@@ -152,7 +149,6 @@ export class Harness {
   private activeRules: Rule[] = [];
 
   // ─── Agent Terminal Integration ───────────────────────────────────
-  private agentTerminalPtyId: string | undefined;
   private onTerminalCommand:
     | ((command: string, output: string, exitCode: number | null) => void)
     | undefined;
@@ -212,7 +208,6 @@ export class Harness {
       savePlanFile: options.savePlanFile,
       skillLoader: options.skillLoader,
       ruleLoader: options.ruleLoader,
-      agentTerminalPtyId: options.agentTerminalPtyId,
       onTerminalCommand: options.onTerminalCommand,
       terminalRuntime: options.terminalRuntime,
       memoryManager: options.memoryManager,
@@ -220,7 +215,6 @@ export class Harness {
     };
 
     // Agent terminal integration
-    this.agentTerminalPtyId = options.agentTerminalPtyId;
     this.onTerminalCommand = options.onTerminalCommand;
     this.terminalRuntime = options.terminalRuntime;
 
@@ -410,16 +404,6 @@ export class Harness {
     if (patch.thinking !== undefined) {
       this.config.thinking = patch.thinking;
     }
-  }
-
-  /** Update the shared agent terminal PTY id (called by the bridge before each turn). */
-  setAgentTerminalPtyId(ptyId: string | undefined): void {
-    this.agentTerminalPtyId = ptyId;
-  }
-
-  /** Read the currently-wired agent terminal PTY id. */
-  getAgentTerminalPtyId(): string | undefined {
-    return this.agentTerminalPtyId;
   }
 
   /** Update the terminal command callback (called by the bridge at init). */
@@ -1185,7 +1169,6 @@ export class Harness {
           if (!activeTurn.signal.aborted) this.emit({ type: 'file_change_pending', change });
         },
         // Agent terminal integration — shared PTY + command tracking
-        agentTerminalPtyId: this.agentTerminalPtyId,
         onTerminalCommand: this.onTerminalCommand,
         onTerminalProgress: (progress) => this.emit({ type: 'terminal_progress', progress }),
         terminal: this.terminalRuntime,

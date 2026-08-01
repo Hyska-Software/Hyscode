@@ -2,19 +2,24 @@ import type {
   TerminalBinding,
   TerminalProgress,
   TerminalRuntimeAdapter,
-  TerminalSnapshot,
   ToolExecutionContext,
   ToolResult,
 } from './types';
+import { CommandWatch } from './command-watch';
+import {
+  buildTerminalFrame,
+  isSensitiveTerminalPrompt,
+  looksLikeTerminalPrompt,
+  parseTerminalFrame,
+} from './terminal-protocol';
 import { resolveWorkspacePath } from './path-policy';
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 const DEFAULT_STARTUP_TIMEOUT_MS = 15_000;
 const INTERRUPT_GRACE_MS = 750;
-const MAX_CAPTURE_CHARS = 1024 * 1024;
-const PROMPT_IDLE_MS = 400;
+const POLL_MS = 50;
 
-type InteractiveCommand = {
+type SuspendedCommand = {
   binding: TerminalBinding;
   command: string;
   cwd: string;
@@ -35,137 +40,6 @@ export type TerminalCommandInput = {
 type PtyData = { pty_id: string; sequence?: number; data: string };
 type PtyExit = { pty_id: string; sequence?: number; code: number | null };
 
-function stripAnsi(value: string): string {
-  return value
-    .replace(/\u001b\][^\u0007]*(?:\u0007|\u001b\\)/g, '')
-    .replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, '')
-    .replace(/\r/g, '');
-}
-
-function appendBounded(current: string, chunk: string): string {
-  const next = current + chunk;
-  return next.length <= MAX_CAPTURE_CHARS ? next : next.slice(-MAX_CAPTURE_CHARS);
-}
-
-export function looksLikeTerminalPrompt(output: string): boolean {
-  const line = stripAnsi(output)
-    .split('\n')
-    .map((value) => value.trim())
-    .filter(Boolean)
-    .at(-1);
-  if (!line) return false;
-  return /(?:\?|:\s*$|\[(?:y\/n|Y\/n|yes\/no)\]\s*$|\((?:y\/n|yes\/no)\)\s*$|password\s*:|passphrase\s*:|press (?:enter|return)|select (?:an? )?(?:option|choice)|enter (?:a )?(?:value|choice|number|name))/i.test(
-    line,
-  );
-}
-
-export function isSensitiveTerminalPrompt(output: string): boolean {
-  const tail = stripAnsi(output).slice(-1_000);
-  return /(?:password|passphrase|secret|api[_ -]?key|access[_ -]?token|mfa|one[- ]time|verification code|captcha)/i.test(
-    tail,
-  );
-}
-
-export function buildTerminalFrame(command: string, windows: boolean, nonce: string): string {
-  const begin = `__HYSCODE_BEGIN_${nonce}__`;
-  const end = `__HYSCODE_END_${nonce}__`;
-  if (windows) {
-    return (
-      `$global:LASTEXITCODE = 0; Write-Output '${begin}'; & { ${command} }; ` +
-      `$hysOk = $?; $hysCode = if ($hysOk) { [int]$LASTEXITCODE } ` +
-      `elseif ($LASTEXITCODE -ne 0) { [int]$LASTEXITCODE } else { 1 }; ` +
-      `Write-Output (\"${end}:{0}\" -f $hysCode)\r\n`
-    );
-  }
-  return `printf '\\n${begin}\\n'; ${command}; hys_code=$?; printf '\\n${end}:%s\\n' \"$hys_code\"\n`;
-}
-
-export type ParsedTerminalFrame = {
-  complete: boolean;
-  output: string;
-  exitCode: number | null;
-  started: boolean;
-};
-
-export function parseTerminalFrame(raw: string, nonce: string): ParsedTerminalFrame {
-  const begin = `__HYSCODE_BEGIN_${nonce}__`;
-  const end = `__HYSCODE_END_${nonce}__`;
-  const lines = stripAnsi(raw).split('\n');
-  const beginIndex = lines.findIndex((line) => line.trim() === begin);
-  if (beginIndex < 0) return { complete: false, output: '', exitCode: null, started: false };
-
-  const endPattern = new RegExp(`^${end}:(-?\\d+)$`);
-  for (let index = beginIndex + 1; index < lines.length; index++) {
-    const match = lines[index].trim().match(endPattern);
-    if (!match) continue;
-    return {
-      complete: true,
-      output: lines
-        .slice(beginIndex + 1, index)
-        .join('\n')
-        .trim(),
-      exitCode: Number.parseInt(match[1], 10),
-      started: true,
-    };
-  }
-  return {
-    complete: false,
-    output: lines
-      .slice(beginIndex + 1)
-      .join('\n')
-      .trim(),
-    exitCode: null,
-    started: true,
-  };
-}
-
-function fallbackAdapter(ctx: ToolExecutionContext): TerminalRuntimeAdapter {
-  const ptyByTerminal = new Map<string, string>();
-  return {
-    async acquire(request) {
-      const preferred = !request.forceNew ? ctx.agentTerminalPtyId : undefined;
-      const preferredAlive = preferred
-        ? await ctx.invoke<boolean>('pty_exists', { ptyId: preferred }).catch(() => false)
-        : false;
-      const ptyId = preferredAlive
-        ? preferred!
-        : await ctx.invoke<string>('pty_spawn', { cwd: request.cwd });
-      ptyByTerminal.set(ptyId, ptyId);
-      return { terminalId: ptyId, ptyId, persistent: preferredAlive };
-    },
-    async snapshot(terminalId, afterSequence) {
-      const snapshot = await ctx.invoke<{
-        data: string;
-        from_sequence: number;
-        to_sequence: number;
-        truncated: boolean;
-        alive: boolean;
-        exit_code: number | null;
-      }>('pty_snapshot', { ptyId: ptyByTerminal.get(terminalId) ?? terminalId, afterSequence });
-      return {
-        data: snapshot.data,
-        fromSequence: snapshot.from_sequence,
-        toSequence: snapshot.to_sequence,
-        truncated: snapshot.truncated,
-        alive: snapshot.alive,
-        exitCode: snapshot.exit_code,
-      };
-    },
-    async write(terminalId, data) {
-      await ctx.invoke('pty_write', {
-        ptyId: ptyByTerminal.get(terminalId) ?? terminalId,
-        data,
-      });
-    },
-    async interrupt(terminalId) {
-      await ctx.invoke('pty_interrupt', { ptyId: ptyByTerminal.get(terminalId) ?? terminalId });
-    },
-    async kill(terminalId) {
-      await ctx.invoke('pty_kill', { ptyId: ptyByTerminal.get(terminalId) ?? terminalId });
-    },
-  };
-}
-
 function emitProgress(
   ctx: ToolExecutionContext,
   binding: TerminalBinding,
@@ -182,7 +56,11 @@ function emitProgress(
   });
 }
 
-async function stopCommand(adapter: TerminalRuntimeAdapter, terminalId: string): Promise<void> {
+/** Interrupt a command and escalate to killing an unresponsive PTY (ADR-0002/0004). */
+export async function stopCommand(
+  adapter: TerminalRuntimeAdapter,
+  terminalId: string,
+): Promise<void> {
   await adapter.interrupt(terminalId).catch(() => undefined);
   await new Promise((resolve) => setTimeout(resolve, INTERRUPT_GRACE_MS));
   const snapshot = await adapter.snapshot(terminalId).catch(() => null);
@@ -190,9 +68,13 @@ async function stopCommand(adapter: TerminalRuntimeAdapter, terminalId: string):
 }
 
 export class TerminalCommandRunner {
-  private readonly interactiveCommands = new Map<string, InteractiveCommand>();
+  private readonly interactiveCommands = new Map<string, SuspendedCommand>();
 
   async run(input: TerminalCommandInput, ctx: ToolExecutionContext): Promise<ToolResult> {
+    const adapter = ctx.terminal;
+    if (!adapter) {
+      return { success: false, output: '', error: 'Terminal runtime is unavailable.' };
+    }
     if (!ctx.listen) {
       return { success: false, output: '', error: 'Terminal event listener is unavailable.' };
     }
@@ -200,7 +82,6 @@ export class TerminalCommandRunner {
     const command = input.command;
     const cwd = input.cwd ? resolveWorkspacePath(input.cwd, ctx.workspacePath) : ctx.workspacePath;
     const background = Boolean(input.background);
-    const adapter = ctx.terminal ?? fallbackAdapter(ctx);
     const binding = await adapter.acquire({
       conversationId: ctx.conversationId,
       toolCallId: ctx.toolCallId,
@@ -210,107 +91,118 @@ export class TerminalCommandRunner {
       background,
       ownerId: ctx.ownerId,
     });
-    const windows = typeof navigator !== 'undefined' && navigator.userAgent?.includes('Win');
     const nonce = crypto.randomUUID().replace(/-/g, '');
-    const frame = buildTerminalFrame(command, windows, nonce);
-    let rawOutput = '';
-    let exited = false;
-    let processExitCode: number | null = null;
-    let sequence = 0;
-    let lastOutputAt = Date.now();
-    let awaitingInput = false;
-    emitProgress(ctx, binding, 'started');
-
-    const unlistenData = await ctx.listen('pty:data', (payload) => {
-      const event = payload as PtyData;
-      if (event.pty_id !== binding.ptyId) return;
-      sequence = event.sequence ?? sequence + 1;
-      rawOutput = appendBounded(rawOutput, event.data);
-      lastOutputAt = Date.now();
-      emitProgress(ctx, binding, 'running', event.data, sequence);
+    const frame = buildTerminalFrame(command, binding.frameLanguage, nonce);
+    const startedAt = Date.now();
+    const watch = new CommandWatch({
+      nonce,
+      background,
+      readyPattern: input.readyPattern ? new RegExp(input.readyPattern) : null,
+      startedAt,
     });
-    const unlistenExit = await ctx.listen('pty:exit', (payload) => {
-      const event = payload as PtyExit;
-      if (event.pty_id !== binding.ptyId) return;
-      exited = true;
-      processExitCode = event.code;
-    });
+    let suspended = false;
+    const unsubscribes: Array<() => void> = [];
     const abort = () => void stopCommand(adapter, binding.terminalId);
     ctx.signal.addEventListener('abort', abort, { once: true });
+    const listen = ctx.listen;
+
+    // Prefer the adapter's replay-capable stream; fall back to raw events for
+    // adapters that only expose the generic event bus.
+    const subscribeToStream = async (): Promise<void> => {
+      if (adapter.subscribe) {
+        unsubscribes.push(
+          await adapter.subscribe(
+            binding.terminalId,
+            (data, sequence) => {
+              watch.pushData(sequence, data);
+              emitProgress(ctx, binding, 'running', data, sequence);
+            },
+            (code) => watch.pushExit(code),
+          ),
+        );
+        return;
+      }
+      const unlistenData = await listen('pty:data', (payload) => {
+        const event = payload as PtyData;
+        if (event.pty_id !== binding.ptyId) return;
+        const sequence = event.sequence ?? watch.sequence + 1;
+        watch.pushData(sequence, event.data);
+        emitProgress(ctx, binding, 'running', event.data, sequence);
+      });
+      const unlistenExit = await listen('pty:exit', (payload) => {
+        const event = payload as PtyExit;
+        if (event.pty_id !== binding.ptyId) return;
+        watch.pushExit(event.code);
+      });
+      unsubscribes.push(unlistenData, unlistenExit);
+    };
 
     try {
-      await ctx.invoke('pty_write', { ptyId: binding.ptyId, data: frame });
-      const startedAt = Date.now();
+      emitProgress(ctx, binding, 'started');
+      await subscribeToStream();
+      await adapter.write(binding.terminalId, frame);
       const waitLimit = background
         ? (input.startupTimeoutMs ?? DEFAULT_STARTUP_TIMEOUT_MS)
         : (input.timeoutMs ?? DEFAULT_TIMEOUT_MS);
-      const readyPattern = input.readyPattern ? new RegExp(input.readyPattern) : null;
 
       while (Date.now() - startedAt < waitLimit && !ctx.signal.aborted) {
-        const parsed = parseTerminalFrame(rawOutput, nonce);
-        if (parsed.complete) {
+        const outcome = watch.evaluate(Date.now());
+        if (outcome.kind === 'complete') {
           this.interactiveCommands.delete(binding.terminalId);
-          ctx.onTerminalCommand?.(command, parsed.output, parsed.exitCode);
-          emitProgress(ctx, binding, parsed.exitCode === 0 ? 'complete' : 'error');
+          ctx.onTerminalCommand?.(command, outcome.output, outcome.exitCode);
+          emitProgress(ctx, binding, outcome.exitCode === 0 ? 'complete' : 'error');
           return {
-            success: parsed.exitCode === 0,
-            output: parsed.output || `Command completed with exit code ${parsed.exitCode}`,
-            error: parsed.exitCode !== 0 ? `Exit code: ${parsed.exitCode}` : undefined,
+            success: outcome.exitCode === 0,
+            output: outcome.output || `Command completed with exit code ${outcome.exitCode}`,
+            error: outcome.exitCode !== 0 ? `Exit code: ${outcome.exitCode}` : undefined,
             metadata: {
               cwd,
-              exitCode: parsed.exitCode,
+              exitCode: outcome.exitCode,
               terminalId: binding.terminalId,
               background: false,
             },
           };
         }
-        if (
-          parsed.started &&
-          looksLikeTerminalPrompt(parsed.output) &&
-          Date.now() - lastOutputAt >= PROMPT_IDLE_MS
-        ) {
+        if (outcome.kind === 'awaiting_input') {
+          suspended = true;
           this.interactiveCommands.set(binding.terminalId, {
             binding,
             command,
             cwd,
             nonce,
           });
-          awaitingInput = true;
-          emitProgress(ctx, binding, 'awaiting_input', '', sequence);
+          emitProgress(ctx, binding, 'awaiting_input', '', outcome.sequence);
           return {
             success: true,
-            output: `${parsed.output}\n\nCommand is waiting for terminal input. Ask for approval before responding.`,
+            output: `${outcome.output}\n\nCommand is waiting for terminal input. Ask for approval before responding.`,
             metadata: {
               cwd,
               terminalId: binding.terminalId,
-              sequence,
+              sequence: outcome.sequence,
               awaitingInput: true,
             },
           };
         }
-        if (background && parsed.started) {
-          const ready = readyPattern ? readyPattern.test(parsed.output) : true;
-          if (ready && Date.now() - startedAt >= 500) {
-            ctx.onTerminalCommand?.(command, parsed.output, null);
-            emitProgress(ctx, binding, 'background');
-            return {
-              success: true,
-              output: parsed.output || 'Background process started.',
-              metadata: {
-                cwd,
-                exitCode: null,
-                terminalId: binding.terminalId,
-                background: true,
-                sequence,
-              },
-            };
-          }
+        if (outcome.kind === 'background_ready') {
+          ctx.onTerminalCommand?.(command, outcome.output, null);
+          emitProgress(ctx, binding, 'background');
+          return {
+            success: true,
+            output: outcome.output || 'Background process started.',
+            metadata: {
+              cwd,
+              exitCode: null,
+              terminalId: binding.terminalId,
+              background: true,
+              sequence: outcome.sequence,
+            },
+          };
         }
-        if (exited) break;
-        await new Promise((resolve) => setTimeout(resolve, 50));
+        if (watch.hasExited) break;
+        await new Promise((resolve) => setTimeout(resolve, POLL_MS));
       }
 
-      const parsed = parseTerminalFrame(rawOutput, nonce);
+      const parsed = watch.parsed();
       if (ctx.signal.aborted) {
         emitProgress(ctx, binding, 'cancelled');
         ctx.onTerminalCommand?.(command, parsed.output, null);
@@ -319,24 +211,23 @@ export class TerminalCommandRunner {
 
       await stopCommand(adapter, binding.terminalId);
       emitProgress(ctx, binding, 'error');
-      ctx.onTerminalCommand?.(command, parsed.output, processExitCode);
+      ctx.onTerminalCommand?.(command, parsed.output, watch.exitCode);
       return {
         success: false,
         output: parsed.output,
         error: background
           ? `Background process did not become ready within ${Math.round(waitLimit / 1000)}s.`
           : `Command timed out after ${Math.round(waitLimit / 1000)}s.`,
-        metadata: { cwd, terminalId: binding.terminalId, timedOut: !exited },
+        metadata: { cwd, terminalId: binding.terminalId, timedOut: !watch.hasExited },
       };
     } catch (error) {
       emitProgress(ctx, binding, 'error');
       return { success: false, output: '', error: String(error) };
     } finally {
-      unlistenData();
-      unlistenExit();
+      unsubscribes.forEach((unsubscribe) => unsubscribe());
       ctx.signal.removeEventListener('abort', abort);
       adapter.release?.(binding.terminalId, ctx.toolCallId);
-      if (!binding.persistent && !background && !awaitingInput) {
+      if (!binding.persistent && !background && !suspended) {
         await adapter.kill(binding.terminalId).catch(() => undefined);
       }
     }
@@ -349,7 +240,10 @@ export class TerminalCommandRunner {
     ctx: ToolExecutionContext,
   ): Promise<ToolResult> {
     const interactive = this.interactiveCommands.get(terminalId);
-    const adapter = ctx.terminal ?? fallbackAdapter(ctx);
+    const adapter = ctx.terminal;
+    if (!adapter) {
+      return { success: false, output: '', error: 'Terminal runtime is unavailable.' };
+    }
     if (!interactive) {
       return { success: false, output: '', error: 'Terminal is not waiting for agent input.' };
     }
@@ -370,19 +264,26 @@ export class TerminalCommandRunner {
         error: 'Sensitive terminal prompts must be answered directly by the user.',
       };
     }
+
+    const baselineChars = baseline.data.length;
+    const watch = new CommandWatch({
+      nonce: interactive.nonce,
+      background: false,
+      readyPattern: null,
+      startedAt: Date.now(),
+    });
+    watch.syncSnapshot(baseline.data, baseline.toSequence);
     let lastSequence = baseline.toSequence;
-    let lastOutputAt = Date.now();
-    let exited = false;
     const unlistenData = await ctx.listen('pty:data', (payload) => {
       const event = payload as PtyData;
       if (event.pty_id !== interactive.binding.ptyId) return;
       lastSequence = event.sequence ?? lastSequence + 1;
-      lastOutputAt = Date.now();
       emitProgress(ctx, interactive.binding, 'running', event.data, lastSequence);
     });
     const unlistenExit = await ctx.listen('pty:exit', (payload) => {
       const event = payload as PtyExit;
-      if (event.pty_id === interactive.binding.ptyId) exited = true;
+      if (event.pty_id !== interactive.binding.ptyId) return;
+      watch.pushExit(event.code);
     });
 
     try {
@@ -391,36 +292,30 @@ export class TerminalCommandRunner {
       const startedAt = Date.now();
       while (Date.now() - startedAt < timeoutMs && !ctx.signal.aborted) {
         const snapshot = await adapter.snapshot(terminalId);
-        const parsed = parseTerminalFrame(snapshot.data, interactive.nonce);
-        if (parsed.complete) {
+        watch.syncSnapshot(snapshot.data, snapshot.toSequence);
+        const outcome = watch.evaluate(Date.now(), baselineChars);
+        if (outcome.kind === 'complete') {
           this.interactiveCommands.delete(terminalId);
-          emitProgress(ctx, interactive.binding, parsed.exitCode === 0 ? 'complete' : 'error');
-          ctx.onTerminalCommand?.(interactive.command, parsed.output, parsed.exitCode);
+          emitProgress(ctx, interactive.binding, outcome.exitCode === 0 ? 'complete' : 'error');
+          ctx.onTerminalCommand?.(interactive.command, outcome.output, outcome.exitCode);
           return {
-            success: parsed.exitCode === 0,
-            output: parsed.output,
-            error: parsed.exitCode !== 0 ? `Exit code: ${parsed.exitCode}` : undefined,
-            metadata: { terminalId, exitCode: parsed.exitCode, awaitingInput: false },
+            success: outcome.exitCode === 0,
+            output: outcome.output,
+            error: outcome.exitCode !== 0 ? `Exit code: ${outcome.exitCode}` : undefined,
+            metadata: { terminalId, exitCode: outcome.exitCode, awaitingInput: false },
           };
         }
-        const newOutput = normalizeTerminalSnapshot(
-          { ...snapshot, data: snapshot.data.slice(baseline.data.length) },
-          MAX_CAPTURE_CHARS,
-        );
-        if (
-          snapshot.toSequence > baseline.toSequence &&
-          looksLikeTerminalPrompt(newOutput) &&
-          Date.now() - lastOutputAt >= PROMPT_IDLE_MS
-        ) {
-          emitProgress(ctx, interactive.binding, 'awaiting_input', '', snapshot.toSequence);
+        if (outcome.kind === 'awaiting_input') {
+          const newOutput = watch.output().slice(baselineChars);
+          emitProgress(ctx, interactive.binding, 'awaiting_input', '', outcome.sequence);
           return {
             success: true,
             output: `${newOutput}\n\nCommand is waiting for more terminal input.`,
-            metadata: { terminalId, sequence: snapshot.toSequence, awaitingInput: true },
+            metadata: { terminalId, sequence: outcome.sequence, awaitingInput: true },
           };
         }
-        if (exited) break;
-        await new Promise((resolve) => setTimeout(resolve, 50));
+        if (watch.hasExited) break;
+        await new Promise((resolve) => setTimeout(resolve, POLL_MS));
       }
       if (ctx.signal.aborted) return { success: false, output: '', error: 'Command cancelled.' };
       emitProgress(ctx, interactive.binding, 'awaiting_input', '', lastSequence);
@@ -434,13 +329,4 @@ export class TerminalCommandRunner {
       unlistenExit();
     }
   }
-}
-
-export function normalizeTerminalSnapshot(snapshot: TerminalSnapshot, maxChars: number): string {
-  const normalized = stripAnsi(snapshot.data)
-    .split('\n')
-    .filter((line) => !line.includes('__HYSCODE_BEGIN_') && !line.includes('__HYSCODE_END_'))
-    .join('\n')
-    .trim();
-  return normalized.length <= maxChars ? normalized : normalized.slice(-maxChars);
 }

@@ -7,23 +7,20 @@ describe('terminal conversation ownership', () => {
     useTerminalStore.setState({ sessions: [], activeSessionId: null, nextIndex: 1 });
   });
 
-  it('never reuses an agent terminal owned by another conversation', () => {
-    const firstId = useTerminalStore.getState().ensureAgentSession({
-      conversationId: 'conversation-a',
-      reuseHealthy: false,
-    });
-    useTerminalStore.getState().setPtyId(firstId, 'pty-a');
-
-    const secondId = useTerminalStore.getState().ensureAgentSession({
-      conversationId: 'conversation-b',
-    });
+  it('creates independent sessions per conversation', () => {
+    const firstId = useTerminalStore
+      .getState()
+      .createAgentSession({ conversationId: 'conversation-a' });
+    const secondId = useTerminalStore
+      .getState()
+      .createAgentSession({ conversationId: 'conversation-b' });
 
     expect(secondId).not.toBe(firstId);
-    expect(useTerminalStore.getState().findHealthyAgentSession('conversation-b')).toBeUndefined();
+    expect(useTerminalStore.getState().sessions).toHaveLength(2);
   });
 
   it('retains a dead PTY id so buffered output remains readable', () => {
-    const sessionId = useTerminalStore.getState().ensureAgentSession({ reuseHealthy: false });
+    const sessionId = useTerminalStore.getState().createAgentSession();
     useTerminalStore.getState().setPtyId(sessionId, 'pty-dead');
     useTerminalStore.getState().markPtyDead(sessionId);
 

@@ -1,13 +1,15 @@
 import { listen } from '@tauri-apps/api/event';
 
-import type {
-  TerminalAcquireRequest,
-  TerminalBinding,
-  TerminalRuntimeAdapter,
-  TerminalSnapshot,
+import {
+  normalizeTerminalOutput,
+  type TerminalAcquireRequest,
+  type TerminalBinding,
+  type TerminalRuntimeAdapter,
+  type TerminalSnapshot,
 } from '@hyscode/agent-harness';
 import { useTerminalStore } from '@/stores/terminal-store';
 
+import { detectFrameLanguage, selectAgentSession } from './terminal-session-policy';
 import { tauriInvokeRaw } from './tauri-invoke';
 
 type NativeSnapshot = {
@@ -19,48 +21,19 @@ type NativeSnapshot = {
   exit_code: number | null;
 };
 
-const terminalLocks = new Map<string, string>();
-
-function normalizeTerminalOutput(output: string, maxChars: number): string {
-  const normalized = output
-    .replace(/\u001b\][^\u0007]*(?:\u0007|\u001b\\)/g, '')
-    .replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, '')
-    .replace(/\r/g, '')
-    .split('\n')
-    .filter((line) => !line.includes('__HYSCODE_BEGIN_') && !line.includes('__HYSCODE_END_'))
-    .join('\n')
-    .trim();
-  return normalized.length <= maxChars ? normalized : normalized.slice(-maxChars);
-}
-
 export class DesktopTerminalRuntime implements TerminalRuntimeAdapter {
   async acquire(request: TerminalAcquireRequest): Promise<TerminalBinding> {
     const store = useTerminalStore.getState();
-    // Children pass an ownerId (sub-agent id) so every concurrent child gets a
-    // dedicated visible terminal session instead of racing for the parent's.
-    const isolationKey = request.ownerId ?? request.conversationId;
-    let session = request.forceNew
-      ? undefined
-      : request.sessionName
-        ? store.sessions.find(
-            (item) =>
-              item.isAgentSession &&
-              item.name === request.sessionName &&
-              item.ownerConversationId === isolationKey,
-          )
-        : store.findHealthyAgentSession(isolationKey);
-
-    if (session?.activeToolCallId && session.activeToolCallId !== request.toolCallId) {
-      session = undefined;
-    }
+    const frameLanguage = detectFrameLanguage();
+    let session = selectAgentSession(store.sessions, request);
     if (!session) {
-      const sessionId = store.ensureAgentSession({
+      const isolationKey = request.ownerId ?? request.conversationId;
+      const sessionId = store.createAgentSession({
         name: request.sessionName,
-        reuseHealthy: false,
         conversationId: isolationKey,
         cwd: request.cwd,
       });
-      session = useTerminalStore.getState().sessions.find((item) => item.id === sessionId);
+      session = useTerminalStore.getState().sessions.find((item) => item.id === sessionId) ?? null;
     }
     if (!session) throw new Error('Failed to create agent terminal session.');
 
@@ -81,9 +54,8 @@ export class DesktopTerminalRuntime implements TerminalRuntimeAdapter {
       useTerminalStore.getState().setPtyId(session.id, ptyId);
     }
 
-    terminalLocks.set(session.id, request.toolCallId);
     useTerminalStore.getState().setAgentActivity(session.id, request.toolCallId);
-    return { terminalId: session.id, ptyId, persistent: true };
+    return { terminalId: session.id, ptyId, persistent: true, frameLanguage };
   }
 
   async snapshot(terminalId: string, afterSequence?: number): Promise<TerminalSnapshot> {
@@ -118,14 +90,13 @@ export class DesktopTerminalRuntime implements TerminalRuntimeAdapter {
   async kill(terminalId: string): Promise<void> {
     const session = this.getSession(terminalId);
     if (session.ptyId) await tauriInvokeRaw('pty_kill', { ptyId: session.ptyId });
-    terminalLocks.delete(terminalId);
     useTerminalStore.getState().markPtyDead(terminalId);
     useTerminalStore.getState().setAgentActivity(terminalId, null);
   }
 
   release(terminalId: string, toolCallId: string): void {
-    if (terminalLocks.get(terminalId) !== toolCallId) return;
-    terminalLocks.delete(terminalId);
+    const session = useTerminalStore.getState().sessions.find((item) => item.id === terminalId);
+    if (!session || session.activeToolCallId !== toolCallId) return;
     useTerminalStore.getState().setAgentActivity(terminalId, null);
   }
 
