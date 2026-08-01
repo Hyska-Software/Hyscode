@@ -975,8 +975,12 @@ pub fn git_log_file(
     revwalk
         .push_head()
         .map_err(|e| format!("Push head error: {}", e))?;
+    // Topological order guarantees children precede their parents, which the
+    // rename-follow below depends on. Time-only sorting is unstable when
+    // commits share a timestamp (same-second commits) and can process the
+    // pre-rename commit before the rename, silently dropping history.
     revwalk
-        .set_sorting(Sort::TIME)
+        .set_sorting(Sort::TOPOLOGICAL | Sort::TIME)
         .map_err(|e| format!("Sort error: {}", e))?;
 
     let mut commits = Vec::new();
