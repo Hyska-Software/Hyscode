@@ -286,6 +286,125 @@ export function cleanMarkdownContent(content: string): string {
     .trim();
 }
 
+// ─── Thinking Markdown ─────────────────────────────────────────────────────────
+// Lightweight GFM-only variant for thinking blocks: basic elements with muted
+// colors, no KaTeX/highlight/mermaid/copy button. Cheap enough to re-render on
+// every streaming chunk without throttling.
+
+const THINKING_MARKDOWN_COMPONENTS = {
+  code: ({ children, className }: { children?: React.ReactNode; className?: string }) => {
+    const isBlock = className;
+    if (!isBlock) {
+      return (
+        <code className="rounded bg-primary/10 px-1 py-[1px] font-mono text-[10.5px] text-primary/80 select-text cursor-text">
+          {children}
+        </code>
+      );
+    }
+    return (
+      <pre className="my-1.5 overflow-x-auto rounded-md bg-muted/60 p-2.5 font-mono text-[10.5px] leading-[1.6] text-foreground/70">
+        <code>{children}</code>
+      </pre>
+    );
+  },
+  pre: ({ children }: { children?: React.ReactNode }) => <>{children}</>,
+
+  p: ({ children }: { children?: React.ReactNode }) => (
+    <p className="my-1 leading-[1.72]">{children}</p>
+  ),
+  strong: ({ children }: { children?: React.ReactNode }) => (
+    <strong className="font-semibold text-foreground/75">{children}</strong>
+  ),
+  em: ({ children }: { children?: React.ReactNode }) => (
+    <em className="italic text-foreground/70">{children}</em>
+  ),
+  del: ({ children }: { children?: React.ReactNode }) => (
+    <del className="line-through text-muted-foreground/60">{children}</del>
+  ),
+
+  h1: ({ children }: { children?: React.ReactNode }) => (
+    <h1 className="mb-1.5 mt-2.5 text-[12.5px] font-semibold text-foreground/80">{children}</h1>
+  ),
+  h2: ({ children }: { children?: React.ReactNode }) => (
+    <h2 className="mb-1 mt-2 text-[12px] font-semibold text-foreground/80">{children}</h2>
+  ),
+  h3: ({ children }: { children?: React.ReactNode }) => (
+    <h3 className="mb-0.5 mt-1.5 text-[11.5px] font-semibold text-foreground/75">{children}</h3>
+  ),
+  h4: ({ children }: { children?: React.ReactNode }) => (
+    <h4 className="mb-0.5 mt-1.5 text-[11px] font-semibold text-foreground/75">{children}</h4>
+  ),
+  h5: ({ children }: { children?: React.ReactNode }) => (
+    <h5 className="mb-0.5 mt-1 text-[11px] font-medium text-foreground/70">{children}</h5>
+  ),
+  h6: ({ children }: { children?: React.ReactNode }) => (
+    <h6 className="mb-0.5 mt-1 text-[10.5px] font-medium text-foreground/65">{children}</h6>
+  ),
+
+  ul: ({ children }: { children?: React.ReactNode }) => (
+    <ul className="my-1 ml-4 list-disc space-y-0.5 marker:text-muted-foreground/40">{children}</ul>
+  ),
+  ol: ({ children }: { children?: React.ReactNode }) => (
+    <ol className="my-1 ml-4 list-decimal space-y-0.5 marker:text-muted-foreground/40">{children}</ol>
+  ),
+  li: ({ children }: { children?: React.ReactNode }) => (
+    <li className="pl-0.5 text-foreground/65">{children}</li>
+  ),
+
+  a: ({ href, children }: { href?: string; children?: React.ReactNode }) => (
+    <a
+      href={href}
+      className="text-primary/80 underline decoration-primary/30 underline-offset-2 transition-colors hover:text-primary/70"
+      target="_blank"
+      rel="noopener noreferrer"
+    >
+      {children}
+    </a>
+  ),
+  blockquote: ({ children }: { children?: React.ReactNode }) => (
+    <blockquote className="my-1.5 rounded-r-md border-l-[3px] border-primary/30 bg-primary/5 py-0.5 pl-2.5 pr-2 italic text-muted-foreground">
+      {children}
+    </blockquote>
+  ),
+  hr: () => <hr className="my-2.5 border-border/60" />,
+
+  table: ({ children }: { children?: React.ReactNode }) => (
+    <div className="my-1.5 overflow-x-auto rounded-md border border-border/40">
+      <table className="w-full text-[10.5px]">{children}</table>
+    </div>
+  ),
+  thead: ({ children }: { children?: React.ReactNode }) => (
+    <thead className="bg-muted/30">{children}</thead>
+  ),
+  th: ({ children }: { children?: React.ReactNode }) => (
+    <th className="border-b border-border/40 px-2.5 py-1.5 text-left text-[9.5px] font-semibold uppercase tracking-wider text-muted-foreground">
+      {children}
+    </th>
+  ),
+  td: ({ children }: { children?: React.ReactNode }) => (
+    <td className="border-b border-border/25 px-2.5 py-1 text-foreground/65">{children}</td>
+  ),
+} as const;
+
+export const ThinkingMarkdown = memo(function ThinkingMarkdown({
+  content,
+  className,
+}: {
+  content: string;
+  className?: string;
+}) {
+  return (
+    <div className={cn('cursor-text select-text', className)}>
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm] as any}
+        components={THINKING_MARKDOWN_COMPONENTS as any}
+      >
+        {content}
+      </ReactMarkdown>
+    </div>
+  );
+});
+
 // ─── MarkdownContent ───────────────────────────────────────────────────────────
 
 export const MarkdownContent = memo(function MarkdownContent({
