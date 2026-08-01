@@ -104,6 +104,10 @@ interface TauriCommands {
   };
   git_diff_file: { args: { repoPath: string; filePath: string; staged: boolean }; ret: string };
   git_diff_staged_all: { args: { repoPath: string }; ret: string };
+  git_uncommitted_diff: {
+    args: { repoPath: string; staged: boolean; maxBytes?: number };
+    ret: string;
+  };
   git_commit_context: { args: { repoPath: string }; ret: GitCommitContextContract };
   git_staged_fingerprint: { args: { repoPath: string }; ret: string };
   git_diff_content: {
