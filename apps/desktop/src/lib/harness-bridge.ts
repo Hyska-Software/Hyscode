@@ -1452,6 +1452,7 @@ Investigate the error, fix the underlying issue in the affected files, and verif
           id: subAgentId,
           task,
           mode,
+          conversationId: store.conversationId ?? undefined,
           status: 'queued',
           output: '',
           toolCalls: [],

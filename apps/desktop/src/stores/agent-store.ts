@@ -38,6 +38,8 @@ export interface SubAgentState {
   id: string;
   task: string;
   mode: AgentMode;
+  /** Owning chat conversation (used by the editor tab to resolve live state). */
+  conversationId?: string;
   status: 'queued' | 'running' | 'done' | 'error' | 'cancelled' | 'cancelling';
   stopReason?: import('@hyscode/agent-harness').TurnStatus;
   output: string;
