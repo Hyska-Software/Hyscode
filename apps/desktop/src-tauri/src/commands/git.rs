@@ -1,28 +1,17 @@
+use super::git_backend::{
+    collect_status, delta_to_status, diff_patch_text, inject_github_auth, list_remotes,
+    normalize_repo_relative_path, run_git_cli_with_github_auth, worktree_root, GitFile,
+    GitStatusResult, PatchTextAccumulator,
+};
+pub use super::git_backend::{open_repo, run_git_cli, GitRemoteInfo};
 use super::keychain::KeychainState;
-use super::utils::cmd;
-use git2::{BranchType, Delta, DiffOptions, ErrorCode, Patch, Repository, Sort, StatusOptions};
+use git2::{BranchType, Delta, DiffOptions, ErrorCode, Patch, Repository, Sort};
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 use tauri::State;
 
 // ── Serializable Types ──────────────────────────────────────────────────────
-
-#[derive(Serialize, Clone)]
-pub struct GitFile {
-    pub path: String,
-    pub absolute_path: String,
-    pub status: String, // "M" | "A" | "D" | "R" | "C" | "T"
-    pub old_path: Option<String>,
-}
-
-#[derive(Serialize)]
-pub struct GitStatusResult {
-    pub staged: Vec<GitFile>,
-    pub unstaged: Vec<GitFile>,
-    pub untracked: Vec<GitFile>,
-    pub conflicts: Vec<GitFile>,
-}
 
 #[derive(Serialize)]
 pub struct GitCommitInfo {
@@ -40,12 +29,6 @@ pub struct GitBranchInfo {
     pub is_current: bool,
     pub is_remote: bool,
     pub upstream: Option<String>,
-}
-
-#[derive(Serialize)]
-pub struct GitRemoteInfo {
-    pub name: String,
-    pub url: String,
 }
 
 #[derive(Serialize)]
@@ -159,71 +142,12 @@ pub struct CommitDetail {
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
-pub fn open_repo(path: &str) -> Result<Repository, String> {
-    Repository::discover(path).map_err(|e| format!("Git error: {}", e))
-}
-
-fn delta_to_status(delta: Delta) -> &'static str {
-    match delta {
-        Delta::Added => "A",
-        Delta::Deleted => "D",
-        Delta::Modified => "M",
-        Delta::Renamed => "R",
-        Delta::Copied => "C",
-        Delta::Typechange => "T",
-        _ => "M",
-    }
-}
-
-fn worktree_root(repo: &Repository) -> Result<&Path, String> {
-    repo.workdir()
-        .ok_or_else(|| "Bare repositories are not supported".to_string())
-}
-
 fn repository_root(repo: &Repository) -> String {
     repo.path()
         .parent()
         .unwrap_or_else(|| repo.path())
         .to_string_lossy()
         .to_string()
-}
-
-fn absolute_worktree_path(repo: &Repository, path: &str) -> Result<String, String> {
-    let relative = validate_repo_relative_path(path)?;
-    Ok(worktree_root(repo)?
-        .join(relative)
-        .to_string_lossy()
-        .to_string())
-}
-
-fn validate_repo_relative_path(path: &str) -> Result<PathBuf, String> {
-    let candidate = Path::new(path);
-    if path.trim().is_empty() || candidate.is_absolute() {
-        return Err(format!("Invalid repository-relative path: '{path}'"));
-    }
-    if candidate.components().any(|component| {
-        matches!(
-            component,
-            Component::ParentDir | Component::RootDir | Component::Prefix(_)
-        )
-    }) {
-        return Err(format!("Path escapes the repository worktree: '{path}'"));
-    }
-    Ok(candidate.to_path_buf())
-}
-
-fn git_file(
-    repo: &Repository,
-    path: String,
-    status: &str,
-    old_path: Option<String>,
-) -> Result<GitFile, String> {
-    Ok(GitFile {
-        absolute_path: absolute_worktree_path(repo, &path)?,
-        path,
-        status: status.to_string(),
-        old_path,
-    })
 }
 
 const COMMIT_CONTEXT_PATCH_BUDGET: usize = 32 * 1024;
@@ -317,18 +241,6 @@ fn staged_context_files(diff: &git2::Diff<'_>) -> Result<(String, Vec<StagedCont
     Ok((format!("{fingerprint:016x}"), files))
 }
 
-fn append_bounded_utf8(output: &mut String, value: &str, maximum_bytes: usize) {
-    let remaining = maximum_bytes.saturating_sub(output.len());
-    if remaining == 0 {
-        return;
-    }
-    let mut boundary = remaining.min(value.len());
-    while boundary > 0 && !value.is_char_boundary(boundary) {
-        boundary -= 1;
-    }
-    output.push_str(&value[..boundary]);
-}
-
 fn bounded_patch(
     diff: &git2::Diff<'_>,
     index: usize,
@@ -341,33 +253,21 @@ fn bounded_patch(
         Some(patch) => patch,
         None => return Ok((None, 0)),
     };
-    let mut output = String::new();
-    let mut total_bytes = 0usize;
-    let mut invalid_utf8 = false;
-
+    let mut accumulator = PatchTextAccumulator::new(maximum_bytes);
     patch
         .print(&mut |_delta, _hunk, line| {
-            let origin = line.origin();
-            if matches!(origin, '+' | '-' | ' ') {
-                total_bytes = total_bytes.saturating_add(origin.len_utf8());
-                if output.len() < maximum_bytes {
-                    output.push(origin);
-                }
-            }
-            total_bytes = total_bytes.saturating_add(line.content().len());
-            match std::str::from_utf8(line.content()) {
-                Ok(content) => append_bounded_utf8(&mut output, content, maximum_bytes),
-                Err(_) => invalid_utf8 = true,
-            }
+            accumulator.line(line.origin(), line.content());
             true
         })
         .map_err(|error| format!("Commit context patch error for '{path}': {error}"))?;
 
-    if invalid_utf8 {
+    if accumulator.invalid_utf8 {
         return Ok((None, 0));
     }
-    let omitted = total_bytes.saturating_sub(output.len());
-    Ok((Some(output), omitted))
+    let omitted = accumulator
+        .total_bytes
+        .saturating_sub(accumulator.output.len());
+    Ok((Some(accumulator.output), omitted))
 }
 
 fn build_git_commit_context(repo: &Repository) -> Result<GitCommitContext, String> {
@@ -411,107 +311,6 @@ fn build_git_commit_context(repo: &Repository) -> Result<GitCommitContext, Strin
         patch_bytes_included,
         patch_bytes_omitted,
     })
-}
-
-fn collect_status(repo: &Repository) -> Result<GitStatusResult, String> {
-    let mut result = GitStatusResult {
-        staged: Vec::new(),
-        unstaged: Vec::new(),
-        untracked: Vec::new(),
-        conflicts: Vec::new(),
-    };
-
-    let mut opts = StatusOptions::new();
-    opts.include_untracked(true)
-        .recurse_untracked_dirs(true)
-        .renames_head_to_index(true)
-        .renames_index_to_workdir(true);
-
-    let statuses = repo
-        .statuses(Some(&mut opts))
-        .map_err(|e| format!("Status error: {e}"))?;
-
-    for entry in statuses.iter() {
-        let path = entry
-            .path()
-            .filter(|value| !value.is_empty())
-            .ok_or_else(|| "Git returned a status entry without a path".to_string())?
-            .to_string();
-        let status = entry.status();
-
-        if status.is_conflicted() {
-            result.conflicts.push(git_file(repo, path, "U", None)?);
-            continue;
-        }
-
-        let staged = if status.is_index_new() {
-            Some(("A", None))
-        } else if status.is_index_modified() {
-            Some(("M", None))
-        } else if status.is_index_deleted() {
-            Some(("D", None))
-        } else if status.is_index_renamed() {
-            let old_path = entry.head_to_index().and_then(|delta| {
-                delta
-                    .old_file()
-                    .path()
-                    .map(|value| value.to_string_lossy().to_string())
-            });
-            Some(("R", old_path))
-        } else if status.is_index_typechange() {
-            Some(("T", None))
-        } else {
-            None
-        };
-        if let Some((kind, old_path)) = staged {
-            result
-                .staged
-                .push(git_file(repo, path.clone(), kind, old_path)?);
-        }
-
-        let unstaged = if status.is_wt_modified() {
-            Some(("M", None))
-        } else if status.is_wt_deleted() {
-            Some(("D", None))
-        } else if status.is_wt_renamed() {
-            let old_path = entry.index_to_workdir().and_then(|delta| {
-                delta
-                    .old_file()
-                    .path()
-                    .map(|value| value.to_string_lossy().to_string())
-            });
-            Some(("R", old_path))
-        } else if status.is_wt_typechange() {
-            Some(("T", None))
-        } else {
-            None
-        };
-        if let Some((kind, old_path)) = unstaged {
-            result
-                .unstaged
-                .push(git_file(repo, path.clone(), kind, old_path)?);
-        }
-
-        if status.is_wt_new() {
-            result.untracked.push(git_file(repo, path, "?", None)?);
-        }
-    }
-
-    Ok(result)
-}
-
-fn list_remotes(repo: &Repository) -> Result<Vec<GitRemoteInfo>, String> {
-    let remotes = repo.remotes().map_err(|e| format!("Remotes error: {e}"))?;
-    Ok(remotes
-        .iter()
-        .flatten()
-        .filter_map(|name| {
-            repo.find_remote(name).ok().map(|remote| GitRemoteInfo {
-                name: name.to_string(),
-                url: remote.url().unwrap_or("").to_string(),
-            })
-        })
-        .collect())
 }
 
 fn repository_operation_state(repo: &Repository) -> &'static str {
@@ -663,6 +462,7 @@ pub fn git_diff_hunks(
     staged: bool,
 ) -> Result<Vec<DiffHunkInfo>, String> {
     let repo = open_repo(&repo_path)?;
+    let file_path = normalize_repo_relative_path(&repo, &file_path)?;
     let mut opts = DiffOptions::new();
     opts.pathspec(&file_path);
 
@@ -694,45 +494,44 @@ pub fn git_diff_hunks(
     Ok(hunks)
 }
 
-/// Legacy unified diff of all staged changes (index vs HEAD).
-/// New commit-message consumers use `git_commit_context`.
+const DEFAULT_DIFF_BUDGET: usize = 32 * 1024;
+
+/// Unified diff of all staged changes (index vs HEAD) in a single pass,
+/// capped at `DEFAULT_DIFF_BUDGET` bytes with a truncation note.
+/// Kept for UI compatibility; new consumers use `git_uncommitted_diff`.
 #[tauri::command]
 pub fn git_diff_staged_all(repo_path: String) -> Result<String, String> {
+    git_uncommitted_diff(repo_path, true, None)
+}
+
+/// Single-pass unified diff of uncommitted changes — index vs HEAD when
+/// `staged`, worktree vs index otherwise — capped at `max_bytes` with a
+/// truncation note. Replaces the agent's N+1 status + per-file diff loop.
+#[tauri::command]
+pub fn git_uncommitted_diff(
+    repo_path: String,
+    staged: bool,
+    max_bytes: Option<usize>,
+) -> Result<String, String> {
     let repo = open_repo(&repo_path)?;
-    let head_tree = repo.head().ok().and_then(|h| h.peel_to_tree().ok());
-    let diff = repo
-        .diff_tree_to_index(head_tree.as_ref(), None, None)
-        .map_err(|e| format!("Diff error: {}", e))?;
+    let mut opts = DiffOptions::new();
+    let diff = if staged {
+        let head_tree = repo.head().ok().and_then(|h| h.peel_to_tree().ok());
+        repo.diff_tree_to_index(head_tree.as_ref(), None, Some(&mut opts))
+    } else {
+        repo.diff_index_to_workdir(None, Some(&mut opts))
+    }
+    .map_err(|e| format!("Diff error: {}", e))?;
 
-    let mut output = String::new();
-    diff.print(git2::DiffFormat::Patch, |_delta, _hunk, line| {
-        let origin = line.origin();
-        if matches!(origin, '+' | '-' | ' ') {
-            output.push(origin);
-        }
-        if let Ok(content) = std::str::from_utf8(line.content()) {
-            output.push_str(content);
-        }
-        true
-    })
-    .map_err(|e| format!("Diff print error: {}", e))?;
-
-    // Truncate at 32 KB to keep within model context limits
-    const MAX_BYTES: usize = 32 * 1024;
-    if output.len() > MAX_BYTES {
-        let original_bytes = output.len();
-        let mut boundary = MAX_BYTES;
-        while !output.is_char_boundary(boundary) {
-            boundary -= 1;
-        }
-        output.truncate(boundary);
-        output.push_str(&format!(
-            "\n... (diff truncated; {} bytes omitted)",
-            original_bytes - boundary
+    let budget = max_bytes.unwrap_or(DEFAULT_DIFF_BUDGET);
+    let (text, total_bytes, _invalid) = diff_patch_text(&diff, budget)?;
+    if total_bytes > text.len() {
+        return Ok(format!(
+            "{text}\n... (diff truncated; {} bytes omitted)",
+            total_bytes - text.len()
         ));
     }
-
-    Ok(output)
+    Ok(text)
 }
 
 #[tauri::command]
@@ -751,6 +550,7 @@ pub fn git_staged_fingerprint(repo_path: String) -> Result<String, String> {
 #[tauri::command]
 pub fn git_diff_file(repo_path: String, file_path: String, staged: bool) -> Result<String, String> {
     let repo = open_repo(&repo_path)?;
+    let file_path = normalize_repo_relative_path(&repo, &file_path)?;
     let mut opts = DiffOptions::new();
     opts.pathspec(&file_path);
 
@@ -764,20 +564,8 @@ pub fn git_diff_file(repo_path: String, file_path: String, staged: bool) -> Resu
     }
     .map_err(|e| format!("Diff error: {}", e))?;
 
-    let mut output = String::new();
-    diff.print(git2::DiffFormat::Patch, |_delta, _hunk, line| {
-        let origin = line.origin();
-        if origin == '+' || origin == '-' || origin == ' ' {
-            output.push(origin);
-        }
-        if let Ok(content) = std::str::from_utf8(line.content()) {
-            output.push_str(content);
-        }
-        true
-    })
-    .map_err(|e| format!("Diff print error: {}", e))?;
-
-    Ok(output)
+    let (text, _, _) = diff_patch_text(&diff, usize::MAX)?;
+    Ok(text)
 }
 
 fn blob_bytes_from_head(repo: &Repository, file_path: &str) -> Result<Option<Vec<u8>>, String> {
@@ -834,8 +622,8 @@ pub fn git_diff_content(
     file_path: String,
     mode: String,
 ) -> Result<GitDiffContent, String> {
-    validate_repo_relative_path(&file_path)?;
     let repo = open_repo(&repo_path)?;
+    let file_path = normalize_repo_relative_path(&repo, &file_path)?;
 
     let (original_bytes, modified_bytes) = match mode.as_str() {
         "staged" => (
@@ -843,7 +631,7 @@ pub fn git_diff_content(
             blob_bytes_from_index(&repo, &file_path, 0)?,
         ),
         "unstaged" => {
-            let full_path = worktree_root(&repo)?.join(validate_repo_relative_path(&file_path)?);
+            let full_path = worktree_root(&repo)?.join(&file_path);
             let modified = match std::fs::read(&full_path) {
                 Ok(content) => Some(content),
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
@@ -852,7 +640,7 @@ pub fn git_diff_content(
             (blob_bytes_from_index(&repo, &file_path, 0)?, modified)
         }
         "conflict" => {
-            let full_path = worktree_root(&repo)?.join(validate_repo_relative_path(&file_path)?);
+            let full_path = worktree_root(&repo)?.join(&file_path);
             let modified = match std::fs::read(&full_path) {
                 Ok(content) => Some(content),
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
@@ -883,6 +671,7 @@ pub fn git_file_content(
     base_branch: Option<String>,
 ) -> Result<GitFileContent, String> {
     let repo = open_repo(&repo_path)?;
+    let file_path = normalize_repo_relative_path(&repo, &file_path)?;
 
     // Resolve the original reference. If it is the literal string "merge-base",
     // compute the merge-base between HEAD and the provided (or default) base branch.
@@ -1004,9 +793,11 @@ pub fn git_add(repo_path: String, paths: Vec<String>) -> Result<(), String> {
     if paths.is_empty() {
         return Ok(());
     }
-    paths
+    let repo = open_repo(&repo_path)?;
+    let paths = paths
         .iter()
-        .try_for_each(|path| validate_repo_relative_path(path).map(|_| ()))?;
+        .map(|path| normalize_repo_relative_path(&repo, path))
+        .collect::<Result<Vec<_>, _>>()?;
     let mut args = vec!["add".to_string(), "--".to_string()];
     args.extend(paths);
     run_git_cli(&repo_path, &args).map(|_| ())
@@ -1023,9 +814,10 @@ pub fn git_unstage(repo_path: String, paths: Vec<String>) -> Result<(), String> 
     if paths.is_empty() {
         return Ok(());
     }
-    paths
+    let paths = paths
         .iter()
-        .try_for_each(|path| validate_repo_relative_path(path).map(|_| ()))?;
+        .map(|path| normalize_repo_relative_path(&repo, path))
+        .collect::<Result<Vec<_>, _>>()?;
     let unborn = repo
         .head()
         .err()
@@ -1055,9 +847,10 @@ pub fn git_discard(repo_path: String, paths: Vec<String>) -> Result<(), String> 
     if paths.is_empty() {
         return Ok(());
     }
-    paths
+    let paths = paths
         .iter()
-        .try_for_each(|path| validate_repo_relative_path(path).map(|_| ()))?;
+        .map(|path| normalize_repo_relative_path(&repo, path))
+        .collect::<Result<Vec<_>, _>>()?;
     let untracked: HashSet<String> = collect_status(&repo)?
         .untracked
         .into_iter()
@@ -1078,7 +871,7 @@ pub fn git_discard(repo_path: String, paths: Vec<String>) -> Result<(), String> 
         run_git_cli(&repo_path, &args)?;
     }
     for path in paths.into_iter().filter(|path| untracked.contains(path)) {
-        let full_path = worktree_root(&repo)?.join(validate_repo_relative_path(&path)?);
+        let full_path = worktree_root(&repo)?.join(&path);
         let metadata = match std::fs::symlink_metadata(&full_path) {
             Ok(metadata) => metadata,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
@@ -1175,6 +968,7 @@ pub fn git_log_file(
     limit: u32,
 ) -> Result<Vec<GitCommitInfo>, String> {
     let repo = open_repo(&repo_path)?;
+    let file_path = normalize_repo_relative_path(&repo, &file_path)?;
     let mut revwalk = repo
         .revwalk()
         .map_err(|e| format!("Revwalk error: {}", e))?;
@@ -1615,6 +1409,7 @@ pub fn git_commit_file_diff(
     file_path: String,
 ) -> Result<String, String> {
     let repo = open_repo(&repo_path)?;
+    let file_path = normalize_repo_relative_path(&repo, &file_path)?;
     let oid = git2::Oid::from_str(&hash).map_err(|e| format!("Invalid hash: {}", e))?;
     let commit = repo
         .find_commit(oid)
@@ -1641,20 +1436,8 @@ pub fn git_commit_file_diff(
         .diff_tree_to_tree(parent_tree.as_ref(), Some(&commit_tree), Some(&mut opts))
         .map_err(|e| format!("Diff error: {}", e))?;
 
-    let mut output = String::new();
-    diff.print(git2::DiffFormat::Patch, |_delta, _hunk, line| {
-        let origin = line.origin();
-        if origin == '+' || origin == '-' || origin == ' ' {
-            output.push(origin);
-        }
-        if let Ok(content) = std::str::from_utf8(line.content()) {
-            output.push_str(content);
-        }
-        true
-    })
-    .map_err(|e| format!("Diff print error: {}", e))?;
-
-    Ok(output)
+    let (text, _, _) = diff_patch_text(&diff, usize::MAX)?;
+    Ok(text)
 }
 
 // ── Git Graph ────────────────────────────────────────────────────────────────
@@ -1798,100 +1581,6 @@ pub fn git_log_graph(repo_path: String, limit: u32) -> Result<Vec<GraphCommit>, 
     Ok(commits)
 }
 
-// ── Remote operations (via CLI for auth compatibility) ───────────────────────
-
-pub(super) fn run_git_cli<I, S>(repo_path: &str, args: I) -> Result<String, String>
-where
-    I: IntoIterator<Item = S>,
-    S: AsRef<std::ffi::OsStr>,
-{
-    let output = cmd("git")
-        .args(args)
-        .current_dir(repo_path)
-        .output()
-        .map_err(|e| format!("Failed to run git: {}", e))?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-        return Err(stderr.trim().to_string());
-    }
-
-    Ok(String::from_utf8_lossy(&output.stdout).to_string())
-}
-
-fn is_github_https_url(url: &str) -> bool {
-    url.starts_with("https://github.com/") || url.starts_with("http://github.com/")
-}
-
-fn github_extraheader(token: &str) -> String {
-    // GitHub's git smart HTTP endpoint requires HTTP Basic auth — Bearer tokens
-    // are only accepted by the REST API (api.github.com). The `x-access-token`
-    // username is the standard pattern used by GitHub Actions and CI systems.
-    use base64::Engine as _;
-    let credentials = base64::engine::general_purpose::STANDARD
-        .encode(format!("x-access-token:{token}"));
-    format!("Authorization: Basic {credentials}")
-}
-
-fn remote_url(repo_path: &str, remote_name: &str) -> Option<String> {
-    let repo = open_repo(repo_path).ok()?;
-    let remote = repo.find_remote(remote_name).ok()?;
-    remote.url().map(String::from)
-}
-
-/// Run a git CLI command, injecting the stored GitHub token as an
-/// `http.extraheader` when the target remote points at github.com. This keeps
-/// private-repository authentication working without persisting credentials in
-/// the repository config. Non-GitHub remotes are left untouched.
-fn run_git_cli_with_github_auth(
-    keychain: &KeychainState,
-    repo_path: &str,
-    remote_hint: Option<&str>,
-    args: Vec<String>,
-) -> Result<String, String> {
-    let mut command = cmd("git");
-
-    let remote_name = remote_hint.map(String::from).or_else(|| {
-        run_git_cli(
-            repo_path,
-            [
-                "rev-parse",
-                "--abbrev-ref",
-                "--symbolic-full-name",
-                "@{upstream}",
-            ],
-        )
-        .ok()
-        .map(|upstream| upstream.trim().split('/').next().unwrap_or("").to_string())
-        .filter(|name| !name.is_empty())
-    });
-
-    if let Some(token) = super::github_repos::github_token_option(&keychain.0) {
-        let is_github = remote_name
-            .as_deref()
-            .and_then(|name| remote_url(repo_path, name))
-            .is_some_and(|url| is_github_https_url(&url));
-        if is_github {
-            command
-                .arg("-c")
-                .arg(format!("http.extraheader={}", github_extraheader(&token)));
-        }
-    }
-
-    let output = command
-        .args(args)
-        .current_dir(repo_path)
-        .output()
-        .map_err(|e| format!("Failed to run git: {}", e))?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-        return Err(stderr.trim().to_string());
-    }
-
-    Ok(String::from_utf8_lossy(&output.stdout).to_string())
-}
-
 /// Clone a git repository into `target_path`, creating parent directories as
 /// needed. For github.com HTTPS URLs, the stored GitHub token is injected so
 /// private repositories can be cloned without extra credential configuration.
@@ -1912,14 +1601,12 @@ pub fn git_clone(
             .map_err(|e| format!("Failed to create target directory: {}", e))?;
     }
 
-    let mut command = cmd("git");
-    if is_github_https_url(&url) {
-        if let Some(token) = super::github_repos::github_token_option(&keychain.0) {
-            command
-                .arg("-c")
-                .arg(format!("http.extraheader={}", github_extraheader(&token)));
-        }
-    }
+    let mut command = super::utils::cmd("git");
+    inject_github_auth(
+        &mut command,
+        &url,
+        super::github_repos::github_token_option(&keychain.0).as_deref(),
+    );
 
     let mut args = vec!["clone".to_string()];
     if let Some(branch) = branch.filter(|value| !value.trim().is_empty()) {
@@ -2091,6 +1778,7 @@ pub fn git_blame(
     line: Option<u32>,
 ) -> Result<Vec<GitBlameHunk>, String> {
     let repo = open_repo(&repo_path)?;
+    let file_path = normalize_repo_relative_path(&repo, &file_path)?;
 
     let mut opts = git2::BlameOptions::new();
     if let Some(l) = line {
@@ -2275,6 +1963,7 @@ pub fn git_branch_changes(
 
 #[cfg(test)]
 mod tests {
+    use super::super::git_backend::validate_repo_relative_path;
     use super::*;
     use std::process::Command;
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -2591,6 +2280,54 @@ mod tests {
                 "rename tracked file",
                 "add tracked file"
             ]
+        );
+    }
+
+    #[test]
+    fn normalize_accepts_absolute_paths_inside_worktree_and_rejects_outside() {
+        let repo = TestRepository::new();
+        repo.commit_file("file.txt", b"content\n", "initial");
+        let opened = open_repo(&repo.path_string()).unwrap();
+
+        let absolute_inside = repo.path.join("file.txt").to_string_lossy().to_string();
+        assert_eq!(
+            normalize_repo_relative_path(&opened, &absolute_inside).unwrap(),
+            "file.txt"
+        );
+
+        let absolute_outside = std::env::temp_dir()
+            .join("hyscode-outside-worktree.txt")
+            .to_string_lossy()
+            .to_string();
+        assert!(normalize_repo_relative_path(&opened, &absolute_outside).is_err());
+
+        assert_eq!(
+            normalize_repo_relative_path(&opened, "nested/file.txt").unwrap(),
+            "nested/file.txt"
+        );
+        assert!(normalize_repo_relative_path(&opened, "../escape.txt").is_err());
+    }
+
+    #[test]
+    fn uncommitted_diff_is_single_pass_and_respects_the_byte_budget() {
+        let repo = TestRepository::new();
+        repo.commit_file("file.txt", b"one\n", "initial");
+        repo.write("file.txt", b"one\ntwo\nthree\nfour\nfive\n");
+
+        let full = git_uncommitted_diff(repo.path_string(), false, None).unwrap();
+        assert!(full.contains("+two"));
+        assert!(!full.contains("truncated"));
+
+        let tiny = git_uncommitted_diff(repo.path_string(), false, Some(16)).unwrap();
+        assert!(tiny.contains("diff truncated"));
+
+        repo.git(["add", "--", "file.txt"]);
+        let staged = git_uncommitted_diff(repo.path_string(), true, None).unwrap();
+        assert!(staged.contains("+two"));
+
+        assert_eq!(
+            git_diff_staged_all(repo.path_string()).unwrap(),
+            git_uncommitted_diff(repo.path_string(), true, None).unwrap()
         );
     }
 }

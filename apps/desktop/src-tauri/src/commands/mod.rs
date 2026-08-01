@@ -7,6 +7,7 @@ pub mod docker;
 pub mod extension;
 pub mod fs;
 pub mod git;
+pub mod git_backend;
 pub mod github_oauth;
 pub mod github_pr;
 pub mod github_repos;

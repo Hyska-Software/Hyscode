@@ -62,6 +62,7 @@ pub fn run() {
             commands::git::git_diff_file,
             commands::git::git_diff_content,
             commands::git::git_diff_staged_all,
+            commands::git::git_uncommitted_diff,
             commands::git::git_commit_context,
             commands::git::git_staged_fingerprint,
             commands::git::git_diff_hunks,
