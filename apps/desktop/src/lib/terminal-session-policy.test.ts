@@ -1,7 +1,7 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { TerminalSession } from '@/stores/terminal-store';
-import { selectAgentSession } from './terminal-session-policy';
+import { detectFrameLanguage, selectAgentSession } from './terminal-session-policy';
 
 function session(overrides: Partial<TerminalSession>): TerminalSession {
   return {
@@ -87,5 +87,42 @@ describe('selectAgentSession', () => {
       'term-a',
     );
     expect(selectAgentSession(sessions, { ...baseRequest, sessionName: 'other' })).toBeNull();
+  });
+
+  it('rejects a named session locked by another tool call', () => {
+    const sessions = [
+      session({
+        id: 'term-a',
+        name: 'dev server',
+        ownerConversationId: 'conversation-a',
+        ptyId: 'pty-a',
+        activeToolCallId: 'tool-other',
+      }),
+    ];
+    expect(selectAgentSession(sessions, { ...baseRequest, sessionName: 'dev server' })).toBeNull();
+    expect(
+      selectAgentSession(sessions, { ...baseRequest, sessionName: 'dev server', toolCallId: 'tool-other' })?.id,
+    ).toBe('term-a');
+  });
+});
+
+describe('detectFrameLanguage', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('detects PowerShell on Windows', () => {
+    vi.stubGlobal('navigator', { userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' });
+    expect(detectFrameLanguage()).toBe('powershell');
+  });
+
+  it('falls back to bash on other platforms', () => {
+    vi.stubGlobal('navigator', { userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X)' });
+    expect(detectFrameLanguage()).toBe('bash');
+  });
+
+  it('defaults to bash when navigator is unavailable', () => {
+    vi.stubGlobal('navigator', undefined);
+    expect(detectFrameLanguage()).toBe('bash');
   });
 });

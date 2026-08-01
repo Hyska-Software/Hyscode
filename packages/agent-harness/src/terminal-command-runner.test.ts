@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { TerminalRuntimeAdapter, ToolExecutionContext } from './types';
 
 import { TerminalCommandRunner } from './terminal-command-runner';
@@ -12,6 +12,41 @@ import { CommandWatch } from './command-watch';
 
 function mockBinding(terminalId: string, ptyId: string) {
   return { terminalId, ptyId, persistent: true, frameLanguage: 'bash' as const };
+}
+
+function contextWith(
+  adapter: TerminalRuntimeAdapter,
+  overrides: Partial<ToolExecutionContext> = {},
+): ToolExecutionContext {
+  return {
+    workspacePath: 'C:/workspace',
+    conversationId: 'conversation-1',
+    toolCallId: 'tool-1',
+    signal: new AbortController().signal,
+    terminal: adapter,
+    onTerminalProgress: () => undefined,
+    listen: async () => () => undefined,
+    invoke: async () => undefined as never,
+    ...overrides,
+  };
+}
+
+function staticAdapter(overrides: Partial<TerminalRuntimeAdapter> = {}): TerminalRuntimeAdapter {
+  return {
+    acquire: vi.fn(async () => mockBinding('terminal-e', 'pty-e')),
+    snapshot: vi.fn(async () => ({
+      data: '',
+      fromSequence: 0,
+      toSequence: 0,
+      truncated: false,
+      alive: true,
+      exitCode: null,
+    })),
+    write: vi.fn(async () => undefined),
+    interrupt: vi.fn(async () => undefined),
+    kill: vi.fn(async () => undefined),
+    ...overrides,
+  };
 }
 
 describe('terminal command framing', () => {
@@ -237,3 +272,401 @@ describe('command watch', () => {
     expect(outcome).toMatchObject({ kind: 'awaiting_input' });
   });
 });
+
+describe('terminal command runner — run paths', () => {
+  function dataAdapter() {
+    let dataHandler: ((data: string, sequence: number) => void) | null = null;
+    let exitHandler: ((code: number | null) => void) | null = null;
+    let lastNonce = '';
+    const adapter = staticAdapter({
+      subscribe: vi.fn(async (_terminalId, onData, onExit) => {
+        dataHandler = onData;
+        exitHandler = onExit;
+        return () => {
+          dataHandler = null;
+          exitHandler = null;
+        };
+      }),
+      write: vi.fn(async (_terminalId, frame) => {
+        lastNonce = String(frame).match(/__HYSCODE_BEGIN_([a-z0-9]+)__/i)?.[1] ?? '';
+      }),
+    });
+    return {
+      adapter,
+      nonce: () => lastNonce,
+      emit: (chunk: string, sequence = 1) => dataHandler?.(chunk, sequence),
+      exit: (code: number | null) => exitHandler?.(code),
+    };
+  }
+
+  /** Let async subscribe/listen registration settle before emitting events. */
+  function flush(): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, 20));
+  }
+
+  it('fails fast when the terminal runtime is missing', async () => {
+    const runner = new TerminalCommandRunner();
+    const result = await runner.run(
+      { command: 'echo hi' },
+      contextWith(undefined as never as TerminalRuntimeAdapter),
+    );
+    expect(result).toMatchObject({ success: false, error: 'Terminal runtime is unavailable.' });
+  });
+
+  it('fails fast when the event bus is unavailable', async () => {
+    const runner = new TerminalCommandRunner();
+    const result = await runner.run(
+      { command: 'echo hi' },
+      contextWith(staticAdapter(), { listen: undefined }),
+    );
+    expect(result).toMatchObject({
+      success: false,
+      error: 'Terminal event listener is unavailable.',
+    });
+  });
+
+  it('reports background success with the ready pattern', async () => {
+    const { adapter, nonce, emit } = dataAdapter();
+    const runner = new TerminalCommandRunner();
+    const pending = runner.run(
+      { command: 'npm run dev', background: true, readyPattern: 'listening', startupTimeoutMs: 5_000 },
+      contextWith(adapter),
+    );
+    await flush();
+    expect(nonce()).toBeTruthy();
+    emit(`__HYSCODE_BEGIN_${nonce()}__\nserver listening on :8080\n`, 1);
+
+    const result = await pending;
+    expect(result).toMatchObject({ success: true, metadata: { background: true, exitCode: null } });
+    expect(result.output).toContain('server listening');
+  });
+
+  it('times out a background command that never becomes ready', async () => {
+    const { adapter } = dataAdapter();
+    const runner = new TerminalCommandRunner();
+    const result = await runner.run(
+      {
+        command: 'slow server',
+        background: true,
+        readyPattern: 'listening',
+        startupTimeoutMs: 300,
+      },
+      contextWith(adapter),
+    );
+    expect(result).toMatchObject({ success: false });
+    expect(result.error).toContain('did not become ready');
+  });
+
+  it('times out a foreground command and stops the process', async () => {
+    const { adapter, nonce, emit } = dataAdapter();
+    const runner = new TerminalCommandRunner();
+    const pending = runner.run({ command: 'sleep 10', timeoutMs: 300 }, contextWith(adapter));
+    await flush();
+    emit(`__HYSCODE_BEGIN_${nonce()}__\nrunning...\n`, 1);
+
+    const result = await pending;
+    expect(result).toMatchObject({
+      success: false,
+      error: 'Command timed out after 0s.',
+      metadata: { timedOut: true },
+    });
+    expect(adapter.interrupt).toHaveBeenCalled();
+    expect(adapter.kill).toHaveBeenCalled();
+  });
+
+  it('cancels through the abort signal and stops the process', async () => {
+    const { adapter, nonce, emit } = dataAdapter();
+    const controller = new AbortController();
+    const runner = new TerminalCommandRunner();
+    const pending = runner.run(
+      { command: 'sleep 10', timeoutMs: 10_000 },
+      contextWith(adapter, { signal: controller.signal }),
+    );
+    await flush();
+    emit(`__HYSCODE_BEGIN_${nonce()}__\nworking...\n`, 1);
+    setTimeout(() => controller.abort(), 100);
+
+    const result = await pending;
+    expect(result).toMatchObject({ success: false, error: 'Command cancelled.' });
+    expect(adapter.interrupt).toHaveBeenCalled();
+  });
+
+  it('breaks out of the wait when the process exits before the frame completes', async () => {
+    const { adapter, nonce, emit, exit } = dataAdapter();
+    const runner = new TerminalCommandRunner();
+    const pending = runner.run({ command: 'crash', timeoutMs: 10_000 }, contextWith(adapter));
+    await flush();
+    emit(`__HYSCODE_BEGIN_${nonce()}__\npartial\n`, 1);
+    exit(1);
+
+    const result = await pending;
+    expect(result).toMatchObject({ success: false, error: 'Command timed out after 10s.' });
+    expect(result.metadata).toMatchObject({ timedOut: false });
+  });
+
+  it('falls back to the raw event bus when the adapter has no subscribe', async () => {
+    const listeners = new Map<string, (payload: unknown) => void>();
+    const adapter = staticAdapter({
+      write: vi.fn(async (_terminalId, frame) => {
+        const nonce = String(frame).match(/__HYSCODE_BEGIN_([a-z0-9]+)__/i)?.[1] ?? '';
+        queueMicrotask(() =>
+          listeners.get('pty:data')?.({
+            pty_id: 'pty-e',
+            sequence: 1,
+            data: `__HYSCODE_BEGIN_${nonce}__\nfallback output\n__HYSCODE_END_${nonce}__:0\n`,
+          }),
+        );
+      }),
+    });
+    const runner = new TerminalCommandRunner();
+    const result = await runner.run(
+      { command: 'echo fb' },
+      contextWith(adapter, {
+        listen: async (event, handler) => {
+          listeners.set(event, handler);
+          return () => listeners.delete(event);
+        },
+      }),
+    );
+    expect(result).toMatchObject({ success: true, output: 'fallback output' });
+  });
+
+  it('propagates write failures as errors and still releases the session', async () => {
+    const release = vi.fn();
+    const adapter = staticAdapter({
+      write: vi.fn(async () => {
+        throw new Error('PTY closed');
+      }),
+      release,
+    });
+    const runner = new TerminalCommandRunner();
+    const result = await runner.run({ command: 'echo hi' }, contextWith(adapter));
+    expect(result).toMatchObject({ success: false, error: 'Error: PTY closed' });
+    expect(release).toHaveBeenCalledWith('terminal-e', 'tool-1');
+  });
+});
+
+describe('terminal command runner — respond paths', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  function suspendedContext(overrides: Partial<ToolExecutionContext> = {}) {
+    let output = '';
+    let sequence = 0;
+    let nonce = '';
+    let pushData: ((data: string) => void) | null = null;
+    const listeners = new Map<string, (payload: unknown) => void>();
+    const adapter: TerminalRuntimeAdapter = {
+      acquire: vi.fn(async () => mockBinding('terminal-i', 'pty-i')),
+      snapshot: vi.fn(async () => ({
+        data: output,
+        fromSequence: output ? 1 : 0,
+        toSequence: sequence,
+        truncated: false,
+        alive: true,
+        exitCode: null,
+      })),
+      write: vi.fn(async (_terminalId, data) => {
+        const nonceMatch = String(data).match(/__HYSCODE_BEGIN_([a-z0-9]+)__/i);
+        if (nonceMatch) {
+          nonce = nonceMatch[1];
+          output = `${data}\n__HYSCODE_BEGIN_${nonce}__\nContinue? [Y/n]\n`;
+          sequence += 1;
+          queueMicrotask(() => pushData?.(output));
+          return;
+        }
+        output += `${data}\n`;
+        sequence += 1;
+        listeners.get('pty:data')?.({ pty_id: 'pty-i', sequence, data: `${data}\n` });
+        pushData?.(`${data}\n`);
+      }),
+      interrupt: vi.fn(async () => undefined),
+      kill: vi.fn(async () => undefined),
+      subscribe: vi.fn(async (_terminalId, onData) => {
+        pushData = (chunk: string) => {
+          sequence += 1;
+          onData(chunk, sequence);
+        };
+        return () => {
+          pushData = null;
+        };
+      }),
+    };
+    const context: ToolExecutionContext = {
+      workspacePath: 'C:/workspace',
+      conversationId: 'conversation-i',
+      toolCallId: 'tool-i',
+      signal: new AbortController().signal,
+      terminal: adapter,
+      onTerminalProgress: () => undefined,
+      listen: async (event, handler) => {
+        listeners.set(event, handler);
+        return () => listeners.delete(event);
+      },
+      invoke: async () => undefined as never,
+      ...overrides,
+    };
+    return {
+      adapter,
+      context,
+      emit: (chunk: string) => {
+        output += chunk;
+        sequence += 1;
+        listeners.get('pty:data')?.({ pty_id: 'pty-i', sequence, data: chunk });
+        pushData?.(chunk);
+      },
+      exit: (code: number | null) => listeners.get('pty:exit')?.({ pty_id: 'pty-i', code }),
+      getOutput: () => output,
+      setOutput: (value: string) => {
+        output = value;
+      },
+    };
+  }
+
+  async function suspend(
+    runner: TerminalCommandRunner,
+    ctx: ToolExecutionContext,
+  ): Promise<void> {
+    const pending = runner.run({ command: 'installer', timeoutMs: 10_000 }, ctx);
+    await vi.advanceTimersByTimeAsync(700);
+    const waiting = await pending;
+    expect(waiting.metadata).toMatchObject({ awaitingInput: true });
+  }
+
+  it('rejects responses for terminals that are not waiting', async () => {
+    const runner = new TerminalCommandRunner();
+    const result = await runner.respond('terminal-x', 'Y', 1_000, {
+      ...contextWithPlaceholder(),
+      terminal: staticAdapter(),
+    });
+    expect(result).toMatchObject({
+      success: false,
+      error: 'Terminal is not waiting for agent input.',
+    });
+  });
+
+  it('rejects responses when the terminal is no longer waiting', async () => {
+    vi.useFakeTimers();
+    const { adapter, context, getOutput, setOutput } = suspendedContext();
+    const runner = new TerminalCommandRunner();
+    await suspend(runner, context);
+    (adapter.write as ReturnType<typeof vi.fn>).mockClear();
+    const nonce = getOutput().match(/__HYSCODE_BEGIN_([a-z0-9]+)__/i)?.[1] ?? '';
+    setOutput(`__HYSCODE_BEGIN_${nonce}__\ndone\n__HYSCODE_END_${nonce}__:0\n`);
+
+    const result = await runner.respond('terminal-i', 'Y', 1_000, context);
+    expect(result).toMatchObject({
+      success: false,
+      error: 'Terminal is no longer waiting for input.',
+    });
+    expect(adapter.write).not.toHaveBeenCalled();
+  });
+
+  it('reserves sensitive prompts for the user', async () => {
+    vi.useFakeTimers();
+    const { adapter, context, getOutput, setOutput } = suspendedContext();
+    const runner = new TerminalCommandRunner();
+    await suspend(runner, context);
+    (adapter.write as ReturnType<typeof vi.fn>).mockClear();
+    const nonce = getOutput().match(/__HYSCODE_BEGIN_([a-z0-9]+)__/i)?.[1] ?? '';
+    setOutput(`__HYSCODE_BEGIN_${nonce}__\nPassword:\n`);
+
+    const result = await runner.respond('terminal-i', 'secret', 1_000, context);
+    expect(result).toMatchObject({
+      success: false,
+      error: 'Sensitive terminal prompts must be answered directly by the user.',
+    });
+    expect(adapter.write).not.toHaveBeenCalled();
+  });
+
+  it('sends input, observes completion and clears the suspended state', async () => {
+    vi.useFakeTimers();
+    const { adapter, context, emit, getOutput } = suspendedContext();
+    const runner = new TerminalCommandRunner();
+    await suspend(runner, context);
+    const nonce = getOutput().match(/__HYSCODE_BEGIN_([a-z0-9]+)__/i)?.[1] ?? '';
+
+    const pending = runner.respond('terminal-i', 'Y', 5_000, context);
+    await vi.advanceTimersByTimeAsync(100);
+    emit(`Y\n__HYSCODE_END_${nonce}__:0\n`);
+    await vi.advanceTimersByTimeAsync(100);
+    const result = await pending;
+
+    expect(result).toMatchObject({ success: true, metadata: { awaitingInput: false } });
+    expect(adapter.write).toHaveBeenCalledWith('terminal-i', 'Y\r\n');
+  });
+
+  it('reports a second prompt as awaiting more input', async () => {
+    vi.useFakeTimers();
+    const { context, emit } = suspendedContext();
+    const runner = new TerminalCommandRunner();
+    await suspend(runner, context);
+
+    const pending = runner.respond('terminal-i', 'Y', 5_000, context);
+    await vi.advanceTimersByTimeAsync(100);
+    emit('Y\nAnother? [Y/n]\n');
+    await vi.advanceTimersByTimeAsync(700);
+    const result = await pending;
+
+    expect(result).toMatchObject({ success: true, metadata: { awaitingInput: true } });
+    expect(result.output).toContain('waiting for more terminal input');
+  });
+
+  it('reports still-running when the command outlives the observation window', async () => {
+    vi.useFakeTimers();
+    const { context } = suspendedContext();
+    const runner = new TerminalCommandRunner();
+    await suspend(runner, context);
+
+    const pending = runner.respond('terminal-i', 'Y', 300, context);
+    await vi.advanceTimersByTimeAsync(600);
+    const result = await pending;
+
+    expect(result).toMatchObject({ success: true, metadata: { awaitingInput: true } });
+    expect(result.output).toBe('Input was sent. The command is still running.');
+  });
+
+  it('cancels a pending response through the abort signal', async () => {
+    vi.useFakeTimers();
+    const controller = new AbortController();
+    const { context } = suspendedContext({ signal: controller.signal });
+    const runner = new TerminalCommandRunner();
+    await suspend(runner, context);
+
+    const pending = runner.respond('terminal-i', 'Y', 5_000, context);
+    controller.abort();
+    await vi.advanceTimersByTimeAsync(100);
+    const result = await pending;
+
+    expect(result).toMatchObject({ success: false, error: 'Command cancelled.' });
+  });
+
+  it('stops waiting when the process exits mid-response', async () => {
+    vi.useFakeTimers();
+    const { context, exit } = suspendedContext();
+    const runner = new TerminalCommandRunner();
+    await suspend(runner, context);
+
+    const pending = runner.respond('terminal-i', 'Y', 5_000, context);
+    await vi.advanceTimersByTimeAsync(100);
+    exit(0);
+    await vi.advanceTimersByTimeAsync(100);
+    const result = await pending;
+
+    expect(result).toMatchObject({ success: true, metadata: { awaitingInput: true } });
+  });
+});
+
+function contextWithPlaceholder(): ToolExecutionContext {
+  return {
+    workspacePath: 'C:/workspace',
+    conversationId: 'conversation-x',
+    toolCallId: 'tool-x',
+    signal: new AbortController().signal,
+    terminal: undefined as never,
+    onTerminalProgress: () => undefined,
+    listen: async () => () => undefined,
+    invoke: async () => undefined as never,
+  };
+}
