@@ -27,7 +27,7 @@ interface SidecarRequest {
 }
 
 interface SidecarEvent {
-  type: 'text' | 'tool_use' | 'thinking' | 'usage' | 'done' | 'error';
+  type: 'text' | 'tool_use' | 'thinking' | 'message_boundary' | 'usage' | 'done' | 'error';
   content?: string;
   toolName?: string;
   toolInput?: string;
@@ -177,6 +177,11 @@ async function main(): Promise<void> {
     // executes its own tools (shell, apply_patch, mcp, ...) internally.
     const { events } = await thread.runStreamed(finalPrompt);
 
+    // Codex streams one `agent_message` per interim step. Each becomes its
+    // own chat message: emit `message_boundary` lazily BEFORE the next
+    // agent_message so the final message has no trailing boundary.
+    let pendingBoundary = false;
+
     for await (const event of events) {
       switch (event.type) {
         case 'item.started': {
@@ -216,7 +221,13 @@ async function main(): Promise<void> {
         case 'item.completed': {
           const item = event.item;
           if (item.type === 'agent_message') {
-            emit({ type: 'text', content: item.text });
+            if (item.text) {
+              if (pendingBoundary) {
+                emit({ type: 'message_boundary' });
+              }
+              emit({ type: 'text', content: item.text });
+              pendingBoundary = true;
+            }
           } else if (item.type === 'reasoning') {
             emit({ type: 'thinking', content: item.text });
           }

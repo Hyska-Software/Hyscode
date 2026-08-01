@@ -80,6 +80,10 @@ export function createCodexInvoke(): CodexInvoke {
               }
               break;
 
+            case 'message_boundary':
+              enqueue({ type: 'message_boundary' });
+              break;
+
             case 'usage':
               if (
                 typeof chunk.input_tokens === 'number' ||

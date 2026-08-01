@@ -577,6 +577,14 @@ mod tests {
     }
 
     #[test]
+    fn parses_message_boundary_event() {
+        let c = chunk(r#"{"type":"message_boundary"}"#).expect("parse");
+        assert_eq!(c.chunk_type, "message_boundary");
+        assert!(!c.done);
+        assert!(c.content.is_none());
+    }
+
+    #[test]
     fn skips_garbage_lines() {
         assert!(chunk("not json").is_none());
         assert!(chunk(r#"{"no":"type"}"#).is_none());

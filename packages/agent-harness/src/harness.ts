@@ -924,6 +924,27 @@ export class Harness {
                   }
                   break;
                 }
+                case 'message_boundary': {
+                  // The content streamed before this chunk belongs to a
+                  // completed assistant message; finalize it as its own
+                  // transcript message and start a fresh segment.
+                  if (assistantText.trim() || thinkingText.trim()) {
+                    const blocks: Message['content'] = [
+                      ...(thinkingText
+                        ? [{ type: 'thinking' as const, thinking: thinkingText }]
+                        : []),
+                      ...(assistantText
+                        ? [{ type: 'text' as const, text: assistantText }]
+                        : []),
+                    ];
+                    this.contextManager.addMessage({ role: 'assistant', content: blocks });
+                    this.emit({ type: 'transcript_message', role: 'assistant', blocks });
+                    this.emit({ type: 'assistant_segment_end' });
+                    assistantText = '';
+                    thinkingText = '';
+                  }
+                  break;
+                }
                 case 'done':
                   providerStopReason = chunk.stopReason;
                   break;
