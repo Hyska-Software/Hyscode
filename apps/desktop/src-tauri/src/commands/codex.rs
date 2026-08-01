@@ -85,7 +85,9 @@ fn sidecar_path() -> std::path::PathBuf {
 ///   2. `~/.codex/bin` (official CLI installer)
 ///   3. ChatGPT/Codex desktop app bundled CLI (Windows:
 ///      `%LOCALAPPDATA%\OpenAI\Codex\bin\<hash>\codex.exe`)
-///   4. legacy vendored runtime next to the app executable (pre-unbundling)
+///   4. VS Code ChatGPT extension bundled CLI (Windows:
+///      `~/.vscode/extensions/openai.chatgpt-*/bin/<triple>/codex.exe`)
+///   5. legacy vendored runtime next to the app executable (pre-unbundling)
 fn resolve_codex_cli() -> Option<std::path::PathBuf> {
     let exe = codex_exe_name();
 
@@ -115,6 +117,11 @@ fn resolve_codex_cli() -> Option<std::path::PathBuf> {
         if let Some(bundled) = find_codex_exe_in_dir(&app_bin_root) {
             return Some(bundled);
         }
+
+        let ext_root = dirs::home_dir()?.join(".vscode").join("extensions");
+        if let Some(ext) = find_vscode_codex_cli(&ext_root) {
+            return Some(ext);
+        }
     }
 
     let legacy = std::env::current_exe()
@@ -125,6 +132,29 @@ fn resolve_codex_cli() -> Option<std::path::PathBuf> {
         return Some(legacy);
     }
 
+    None
+}
+
+/// Find the CLI bundled with the VS Code ChatGPT extension
+/// (`<extensions>/openai.chatgpt-*/bin/<triple>/codex(.exe)`).
+#[cfg(target_os = "windows")]
+fn find_vscode_codex_cli(ext_root: &std::path::Path) -> Option<std::path::PathBuf> {
+    let exe = codex_exe_name();
+    let entries = std::fs::read_dir(ext_root).ok()?;
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if !name.starts_with("openai.chatgpt-") {
+            continue;
+        }
+        let bin_root = entry.path().join("bin");
+        let bin_entries = std::fs::read_dir(&bin_root).ok()?;
+        for bin_entry in bin_entries.flatten() {
+            let candidate = bin_entry.path().join(exe);
+            if candidate.is_file() {
+                return Some(candidate);
+            }
+        }
+    }
     None
 }
 
@@ -621,6 +651,35 @@ mod tests {
 
         // Non-.cmd paths are not treated as shims.
         assert!(resolve_npm_shim(&root.join("codex.exe")).is_none());
+
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn finds_vscode_extension_codex_cli() {
+        let root =
+            std::env::temp_dir().join(format!("hyscode-codex-vscode-test-{}", std::process::id()));
+        let ext_bin = root
+            .join("extensions")
+            .join("openai.chatgpt-26.721.30844-win32-x64")
+            .join("bin")
+            .join("windows-x86_64");
+        std::fs::create_dir_all(&ext_bin).unwrap();
+        std::fs::write(ext_bin.join("codex.exe"), b"MZ fake exe").unwrap();
+        // Unrelated extension with a codex.exe must be ignored.
+        std::fs::create_dir_all(root.join("extensions").join("other.vendor").join("bin")).unwrap();
+        std::fs::write(
+            root.join("extensions")
+                .join("other.vendor")
+                .join("bin")
+                .join("codex.exe"),
+            b"MZ fake exe",
+        )
+        .unwrap();
+
+        assert!(find_vscode_codex_cli(&root.join("extensions")).is_some());
+        assert!(find_vscode_codex_cli(&root.join("missing")).is_none());
 
         std::fs::remove_dir_all(&root).ok();
     }

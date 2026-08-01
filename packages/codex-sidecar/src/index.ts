@@ -78,7 +78,23 @@ function findCodexCli(): string | null {
     }
   }
 
-  // 4) Legacy: vendored runtime next to this binary (pre-unbundling builds)
+  // 4) VS Code ChatGPT extension bundled CLI (Windows)
+  if (process.platform === 'win32') {
+    const extRoot = path.join(os.homedir(), '.vscode', 'extensions');
+    if (existsSync(extRoot)) {
+      for (const entry of readdirSync(extRoot)) {
+        if (!entry.startsWith('openai.chatgpt-')) continue;
+        const binRoot = path.join(extRoot, entry, 'bin');
+        if (!existsSync(binRoot)) continue;
+        for (const sub of readdirSync(binRoot)) {
+          const candidate = path.join(binRoot, sub, exe);
+          if (existsSync(candidate)) return candidate;
+        }
+      }
+    }
+  }
+
+  // 5) Legacy: vendored runtime next to this binary (pre-unbundling builds)
   const legacy = path.join(path.dirname(process.execPath), 'codex-cli-runtime', 'bin', exe);
   if (existsSync(legacy)) return legacy;
 
@@ -118,15 +134,18 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  // Locate the user-installed Codex CLI: system PATH, then ~/.codex/bin
-  // (where the official installer puts it). Legacy fallback: a vendored
-  // runtime copied next to this binary by older builds.
+  // Locate the user-installed Codex CLI: system PATH, ~/.codex/bin, the
+  // ChatGPT/Codex desktop app, or the VS Code extension bundled CLI.
   const cliPath = findCodexCli();
   if (!cliPath) {
     emit({
       type: 'error',
       error:
-        'Codex CLI not found. Install it with: npm install -g @openai/codex (or run the official installer — see https://developers.openai.com/codex/cli). Then restart HysCode.',
+        'Codex CLI not found. Checked: system PATH, ~/.codex/bin, ' +
+        '%LOCALAPPDATA%\\OpenAI\\Codex\\bin, VS Code ChatGPT extension. ' +
+        'Install it with: npm install -g @openai/codex (or run the official ' +
+        'installer — see https://developers.openai.com/codex/cli). ' +
+        'Then restart HysCode.',
     });
     process.exit(1);
   }
