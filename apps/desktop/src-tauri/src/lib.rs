@@ -5,6 +5,7 @@ use tauri::Manager;
 mod commands;
 
 use commands::ai::AiRequestState;
+use commands::codex::CodexRequestState;
 use commands::db::DbState;
 use commands::docker::DockerWatchState;
 use commands::fs::FsWatcherState;
@@ -28,6 +29,7 @@ pub fn run() {
         .manage(FsWatcherState(Mutex::new(HashMap::new())))
         .manage(DockerWatchState(Mutex::new(HashMap::new())))
         .manage(AiRequestState::default())
+        .manage(CodexRequestState::default())
         .manage(KeychainState(Arc::new(Mutex::new(
             commands::keychain::load_keychain(),
         ))))
@@ -147,6 +149,13 @@ pub fn run() {
             // Claude Agent sidecar commands
             commands::claude_agent::claude_agent_run,
             commands::claude_agent::claude_agent_cancel,
+            // Codex sidecar commands
+            commands::codex::codex_run,
+            commands::codex::codex_cancel,
+            commands::codex::codex_login,
+            commands::codex::codex_login_status,
+            commands::codex::codex_logout,
+            commands::codex::codex_cli_status,
             // GitHub OAuth / Copilot commands
             commands::github_oauth::github_oauth_start,
             commands::github_oauth::github_oauth_poll,

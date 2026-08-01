@@ -60,6 +60,11 @@ Name: "associatewithfiles"; Description: "Register {#MyAppName} as an editor for
 Source: "{#SourceDir}\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#SourceDir}\*.dll"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
 Source: "{#SourceDir}\resources\*"; DestDir: "{app}\resources"; Flags: ignoreversion recursesubdirs createallsubdirs skipifsourcedoesntexist
+; AI agent sidecars (copied next to the exe by scripts/build-windows.ps1)
+Source: "{#SourceDir}\claude-agent.exe"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
+Source: "{#SourceDir}\codex-sidecar.exe"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
+; Note: the Codex CLI itself is NOT bundled — it is installed by the user
+; (npm install -g @openai/codex) and detected at runtime.
 
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"

@@ -6,7 +6,7 @@ import { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { X, ExternalLink, Copy, Check, ChevronRight } from 'lucide-react';
 
-type GuideId = 'claude-agent' | 'github-copilot';
+type GuideId = 'claude-agent' | 'github-copilot' | 'codex';
 
 interface ProviderSetupGuideProps {
   guide: GuideId;
@@ -41,7 +41,11 @@ export function ProviderSetupGuide({ guide, open, onClose }: ProviderSetupGuideP
         {/* Header */}
         <div className="sticky top-0 z-10 flex items-center justify-between border-b border-border bg-background/95 backdrop-blur-sm px-5 py-3.5">
           <h2 className="text-[13px] font-semibold text-foreground tracking-tight">
-            {guide === 'claude-agent' ? 'Claude Agent Setup' : 'GitHub Copilot Setup'}
+            {guide === 'claude-agent'
+              ? 'Claude Agent Setup'
+              : guide === 'github-copilot'
+                ? 'GitHub Copilot Setup'
+                : 'Codex Setup'}
           </h2>
           <button
             onClick={onClose}
@@ -53,7 +57,13 @@ export function ProviderSetupGuide({ guide, open, onClose }: ProviderSetupGuideP
 
         {/* Content */}
         <div className="px-5 py-4">
-          {guide === 'claude-agent' ? <ClaudeAgentGuide /> : <GitHubCopilotGuide />}
+          {guide === 'claude-agent' ? (
+            <ClaudeAgentGuide />
+          ) : guide === 'github-copilot' ? (
+            <GitHubCopilotGuide />
+          ) : (
+            <CodexGuide />
+          )}
         </div>
       </div>
     </div>,
@@ -206,6 +216,85 @@ function GitHubCopilotGuide() {
         Your GitHub OAuth tokens are stored locally in the system keychain.
         A Copilot session token is refreshed automatically when it expires.
         You can disconnect at any time from the settings panel.
+      </InfoBox>
+    </div>
+  );
+}
+
+// ─── Codex Guide ────────────────────────────────────────────────────────────
+
+function CodexGuide() {
+  return (
+    <div className="flex flex-col gap-5">
+      <p className="text-[12px] leading-relaxed text-muted-foreground">
+        Codex is OpenAI's agentic coding agent. HysCode drives the official
+        Codex CLI (not bundled) as a local sidecar. You can sign in with
+        ChatGPT (uses your ChatGPT plan) or use an OpenAI API key.
+      </p>
+
+      <StepList>
+        <Step number={1} title="Install the Codex CLI">
+          <p className="text-[11px] leading-relaxed text-muted-foreground">
+            Open a terminal and run:
+          </p>
+          <CodeSnippet text="npm install -g @openai/codex" />
+          <p className="text-[11px] leading-relaxed text-muted-foreground">
+            (macOS/Linux alternative:{' '}
+            <CodeSnippet text="curl -fsSL https://chatgpt.com/codex/install.sh | sh" />
+            ). Then click <Kbd>I've installed it — check again</Kbd> in the
+            settings above.
+          </p>
+        </Step>
+
+        <Step number={2} title="Sign in with ChatGPT (recommended)">
+          <p className="text-[11px] leading-relaxed text-muted-foreground">
+            Click <Kbd>Sign in with ChatGPT</Kbd> above. A browser window opens —
+            complete the login and HysCode will detect it automatically. Codex
+            then works with your Plus, Pro, Business, Edu, or Enterprise plan.
+          </p>
+        </Step>
+
+        <Step number={3} title="Or enter an OpenAI API key">
+          <p className="text-[11px] leading-relaxed text-muted-foreground">
+            If you prefer usage-based billing, paste a key from the OpenAI
+            dashboard into the <Kbd>Codex</Kbd> field and click <Kbd>Save</Kbd>.
+            The key is stored securely in the system keychain.
+          </p>
+          <ExternalLinkButton
+            href="https://platform.openai.com/api-keys"
+            label="Open OpenAI API Keys"
+          />
+        </Step>
+
+        <Step number={4} title="Select a Codex model">
+          <p className="text-[11px] leading-relaxed text-muted-foreground">
+            In the <Kbd>Active Provider & Model</Kbd> section, select
+            <Kbd>Codex (Agent)</Kbd> as the provider. Available models:
+          </p>
+          <ModelList
+            models={[
+              { name: 'GPT 5.6 Sol (Codex)', desc: 'Flagship — best for complex work' },
+              { name: 'GPT 5.6 Terra (Codex)', desc: 'Balanced everyday workhorse' },
+              { name: 'GPT 5.6 Luna (Codex)', desc: 'Fast and affordable' },
+              { name: 'GPT 5.5 / 5.4 / 5.4 Mini (Codex)', desc: 'Previous generation' },
+            ]}
+          />
+        </Step>
+
+        <Step number={5} title="Start using it" last>
+          <p className="text-[11px] leading-relaxed text-muted-foreground">
+            Open the chat panel and start a conversation. Codex executes
+            multi-step tasks in your workspace — it can run shell commands,
+            edit files, and search the web autonomously.
+          </p>
+        </Step>
+      </StepList>
+
+      <InfoBox>
+        Codex runs locally via the Codex CLI you installed. ChatGPT login
+        credentials are cached in <CodeSnippet text="~/.codex/auth.json" /> by
+        the CLI and are shared with the Codex IDE extension if you have it
+        installed.
       </InfoBox>
     </div>
   );

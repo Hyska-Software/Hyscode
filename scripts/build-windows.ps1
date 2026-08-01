@@ -48,6 +48,13 @@ if (-not (Test-Command "pnpm")) {
 }
 Write-Host "  ✓ pnpm $(pnpm --version)" -ForegroundColor Green
 
+if (-not (Test-Command "bun")) {
+    Write-Host "  ⚠ bun not found in PATH. Sidecar binaries (claude-agent, codex) will NOT be built." -ForegroundColor Yellow
+    Write-Host "    Install from https://bun.sh/docs/installation and re-run." -ForegroundColor Yellow
+} else {
+    Write-Host "  ✓ bun $(bun --version)" -ForegroundColor Green
+}
+
 if (-not (Test-Command "cargo")) {
     Write-Error "Cargo not found."
 }
@@ -78,6 +85,13 @@ Push-Location $ROOT
 pnpm build
 Pop-Location
 Write-Host "  ✓ Frontend built" -ForegroundColor Green
+
+# ── Step 3.5: Copy sidecar binaries next to the app exe ─────────────────────
+Write-Host ""
+Write-Host "  Copying sidecar binaries..." -ForegroundColor Yellow
+node scripts/copy-sidecars.mjs `
+  --target (Join-Path $TAURI_DIR "target" $Target "release") `
+  --target (Join-Path $TAURI_DIR "target" "release")
 
 # ── Step 4: Build Tauri (NSIS + MSI) ────────────────────────────────────────
 if (-not $InnoOnly) {

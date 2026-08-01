@@ -6,11 +6,13 @@ import { getProviderRegistry } from '@hyscode/ai-providers';
 import { tauriKeyStore } from './tauri-key-store';
 import { createTauriFetch } from './tauri-ai-transport';
 import { createClaudeAgentInvoke } from './tauri-claude-agent-transport';
+import { createCodexInvoke } from './tauri-codex-transport';
 import { tauriInvoke } from './tauri-invoke';
 import type { ResilienceConfig } from '@hyscode/ai-providers';
 
 let _tauriFetch: ReturnType<typeof createTauriFetch> | null = null;
 let _claudeAgentInvoke: ReturnType<typeof createClaudeAgentInvoke> | null = null;
+let _codexInvoke: ReturnType<typeof createCodexInvoke> | null = null;
 
 export class ProviderInitializationCoordinator {
   private initialized = false;
@@ -65,6 +67,24 @@ function getClaudeAgentInvoke() {
   return _claudeAgentInvoke;
 }
 
+function getCodexInvoke() {
+  if (!_codexInvoke) {
+    _codexInvoke = createCodexInvoke();
+  }
+  return _codexInvoke;
+}
+
+/** Whether the Codex CLI has a cached ChatGPT login (enables keyless use). */
+async function getCodexAuthDetected(): Promise<boolean> {
+  try {
+    const status = await tauriInvoke('codex_login_status', {});
+    return status.authenticated;
+  } catch {
+    // Sidecar unavailable (e.g. codex-cli not built) — fall back to keyless-off
+    return false;
+  }
+}
+
 async function refreshCopilotToken(): Promise<void> {
   try {
     const authed = await tauriInvoke('github_copilot_is_authenticated', {});
@@ -85,7 +105,14 @@ export async function initProviders(): Promise<void> {
     await refreshCopilotToken();
 
     const registry = getProviderRegistry();
-    await registry.initialize(tauriKeyStore, undefined, getTauriFetch(), getClaudeAgentInvoke());
+    await registry.initialize(
+      tauriKeyStore,
+      undefined,
+      getTauriFetch(),
+      getClaudeAgentInvoke(),
+      getCodexInvoke(),
+      await getCodexAuthDetected(),
+    );
   });
 }
 
@@ -98,5 +125,7 @@ export async function reinitProvider(providerId: string): Promise<void> {
     undefined,
     getTauriFetch(),
     getClaudeAgentInvoke(),
+    getCodexInvoke(),
+    await getCodexAuthDetected(),
   );
 }

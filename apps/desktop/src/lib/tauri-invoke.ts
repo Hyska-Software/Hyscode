@@ -331,6 +331,33 @@ interface TauriCommands {
   };
   claude_agent_cancel: { args: { requestId: string }; ret: void };
 
+  // Codex Sidecar
+  codex_run: {
+    args: {
+      request: {
+        request_id: string;
+        model: string;
+        system_prompt?: string;
+        prompt: string;
+        api_key?: string;
+        cwd?: string;
+        reasoning_effort?: string;
+      };
+    };
+    ret: void;
+  };
+  codex_cancel: { args: { requestId: string }; ret: void };
+  codex_login: { args: Record<string, never>; ret: void };
+  codex_logout: { args: Record<string, never>; ret: void };
+  codex_login_status: {
+    args: Record<string, never>;
+    ret: { authenticated: boolean; method: string | null; has_api_key: boolean };
+  };
+  codex_cli_status: {
+    args: Record<string, never>;
+    ret: { installed: boolean; path: string | null; version: string | null };
+  };
+
   // GitHub OAuth / Copilot
   github_oauth_start: {
     args: Record<string, never>;

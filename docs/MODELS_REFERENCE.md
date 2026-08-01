@@ -286,6 +286,23 @@ Tier **Batch** oferece 50% de desconto sobre o Standard; tier **Priority** (ex.:
 
 ---
 
+## 6. Codex (provedor sidecar)
+
+Agente de codificação da OpenAI rodando via **Codex CLI instalado pelo usuário** (`npm install -g @openai/codex` — não é embutido no instalador do HysCode; o app detecta no PATH/`~/.codex/bin` e exibe o comando de instalação se ausente). Autenticação: API key OpenAI (pay-as-you-go) **ou** login ChatGPT via `codex login` (planos Plus/Pro/Business/Edu/Enterprise). Reasoning effort: `minimal` / `low` / `medium` / `high` / `xhigh`. Preços indicativos de referência — confirmar na [página de preços da API OpenAI](https://openai.com/api/pricing/).
+
+| Nome | ID do modelo | Janela de contexto | Entrada | Saída | Cache read |
+|---|---|---|---|---|---|
+| GPT 5.6 Sol | `gpt-5.6-sol` | 400K | $2.50 | $10.00 | $0.25 |
+| GPT 5.6 Terra | `gpt-5.6-terra` | 400K | $1.25 | $10.00 | $0.125 |
+| GPT 5.6 Luna | `gpt-5.6-luna` | 400K | $0.50 | $4.00 | $0.05 |
+| GPT 5.5 | `gpt-5.5` | 400K | $1.25 | $10.00 | $0.125 |
+| GPT 5.4 | `gpt-5.4` | 400K | $1.25 | $10.00 | $0.125 |
+| GPT 5.4 Mini | `gpt-5.4-mini` | 400K | $0.40 | $1.60 | $0.04 |
+
+> **Nota**: no login ChatGPT, `gpt-5.4`/`gpt-5.4-mini` são aposentados em 2026-08-31 (substituir por `gpt-5.6-terra`/`gpt-5.6-luna`). `gpt-5.3-codex-spark` existe apenas para ChatGPT Pro (sem API) — não listado no catálogo.
+
+---
+
 ## Observações finais
 
 - **Níveis de pensamento comparados**: OpenAI usa `none` → `minimal` → `low` → `medium` → `high` → `xhigh` → `max` (via `reasoning.effort`), com GPT-5.6 adicionando `reasoning.mode` = `standard`/`pro`. Anthropic usa `low` → `medium` → `high` → `xhigh` → `max` (via `effort`), onde `xhigh` é restrito a Fable 5/Mythos 5/Opus 5/4.8/4.7/Sonnet 5 e `max` a um subconjunto maior. Modelos abertos (Grok, DeepSeek, Qwen, GLM, Kimi, MiMo) tipicamente suportam níveis `low`/`medium`/`high` de raciocínio.

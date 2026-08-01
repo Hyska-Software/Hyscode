@@ -1,0 +1,16 @@
+{
+  "name": "@hyscode/codex-sidecar",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "bun build --compile src/index.ts --outfile ../../apps/desktop/src-tauri/binaries/codex-sidecar && node ../../scripts/tag-sidecar-triple.mjs codex-sidecar",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@openai/codex-sdk": "^0.146.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.0"
+  }
+}
