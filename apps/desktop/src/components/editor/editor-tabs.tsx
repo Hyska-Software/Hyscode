@@ -179,6 +179,12 @@ export function EditorTabs() {
             } ${isDragOver ? 'border-l-2 border-primary' : ''}`}
             onClick={() => setActiveTab(tab.id)}
             onContextMenu={(e) => handleContextMenu(e, tab)}
+            onMouseDown={(e) => {
+              if (e.button === 1) {
+                e.preventDefault();
+                closeTab(tab.id);
+              }
+            }}
           >
             {tab.isPinned && (
               <Pin className="h-2.5 w-2.5 shrink-0 text-primary opacity-60" />
