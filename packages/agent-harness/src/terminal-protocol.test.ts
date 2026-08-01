@@ -1,0 +1,173 @@
+import { describe, expect, it } from 'vitest';
+
+import {
+  appendBounded,
+  buildTerminalFrame,
+  frameMarker,
+  isSensitiveTerminalPrompt,
+  looksLikeTerminalPrompt,
+  MAX_CAPTURE_CHARS,
+  normalizeTerminalOutput,
+  parseTerminalFrame,
+  stripAnsi,
+} from './terminal-protocol';
+
+describe('frameMarker', () => {
+  it('builds unique begin/end markers from a nonce', () => {
+    expect(frameMarker('BEGIN', 'abc')).toBe('__HYSCODE_BEGIN_abc__');
+    expect(frameMarker('END', 'abc')).toBe('__HYSCODE_END_abc__');
+    expect(frameMarker('BEGIN', 'abc')).not.toBe(frameMarker('BEGIN', 'def'));
+  });
+});
+
+describe('stripAnsi', () => {
+  it('strips CSI sequences', () => {
+    expect(stripAnsi('\u001b[31mred\u001b[0m')).toBe('red');
+    expect(stripAnsi('\u001b[2J\u001b[Htop')).toBe('top');
+  });
+
+  it('strips OSC sequences', () => {
+    expect(stripAnsi('\u001b]0;title\u0007body')).toBe('body');
+    expect(stripAnsi('\u001b]8;;http://x\u001b\\link')).toBe('link');
+  });
+
+  it('removes carriage returns and preserves plain text', () => {
+    expect(stripAnsi('line1\r\nline2\r')).toBe('line1\nline2');
+    expect(stripAnsi('plain text 42')).toBe('plain text 42');
+  });
+});
+
+describe('appendBounded', () => {
+  it('appends while under the cap', () => {
+    expect(appendBounded('ab', 'cd')).toBe('abcd');
+  });
+
+  it('keeps only the tail when the cap is exceeded', () => {
+    const base = 'x'.repeat(MAX_CAPTURE_CHARS);
+    const result = appendBounded(base, 'tail');
+    expect(result.length).toBe(MAX_CAPTURE_CHARS);
+    expect(result.endsWith('tail')).toBe(true);
+  });
+});
+
+describe('buildTerminalFrame', () => {
+  it('builds a bash frame with markers and exit capture', () => {
+    const frame = buildTerminalFrame('npm test', 'bash', 'n1');
+    expect(frame).toContain("printf '\\n__HYSCODE_BEGIN_n1__\\n'");
+    expect(frame).toContain('npm test');
+    expect(frame).toContain("printf '\\n__HYSCODE_END_n1__:%s\\n'");
+    expect(frame).toContain('hys_code=$?');
+  });
+
+  it('builds a PowerShell frame with LASTEXITCODE capture', () => {
+    const frame = buildTerminalFrame('Get-ChildItem', 'powershell', 'pw1');
+    expect(frame).toContain('$global:LASTEXITCODE = 0;');
+    expect(frame).toContain('Write-Output \'__HYSCODE_BEGIN_pw1__\'');
+    expect(frame).toContain('__HYSCODE_END_pw1__:{0}');
+  });
+});
+
+describe('parseTerminalFrame', () => {
+  const nonce = 'abc';
+
+  it('reports not-started before the begin marker appears', () => {
+    expect(parseTerminalFrame('$ prompt', nonce)).toEqual({
+      complete: false,
+      output: '',
+      exitCode: null,
+      started: false,
+    });
+  });
+
+  it('reports started without completion between markers', () => {
+    const raw = `__HYSCODE_BEGIN_${nonce}__\npartial output`;
+    expect(parseTerminalFrame(raw, nonce)).toMatchObject({
+      started: true,
+      complete: false,
+      output: 'partial output',
+    });
+  });
+
+  it('extracts output and exit code between markers', () => {
+    const raw = `pre\n__HYSCODE_BEGIN_${nonce}__\nout1\nout2\n__HYSCODE_END_${nonce}__:3\n`;
+    expect(parseTerminalFrame(raw, nonce)).toEqual({
+      started: true,
+      complete: true,
+      output: 'out1\nout2',
+      exitCode: 3,
+    });
+  });
+
+  it('ignores markers with a different nonce', () => {
+    const raw = `__HYSCODE_BEGIN_other__\nx\n__HYSCODE_END_other__:0\n`;
+    expect(parseTerminalFrame(raw, nonce).started).toBe(false);
+  });
+
+  it('strips ANSI from captured output', () => {
+    const raw = `__HYSCODE_BEGIN_${nonce}__\n\u001b[32mok\u001b[0m\n__HYSCODE_END_${nonce}__:0\n`;
+    expect(parseTerminalFrame(raw, nonce).output).toBe('ok');
+  });
+});
+
+describe('normalizeTerminalOutput', () => {
+  it('drops marker lines and wrapper noise, keeps command output', () => {
+    const raw = [
+      '$global:LASTEXITCODE = 0;',
+      '__HYSCODE_BEGIN_abc__',
+      '$hysOk = $?;',
+      '$hysCode = if ($hysOk) { [int]$LASTEXITCODE }',
+      'installed 42 packages',
+      '__HYSCODE_END_abc__:0',
+    ].join('\r\n');
+    expect(normalizeTerminalOutput(raw, 16_000)).toBe('installed 42 packages');
+  });
+
+  it('strips ANSI and trims outer whitespace', () => {
+    expect(normalizeTerminalOutput('\n\u001b[32mready\u001b[0m\n\n', 16_000)).toBe('ready');
+  });
+
+  it('bounds the result to maxChars keeping the tail', () => {
+    const raw = 'a'.repeat(100) + 'SIGNATURE';
+    expect(normalizeTerminalOutput(raw, 9)).toBe('SIGNATURE');
+  });
+
+  it('keeps normal multiline output untouched', () => {
+    expect(normalizeTerminalOutput('line one\nline two', 16_000)).toBe('line one\nline two');
+  });
+});
+
+describe('looksLikeTerminalPrompt', () => {
+  it('recognizes common interactive prompt shapes', () => {
+    expect(looksLikeTerminalPrompt('Continue installation? [Y/n]')).toBe(true);
+    expect(looksLikeTerminalPrompt('Choose an option:')).toBe(true);
+    expect(looksLikeTerminalPrompt('Password:')).toBe(true);
+    expect(looksLikeTerminalPrompt('Press Enter to continue')).toBe(true);
+    expect(looksLikeTerminalPrompt('Enter your name:')).toBe(true);
+  });
+
+  it('rejects progress output and empty text', () => {
+    expect(looksLikeTerminalPrompt('building package 42/100')).toBe(false);
+    expect(looksLikeTerminalPrompt('')).toBe(false);
+    expect(looksLikeTerminalPrompt('   \n\n')).toBe(false);
+    expect(looksLikeTerminalPrompt('127.0.0.1:8080')).toBe(false);
+  });
+
+  it('only inspects the last non-empty line', () => {
+    expect(looksLikeTerminalPrompt('downloaded 10 MB\nContinue? [Y/n]')).toBe(true);
+    expect(looksLikeTerminalPrompt('Continue? [Y/n]\nfinished')).toBe(false);
+  });
+});
+
+describe('isSensitiveTerminalPrompt', () => {
+  it('flags secret-entry prompts', () => {
+    expect(isSensitiveTerminalPrompt('Password:')).toBe(true);
+    expect(isSensitiveTerminalPrompt('Enter your API key:')).toBe(true);
+    expect(isSensitiveTerminalPrompt('MFA code:')).toBe(true);
+    expect(isSensitiveTerminalPrompt('Captcha:')).toBe(true);
+  });
+
+  it('does not flag ordinary prompts', () => {
+    expect(isSensitiveTerminalPrompt('Continue installation? [Y/n]')).toBe(false);
+    expect(isSensitiveTerminalPrompt('Choose a version:')).toBe(false);
+  });
+});

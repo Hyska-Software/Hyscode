@@ -74,22 +74,8 @@ interface TerminalState {
   ) => void;
   /** Append a command to the rolling history */
   appendCommandHistory: (sessionId: string, entry: CommandHistoryEntry) => void;
-  /** Find or create a dedicated agent terminal session.
-   *  If `name` is provided, looks for an existing agent session with that exact name.
-   *  If `reuseHealthy` is true (default), reuses an existing agent session that still has a PTY.
-   *  Otherwise creates a fresh one. */
-  ensureAgentSession: (opts?: {
-    name?: string;
-    reuseHealthy?: boolean;
-    conversationId?: string;
-    cwd?: string;
-  }) => string;
-  /** Get all agent sessions */
-  getAgentSessions: () => TerminalSession[];
-  /** Get the first agent session (legacy compat) */
-  getAgentSession: () => TerminalSession | undefined;
-  /** Find an agent session that has a live PTY */
-  findHealthyAgentSession: (conversationId?: string) => TerminalSession | undefined;
+  /** Create a fresh agent terminal session owned by a conversation (or sub-agent). */
+  createAgentSession: (opts?: { name?: string; conversationId?: string; cwd?: string }) => string;
   setAgentActivity: (sessionId: string, toolCallId: string | null) => void;
   setAwaitingInput: (sessionId: string, awaiting: boolean) => void;
   setOutputSequence: (sessionId: string, sequence: number) => void;
@@ -205,33 +191,8 @@ export const useTerminalStore = create<TerminalState>()(
         }
       }),
 
-    ensureAgentSession: (opts) => {
-      const { name, reuseHealthy = true, conversationId, cwd } = opts ?? {};
-
-      // 1) If a specific name is requested, try to find an existing one
-      if (name) {
-        const named = get().sessions.find(
-          (s) =>
-            s.isAgentSession &&
-            s.name === name &&
-            (!conversationId || s.ownerConversationId === conversationId),
-        );
-        if (named) return named.id;
-      }
-
-      // 2) If reuse is allowed, pick any healthy agent session
-      if (reuseHealthy) {
-        const healthy = get().sessions.find(
-          (s) =>
-            s.isAgentSession &&
-            !s.isDead &&
-            s.ptyId &&
-            (!conversationId || s.ownerConversationId === conversationId),
-        );
-        if (healthy) return healthy.id;
-      }
-
-      // 3) Create a fresh agent session
+    createAgentSession: (opts) => {
+      const { name, conversationId, cwd } = opts ?? {};
       const id = genId();
       const idx = get().nextIndex;
       const sessionName = name ?? `Agent Terminal ${idx}`;
@@ -254,24 +215,6 @@ export const useTerminalStore = create<TerminalState>()(
         state.nextIndex = idx + 1;
       });
       return id;
-    },
-
-    getAgentSessions: () => {
-      return get().sessions.filter((s) => s.isAgentSession);
-    },
-
-    getAgentSession: () => {
-      return get().sessions.find((s) => s.isAgentSession);
-    },
-
-    findHealthyAgentSession: (conversationId) => {
-      return get().sessions.find(
-        (s) =>
-          s.isAgentSession &&
-          !s.isDead &&
-          s.ptyId &&
-          (!conversationId || s.ownerConversationId === conversationId),
-      );
     },
 
     setAgentActivity: (sessionId, toolCallId) =>

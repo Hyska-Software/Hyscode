@@ -44,7 +44,6 @@ export interface HarnessEnvironment {
   ) => Promise<void>;
   skillLoader?: SkillLoader;
   ruleLoader?: RuleLoader;
-  agentTerminalPtyId?: string;
   onTerminalCommand?: (command: string, output: string, exitCode: number | null) => void;
   terminalRuntime?: TerminalRuntimeAdapter;
   memoryManager?: MemoryManager;
