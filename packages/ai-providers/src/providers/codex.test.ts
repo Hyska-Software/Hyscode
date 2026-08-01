@@ -78,6 +78,16 @@ describe('CodexProvider chat', () => {
     expect(calls[0].apiKey).toBeUndefined();
   });
 
+  it('falls back to the first catalog model for an empty model id', async () => {
+    const { calls, invoke } = captureInvoke();
+    const provider = new CodexProvider('key', invoke);
+
+    await consume(provider, { ...params(), model: '' });
+
+    // The SDK treats '' as "no --model flag" — never forward it.
+    expect(calls[0].model).toBe('gpt-5.6-sol');
+  });
+
   it('forwards the API key when present', async () => {
     const { calls, invoke } = captureInvoke();
     const provider = new CodexProvider('sk-123', invoke);

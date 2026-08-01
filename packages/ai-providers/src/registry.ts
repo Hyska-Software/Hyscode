@@ -130,6 +130,14 @@ export class ProviderRegistry {
       if (!model) model = def.modelId;
     }
 
+    // An empty model with an explicit provider must never reach the provider
+    // (e.g. provider switch with no enabled models, or a stale selection) —
+    // providers may silently fall back to their own default. Use the
+    // provider's first catalog model instead.
+    if (!model) {
+      model = provider.models[0]?.id ?? '';
+    }
+
     if (!provider.isConfigured()) {
       throw new ProviderError(
         `Provider "${provider.id}" is not configured (missing API key?)`,
