@@ -421,6 +421,9 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # linuxdeploy is distributed as an AppImage; GitHub runners have no
+          # FUSE, so extract-and-run is required ("failed to run linuxdeploy").
+          APPIMAGE_EXTRACT_AND_RUN: "1"
         with:
           projectPath: apps/desktop
           releaseId: ${{ needs.create-release.outputs.release_id }}

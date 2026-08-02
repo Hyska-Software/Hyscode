@@ -202,6 +202,8 @@ fn resolve_npm_shim(shim: &std::path::Path) -> Option<std::path::PathBuf> {
 }
 
 /// Find `codex(.exe)` one level below `root` (versioned subdirectories).
+/// Only used by the Windows-specific CLI locations (desktop app, npm shims).
+#[cfg(target_os = "windows")]
 fn find_codex_exe_in_dir(root: &std::path::Path) -> Option<std::path::PathBuf> {
     let exe = codex_exe_name();
     let entries = std::fs::read_dir(root).ok()?;
@@ -616,6 +618,7 @@ mod tests {
         std::fs::remove_dir_all(&dir).ok();
     }
 
+    #[cfg(target_os = "windows")]
     #[test]
     fn finds_codex_one_level_deep_in_versioned_dirs() {
         let root =
