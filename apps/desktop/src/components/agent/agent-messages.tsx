@@ -173,7 +173,7 @@ const MessageItem = memo(function MessageItem({
         </div>
       )}
 
-      {/* Assistant message — flex layout with persistent icon column */}
+      {/* Assistant message — flex layout */}
       {msg.role === 'assistant' &&
         (msg.thinking ||
           msg.content?.trim() ||
@@ -182,15 +182,6 @@ const MessageItem = memo(function MessageItem({
           msg.isError) && (
           <div className={cn('mb-4', isConsecutiveAssistant ? 'mt-1' : 'mt-5')}>
             <div className="flex gap-3">
-              {/* Icon column — avatar for first in group, spacer for consecutive */}
-              {!isConsecutiveAssistant ? (
-                <div className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary [&_svg]:size-4">
-                  <Sparkles />
-                </div>
-              ) : (
-                <div className="w-7 shrink-0" />
-              )}
-
               {/* Content column */}
               <div className="flex min-w-0 flex-1 flex-col gap-1">
                 {/* Role label (first in group only) */}
