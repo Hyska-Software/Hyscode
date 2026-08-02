@@ -397,7 +397,8 @@ jobs:
             libssl-dev \
             librsvg2-dev \
             patchelf \
-            libfuse2
+            libfuse2 \
+            binutils
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
@@ -418,20 +419,84 @@ jobs:
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
 
+      - name: Prepare AppImage tooling for Bun sidecars
+        run: |
+          # Bun-compiled sidecar binaries (codex-sidecar, claude-agent) crash
+          # glibc's loader when traced: `ldd` exits 1, so linuxdeploy aborts
+          # the AppImage bundle with an opaque "failed to run linuxdeploy".
+          # Bun binaries only link blacklisted system libs (libc/libm/libpthread/
+          # libdl), so report success without output for them.
+          sudo tee /usr/local/bin/ldd >/dev/null <<'EOF'
+          #!/bin/sh
+          REAL_LDD=/usr/bin/ldd
+          "$REAL_LDD" "$@"
+          rc=$?
+          if [ "$rc" -ne 0 ] && [ -n "$1" ] && [ -f "$1" ]; then
+            if readelf -S "$1" 2>/dev/null | grep -q '\.bun'; then
+              exit 0
+            fi
+          fi
+          exit "$rc"
+          EOF
+          sudo chmod +x /usr/local/bin/ldd
+          # The linuxdeploy build pinned by tauri (2024-07-26) bundles an old
+          # patchelf that corrupts Bun-compiled ELF files while setting rpath,
+          # yielding a segfaulting sidecar inside the AppImage. The current
+          # upstream build bundles patchelf 0.19.1 which handles them. Seed
+          # tauri's tool cache (~/.cache/tauri) so `tauri build` reuses it
+          # instead of downloading the pinned 2024 build.
+          mkdir -p "$HOME/.cache/tauri"
+          curl -fsSL \
+            https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage \
+            -o "$HOME/.cache/tauri/linuxdeploy-x86_64.AppImage"
+          chmod +x "$HOME/.cache/tauri/linuxdeploy-x86_64.AppImage"
+
       - name: Build Tauri (Linux x64)
-        uses: tauri-apps/tauri-action@v0
+        shell: bash
+        working-directory: apps/desktop
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # linuxdeploy is distributed as an AppImage; GitHub runners have no
           # FUSE, so extract-and-run is required ("failed to run linuxdeploy").
           APPIMAGE_EXTRACT_AND_RUN: "1"
-          # linuxdeploy's strip step fails on the Bun-compiled sidecar binaries
-          # (codex-sidecar, claude-agent), aborting the AppImage bundle with a
-          # silent "failed to run linuxdeploy". Disable stripping.
+          # Avoid the bundled strip on the shared libraries.
           NO_STRIP: "true"
-        with:
-          projectPath: apps/desktop
-          releaseId: ${{ needs.create-release.outputs.release_id }}
+        run: |
+          # The AppImage step (linuxdeploy) died deterministically with an
+          # opaque "failed to run linuxdeploy" once the Bun sidecars were
+          # introduced (see the "Prepare AppImage tooling for Bun sidecars"
+          # step above — that is the actual fix). tauri only logs linuxdeploy's
+          # output at verbose level, so build with `-v` for diagnostics and
+          # keep a bounded retry as a safety net against runner flakiness.
+          failed=1
+          for attempt in 1 2 3; do
+            echo "::group::tauri build (attempt $attempt/3)"
+            if npm run tauri build -- --bundles deb,rpm,appimage -v; then
+              failed=0
+              echo "::endgroup::"
+              break
+            fi
+            echo "::endgroup::"
+            echo "::warning::tauri build attempt $attempt/3 failed; retrying in 30s..."
+            sleep 30
+          done
+          if [ "$failed" -ne 0 ]; then
+            echo "::error::tauri build failed after 3 attempts — see the linuxdeploy debug output above"
+            exit 1
+          fi
+
+      - name: Upload Linux bundles to release
+        shell: bash
+        working-directory: apps/desktop
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.create-release.outputs.tag_name }}
+        run: |
+          gh release upload "$TAG" \
+            src-tauri/target/release/bundle/deb/*.deb \
+            src-tauri/target/release/bundle/rpm/*.rpm \
+            src-tauri/target/release/bundle/appimage/*.AppImage \
+            --clobber
 
 # ─────────────────────────────────────────────────────────────────────────────
 # JOB 4 — Build macOS
