@@ -765,10 +765,15 @@ export class Harness {
         selectedToolMode = this.agentType;
       }
       const tools = selectedTools;
+      // Resolve the provider up-front so the system prompt can be adapted for
+      // agentic sidecar providers (Codex) before the snapshot is built.
+      const registry = getProviderRegistry();
+      const provider = registry.get(this.config.providerId);
       const snapshot = this.contextManager.buildSnapshot(
         tools,
         policy.maxInputTokens,
         outputBudget,
+        provider?.capabilities?.agenticToolExecution === true,
       );
       this.traceRecorder.recordContextSnapshot(
         snapshot.tokenBreakdown,
@@ -790,8 +795,6 @@ export class Harness {
       }
 
       // Call LLM
-      const registry = getProviderRegistry();
-      const provider = registry.get(this.config.providerId);
       const model = provider?.models.find((candidate) => candidate.id === this.config.modelId);
 
       // Emit api_request_sent so the UI can track credit usage
@@ -815,6 +818,7 @@ export class Harness {
         provider,
         model,
         modelId: this.config.modelId,
+        mode: this.agentType,
         maxOutputTokens: outputBudget,
         thinking: this.config.thinking,
         enabled: this.config.costOptimization,
@@ -921,6 +925,27 @@ export class Harness {
                     } catch {
                       invalidToolCall = tc.name;
                     }
+                  }
+                  break;
+                }
+                case 'message_boundary': {
+                  // The content streamed before this chunk belongs to a
+                  // completed assistant message; finalize it as its own
+                  // transcript message and start a fresh segment.
+                  if (assistantText.trim() || thinkingText.trim()) {
+                    const blocks: Message['content'] = [
+                      ...(thinkingText
+                        ? [{ type: 'thinking' as const, thinking: thinkingText }]
+                        : []),
+                      ...(assistantText
+                        ? [{ type: 'text' as const, text: assistantText }]
+                        : []),
+                    ];
+                    this.contextManager.addMessage({ role: 'assistant', content: blocks });
+                    this.emit({ type: 'transcript_message', role: 'assistant', blocks });
+                    this.emit({ type: 'assistant_segment_end' });
+                    assistantText = '';
+                    thinkingText = '';
                   }
                   break;
                 }
@@ -1050,6 +1075,47 @@ export class Harness {
       this.emit({ type: 'transcript_message', role: 'assistant', blocks: assistantMsg.content });
 
       if (iterationFailureStatus) {
+        break;
+      }
+
+      // Agentic sidecar providers (Codex, Claude Agent) execute their tools
+      // internally — tool calls in the stream are informational evidence, not
+      // requests for the harness to route. Surface them as cards and end the
+      // iteration normally.
+      if (provider?.capabilities?.agenticToolExecution && toolCalls.length > 0) {
+        for (const tc of toolCalls) {
+          this.emit({
+            type: 'tool_call_start',
+            toolCallId: tc.id,
+            toolName: tc.name,
+            input: tc.input,
+          });
+          const record: ToolCallRecord = {
+            id: tc.id,
+            toolName: tc.name,
+            input: tc.input,
+            output: {
+              success: true,
+              output: '',
+              metadata: { note: 'Executed by the agent internally' },
+            },
+            durationMs: 0,
+            approved: true,
+            timestamp: new Date().toISOString(),
+          };
+          this.toolCallHistory.push(record);
+          this.traceRecorder.recordToolCall(record);
+          this.emit({
+            type: 'tool_call_result',
+            toolCallId: tc.id,
+            toolName: tc.name,
+            result: record.output,
+            durationMs: 0,
+          });
+        }
+        this.traceRecorder.setHadToolCalls(true);
+        this.traceRecorder.endIteration();
+        finalResponse = assistantText;
         break;
       }
 

@@ -80,6 +80,12 @@ export interface ProviderCapabilities {
   reasoningReplay: ReasoningReplayMode;
   nativeTokenCounting: boolean;
   acceptsPromptCacheKey: boolean;
+  /**
+   * True for agentic sidecar providers (Codex, Claude Agent): tool calls in
+   * the stream are executed internally by the provider and are informational
+   * evidence — the harness must NOT route them through its own tool router.
+   */
+  agenticToolExecution?: boolean;
 }
 
 // ─── Stream Chunks ──────────────────────────────────────────────────────────
@@ -90,6 +96,13 @@ export type StreamChunk =
   | { type: 'tool_call_start'; id: string; name: string }
   | { type: 'tool_call_delta'; id: string; input: string }
   | { type: 'tool_call_end'; id: string }
+  /**
+   * Marks the end of one assistant message segment — the content streamed
+   * before it belongs to a completed message and a new one starts after it.
+   * Used by agentic providers (Codex) that emit multiple interim messages
+   * per turn so the chat renders each as its own message.
+   */
+  | { type: 'message_boundary' }
   | { type: 'usage'; usage: TokenUsage }
   | { type: 'done'; stopReason: StopReason }
   | { type: 'error'; error: string; retryable?: boolean; details?: ProviderErrorDetails };
@@ -130,6 +143,12 @@ export interface ChatParams {
   signal?: AbortSignal;
   /** Thinking/reasoning configuration */
   thinking?: ThinkingConfig;
+  /**
+   * The harness agent mode (chat | build | review | debug | plan). Agentic
+   * sidecar providers (Codex) map it to their native sandbox so mode
+   * restrictions actually apply.
+   */
+  agentMode?: string;
 }
 
 // ─── Transport ──────────────────────────────────────────────────────────────

@@ -1727,6 +1727,19 @@ Investigate the error, fix the underlying issue in the affected files, and verif
         break;
       }
 
+      case 'assistant_segment_end': {
+        // Finalize the current assistant message and start a new one —
+        // agentic providers (Codex) emit one segment per interim message.
+        store.flushStreamingText();
+        store.beginAssistantMessage({
+          id: crypto.randomUUID(),
+          role: 'assistant',
+          content: '',
+          timestamp: Date.now(),
+        });
+        break;
+      }
+
       case 'tool_call_start': {
         this.debug(`Ferramenta: ${event.toolName}`);
         const tc: ToolCallDisplay = {

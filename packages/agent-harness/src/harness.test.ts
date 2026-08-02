@@ -417,4 +417,107 @@ describe('Harness lifecycle', () => {
     expect(result.status).toBe('cancelled');
     expect(result.response).toBe('Request cancelled.');
   });
+
+  it('treats agentic provider tool calls as informational (no routing, turn ends)', async () => {
+    const agenticProvider: AIProvider = {
+      ...provider('shell', { command: 'ls' }),
+      capabilities: {
+        promptCache: 'automatic',
+        reasoningReplay: 'none',
+        nativeTokenCounting: true,
+        acceptsPromptCacheKey: false,
+        agenticToolExecution: true,
+      },
+    };
+    getProviderRegistry().register(agenticProvider);
+
+    const events: HarnessEvent[] = [];
+    const harness = new Harness({
+      workspacePath: 'C:/workspace',
+      projectId: 'project',
+      invoke: async () => undefined as never,
+      onEvent: (event) => events.push(event),
+      config: {
+        providerId: 'harness-test',
+        modelId: 'test-model',
+        maxIterations: 5,
+        approval: { mode: 'manual' },
+      },
+    });
+    harness.setAgentType('build');
+    harness.setConversationId('conversation');
+
+    const result = await harness.run('inspect', []);
+
+    // One iteration — tool calls are informational, the turn ends normally.
+    expect(result.status).toBe('complete');
+    expect(result.turnRecord.iterations).toBe(1);
+    // Tool calls surfaced as cards via start/result events (never routed).
+    const starts = events.filter((event) => event.type === 'tool_call_start');
+    const results = events.filter((event) => event.type === 'tool_call_result');
+    expect(starts).toHaveLength(1);
+    expect(results).toHaveLength(1);
+    expect(starts[0]).toEqual(
+      expect.objectContaining({ toolName: 'shell', input: { command: 'ls' } }),
+    );
+    expect(results[0]).toEqual(
+      expect.objectContaining({ toolCallId: starts[0].toolCallId, toolName: 'shell' }),
+    );
+    expect(result.turnRecord.toolCalls).toHaveLength(1);
+    expect(result.turnRecord.toolCalls[0].toolName).toBe('shell');
+  });
+
+  it('splits assistant segments on message_boundary chunks', async () => {
+    const segmentedProvider: AIProvider = {
+      id: 'harness-test',
+      name: 'Harness Test',
+      models: [model],
+      isConfigured: () => true,
+      listModels: async () => [model],
+      async *chat(): AsyncIterable<StreamChunk> {
+        yield { type: 'text_delta', text: 'step one' };
+        yield { type: 'message_boundary' };
+        yield { type: 'text_delta', text: 'final answer' };
+        yield { type: 'done', stopReason: 'end_turn' };
+      },
+    };
+    getProviderRegistry().register(segmentedProvider);
+
+    const events: HarnessEvent[] = [];
+    const harness = new Harness({
+      workspacePath: 'C:/workspace',
+      projectId: 'project',
+      invoke: async () => undefined as never,
+      onEvent: (event) => events.push(event),
+      config: {
+        providerId: 'harness-test',
+        modelId: 'test-model',
+        approval: { mode: 'yolo' },
+      },
+    });
+    harness.setAgentType('build');
+    harness.setConversationId('conversation');
+
+    const result = await harness.run('do it', []);
+
+    expect(result.status).toBe('complete');
+    // The final segment is the response.
+    expect(result.response).toBe('final answer');
+    // One transcript per segment: boundary segment + final segment.
+    const transcripts = events.filter(
+      (event) => event.type === 'transcript_message' && event.role === 'assistant',
+    );
+    expect(transcripts).toHaveLength(2);
+    expect(transcripts[0]).toEqual(
+      expect.objectContaining({
+        blocks: [{ type: 'text', text: 'step one' }],
+      }),
+    );
+    expect(transcripts[1]).toEqual(
+      expect.objectContaining({
+        blocks: [{ type: 'text', text: 'final answer' }],
+      }),
+    );
+    expect(events.filter((event) => event.type === 'assistant_segment_end')).toHaveLength(1);
+  });
 });

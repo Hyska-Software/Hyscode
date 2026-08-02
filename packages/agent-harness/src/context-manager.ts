@@ -8,6 +8,7 @@ import {
   estimateToolDefinitionTokens,
   estimateSystemPromptTokens,
 } from '@hyscode/ai-providers';
+import { adaptSystemPromptForAgentic } from './agents';
 import { resolveWorkspacePath } from './path-policy';
 import type {
   ContextSource,
@@ -232,8 +233,9 @@ export class ContextManager {
     tools: ToolDefinition[],
     maxInputTokens: number,
     maxOutputTokens: number,
+    agenticExecution = false,
   ): ContextSnapshot {
-    const systemPrompt = this.buildSystemPrompt();
+    const systemPrompt = this.buildSystemPrompt(agenticExecution);
     const systemTokens = estimateSystemPromptTokens(systemPrompt);
     const toolTokens = estimateToolDefinitionTokens(tools);
 
@@ -272,14 +274,18 @@ export class ContextManager {
 
   // ─── System Prompt Construction ─────────────────────────────────────
 
-  private buildSystemPrompt(): string {
+  private buildSystemPrompt(agenticExecution = false): string {
     const parts: string[] = [];
 
-    // Base agent prompt
+    // Base agent prompt (adapted for agentic sidecar providers like Codex)
     if (this.systemPromptOverride) {
       parts.push(this.systemPromptOverride);
     } else if (this.agentDef) {
-      parts.push(this.agentDef.basePrompt);
+      parts.push(
+        agenticExecution
+          ? adaptSystemPromptForAgentic(this.agentDef.basePrompt)
+          : this.agentDef.basePrompt,
+      );
     }
 
     // Active rules (injected before skills — higher precedence)

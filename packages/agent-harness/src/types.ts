@@ -561,6 +561,7 @@ type HarnessEventPayload =
   | { type: 'turn_recoverable_error'; recovery: RecoverableTurnError }
   | { type: 'stream_chunk'; chunk: StreamChunk }
   | { type: 'transcript_message'; role: 'assistant' | 'tool'; blocks: Message['content'] }
+  | { type: 'assistant_segment_end' }
   | { type: 'terminal_progress'; progress: TerminalProgress }
   | {
       type: 'tool_call_start';

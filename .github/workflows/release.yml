@@ -311,6 +311,12 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Build AI sidecars (Windows x64)
+        run: npm run build:sidecars
+
       - name: Build Tauri (Windows x64 — binary only)
         uses: tauri-apps/tauri-action@v0
         env:
@@ -321,6 +327,12 @@ jobs:
           # identifiers (e.g. "0.1.2-preview-build.21"). We only need the
           # compiled binary; Inno Setup step below creates the actual installer.
           args: --target x86_64-pc-windows-msvc --no-bundle
+
+      - name: Copy sidecars next to release binary
+        shell: pwsh
+        run: |
+          node scripts/copy-sidecars.mjs --target "apps/desktop/src-tauri/target/x86_64-pc-windows-msvc/release"
+          Get-ChildItem "apps/desktop/src-tauri/target/x86_64-pc-windows-msvc/release" -Name | Select-String "codex|claude"
 
       - name: Build Inno Setup installer
         shell: pwsh
@@ -399,6 +411,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+
       - name: Build Tauri (Linux x64)
         uses: tauri-apps/tauri-action@v0
         env:
@@ -408,10 +423,52 @@ jobs:
           releaseId: ${{ needs.create-release.outputs.release_id }}
 
 # ─────────────────────────────────────────────────────────────────────────────
-# JOB 4 — Publish release (after all platform builds succeed)
+# JOB 4 — Build macOS
+# ─────────────────────────────────────────────────────────────────────────────
+  build-macos:
+    needs: create-release
+    runs-on: macos-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Check out the version-bump commit, not the original trigger SHA.
+          ref: ${{ needs.create-release.outputs.bumped_sha }}
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: "apps/desktop/src-tauri -> target"
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build Tauri (macOS)
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectPath: apps/desktop
+          releaseId: ${{ needs.create-release.outputs.release_id }}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# JOB 5 — Publish release (after all platform builds succeed)
 # ─────────────────────────────────────────────────────────────────────────────
   publish-release:
-    needs: [create-release, build-windows, build-linux]
+    needs: [create-release, build-windows, build-linux, build-macos]
     runs-on: ubuntu-latest
     permissions:
       contents: write

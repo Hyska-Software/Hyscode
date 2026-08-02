@@ -1,6 +1,7 @@
 pub mod ai;
 pub mod browser;
 pub mod claude_agent;
+pub mod codex;
 pub mod db;
 pub mod devices;
 pub mod docker;

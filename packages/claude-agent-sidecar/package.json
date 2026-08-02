@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "bun build --compile src/index.ts --outfile ../../apps/desktop/src-tauri/binaries/claude-agent",
+    "build": "bun build --compile src/index.ts --outfile ../../apps/desktop/src-tauri/binaries/claude-agent && node ../../scripts/tag-sidecar-triple.mjs claude-agent",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

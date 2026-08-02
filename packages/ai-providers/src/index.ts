@@ -43,6 +43,8 @@ export { OllamaProvider } from './providers/ollama';
 export { OpenRouterProvider } from './providers/openrouter';
 export { ClaudeAgentProvider } from './providers/claude-agent';
 export type { ClaudeAgentInvoke } from './providers/claude-agent';
+export { CodexProvider, CODEX_MODELS } from './providers/codex';
+export type { CodexInvoke, CodexReasoningEffort } from './providers/codex';
 export { GitHubCopilotProvider } from './providers/github-copilot';
 export { OpenCodeZenProvider } from './providers/opencode-zen';
 export { OpenCodeGoProvider } from './providers/opencode-go';

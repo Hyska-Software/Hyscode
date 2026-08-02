@@ -1200,6 +1200,55 @@ export const PROVIDERS: ProviderInfo[] = [
       },
     ],
   },
+  {
+    id: 'codex',
+    name: 'Codex (Agent)',
+    needsKey: true,
+    models: [
+      {
+        id: 'gpt-5.6-sol',
+        name: 'GPT 5.6 Sol (Codex)',
+        supportsThinking: true,
+        thinkingType: 'openai',
+        thinkingLevels: ['minimal', 'low', 'medium', 'high', 'xhigh'],
+      },
+      {
+        id: 'gpt-5.6-terra',
+        name: 'GPT 5.6 Terra (Codex)',
+        supportsThinking: true,
+        thinkingType: 'openai',
+        thinkingLevels: ['minimal', 'low', 'medium', 'high', 'xhigh'],
+      },
+      {
+        id: 'gpt-5.6-luna',
+        name: 'GPT 5.6 Luna (Codex)',
+        supportsThinking: true,
+        thinkingType: 'openai',
+        thinkingLevels: ['minimal', 'low', 'medium', 'high', 'xhigh'],
+      },
+      {
+        id: 'gpt-5.5',
+        name: 'GPT 5.5 (Codex)',
+        supportsThinking: true,
+        thinkingType: 'openai',
+        thinkingLevels: ['minimal', 'low', 'medium', 'high', 'xhigh'],
+      },
+      {
+        id: 'gpt-5.4',
+        name: 'GPT 5.4 (Codex)',
+        supportsThinking: true,
+        thinkingType: 'openai',
+        thinkingLevels: ['minimal', 'low', 'medium', 'high', 'xhigh'],
+      },
+      {
+        id: 'gpt-5.4-mini',
+        name: 'GPT 5.4 Mini (Codex)',
+        supportsThinking: true,
+        thinkingType: 'openai',
+        thinkingLevels: ['minimal', 'low', 'medium', 'high', 'xhigh'],
+      },
+    ],
+  },
 ];
 
 /** Get all models for a provider (catalog + user custom) */

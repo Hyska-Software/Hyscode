@@ -204,6 +204,52 @@ class OpenRouterProvider implements AIProvider {
 }
 ```
 
+### Codex (OpenAI Agent Sidecar)
+
+```typescript
+class CodexProvider implements AIProvider {
+  // Transport: spawns the Bun-compiled codex-sidecar binary via the Tauri
+  //            command `codex_run` (events stream back over `codex:chunk`)
+  // Auth: optional API key (hyscode:codex_api_key) OR the ChatGPT login
+  //       cached by the Codex CLI (~/.codex/auth.json via `codex login`)
+  // CLI:  NOT bundled — the user installs it (npm install -g @openai/codex);
+  //       the sidecar and `codex_cli_status` resolve it from PATH / ~/.codex/bin
+  // Protocol: 1 JSON request on stdin → NDJSON events on stdout
+  // Agent loop: Codex runs its own agentic loop (shell, apply_patch, MCP,
+  //             web_search) internally — `ChatParams.tools` is informational
+  // Models: gpt-5.6-sol, gpt-5.6-terra, gpt-5.6-luna, gpt-5.5, gpt-5.4, gpt-5.4-mini
+  // Reasoning: model_reasoning_effort = minimal|low|medium|high|xhigh
+  // Sandbox: mapped from the harness agent mode — chat/review → read-only,
+  //          plan → workspace-write, build/debug → danger-full-access
+  //          (approval_policy stays 'never'; the sidecar has no UI to answer
+  //          interactive prompts, so HysCode approvals are the guardrail)
+}
+```
+
+Flow: `CodexProvider.chat()` → `createCodexInvoke()` (desktop transport, listens
+`codex:chunk`, filters by `request_id`) → `codex_run` (Rust) → sidecar binary
+(`binaries/codex-sidecar`) → `@openai/codex-sdk` → user-installed Codex CLI
+(resolved from PATH / `~/.codex/bin` by the sidecar, passed as
+`codexPathOverride` — the SDK's own `createRequire` resolution does not work
+inside Bun-compiled binaries).
+
+The sidecar is a sibling of `claude-agent-sidecar`; the Rust host reuses the
+same spawn/read pattern (`commands/codex.rs`) but with **real cancellation**
+(process kill via `CodexRequestState`) and optional `api_key` so ChatGPT-login
+users need no key. The settings UI (CodexAuthRow) checks `codex_cli_status` on
+mount and shows the install command (`npm install -g @openai/codex`) when the
+CLI is missing. Build: `packages/codex-sidecar` (`bun build --compile` +
+`scripts/tag-sidecar-triple.mjs`).
+
+**Bundling**: both sidecars are declared in `tauri.conf.json`
+`bundle.externalBin` (triple-suffixed names, produced at build time) and ship
+next to the app executable on all platforms (Inno, NSIS/MSI, deb/AppImage,
+macOS .app/.dmg). Because `tauri-build` validates external binaries at compile
+time, `beforeDevCommand`/`beforeBuildCommand` run `npm run build:sidecars`
+first — **bun is now required** for `tauri dev` and `tauri build` (already
+required for building the sidecars themselves). The Codex CLI itself is never
+bundled — it is user-installed and detected at runtime.
+
 ---
 
 ## Provider Registry

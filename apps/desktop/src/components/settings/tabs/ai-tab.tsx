@@ -14,7 +14,6 @@ import {
   Zap,
   SlidersHorizontal,
   Check,
-  Clock,
 } from 'lucide-react';
 import { useSettingsStore } from '@/stores/settings-store';
 import type { McpServerConfig } from '@/stores/settings-store';
@@ -23,6 +22,7 @@ import { tauriInvoke } from '@/lib/tauri-invoke';
 import { reinitProvider } from '@/lib/init-providers';
 import { McpServerForm } from './mcp-server-form';
 import { CopilotAuthRow } from './copilot-auth-row';
+import { CodexAuthRow } from './codex-auth-row';
 import { ProviderSetupGuide } from './provider-setup-guide';
 import {
   PROVIDERS,
@@ -47,7 +47,9 @@ export function AiTab() {
   const [showingMcpForm, setShowingMcpForm] = useState(false);
   const [expandedProvider, setExpandedProvider] = useState<string | null>(null);
   const [customModelInput, setCustomModelInput] = useState('');
-  const [setupGuide, setSetupGuide] = useState<'claude-agent' | 'github-copilot' | null>(null);
+  const [setupGuide, setSetupGuide] = useState<
+    'claude-agent' | 'github-copilot' | 'codex' | null
+  >(null);
 
   const enabledForProvider = (providerId: string): ModelInfo[] =>
     getEnabledModelsForProvider(providerId, store.enabledModels, store.customModels);
@@ -294,15 +296,23 @@ export function AiTab() {
           <CopilotAuthRow />
         </div>
 
-        {/* Codex — coming soon */}
-        <div className="rounded-lg bg-surface-raised px-3 py-2.5 opacity-70">
-          <div className="flex items-center gap-2">
-            <Clock className="h-3.5 w-3.5 text-amber-400" />
+        {/* Codex — API key (optional) + ChatGPT login */}
+        <div className="rounded-lg bg-surface-raised px-3 py-2.5">
+          <div className="flex items-center gap-2 mb-2">
+            <Key className="h-3.5 w-3.5 text-muted-foreground" />
             <span className="text-[12px] text-foreground">Codex</span>
-            <span className="ml-auto rounded-full bg-amber-400/10 px-2 py-0.5 text-[9px] font-medium text-amber-400">
-              Under development
+            <span className="text-[10px] text-muted-foreground italic">
+              optional API key · or sign in with ChatGPT
             </span>
+            <button
+              onClick={() => setSetupGuide('codex')}
+              className="ml-auto rounded-md p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+              title="Setup guide"
+            >
+              <HelpCircle className="h-3.5 w-3.5" />
+            </button>
           </div>
+          <CodexAuthRow />
         </div>
       </SettingSection>
 

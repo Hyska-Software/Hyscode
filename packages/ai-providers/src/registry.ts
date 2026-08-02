@@ -7,6 +7,8 @@ import { OllamaProvider } from './providers/ollama';
 import { OpenRouterProvider } from './providers/openrouter';
 import { ClaudeAgentProvider } from './providers/claude-agent';
 import type { ClaudeAgentInvoke } from './providers/claude-agent';
+import { CodexProvider } from './providers/codex';
+import type { CodexInvoke } from './providers/codex';
 import { GitHubCopilotProvider } from './providers/github-copilot';
 import { OpenCodeZenProvider } from './providers/opencode-zen';
 import { OpenCodeGoProvider } from './providers/opencode-go';
@@ -128,6 +130,14 @@ export class ProviderRegistry {
       if (!model) model = def.modelId;
     }
 
+    // An empty model with an explicit provider must never reach the provider
+    // (e.g. provider switch with no enabled models, or a stale selection) —
+    // providers may silently fall back to their own default. Use the
+    // provider's first catalog model instead.
+    if (!model) {
+      model = provider.models[0]?.id ?? '';
+    }
+
     if (!provider.isConfigured()) {
       throw new ProviderError(
         `Provider "${provider.id}" is not configured (missing API key?)`,
@@ -227,6 +237,8 @@ export class ProviderRegistry {
     ollamaBaseUrl?: string,
     fetchImpl?: FetchImpl,
     claudeAgentInvoke?: ClaudeAgentInvoke,
+    codexInvoke?: CodexInvoke,
+    codexAuthDetected = false,
   ): Promise<void> {
     // Anthropic
     const anthropicKey = await keyStore.get('anthropic_api_key');
@@ -259,6 +271,13 @@ export class ProviderRegistry {
     const claudeAgentKey = await keyStore.get('anthropic_api_key');
     if (claudeAgentKey) {
       this.register(new ClaudeAgentProvider(claudeAgentKey, claudeAgentInvoke));
+    }
+
+    // Codex (always registered when the sidecar transport is available —
+    // works with an optional API key or the Codex CLI ChatGPT login)
+    const codexKey = await keyStore.get('codex_api_key');
+    if (codexKey || codexInvoke) {
+      this.register(new CodexProvider(codexKey ?? '', codexInvoke, codexAuthDetected));
     }
 
     // GitHub Copilot
@@ -296,6 +315,8 @@ export class ProviderRegistry {
     ollamaBaseUrl?: string,
     fetchImpl?: FetchImpl,
     claudeAgentInvoke?: ClaudeAgentInvoke,
+    codexInvoke?: CodexInvoke,
+    codexAuthDetected = false,
   ): Promise<void> {
     this.unregister(providerId);
 
@@ -327,6 +348,13 @@ export class ProviderRegistry {
       case 'claude-agent': {
         const key = await keyStore.get('anthropic_api_key');
         if (key) this.register(new ClaudeAgentProvider(key, claudeAgentInvoke));
+        break;
+      }
+      case 'codex': {
+        const key = await keyStore.get('codex_api_key');
+        if (key || codexInvoke) {
+          this.register(new CodexProvider(key ?? '', codexInvoke, codexAuthDetected));
+        }
         break;
       }
       case 'github-copilot': {
