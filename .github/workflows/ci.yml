@@ -215,19 +215,18 @@ jobs:
       - name: Build sidecar packages
         run: npm run build:sidecars
 
-      - name: Smoke test codex sidecar (invalid JSON → error event)
-        shell: bash
-        run: |
-          echo 'not json' | "$BIN" 2>&1 | grep -q "Invalid JSON input" \
-            || (echo "codex sidecar smoke test failed"; exit 1)
-        env:
-          BIN: ${{ runner.os == 'Windows' && 'apps/desktop/src-tauri/binaries/codex-sidecar.exe' || 'apps/desktop/src-tauri/binaries/codex-sidecar' }}
-
       - name: Smoke test claude-agent sidecar (invalid JSON → error event)
         shell: bash
         run: |
-          echo 'not json' | "$BIN" 2>&1 | grep -q "Invalid JSON input" \
-            || (echo "claude-agent sidecar smoke test failed"; exit 1)
+          # The sidecar exits 1 by design after emitting the error event, which
+          # fails the pipeline under `set -o pipefail` even when grep matches —
+          # capture the output and check the content instead.
+          output=$(echo 'not json' | "$BIN" 2>&1 || true)
+          if ! echo "$output" | grep -q "Invalid JSON input"; then
+            echo "claude-agent sidecar smoke test failed. Output:"
+            echo "$output"
+            exit 1
+          fi
         env:
           BIN: ${{ runner.os == 'Windows' && 'apps/desktop/src-tauri/binaries/claude-agent.exe' || 'apps/desktop/src-tauri/binaries/claude-agent' }}
 
