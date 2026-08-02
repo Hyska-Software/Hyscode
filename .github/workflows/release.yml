@@ -54,6 +54,9 @@ on:
 
 env:
   TAURI_SIGNING_PRIVATE_KEY: ""
+  # vite build / tsc can exceed Node's default heap (~2GB) on CI runners
+  # (observed OOM on macOS arm64). Raise it for all build jobs.
+  NODE_OPTIONS: "--max-old-space-size=8192"
 
 permissions:
   contents: write
