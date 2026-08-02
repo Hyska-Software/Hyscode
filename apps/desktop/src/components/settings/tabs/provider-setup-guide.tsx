@@ -1,12 +1,12 @@
 // ─── Provider Setup Guide Modal ─────────────────────────────────────────────
-// Inline modal that opens when the user clicks the "?" button on Claude Agent
-// or GitHub Copilot rows in the AI settings tab.
+// Inline modal that opens when the user clicks the "?" button on GitHub Copilot
+// or Codex rows in the AI settings tab.
 
 import { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { X, ExternalLink, Copy, Check, ChevronRight } from 'lucide-react';
 
-type GuideId = 'claude-agent' | 'github-copilot' | 'codex';
+type GuideId = 'github-copilot' | 'codex';
 
 interface ProviderSetupGuideProps {
   guide: GuideId;
@@ -41,11 +41,7 @@ export function ProviderSetupGuide({ guide, open, onClose }: ProviderSetupGuideP
         {/* Header */}
         <div className="sticky top-0 z-10 flex items-center justify-between border-b border-border bg-background/95 backdrop-blur-sm px-5 py-3.5">
           <h2 className="text-[13px] font-semibold text-foreground tracking-tight">
-            {guide === 'claude-agent'
-              ? 'Claude Agent Setup'
-              : guide === 'github-copilot'
-                ? 'GitHub Copilot Setup'
-                : 'Codex Setup'}
+            {guide === 'github-copilot' ? 'GitHub Copilot Setup' : 'Codex Setup'}
           </h2>
           <button
             onClick={onClose}
@@ -57,82 +53,11 @@ export function ProviderSetupGuide({ guide, open, onClose }: ProviderSetupGuideP
 
         {/* Content */}
         <div className="px-5 py-4">
-          {guide === 'claude-agent' ? (
-            <ClaudeAgentGuide />
-          ) : guide === 'github-copilot' ? (
-            <GitHubCopilotGuide />
-          ) : (
-            <CodexGuide />
-          )}
+          {guide === 'github-copilot' ? <GitHubCopilotGuide /> : <CodexGuide />}
         </div>
       </div>
     </div>,
     document.body,
-  );
-}
-
-// ─── Claude Agent Guide ─────────────────────────────────────────────────────
-
-function ClaudeAgentGuide() {
-  return (
-    <div className="flex flex-col gap-5">
-      <p className="text-[12px] leading-relaxed text-muted-foreground">
-        Claude Agent uses the Anthropic API with Claude's agentic capabilities.
-        It reuses your existing Anthropic API key — no extra configuration needed.
-      </p>
-
-      <StepList>
-        <Step number={1} title="Get an Anthropic API key">
-          <p className="text-[11px] leading-relaxed text-muted-foreground">
-            If you don't have one yet, create an account and generate an API key
-            from the Anthropic Console.
-          </p>
-          <ExternalLinkButton
-            href="https://console.anthropic.com/settings/keys"
-            label="Open Anthropic Console"
-          />
-        </Step>
-
-        <Step number={2} title="Enter your API key">
-          <p className="text-[11px] leading-relaxed text-muted-foreground">
-            In the <Kbd>API Keys</Kbd> section above, paste your key into the
-            <Kbd>Anthropic</Kbd> field and click <Kbd>Save</Kbd>.
-            Claude Agent will automatically use this same key.
-          </p>
-        </Step>
-
-        <Step number={3} title="Select a Claude Agent model">
-          <p className="text-[11px] leading-relaxed text-muted-foreground">
-            In the <Kbd>Active Provider & Model</Kbd> section, select
-            <Kbd>Claude Agent</Kbd> as the provider. Available models:
-          </p>
-          <ModelList
-            models={[
-              { name: 'Claude Fable 5 (Agent)', desc: 'Most powerful — Anthropic\'s flagship creative model' },
-              { name: 'Claude Opus 5 (Agent)', desc: 'Maximum capability for complex agentic tasks' },
-              { name: 'Claude Opus 4.8 (Agent)', desc: 'Premium reasoning for tough problems' },
-              { name: 'Claude Sonnet 5 (Agent)', desc: 'Best balance of speed and quality' },
-              { name: 'Claude Opus 4.7 (Agent)', desc: 'Strong reasoning at scale' },
-              { name: 'Claude Opus 4.6 (Agent)', desc: 'Solid premium choice' },
-              { name: 'Claude Sonnet 4.6 (Agent)', desc: 'Fast and capable for everyday coding' },
-              { name: 'Claude Haiku 4.5 (Agent)', desc: 'Fastest and most cost-effective' },
-            ]}
-          />
-        </Step>
-
-        <Step number={4} title="Start using it" last>
-          <p className="text-[11px] leading-relaxed text-muted-foreground">
-            Open the chat panel and start a conversation. Claude Agent can execute
-            multi-step tasks, use tools, and work with your codebase autonomously.
-          </p>
-        </Step>
-      </StepList>
-
-      <InfoBox>
-        Claude Agent runs as a local sidecar process. Your API key is stored securely
-        in the system keychain and is never sent to any third-party services.
-      </InfoBox>
-    </div>
   );
 }
 

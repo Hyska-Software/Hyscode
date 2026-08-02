@@ -292,6 +292,33 @@ export function migrateSettingsState(persistedState: unknown, version: number): 
       agentSafe: server.agentSafe === true,
     }));
   }
+  if (version < 4) {
+    // Claude Agent provider is disabled (in development) — clear any persisted
+    // selection so the app never tries to chat with an unregistered provider.
+    if (state.activeProviderId === 'claude-agent') {
+      state.activeProviderId = null;
+      state.activeModelId = null;
+    }
+    if (state.inlineCompletionProviderId === 'claude-agent') {
+      state.inlineCompletionProviderId = null;
+      state.inlineCompletionModelId = null;
+    }
+    if (state.enabledModels && typeof state.enabledModels === 'object') {
+      const enabledModels = state.enabledModels as Record<string, unknown>;
+      delete enabledModels['claude-agent'];
+    }
+    if (Array.isArray(state.customModels)) {
+      state.customModels = (state.customModels as Array<Record<string, unknown>>).filter(
+        (c) => c.providerId !== 'claude-agent',
+      );
+    }
+    if (state.thinkingSettings && typeof state.thinkingSettings === 'object') {
+      const thinkingSettings = state.thinkingSettings as Record<string, unknown>;
+      for (const key of Object.keys(thinkingSettings)) {
+        if (key.startsWith('claude-agent::')) delete thinkingSettings[key];
+      }
+    }
+  }
   return state;
 }
 
@@ -532,7 +559,7 @@ export const useSettingsStore = create<SettingsState>()(
     {
       name: 'hyscode-settings',
       storage: createJSONStorage(() => localStorage),
-      version: 3,
+      version: 4,
       migrate: migrateSettingsState,
       partialize: (state) => {
         // Exclude transient UI state and action functions from persistence

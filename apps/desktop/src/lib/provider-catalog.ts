@@ -489,69 +489,6 @@ export const PROVIDERS: ProviderInfo[] = [
     ],
   },
   {
-    id: 'claude-agent',
-    name: 'Claude Agent',
-    needsKey: false, // Reuses Anthropic API key
-    models: [
-      {
-        id: 'claude-fable-5',
-        name: 'Claude Fable 5 (Agent)',
-        supportsThinking: true,
-        thinkingType: 'anthropic',
-        thinkingLevels: ['low', 'medium', 'high', 'xhigh', 'max'],
-      },
-      {
-        id: 'claude-opus-5',
-        name: 'Claude Opus 5 (Agent)',
-        supportsThinking: true,
-        thinkingType: 'anthropic',
-        thinkingLevels: ['low', 'medium', 'high', 'xhigh', 'max'],
-      },
-      {
-        id: 'claude-opus-4-8',
-        name: 'Claude Opus 4.8 (Agent)',
-        supportsThinking: true,
-        thinkingType: 'anthropic',
-        thinkingLevels: ['low', 'medium', 'high', 'xhigh', 'max'],
-      },
-      {
-        id: 'claude-sonnet-5',
-        name: 'Claude Sonnet 5 (Agent)',
-        supportsThinking: true,
-        thinkingType: 'anthropic',
-        thinkingLevels: ['low', 'medium', 'high', 'xhigh', 'max'],
-      },
-      {
-        id: 'claude-opus-4-7',
-        name: 'Claude Opus 4.7 (Agent)',
-        supportsThinking: true,
-        thinkingType: 'anthropic',
-        thinkingLevels: ['low', 'medium', 'high', 'xhigh', 'max'],
-      },
-      {
-        id: 'claude-opus-4-6',
-        name: 'Claude Opus 4.6 (Agent)',
-        supportsThinking: true,
-        thinkingType: 'anthropic',
-        thinkingLevels: ['low', 'medium', 'high', 'max'],
-      },
-      {
-        id: 'claude-sonnet-4-6',
-        name: 'Claude Sonnet 4.6 (Agent)',
-        supportsThinking: true,
-        thinkingType: 'anthropic',
-        thinkingLevels: ['low', 'medium', 'high', 'max'],
-      },
-      {
-        id: 'claude-haiku-4-5',
-        name: 'Claude Haiku 4.5 (Agent)',
-        supportsThinking: true,
-        thinkingType: 'anthropic',
-        thinkingLevels: ['low', 'medium', 'high', 'max'],
-      },
-    ],
-  },
-  {
     id: 'github-copilot',
     name: 'GitHub Copilot',
     needsKey: false, // Uses OAuth, not API key

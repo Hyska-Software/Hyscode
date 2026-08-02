@@ -204,6 +204,44 @@ class OpenRouterProvider implements AIProvider {
 }
 ```
 
+### Claude Agent (Anthropic Sidecar) — temporarily disabled
+
+> **Status: in development — unavailable in the current build.**
+>
+> The Claude Agent provider is disabled until further notice. It is **not
+> registered** in the `ProviderRegistry`, so any chat request targeting the
+> `claude-agent` provider id fails with `Provider not found`. Its catalog entry
+> is removed from the UI, and the AI settings tab shows an
+> "in development / temporarily unavailable" notice instead.
+
+**Changes applied:**
+
+- `packages/ai-providers/src/registry.ts` — `initialize()` and
+  `reinitializeProvider()` no longer register `ClaudeAgentProvider`; the
+  `claudeAgentInvoke` parameter was removed from both signatures.
+- `apps/desktop/src/lib/init-providers.ts` — the `claude-agent` transport
+  wiring (`createClaudeAgentInvoke`) is no longer passed to the registry.
+- `apps/desktop/src/lib/provider-catalog.ts` — the `claude-agent` entry
+  (provider metadata + models) was removed from `PROVIDERS`, so it disappears
+  from the provider/model selectors and the Models list.
+- `apps/desktop/src/components/settings/tabs/ai-tab.tsx` — banner
+  ("Claude Agent is in development and temporarily unavailable") plus a
+  disabled row in API Keys with an "In development" badge; the setup-guide
+  entry point was removed.
+- `apps/desktop/src/components/settings/tabs/provider-setup-guide.tsx` — the
+  Claude Agent setup guide was removed.
+- `apps/desktop/src/stores/settings-store.ts` — persist version bumped
+  `3 → 4`: the migration clears any persisted Claude Agent selection (active
+  provider/model, inline completion, enabled models, custom models, thinking
+  settings) so existing installations never attempt to chat with an
+  unregistered provider.
+
+The implementation itself (`ClaudeAgentProvider`, the Tauri transport, and the
+`claude-agent-sidecar` package) remains in the repository and can be re-enabled
+by restoring the registry registration and the catalog entry.
+
+---
+
 ### Codex (OpenAI Agent Sidecar)
 
 ```typescript

@@ -5,13 +5,11 @@
 import { getProviderRegistry } from '@hyscode/ai-providers';
 import { tauriKeyStore } from './tauri-key-store';
 import { createTauriFetch } from './tauri-ai-transport';
-import { createClaudeAgentInvoke } from './tauri-claude-agent-transport';
 import { createCodexInvoke } from './tauri-codex-transport';
 import { tauriInvoke } from './tauri-invoke';
 import type { ResilienceConfig } from '@hyscode/ai-providers';
 
 let _tauriFetch: ReturnType<typeof createTauriFetch> | null = null;
-let _claudeAgentInvoke: ReturnType<typeof createClaudeAgentInvoke> | null = null;
 let _codexInvoke: ReturnType<typeof createCodexInvoke> | null = null;
 
 export class ProviderInitializationCoordinator {
@@ -60,13 +58,6 @@ export function configureProviderResilience(config: ResilienceConfig): void {
   _tauriFetch = createTauriFetch(normalized);
 }
 
-function getClaudeAgentInvoke() {
-  if (!_claudeAgentInvoke) {
-    _claudeAgentInvoke = createClaudeAgentInvoke();
-  }
-  return _claudeAgentInvoke;
-}
-
 function getCodexInvoke() {
   if (!_codexInvoke) {
     _codexInvoke = createCodexInvoke();
@@ -109,7 +100,6 @@ export async function initProviders(): Promise<void> {
       tauriKeyStore,
       undefined,
       getTauriFetch(),
-      getClaudeAgentInvoke(),
       getCodexInvoke(),
       await getCodexAuthDetected(),
     );
@@ -124,7 +114,6 @@ export async function reinitProvider(providerId: string): Promise<void> {
     tauriKeyStore,
     undefined,
     getTauriFetch(),
-    getClaudeAgentInvoke(),
     getCodexInvoke(),
     await getCodexAuthDetected(),
   );

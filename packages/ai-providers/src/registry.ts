@@ -5,8 +5,6 @@ import { OpenAIProvider } from './providers/openai';
 import { GeminiProvider } from './providers/gemini';
 import { OllamaProvider } from './providers/ollama';
 import { OpenRouterProvider } from './providers/openrouter';
-import { ClaudeAgentProvider } from './providers/claude-agent';
-import type { ClaudeAgentInvoke } from './providers/claude-agent';
 import { CodexProvider } from './providers/codex';
 import type { CodexInvoke } from './providers/codex';
 import { GitHubCopilotProvider } from './providers/github-copilot';
@@ -236,7 +234,6 @@ export class ProviderRegistry {
     keyStore: KeyStore,
     ollamaBaseUrl?: string,
     fetchImpl?: FetchImpl,
-    claudeAgentInvoke?: ClaudeAgentInvoke,
     codexInvoke?: CodexInvoke,
     codexAuthDetected = false,
   ): Promise<void> {
@@ -265,12 +262,6 @@ export class ProviderRegistry {
     const openrouterKey = await keyStore.get('openrouter_api_key');
     if (openrouterKey) {
       this.register(new OpenRouterProvider(openrouterKey, fetchImpl));
-    }
-
-    // Claude Agent (uses Anthropic API key + sidecar)
-    const claudeAgentKey = await keyStore.get('anthropic_api_key');
-    if (claudeAgentKey) {
-      this.register(new ClaudeAgentProvider(claudeAgentKey, claudeAgentInvoke));
     }
 
     // Codex (always registered when the sidecar transport is available —
@@ -314,7 +305,6 @@ export class ProviderRegistry {
     keyStore: KeyStore,
     ollamaBaseUrl?: string,
     fetchImpl?: FetchImpl,
-    claudeAgentInvoke?: ClaudeAgentInvoke,
     codexInvoke?: CodexInvoke,
     codexAuthDetected = false,
   ): Promise<void> {
@@ -343,11 +333,6 @@ export class ProviderRegistry {
       case 'openrouter': {
         const key = await keyStore.get('openrouter_api_key');
         if (key) this.register(new OpenRouterProvider(key, fetchImpl));
-        break;
-      }
-      case 'claude-agent': {
-        const key = await keyStore.get('anthropic_api_key');
-        if (key) this.register(new ClaudeAgentProvider(key, claudeAgentInvoke));
         break;
       }
       case 'codex': {

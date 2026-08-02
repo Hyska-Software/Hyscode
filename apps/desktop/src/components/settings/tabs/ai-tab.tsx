@@ -47,9 +47,7 @@ export function AiTab() {
   const [showingMcpForm, setShowingMcpForm] = useState(false);
   const [expandedProvider, setExpandedProvider] = useState<string | null>(null);
   const [customModelInput, setCustomModelInput] = useState('');
-  const [setupGuide, setSetupGuide] = useState<
-    'claude-agent' | 'github-copilot' | 'codex' | null
-  >(null);
+  const [setupGuide, setSetupGuide] = useState<'github-copilot' | 'codex' | null>(null);
 
   const enabledForProvider = (providerId: string): ModelInfo[] =>
     getEnabledModelsForProvider(providerId, store.enabledModels, store.customModels);
@@ -76,6 +74,14 @@ export function AiTab() {
 
   return (
     <div className="flex flex-col gap-6">
+      {/* ─── Claude Agent notice ─────────────────────────────────────── */}
+      <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2.5">
+        <p className="text-[11px] leading-relaxed text-amber-300">
+          <span className="font-semibold">Claude Agent</span> is in development and
+          temporarily unavailable. It will return in a future release.
+        </p>
+      </div>
+
       {/* ─── Active Provider & Model ────────────────────────────────── */}
       <SettingSection title="Active Provider & Model">
         {/* Use all providers toggle */}
@@ -264,20 +270,18 @@ export function AiTab() {
           <ApiKeyRow key={provider.id} providerId={provider.id} providerName={provider.name} />
         ))}
 
-        {/* Claude Agent note — reuses Anthropic key */}
-        <div className="rounded-lg bg-surface-raised px-3 py-2.5">
+        {/* Claude Agent — in development */}
+        <div className="rounded-lg bg-surface-raised px-3 py-2.5 opacity-80">
           <div className="flex items-center gap-2">
             <Key className="h-3.5 w-3.5 text-muted-foreground" />
             <span className="text-[12px] text-foreground">Claude Agent</span>
-            <span className="text-[10px] text-muted-foreground italic">uses Anthropic key</span>
-            <button
-              onClick={() => setSetupGuide('claude-agent')}
-              className="ml-auto rounded-md p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-              title="Setup guide"
-            >
-              <HelpCircle className="h-3.5 w-3.5" />
-            </button>
+            <span className="rounded bg-amber-500/15 px-1.5 py-0.5 text-[9px] font-medium text-amber-300">
+              In development
+            </span>
           </div>
+          <p className="mt-1 text-[10px] text-muted-foreground">
+            This provider is under development and temporarily unavailable.
+          </p>
         </div>
 
         {/* GitHub Copilot OAuth */}
@@ -697,7 +701,7 @@ export function AiTab() {
 
       {/* ─── Setup Guide Modal ──────────────────────────────────────── */}
       <ProviderSetupGuide
-        guide={setupGuide ?? 'claude-agent'}
+        guide={setupGuide ?? 'github-copilot'}
         open={setupGuide !== null}
         onClose={() => setSetupGuide(null)}
       />

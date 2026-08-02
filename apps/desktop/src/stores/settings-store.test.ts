@@ -54,6 +54,44 @@ describe('agent interaction limit settings', () => {
 
     expect(migrated.mcpServers[0].agentSafe).toBe(false);
   });
+
+  it('clears persisted Claude Agent selections when the provider is disabled', () => {
+    const migrated = migrateSettingsState(
+      {
+        activeProviderId: 'claude-agent',
+        activeModelId: 'claude-sonnet-5',
+        inlineCompletionProviderId: 'claude-agent',
+        inlineCompletionModelId: 'claude-opus-5',
+        enabledModels: { 'claude-agent': ['claude-sonnet-5'], openai: ['gpt-5.5'] },
+        customModels: [{ providerId: 'claude-agent', modelId: 'my-model', name: 'My Model' }],
+        thinkingSettings: {
+          'claude-agent::claude-sonnet-5': { enabled: true },
+          'openai::gpt-5.5': { enabled: false },
+        },
+      },
+      3,
+    ) as Record<string, any>;
+
+    expect(migrated.activeProviderId).toBeNull();
+    expect(migrated.activeModelId).toBeNull();
+    expect(migrated.inlineCompletionProviderId).toBeNull();
+    expect(migrated.inlineCompletionModelId).toBeNull();
+    expect(migrated.enabledModels['claude-agent']).toBeUndefined();
+    expect(migrated.enabledModels.openai).toEqual(['gpt-5.5']);
+    expect(migrated.customModels).toEqual([]);
+    expect(migrated.thinkingSettings['claude-agent::claude-sonnet-5']).toBeUndefined();
+    expect(migrated.thinkingSettings['openai::gpt-5.5']).toEqual({ enabled: false });
+  });
+
+  it('keeps other active providers when migrating', () => {
+    const migrated = migrateSettingsState(
+      { activeProviderId: 'openai', activeModelId: 'gpt-5.5' },
+      3,
+    ) as Record<string, unknown>;
+
+    expect(migrated.activeProviderId).toBe('openai');
+    expect(migrated.activeModelId).toBe('gpt-5.5');
+  });
 });
 
 describe('activity bar settings', () => {
