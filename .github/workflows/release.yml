@@ -396,7 +396,8 @@ jobs:
             libayatana-appindicator3-dev \
             libssl-dev \
             librsvg2-dev \
-            patchelf
+            patchelf \
+            libfuse2
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
@@ -424,6 +425,10 @@ jobs:
           # linuxdeploy is distributed as an AppImage; GitHub runners have no
           # FUSE, so extract-and-run is required ("failed to run linuxdeploy").
           APPIMAGE_EXTRACT_AND_RUN: "1"
+          # linuxdeploy's strip step fails on the Bun-compiled sidecar binaries
+          # (codex-sidecar, claude-agent), aborting the AppImage bundle with a
+          # silent "failed to run linuxdeploy". Disable stripping.
+          NO_STRIP: "true"
         with:
           projectPath: apps/desktop
           releaseId: ${{ needs.create-release.outputs.release_id }}
