@@ -219,8 +219,10 @@ class CodexProvider implements AIProvider {
   //             web_search) internally — `ChatParams.tools` is informational
   // Models: gpt-5.6-sol, gpt-5.6-terra, gpt-5.6-luna, gpt-5.5, gpt-5.4, gpt-5.4-mini
   // Reasoning: model_reasoning_effort = minimal|low|medium|high|xhigh
-  // Sandbox: danger-full-access + approval_policy=never (HysCode harness
-  //          approvals are the guardrail; Codex never blocks on its own UI)
+  // Sandbox: mapped from the harness agent mode — chat/review → read-only,
+  //          plan → workspace-write, build/debug → danger-full-access
+  //          (approval_policy stays 'never'; the sidecar has no UI to answer
+  //          interactive prompts, so HysCode approvals are the guardrail)
 }
 ```
 

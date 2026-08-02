@@ -765,10 +765,15 @@ export class Harness {
         selectedToolMode = this.agentType;
       }
       const tools = selectedTools;
+      // Resolve the provider up-front so the system prompt can be adapted for
+      // agentic sidecar providers (Codex) before the snapshot is built.
+      const registry = getProviderRegistry();
+      const provider = registry.get(this.config.providerId);
       const snapshot = this.contextManager.buildSnapshot(
         tools,
         policy.maxInputTokens,
         outputBudget,
+        provider?.capabilities?.agenticToolExecution === true,
       );
       this.traceRecorder.recordContextSnapshot(
         snapshot.tokenBreakdown,
@@ -790,8 +795,6 @@ export class Harness {
       }
 
       // Call LLM
-      const registry = getProviderRegistry();
-      const provider = registry.get(this.config.providerId);
       const model = provider?.models.find((candidate) => candidate.id === this.config.modelId);
 
       // Emit api_request_sent so the UI can track credit usage
@@ -815,6 +818,7 @@ export class Harness {
         provider,
         model,
         modelId: this.config.modelId,
+        mode: this.agentType,
         maxOutputTokens: outputBudget,
         thinking: this.config.thinking,
         enabled: this.config.costOptimization,
