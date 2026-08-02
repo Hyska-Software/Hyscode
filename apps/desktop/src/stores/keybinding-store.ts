@@ -66,7 +66,9 @@ interface KeybindingState {
 
 // ── Parsing helpers ──────────────────────────────────────────────────────────
 
-const isMac = navigator.platform?.startsWith('Mac') ?? false;
+// navigator is not defined in Node < 21 (CI test runners) - guard module scope.
+const isMac =
+  typeof navigator !== 'undefined' ? (navigator.platform?.startsWith('Mac') ?? false) : false;
 
 /**
  * Parse a keybinding string like "ctrl+shift+p" into structured form.

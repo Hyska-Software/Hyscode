@@ -414,7 +414,7 @@ export class HarnessBridge {
 
   /** Fallback home path when Tauri command is not available */
   private static getHomePathFallback(): string {
-    const isWin = navigator.userAgent?.includes('Windows');
+    const isWin = typeof navigator !== 'undefined' && navigator.userAgent?.includes('Windows');
     const username = (globalThis as Record<string, unknown>).__TAURI_USERNAME__ as
       | string
       | undefined;
