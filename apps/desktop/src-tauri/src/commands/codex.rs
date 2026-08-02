@@ -25,6 +25,7 @@ pub struct CodexRequest {
     pub api_key: Option<String>,
     pub cwd: Option<String>,
     pub reasoning_effort: Option<String>,
+    pub sandbox_mode: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -300,6 +301,7 @@ pub async fn codex_run(
             "prompt": request.prompt,
             "cwd": request.cwd,
             "reasoningEffort": request.reasoning_effort,
+            "sandboxMode": request.sandbox_mode,
         });
 
         let input_json = match serde_json::to_string(&sidecar_input) {

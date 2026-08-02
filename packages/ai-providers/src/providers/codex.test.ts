@@ -88,6 +88,35 @@ describe('CodexProvider chat', () => {
     expect(calls[0].model).toBe('gpt-5.6-sol');
   });
 
+  it('forwards the abort signal so stop cancels the sidecar process', async () => {
+    const { calls, invoke } = captureInvoke();
+    const provider = new CodexProvider('key', invoke);
+    const controller = new AbortController();
+
+    await consume(provider, { ...params(), signal: controller.signal });
+
+    expect(calls[0].signal).toBe(controller.signal);
+  });
+
+  it('maps the harness agent mode to the Codex sandbox', async () => {
+    const cases: Array<[string | undefined, string]> = [
+      ['chat', 'read-only'],
+      ['review', 'read-only'],
+      ['plan', 'workspace-write'],
+      ['build', 'danger-full-access'],
+      ['debug', 'danger-full-access'],
+      [undefined, 'danger-full-access'],
+      ['unknown-mode', 'danger-full-access'],
+    ];
+
+    for (const [mode, expected] of cases) {
+      const { calls, invoke } = captureInvoke();
+      const provider = new CodexProvider('key', invoke);
+      await consume(provider, { ...params(), ...(mode ? { agentMode: mode } : {}) });
+      expect(calls[0].sandboxMode).toBe(expected);
+    }
+  });
+
   it('forwards the API key when present', async () => {
     const { calls, invoke } = captureInvoke();
     const provider = new CodexProvider('sk-123', invoke);

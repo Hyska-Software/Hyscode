@@ -45,7 +45,15 @@ export function createCodexInvoke(): CodexInvoke {
         const queue: Array<StreamChunk | null> = [];
         let resolve: (() => void) | null = null;
         let unlisten: (() => void) | null = null;
+        let abortHandler: (() => void) | null = null;
         let started = false;
+
+        function cleanupAbortListener(): void {
+          if (abortHandler && params.signal) {
+            params.signal.removeEventListener('abort', abortHandler);
+            abortHandler = null;
+          }
+        }
 
         function enqueue(item: StreamChunk | null): void {
           queue.push(item);
@@ -128,6 +136,21 @@ export function createCodexInvoke(): CodexInvoke {
             }
           })) as unknown as () => void;
 
+          // Stop support: abort the sidecar process (Rust kills the child and
+          // emits a terminal "Cancelled by user" chunk, ending the stream).
+          const onAbort = () => {
+            invoke<void>('codex_cancel', { requestId }).catch(() => {
+              // The process may already have exited — the stream ends on its own.
+            });
+          };
+          abortHandler = onAbort;
+          const signal = params.signal;
+          if (signal?.aborted) {
+            onAbort();
+          } else {
+            signal?.addEventListener('abort', onAbort, { once: true });
+          }
+
           // Run Codex in the active workspace root (falls back to app dir).
           const cwd = useFileStore.getState().rootPath ?? undefined;
 
@@ -142,9 +165,11 @@ export function createCodexInvoke(): CodexInvoke {
                 api_key: params.apiKey,
                 cwd,
                 reasoning_effort: params.reasoningEffort,
+                sandbox_mode: params.sandboxMode,
               },
             });
           } catch (err) {
+            cleanupAbortListener();
             unlisten?.();
             enqueue({
               type: 'error',
@@ -166,6 +191,7 @@ export function createCodexInvoke(): CodexInvoke {
 
             const item = queue.shift()!;
             if (item === null) {
+              cleanupAbortListener();
               unlisten?.();
               return { done: true, value: undefined };
             }
@@ -173,6 +199,7 @@ export function createCodexInvoke(): CodexInvoke {
           },
 
           async return(): Promise<IteratorResult<StreamChunk>> {
+            cleanupAbortListener();
             unlisten?.();
             return { done: true, value: undefined };
           },

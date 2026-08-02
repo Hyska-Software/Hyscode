@@ -342,6 +342,7 @@ interface TauriCommands {
         api_key?: string;
         cwd?: string;
         reasoning_effort?: string;
+        sandbox_mode?: 'read-only' | 'workspace-write' | 'danger-full-access';
       };
     };
     ret: void;

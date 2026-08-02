@@ -115,6 +115,23 @@ export const CODEX_MODELS: AIModel[] = [
 
 export type CodexReasoningEffort = 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
 
+export type CodexSandboxMode = 'read-only' | 'workspace-write' | 'danger-full-access';
+
+/**
+ * Maps the harness agent mode to the Codex CLI native sandbox so mode
+ * restrictions are enforced, not just prompted:
+ * - chat / review: HysCode denies writes + terminal → read-only
+ * - plan: HysCode allows writing plan docs, denies code/terminal → workspace-write
+ * - build / debug: full autonomy → danger-full-access
+ */
+const AGENT_MODE_TO_SANDBOX: Record<string, CodexSandboxMode> = {
+  chat: 'read-only',
+  review: 'read-only',
+  plan: 'workspace-write',
+  build: 'danger-full-access',
+  debug: 'danger-full-access',
+};
+
 /**
  * Invokes the Codex sidecar via Tauri.
  * This function type is injected from the desktop app so the provider
@@ -127,6 +144,8 @@ export type CodexInvoke = (params: {
   prompt: string;
   cwd?: string;
   reasoningEffort?: CodexReasoningEffort;
+  sandboxMode?: CodexSandboxMode;
+  signal?: AbortSignal;
 }) => AsyncIterable<StreamChunk>;
 
 const REASONING_EFFORT_LEVELS: ReadonlySet<string> = new Set([
@@ -206,6 +225,8 @@ export class CodexProvider implements AIProvider {
       systemPrompt: params.systemPrompt,
       prompt,
       reasoningEffort: resolveReasoningEffort(params.thinking),
+      sandboxMode: AGENT_MODE_TO_SANDBOX[params.agentMode ?? ''] ?? 'danger-full-access',
+      signal: params.signal,
     });
   }
 }

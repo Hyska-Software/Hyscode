@@ -143,6 +143,12 @@ export interface ChatParams {
   signal?: AbortSignal;
   /** Thinking/reasoning configuration */
   thinking?: ThinkingConfig;
+  /**
+   * The harness agent mode (chat | build | review | debug | plan). Agentic
+   * sidecar providers (Codex) map it to their native sandbox so mode
+   * restrictions actually apply.
+   */
+  agentMode?: string;
 }
 
 // ─── Transport ──────────────────────────────────────────────────────────────

@@ -24,6 +24,7 @@ interface SidecarRequest {
   prompt: string;
   cwd?: string;
   reasoningEffort?: 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
+  sandboxMode?: 'read-only' | 'workspace-write' | 'danger-full-access';
 }
 
 interface SidecarEvent {
@@ -166,9 +167,10 @@ async function main(): Promise<void> {
       model: request.model,
       workingDirectory: request.cwd,
       skipGitRepoCheck: true,
-      // The sidecar runs without a UI — Codex must never block on its own
-      // approval prompts. HysCode's harness approval layer is the guardrail.
-      sandboxMode: 'danger-full-access',
+      // The sandbox maps the HysCode agent mode (chat/review/plan → restricted,
+      // build/debug → full access). The sidecar runs without a UI — Codex must
+      // never block on its own approval prompts, so approval stays 'never'.
+      sandboxMode: request.sandboxMode ?? 'danger-full-access',
       approvalPolicy: 'never',
       modelReasoningEffort: request.reasoningEffort,
     });

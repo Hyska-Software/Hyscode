@@ -32,6 +32,7 @@ type PrepareRequestInput = {
   provider?: AIProvider;
   model?: AIModel;
   modelId: string;
+  mode?: string;
   maxOutputTokens: number;
   thinking?: ThinkingConfig;
   enabled: boolean;
@@ -75,6 +76,7 @@ export class RequestPreparation {
         thinking: input.thinking,
         cachePrompt: input.enabled && capabilities?.promptCache === 'explicit-breakpoints',
         promptCacheKey,
+        agentMode: input.mode,
       },
       stablePrefixHash,
       promptCacheKey,
