@@ -29,6 +29,7 @@ import { ExtensionSettingsTab } from './tabs/extension-settings-tab';
 import { ExtensionCustomTab } from './tabs/extension-custom-tab';
 import { RulesTab } from './tabs/rules-tab';
 import { SubAgentsTab } from './tabs/sub-agents-tab';
+import { SpectraTab } from './tabs/spectra-tab';
 import { SettingsTree } from './settings-tree';
 import {
   BUILTIN_GROUPS,
@@ -50,6 +51,7 @@ const BUILTIN_TAB_CONTENT: Record<BuiltinTabIdAny, ReactNode> = {
   editor: <EditorTab />,
   theme: <ThemeTab />,
   languages: <LanguageServersTab />,
+  spectra: <SpectraTab />,
   terminal: <TerminalTab />,
   git: <GitTab />,
   ai: <AiTab />,

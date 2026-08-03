@@ -1,6 +1,6 @@
 import { useRef, useState, useEffect } from 'react';
-import { GitBranch, Circle, Blocks, Zap, Smartphone, Github } from 'lucide-react';
-import { useGitStore, useEditorStore, useExtensionStore } from '../../stores';
+import { GitBranch, Circle, Blocks, Zap, Smartphone, Github, Hexagon } from 'lucide-react';
+import { useGitStore, useEditorStore, useExtensionStore, useCommandStore } from '../../stores';
 import { useGithubStore } from '../../stores/github-store';
 import { useSettingsStore } from '../../stores/settings-store';
 import { useLspStore } from '../../stores/lsp-store';
@@ -150,6 +150,18 @@ export function StatusBar() {
           )}
           <span>UTF-8</span>
           <span>{activeTab?.language ?? 'Plain Text'}</span>
+          {activeLang === 'spectra' && (
+            <button
+              className="flex items-center gap-1 text-primary hover:text-foreground transition-colors"
+              title="SpectraLang — compiler actions"
+              onClick={() => {
+                void useCommandStore.getState().executeCommand('spectra.compilerActions');
+              }}
+            >
+              <Hexagon className="h-2.5 w-2.5" />
+              <span>Spectra</span>
+            </button>
+          )}
           {lspInfo && (
             <span
               className={`flex items-center gap-1 ${

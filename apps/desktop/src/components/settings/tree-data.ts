@@ -43,6 +43,7 @@ export type BuiltinTabId =
   | 'general'
   | 'ai'
   | 'languages'
+  | 'spectra'
   | 'mobile'
   | 'docker'
   | 'extensions'
@@ -131,6 +132,13 @@ export const BUILTIN_GROUPS: SettingsGroup[] = [
         label: 'Languages',
         icon: Braces,
         keywords: ['lsp', 'language server', 'binary'],
+      },
+      {
+        kind: 'leaf',
+        id: 'spectra',
+        label: 'SpectraLang',
+        icon: Code2,
+        keywords: ['spectralang', 'spectra', 'lsp', 'toolchain', 'compile', 'lint', 'api'],
       },
       {
         kind: 'leaf',
@@ -315,6 +323,7 @@ export const TAB_DEFAULT_KEYS: Record<BuiltinTabId, readonly SettingsKey[]> = {
     'skillsPath',
   ],
   languages: ['lspCustomBinaryPaths'],
+  spectra: ['spectraCliPath', 'spectraLintOnSave', 'spectraFormatOnSave'],
   mobile: ['flutterSdkPath', 'androidSdkPath', 'reactNativeAutoDetect'],
   docker: [
     'dockerSocketPath',

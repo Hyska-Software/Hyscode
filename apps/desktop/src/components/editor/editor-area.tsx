@@ -180,6 +180,11 @@ export function EditorArea() {
       clearExternalConflict(activeTab.filePath);
       const lang = detectLspLanguage(activeTab.filePath) ?? activeTab.language ?? 'plaintext';
       LspBridge.onFileSaved(activeTab.filePath, lang, currentContent);
+
+      // Native SpectraLang format-on-save (via the LSP formatting provider).
+      if (lang === 'spectra' && useSettingsStore.getState().spectraFormatOnSave) {
+        editorInstanceRef.current?.trigger('spectra', 'editor.action.formatDocument', undefined);
+      }
       // Record history snapshot (skip large files >1 MB, fire-and-forget)
       if (currentContent.length <= 1_048_576) {
         import('@tauri-apps/api/core').then(({ invoke }) => {

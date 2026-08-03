@@ -210,6 +210,14 @@ interface SettingsState {
   /** Per-server custom binary path overrides: serverId → absolute path to binary */
   lspCustomBinaryPaths: Record<string, string>;
 
+  // ─ SpectraLang ─
+  /** Path to the spectralang CLI binary ('' = use PATH) */
+  spectraCliPath: string;
+  /** Include lint warnings in Spectra diagnostics on save (via spectra-lsp) */
+  spectraLintOnSave: boolean;
+  /** Format Spectra files on save (via spectra-lsp) */
+  spectraFormatOnSave: boolean;
+
   // ─ Sub-agents ─
   /** Master switch — when false the spawn_subagent tool is disabled. */
   subAgentEnabled: boolean;

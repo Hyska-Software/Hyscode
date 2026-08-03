@@ -163,16 +163,12 @@ When a file is modified outside HysCode (e.g., by git, another editor):
 ## Language Support
 
 ### Built-in (Monaco)
-TypeScript, JavaScript, JSON, HTML, CSS, SCSS, Less, Markdown, XML, YAML, Python, Go, Rust, C, C++, Java, PHP, Ruby, Swift, Kotlin, SQL
+TypeScript, JavaScript, JSON, HTML, CSS, SCSS, Less, Markdown, XML, YAML, Python, Go, Rust, C, C++, Java, PHP, Ruby, Swift, Kotlin, SQL, SpectraLang
 
-### Language Server Protocol (LSP)
+Additional languages (Dockerfile, HCL, Elixir, Haskell, Zig, Nim, Clojure, OCaml, Makefile, INI, log, ASM, CMake, WAT, V, TOML, Protobuf, Spectra) get Monarch tokenizers + language configurations registered natively in `packages/lsp-client/src/language-registry.ts`.
 
-For MVP, LSP is **not** included. Monaco's built-in IntelliSense covers:
-- TypeScript/JavaScript: full type checking, go-to-definition, autocomplete
-- JSON: schema validation
-- HTML/CSS: tag/property autocomplete
-
-**Future (post-MVP)**: LSP client connecting to language servers via Tauri subprocess management.
+### Native language services (LSP)
+HysCode ships a built-in LSP client (`packages/lsp-client`) that starts language servers per file language via Tauri (`lsp_start`), including: TypeScript (`typescript-language-server`), Pyright, rust-analyzer, gopls, clangd, jdtls, csharp-ls, Intelephense, Ruby LSP, Dart, HTML/CSS/JSON (`vscode-langservers-extracted`) and SpectraLang (`spectra-lsp`). Server configs live in `packages/lsp-client/src/builtin-servers.ts`; `initializationOptions` from each config are sent in the LSP `initialize` request. IntelliSense (diagnostics, completion, hover, definition, formatting, symbols) is wired to Monaco via `MonacoLspAdapter`.
 
 ---
 

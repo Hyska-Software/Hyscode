@@ -41,11 +41,16 @@ export class LspConnection {
     return this._status;
   }
 
-  async initialize(rootUri: string, workspaceFolders?: Array<{ uri: string; name: string }>): Promise<InitializeResult> {
+  async initialize(
+    rootUri: string,
+    initializationOptions?: Record<string, unknown>,
+    workspaceFolders?: Array<{ uri: string; name: string }>,
+  ): Promise<InitializeResult> {
     const result = await this.sendRequest<InitializeResult>('initialize', {
       processId: null,
       rootUri,
       workspaceFolders: workspaceFolders ?? [{ uri: rootUri, name: 'workspace' }],
+      ...(initializationOptions !== undefined ? { initializationOptions } : {}),
       capabilities: {
         textDocument: {
           synchronization: { dynamicRegistration: false, willSave: false, didSave: true, willSaveWaitUntil: false },

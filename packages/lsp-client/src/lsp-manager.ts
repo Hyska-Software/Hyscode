@@ -140,7 +140,7 @@ export class LspManager {
       }
     });
 
-    await connection.initialize(resolvedRootUri);
+    await connection.initialize(resolvedRootUri, config.initializationOptions);
 
     const adapter = new MonacoLspAdapter(connection, this.monaco);
     // Register adapter for both the normalized key and the original languageId

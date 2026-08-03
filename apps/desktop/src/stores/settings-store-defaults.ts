@@ -120,6 +120,11 @@ export const SETTINGS_DEFAULTS = {
   // ─ Language Servers ─
   lspCustomBinaryPaths: {},
 
+  // ─ SpectraLang ─
+  spectraCliPath: 'spectralang',
+  spectraLintOnSave: true,
+  spectraFormatOnSave: false,
+
   // ─ Sub-agents ─
   subAgentEnabled: true,
   subAgentDefaultMode: 'build',

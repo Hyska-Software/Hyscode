@@ -4,6 +4,7 @@
 // and Monarch tokenizers for languages Monaco doesn't support natively.
 
 import { REACT_SNIPPETS } from './snippets/react-snippets';
+import { SPECTRA_SNIPPETS } from './snippets/spectra-snippets';
 
 type MonacoInstance = typeof import('monaco-editor');
 
@@ -367,6 +368,7 @@ export function registerAllLanguages(monaco: MonacoInstance): void {
   registerV(monaco);
   registerTypescriptReact(monaco);
   registerReactSnippets(monaco);
+  registerSpectraSnippets(monaco);
 
   // Register language configurations for languages Monaco supports
   // but doesn't have comment/bracket configs for
@@ -376,12 +378,15 @@ export function registerAllLanguages(monaco: MonacoInstance): void {
 
 // ── Individual Language Registrations ────────────────────────────────────────
 
-function registerReactSnippets(monaco: MonacoInstance) {
-  const languages = ['typescript', 'typescriptreact', 'javascript', 'javascriptreact'];
+function registerSnippetProvider(
+  monaco: MonacoInstance,
+  languages: string[],
+  snippets: Array<{ label: string; kind: number; detail: string; insertText: string }>,
+) {
   for (const lang of languages) {
     monaco.languages.registerCompletionItemProvider(lang, {
       provideCompletionItems: () => ({
-        suggestions: REACT_SNIPPETS.map((s) => ({
+        suggestions: snippets.map((s) => ({
           label: s.label,
           kind: s.kind,
           detail: s.detail,
@@ -392,6 +397,15 @@ function registerReactSnippets(monaco: MonacoInstance) {
       }),
     });
   }
+}
+
+function registerReactSnippets(monaco: MonacoInstance) {
+  const languages = ['typescript', 'typescriptreact', 'javascript', 'javascriptreact'];
+  registerSnippetProvider(monaco, languages, REACT_SNIPPETS);
+}
+
+function registerSpectraSnippets(monaco: MonacoInstance) {
+  registerSnippetProvider(monaco, ['spectra'], SPECTRA_SNIPPETS);
 }
 
 function registerTypescriptReact(monaco: MonacoInstance) {
@@ -500,30 +514,52 @@ function registerSpectra(monaco: MonacoInstance) {
   monaco.languages.setMonarchTokensProvider('spectra', {
     tokenizer: {
       root: [
+        // Comments
         [/\/\/.*$/, 'comment'],
         [/\/\*/, 'comment', '@blockComment'],
+
+        // Strings & character literals (f-strings must win over plain strings)
         [/f"/, 'string.interpolated', '@interpolatedString'],
         [/"/, 'string', '@string'],
         [/'(\\.|[^\\'])'/, 'string.quoted.single.char'],
+
+        // Numbers (decimal / hex / binary)
         [/\b(0[xX][0-9a-fA-F_]+|0[bB][01_]+|[0-9](?:[0-9_]*[0-9])?(?:\.[0-9_]+)?(?:[eE][+-]?[0-9_]+)?)\b/, 'number'],
+
+        // Declarations: fn / struct·enum·trait·module / impl (name follows the keyword)
         [/\b(fn)\s+([A-Za-z_][A-Za-z0-9_]*)/, ['keyword.declaration.function', 'entity.name.function']],
         [/\b(struct|enum|trait|module)\s+([A-Za-z_][A-Za-z0-9_]*)/, ['keyword.declaration.type', 'entity.name.type']],
         [/\b(impl)\s+([A-Za-z_][A-Za-z0-9_:<>]*)/, ['keyword.declaration.impl', 'entity.name.type']],
+
+        // std.api namespace — the whole dotted path (std.api.http.Request) is a
+        // single token so names are never split across two colors.
+        [/\b(?:std\.api|spectra\.api|spectra\.std\.api)(?:\.[A-Za-z_][A-Za-z0-9_]*)*/, 'support.namespace.std-api'],
+        [/\b(?:get|post|put|patch|delete|options|route_add|route_match|match_param|match_query)\b/, 'support.function.std-api.routing'],
+        [/\b(?:text|json|bytes|status|with_header|into_response|register_sync|register_async|dispatch_sync|dispatch_async)\b/, 'support.function.std-api.handler'],
+        [/\b(?:policy|permissive|allow_origin|allow_method|allow_header|expose_header|allow_credentials|max_age|middleware|is_preflight|preflight|apply|allowed_origin)\b/, 'support.function.std-api.cors'],
+        [/\b(?:chain|chain_new|chain_len|register_sync_short_circuit|register_async_short_circuit|use_sync|use_async|execute_sync|execute_async|last_trace|trace_len|trace_event|trace_short_circuited)\b/, 'support.function.std-api.middleware'],
+
+        // Keywords
         [/\b(if|elif|elseif|else|unless|match|switch|case|cond|while|do|for|foreach|in|of|repeat|until|loop|return|break|continue|yield|goto|let|await)\b/, 'keyword.control'],
         [/\b(module|import|export|fn|async|struct|enum|impl|class|trait)\b/, 'keyword.declaration'],
         [/\b(pub|mut|internal|Self|self)\b/, 'storage.modifier'],
         [/\b(true|false)\b/, 'constant.language'],
         [/\b(type|const|static|as|dyn)\b/, 'keyword'],
+
+        // Types: primitives first, then capitalized names (incl. generics like Foo<Bar, Baz>)
         [/\b(int|float|double|bool|string|char|void|unit|Task|Stream)\b/, 'support.type.primitive'],
-        [/\b[A-Z][A-Za-z0-9_]*(?:<[A-Za-z0-9_,: <>]+>)?\b/, 'entity.name.type'],
-        [/\b(?:std\.api|spectra\.api|spectra\.std\.api)(?:\.[a-z_]+)*\b/, 'support.namespace.std-api'],
-        [/\b(?:get|post|put|patch|delete|options|route_add|route_match|match_param|match_query)\b/, 'support.function.std-api.routing'],
-        [/\b(?:text|json|bytes|status|with_header|into_response|register_sync|register_async|dispatch_sync|dispatch_async)\b/, 'support.function.std-api.handler'],
-        [/\b(?:policy|permissive|allow_origin|allow_method|allow_header|expose_header|allow_credentials|max_age|middleware|is_preflight|preflight|apply|allowed_origin)\b/, 'support.function.std-api.cors'],
-        [/\b(?:chain|chain_new|chain_len|register_sync_short_circuit|register_async_short_circuit|use_sync|use_async|execute_sync|execute_async|last_trace|trace_len|trace_event|trace_short_circuited)\b/, 'support.function.std-api.middleware'],
-        [/(==|!=|<=|>=|&&|\|\||\.\.=|\.\.|::|->|\+=|-=|\*=|\/=|%=|\+|-|\*|\/|%|<|>|=|\?|!|&)/, 'operator'],
+        [/[A-Z][A-Za-z0-9_]*(?:<[A-Za-z0-9_,: <>]+>)?/, 'entity.name.type'],
+
+        // Operators (multi-char before single-char so `=>`, `..`, `::` win)
+        [/(\.\.=|\.\.|=>|==|!=|<=|>=|&&|\|\||::|->|\+=|-=|\*=|\/=|%=|\+|-|\*|\/|%|<|>|=|\?|!|&)/, 'operator'],
+        [/\./, 'operator'],
+
+        // Brackets & delimiters
         [/[{}()\[\]]/, '@brackets'],
         [/[;,]/, 'delimiter'],
+
+        // Fallback — any other identifier is a plain variable (single color)
+        [/[a-zA-Z_][a-zA-Z0-9_]*/, 'variable'],
       ],
       blockComment: [
         [/\*\//, 'comment', '@pop'],
@@ -542,7 +578,11 @@ function registerSpectra(monaco: MonacoInstance) {
         [/"/, 'string.interpolated', '@pop'],
       ],
       interpolation: [
-        [/[^}]+/, 'meta.interpolation'],
+        [/[^}"\\]+/, 'meta.interpolation'],
+        [/\\./, 'constant.character.escape'],
+        // Bail out of the interpolation state on an unterminated brace so the
+        // rest of the file never leaks into the interpolation color.
+        [/"/, 'string.interpolated', '@pop'],
         [/\}/, 'meta.interpolation', '@pop'],
       ],
     },

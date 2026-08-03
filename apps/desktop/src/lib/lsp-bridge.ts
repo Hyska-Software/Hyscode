@@ -77,7 +77,23 @@ class LspBridgeImpl {
       const store = useLspStore.getState();
       if (store.disabledServers.has(server.id)) continue;
       const customPath = customPaths[server.id];
-      const config = customPath ? { ...server, command: customPath } : server;
+      let config = customPath ? { ...server, command: customPath } : server;
+
+      // SpectraLang: feed the native settings (CLI path + lint on save) to spectra-lsp
+      // via the LSP initialize request so the server's toolchain integration is live.
+      if (server.id === 'builtin-spectra') {
+        const settings = useSettingsStore.getState();
+        config = {
+          ...config,
+          initializationOptions: {
+            spectra: {
+              cliPath: settings.spectraCliPath || 'spectralang',
+              lintOnSave: settings.spectraLintOnSave,
+            },
+          },
+        };
+      }
+
       this.manager.registerServerConfig(config);
     }
 

@@ -42,6 +42,7 @@ import { saveProjectState, switchProject, closeCurrentProject } from './lib/proj
 import { isLightTheme } from './lib/monaco-themes';
 import { tauriInvoke } from './lib/tauri-invoke';
 import { chooseDefaultGitRemote, shouldConfirmGitDiscard } from './lib/git-workflow';
+import { registerSpectraSupport } from './lib/spectra-language';
 import type { AgentMode, ChatMessage } from './stores/agent-store';
 
 // ─── Open tabs persistence ───────────────────────────────────────────────────
@@ -921,6 +922,9 @@ export function App() {
       },
       { category: 'Preferences', key: 'ctrl+k ctrl+t' },
     );
+
+    // ── Native SpectraLang support (toolchain commands + keybindings) ────
+    disposers.push(registerSpectraSupport());
 
     return () => {
       for (const dispose of disposers) dispose();
