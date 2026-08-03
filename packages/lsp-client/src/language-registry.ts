@@ -205,6 +205,10 @@ const EXTENSION_MAP: Record<string, string> = {
   // Wasm
   wat: 'wat',
   wast: 'wat',
+
+  // SpectraLang
+  spectra: 'spectra',
+  spc: 'spectra',
 };
 
 // Filename-based detection (no extension or special filenames)
@@ -343,6 +347,7 @@ export function enableNativeTypeScriptValidation(monaco: MonacoInstance) {
 export function registerAllLanguages(monaco: MonacoInstance): void {
   // Register languages that Monaco doesn't have built-in
   registerToml(monaco);
+  registerSpectra(monaco);
   registerDockerfile(monaco);
   registerHcl(monaco);
   registerProtobuf(monaco);
@@ -481,6 +486,96 @@ function registerToml(monaco: MonacoInstance) {
       { open: '[', close: ']' },
       { open: '{', close: '}' },
     ],
+  });
+}
+
+function registerSpectra(monaco: MonacoInstance) {
+  monaco.languages.register({
+    id: 'spectra',
+    extensions: ['.spectra', '.spc'],
+    aliases: ['Spectra', 'SpectraLang'],
+    mimetypes: ['text/x-spectra'],
+  });
+
+  monaco.languages.setMonarchTokensProvider('spectra', {
+    tokenizer: {
+      root: [
+        [/\/\/.*$/, 'comment'],
+        [/\/\*/, 'comment', '@blockComment'],
+        [/f"/, 'string.interpolated', '@interpolatedString'],
+        [/"/, 'string', '@string'],
+        [/'(\\.|[^\\'])'/, 'string.quoted.single.char'],
+        [/\b(0[xX][0-9a-fA-F_]+|0[bB][01_]+|[0-9](?:[0-9_]*[0-9])?(?:\.[0-9_]+)?(?:[eE][+-]?[0-9_]+)?)\b/, 'number'],
+        [/\b(fn)\s+([A-Za-z_][A-Za-z0-9_]*)/, ['keyword.declaration.function', 'entity.name.function']],
+        [/\b(struct|enum|trait|module)\s+([A-Za-z_][A-Za-z0-9_]*)/, ['keyword.declaration.type', 'entity.name.type']],
+        [/\b(impl)\s+([A-Za-z_][A-Za-z0-9_:<>]*)/, ['keyword.declaration.impl', 'entity.name.type']],
+        [/\b(if|elif|elseif|else|unless|match|switch|case|cond|while|do|for|foreach|in|of|repeat|until|loop|return|break|continue|yield|goto|let|await)\b/, 'keyword.control'],
+        [/\b(module|import|export|fn|async|struct|enum|impl|class|trait)\b/, 'keyword.declaration'],
+        [/\b(pub|mut|internal|Self|self)\b/, 'storage.modifier'],
+        [/\b(true|false)\b/, 'constant.language'],
+        [/\b(type|const|static|as|dyn)\b/, 'keyword'],
+        [/\b(int|float|double|bool|string|char|void|unit|Task|Stream)\b/, 'support.type.primitive'],
+        [/\b[A-Z][A-Za-z0-9_]*(?:<[A-Za-z0-9_,: <>]+>)?\b/, 'entity.name.type'],
+        [/\b(?:std\.api|spectra\.api|spectra\.std\.api)(?:\.[a-z_]+)*\b/, 'support.namespace.std-api'],
+        [/\b(?:get|post|put|patch|delete|options|route_add|route_match|match_param|match_query)\b/, 'support.function.std-api.routing'],
+        [/\b(?:text|json|bytes|status|with_header|into_response|register_sync|register_async|dispatch_sync|dispatch_async)\b/, 'support.function.std-api.handler'],
+        [/\b(?:policy|permissive|allow_origin|allow_method|allow_header|expose_header|allow_credentials|max_age|middleware|is_preflight|preflight|apply|allowed_origin)\b/, 'support.function.std-api.cors'],
+        [/\b(?:chain|chain_new|chain_len|register_sync_short_circuit|register_async_short_circuit|use_sync|use_async|execute_sync|execute_async|last_trace|trace_len|trace_event|trace_short_circuited)\b/, 'support.function.std-api.middleware'],
+        [/(==|!=|<=|>=|&&|\|\||\.\.=|\.\.|::|->|\+=|-=|\*=|\/=|%=|\+|-|\*|\/|%|<|>|=|\?|!|&)/, 'operator'],
+        [/[{}()\[\]]/, '@brackets'],
+        [/[;,]/, 'delimiter'],
+      ],
+      blockComment: [
+        [/\*\//, 'comment', '@pop'],
+        [/[^*/]+/, 'comment'],
+        [/./, 'comment'],
+      ],
+      string: [
+        [/[^"\\]+/, 'string'],
+        [/\\./, 'constant.character.escape'],
+        [/"/, 'string', '@pop'],
+      ],
+      interpolatedString: [
+        [/[^"\\{]+/, 'string.interpolated'],
+        [/\\./, 'constant.character.escape'],
+        [/\{/, 'meta.interpolation', '@interpolation'],
+        [/"/, 'string.interpolated', '@pop'],
+      ],
+      interpolation: [
+        [/[^}]+/, 'meta.interpolation'],
+        [/\}/, 'meta.interpolation', '@pop'],
+      ],
+    },
+  } as import('monaco-editor').languages.IMonarchLanguage);
+
+  monaco.languages.setLanguageConfiguration('spectra', {
+    comments: { lineComment: '//', blockComment: ['/*', '*/'] },
+    brackets: [
+      ['{', '}'],
+      ['[', ']'],
+      ['(', ')'],
+    ],
+    autoClosingPairs: [
+      { open: '{', close: '}', notIn: ['string', 'comment'] },
+      { open: '[', close: ']', notIn: ['string', 'comment'] },
+      { open: '(', close: ')', notIn: ['string', 'comment'] },
+      { open: '"', close: '"', notIn: ['string', 'comment'] },
+      { open: "'", close: "'", notIn: ['string', 'comment'] },
+      { open: '`', close: '`', notIn: ['string', 'comment'] },
+    ],
+    surroundingPairs: [
+      { open: '{', close: '}' },
+      { open: '[', close: ']' },
+      { open: '(', close: ')' },
+      { open: '"', close: '"' },
+      { open: "'", close: "'" },
+      { open: '`', close: '`' },
+    ],
+    wordPattern: /(-?\d*\.?\d+([eE][\-+]?\d+)?[fFdD]?|\b(0[xX][0-9a-fA-F]+|\d+)[uUlL]*\b|\b[A-Za-z_][A-Za-z0-9_]*\b)/,
+    indentationRules: {
+      increaseIndentPattern: /^.*(\{[^"']*|\([^)"']*)$/,
+      decreaseIndentPattern: /^\s*[\}\)].*$/,
+    },
   });
 }
 

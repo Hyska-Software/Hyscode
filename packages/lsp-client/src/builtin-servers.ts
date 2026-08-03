@@ -263,6 +263,29 @@ export const BUILTIN_SERVERS: BuiltinServerConfig[] = [
       pnpm: 'pnpm add -g vscode-langservers-extracted',
     },
   },
+
+  // ── 12. SpectraLang ─────────────────────────────────────────────────────
+  {
+    id: 'builtin-spectra',
+    displayName: 'Spectra Language Server',
+    description: 'SpectraLang support with diagnostics, completion, hover, formatting, and symbols',
+    languageIds: ['spectra'],
+    command: 'spectra-lsp',
+    args: [],
+    rootPatterns: ['spectra.toml', 'Spectra.toml'],
+    initializationOptions: {
+      spectra: {
+        cliPath: 'spectralang',
+        lintOnSave: true,
+      },
+    },
+    enabledByDefault: true,
+    cargoCrate: 'spectra-lsp',
+    installInstructions: {
+      manual: 'Install the SpectraLang toolchain from the official installer (adds spectralang and spectra-lsp to PATH), or build locally with: cargo build -p spectra-lsp',
+      cargo: 'cargo install --path tools/spectra-lsp',
+    },
+  },
 ];
 
 /**
