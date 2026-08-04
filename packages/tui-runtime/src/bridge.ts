@@ -249,7 +249,10 @@ export class TuiBridge {
     const params = normalizeSendParams(rawParams);
     if (!this.harness) throw new Error('Runtime is not initialized.');
     if (this.activeRun) throw new Error('A turn is already running.');
-    const history = params.history ?? this.session?.messages ?? [];
+    // The harness owns and mutates its working history while it runs. Keep it
+    // isolated from the persisted session array so persistTurn can append the
+    // completed turn exactly once.
+    const history = [...(params.history ?? this.session?.messages ?? [])];
     this.activeTurnId = null;
     this.activeTurnMessages = [];
     const run = this.harness.run({ userMessage: params.message, history, images: params.images });

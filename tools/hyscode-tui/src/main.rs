@@ -223,7 +223,7 @@ fn resolve_bridge_command(repo_root: &Path) -> Result<(PathBuf, Vec<String>, Pat
     ))
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum TranscriptKind {
     User,
     Assistant,
@@ -234,6 +234,7 @@ pub(crate) enum TranscriptKind {
     Error,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct TranscriptItem {
     pub(crate) kind: TranscriptKind,
     pub(crate) text: String,
@@ -317,6 +318,7 @@ struct App {
     pending_requests: HashMap<String, String>,
     pub(crate) current_session_id: Option<String>,
     last_user_message: Option<String>,
+    live_stream_start: Option<usize>,
     config_path: Option<String>,
     pub(crate) focus: Focus,
     pub(crate) overlay: Overlay,
@@ -355,6 +357,7 @@ impl App {
             pending_requests: HashMap::new(),
             current_session_id: None,
             last_user_message: None,
+            live_stream_start: None,
             config_path: options.config_path.clone(),
             focus: Focus::Composer,
             overlay: Overlay::None,
@@ -586,6 +589,7 @@ impl App {
         };
         self.current_session_id = Some(session_id.to_string());
         self.transcript.clear();
+        self.live_stream_start = None;
         if let Some(messages) = session.get("messages").and_then(Value::as_array) {
             for message in messages {
                 self.apply_session_message(message);
@@ -707,6 +711,7 @@ impl App {
         {
             "turn_start" => {
                 self.running = true;
+                self.live_stream_start = None;
                 let iteration = payload
                     .get("iteration")
                     .and_then(Value::as_u64)
@@ -715,7 +720,9 @@ impl App {
             }
             "stream_chunk" => self.apply_stream_chunk(payload.get("chunk").unwrap_or(&Value::Null)),
             "transcript_message" => {
-                self.apply_transcript_blocks(payload.get("blocks").unwrap_or(&Value::Null))
+                if payload.get("role").and_then(Value::as_str) == Some("assistant") {
+                    self.replace_live_transcript(payload.get("blocks").unwrap_or(&Value::Null));
+                }
             }
             "assistant_segment_end" => self.push(TranscriptKind::Assistant, String::new()),
             "tool_call_start" => {
@@ -766,6 +773,7 @@ impl App {
             }
             "turn_end" => {
                 self.running = false;
+                self.live_stream_start = None;
                 self.status = payload
                     .get("reason")
                     .and_then(Value::as_str)
@@ -785,14 +793,14 @@ impl App {
             .and_then(Value::as_str)
             .unwrap_or_default()
         {
-            "text_delta" => self.append_last(
+            "text_delta" => self.append_live(
                 TranscriptKind::Assistant,
                 chunk
                     .get("text")
                     .and_then(Value::as_str)
                     .unwrap_or_default(),
             ),
-            "thinking_delta" => self.append_last(
+            "thinking_delta" => self.append_live(
                 TranscriptKind::Thinking,
                 chunk
                     .get("text")
@@ -801,7 +809,10 @@ impl App {
             ),
             "tool_call_start" => {
                 let name = chunk.get("name").and_then(Value::as_str).unwrap_or("tool");
-                self.push(TranscriptKind::Tool, format!("{name} (provider tool call)"));
+                self.append_live(
+                    TranscriptKind::Tool,
+                    &format!("{name} (provider tool call)"),
+                );
             }
             "error" => {
                 let error = chunk
@@ -815,48 +826,17 @@ impl App {
     }
 
     fn apply_transcript_blocks(&mut self, blocks: &Value) {
-        let Some(blocks) = blocks.as_array() else {
-            return;
-        };
-        for block in blocks {
-            match block
-                .get("type")
-                .and_then(Value::as_str)
-                .unwrap_or_default()
-            {
-                "text" => self.append_last(
-                    TranscriptKind::Assistant,
-                    block
-                        .get("text")
-                        .and_then(Value::as_str)
-                        .unwrap_or_default(),
-                ),
-                "thinking" => self.append_last(
-                    TranscriptKind::Thinking,
-                    block
-                        .get("thinking")
-                        .and_then(Value::as_str)
-                        .unwrap_or_default(),
-                ),
-                "tool_call" => self.push(
-                    TranscriptKind::Tool,
-                    format!(
-                        "{} {}",
-                        block.get("name").and_then(Value::as_str).unwrap_or("tool"),
-                        format_json(block.get("input").unwrap_or(&Value::Null))
-                    ),
-                ),
-                "tool_result" => self.push(
-                    TranscriptKind::Result,
-                    block
-                        .get("output")
-                        .and_then(Value::as_str)
-                        .unwrap_or_default()
-                        .to_string(),
-                ),
-                _ => {}
-            }
+        for (kind, text) in transcript_block_items(blocks) {
+            self.append_last(kind, &text);
         }
+    }
+
+    fn replace_live_transcript(&mut self, blocks: &Value) {
+        replace_live_transcript_items(&mut self.transcript, &mut self.live_stream_start, blocks);
+        while self.transcript.len() > 500 {
+            self.transcript.pop_front();
+        }
+        self.scroll = 0;
     }
 
     fn apply_interaction(&mut self, payload: &Value) {
@@ -1727,8 +1707,31 @@ impl App {
         self.transcript.push_back(TranscriptItem { kind, text });
         while self.transcript.len() > 500 {
             self.transcript.pop_front();
+            if let Some(start) = self.live_stream_start.as_mut() {
+                *start = start.saturating_sub(1);
+            }
         }
         self.scroll = 0;
+    }
+
+    fn append_live(&mut self, kind: TranscriptKind, text: &str) {
+        if text.is_empty() {
+            return;
+        }
+        let start = *self.live_stream_start.get_or_insert(self.transcript.len());
+        let has_live_item = self.transcript.len() > start;
+        if has_live_item {
+            if let Some(last) = self.transcript.back_mut() {
+                if std::mem::discriminant(&last.kind) == std::mem::discriminant(&kind) {
+                    last.text.push_str(text);
+                    if last.text.len() > MAX_TRANSCRIPT_CHARS {
+                        last.text = last.text[last.text.len() - MAX_TRANSCRIPT_CHARS..].to_string();
+                    }
+                    return;
+                }
+            }
+        }
+        self.push(kind, text.to_string());
     }
 
     fn append_last(&mut self, kind: TranscriptKind, text: &str) {
@@ -1865,6 +1868,65 @@ fn command_argument(input: &str, command: &str) -> String {
         .trim_matches('"')
         .trim_matches('\'')
         .to_string()
+}
+
+fn transcript_block_items(blocks: &Value) -> Vec<(TranscriptKind, String)> {
+    let Some(blocks) = blocks.as_array() else {
+        return Vec::new();
+    };
+    blocks
+        .iter()
+        .filter_map(|block| match block.get("type").and_then(Value::as_str) {
+            Some("text") => Some((
+                TranscriptKind::Assistant,
+                block
+                    .get("text")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_string(),
+            )),
+            Some("thinking") => Some((
+                TranscriptKind::Thinking,
+                block
+                    .get("thinking")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_string(),
+            )),
+            Some("tool_call") => Some((
+                TranscriptKind::Tool,
+                format!(
+                    "{} {}",
+                    block.get("name").and_then(Value::as_str).unwrap_or("tool"),
+                    format_json(block.get("input").unwrap_or(&Value::Null))
+                ),
+            )),
+            Some("tool_result") => Some((
+                TranscriptKind::Result,
+                block
+                    .get("output")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_string(),
+            )),
+            _ => None,
+        })
+        .collect()
+}
+
+fn replace_live_transcript_items(
+    transcript: &mut VecDeque<TranscriptItem>,
+    live_stream_start: &mut Option<usize>,
+    blocks: &Value,
+) {
+    if let Some(start) = live_stream_start.take() {
+        transcript.truncate(start.min(transcript.len()));
+    }
+    for (kind, text) in transcript_block_items(blocks) {
+        if !text.is_empty() {
+            transcript.push_back(TranscriptItem { kind, text });
+        }
+    }
 }
 
 fn parse_model_option(value: &Value) -> Option<ModelOption> {
@@ -2010,10 +2072,11 @@ mod tests {
     use super::{
         command_argument, delete_previous_word, format_diagnostic, format_json,
         format_project_summary, normalize_input_key, parse_bridge_line, parse_model_option,
-        TranscriptKind,
+        replace_live_transcript_items, TranscriptItem, TranscriptKind,
     };
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     use serde_json::json;
+    use std::collections::VecDeque;
 
     #[test]
     fn parses_only_non_empty_valid_ndjson_frames() {
@@ -2065,6 +2128,51 @@ mod tests {
         assert_eq!(model.name, "Claude Sonnet");
         assert_eq!(model.provider, "anthropic");
         assert!(parse_model_option(&json!({ "name": "missing id" })).is_none());
+    }
+
+    #[test]
+    fn replaces_live_stream_content_with_one_canonical_transcript() {
+        let mut transcript = VecDeque::from([
+            TranscriptItem {
+                kind: TranscriptKind::User,
+                text: "ola".to_string(),
+            },
+            TranscriptItem {
+                kind: TranscriptKind::Thinking,
+                text: "reasoning".to_string(),
+            },
+            TranscriptItem {
+                kind: TranscriptKind::Assistant,
+                text: "Olá!".to_string(),
+            },
+        ]);
+        let mut live_stream_start = Some(1);
+        replace_live_transcript_items(
+            &mut transcript,
+            &mut live_stream_start,
+            &json!([
+                { "type": "thinking", "thinking": "reasoning" },
+                { "type": "text", "text": "Olá!" }
+            ]),
+        );
+        assert_eq!(live_stream_start, None);
+        assert_eq!(
+            transcript,
+            VecDeque::from([
+                TranscriptItem {
+                    kind: TranscriptKind::User,
+                    text: "ola".to_string(),
+                },
+                TranscriptItem {
+                    kind: TranscriptKind::Thinking,
+                    text: "reasoning".to_string(),
+                },
+                TranscriptItem {
+                    kind: TranscriptKind::Assistant,
+                    text: "Olá!".to_string(),
+                },
+            ])
+        );
     }
 
     #[test]

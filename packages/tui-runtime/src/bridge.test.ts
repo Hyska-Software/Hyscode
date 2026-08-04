@@ -351,9 +351,9 @@ describe('shared harness bridge protocol', () => {
         method: 'session_load',
         params: { id: initialized.session?.id },
       }));
-      expect(session?.messages.some((message) => message.role === 'user')).toBe(true);
-      expect(session?.messages.some((message) => message.role === 'assistant')).toBe(true);
-      expect(session?.messages.some((message) => message.role === 'tool')).toBe(true);
+      expect(session?.messages).toHaveLength(5);
+      expect(session?.messages.filter((message) => message.role === 'user')).toHaveLength(1);
+      expect(session?.messages.filter((message) => message.role === 'tool')).toHaveLength(1);
     } finally {
       registry.unregister('openai');
       await bridge.handle({ id: 'shutdown', method: 'shutdown', params: {} });
