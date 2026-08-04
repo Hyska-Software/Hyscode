@@ -67,6 +67,32 @@ interface ChatParams {
 
 ---
 
+## Thinking and Reasoning Controls
+
+Thinking is a model capability, not a provider-wide assumption. `AIModel.thinkingVariants`
+declares the native wire-format kind, the supported `ThinkingConfig.level` values, and
+the default level. Models without this field (or with `kind: 'none'`) do not expose
+thinking controls.
+
+`ThinkingConfig.level` is the shared effort contract. Clients must keep using that
+field rather than introducing a separate generic `effort` property. Optional
+`mode`, `budgetTokens`, `type`, and `display` fields preserve provider-native
+configuration when a provider needs them. The harness passes the configuration to
+the selected provider on the next turn.
+
+Thinking settings are persisted by the stable `${providerId}::${modelId}` key. The
+runtime validates an enabled level against the selected model's declared variants;
+unsupported levels are rejected for explicit changes and invalid persisted values
+are safely disabled. The TUI receives both the model catalog and the active
+configuration in `runtime_ready`, then uses `set_config` for visual changes.
+
+The desktop and TUI share the default settings file. The desktop imports the active
+provider, active model, and per-model thinking settings before its first export on
+startup, so a TUI change is visible on the next desktop launch. A TUI started with
+`--config` uses an isolated settings path by design.
+
+---
+
 ## Stream Protocol
 
 All providers normalize to a unified streaming protocol:

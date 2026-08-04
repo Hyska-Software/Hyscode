@@ -1,0 +1,20 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "composite": true,
+    "outDir": "dist",
+    "rootDir": "src",
+    "baseUrl": ".",
+    "paths": {
+      "@hyscode/ai-providers": ["../ai-providers/src/index.ts"],
+      "@hyscode/agent-harness": ["../agent-harness/src/index.ts"],
+      "@hyscode/mcp-client": ["../mcp-client/src/index.ts"]
+    }
+  },
+  "include": ["src"],
+  "references": [
+    { "path": "../ai-providers" },
+    { "path": "../agent-harness" },
+    { "path": "../mcp-client" }
+  ]
+}

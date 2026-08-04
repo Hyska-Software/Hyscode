@@ -2313,7 +2313,9 @@ Investigate the error, fix the underlying issue in the affected files, and verif
     return {
       enabled: true,
       level: cfg.level,
+      mode: cfg.mode,
       budgetTokens: cfg.budgetTokens,
+      type: cfg.type,
       display: cfg.display,
     };
   }

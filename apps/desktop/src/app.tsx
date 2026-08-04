@@ -33,6 +33,7 @@ import { useEffect, useRef, useCallback } from 'react';
 import { pickFolder, pickFile } from './lib/tauri-dialog';
 import { initProviders } from './lib/init-providers';
 import { HarnessBridge } from './lib/harness-bridge';
+import { startSharedConfigSync } from './lib/shared-config-sync';
 import { LspBridge } from './lib/lsp-bridge';
 import { startExtensionLspSync } from './lib/extension-lsp-bridge';
 import { getViewerType } from './lib/utils';
@@ -305,6 +306,10 @@ export function App() {
   useEffect(() => {
     initProviders().catch(console.error);
   }, []);
+
+  // Keep the provider, agent, approval, MCP, skills, and retry settings in a
+  // shared JSON contract consumed by the standalone Rust TUI runtime.
+  useEffect(() => startSharedConfigSync(), []);
 
   // Check for updates silently after a short delay (non-blocking)
   useEffect(() => {

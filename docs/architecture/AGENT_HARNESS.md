@@ -112,6 +112,27 @@ propagated to provider streams, tool execution, approvals, mode switches, and
 agent questions through a shared `AbortSignal`. A harness rejects concurrent
 turns rather than allowing their events to interleave.
 
+### Thinking Configuration and Client Synchronization
+
+The harness accepts the shared `ThinkingConfig` contract from the provider layer.
+Thinking is enabled only when the selected model declares compatible
+`thinkingVariants`; `level` remains the canonical effort field, while `mode`,
+`budgetTokens`, `type`, and `display` carry provider-native options when needed.
+The harness applies the selected configuration to the next provider request and
+does not create a separate TUI settings store.
+
+The TUI runtime exposes the model capability metadata and the current value in its
+additive `runtime_ready` payload. Visual `/thinking` selections call `set_config`
+with the existing `providerId`, `modelId`, and `thinking` fields. Runtime validation
+rejects unsupported enabled levels and normalizes incompatible persisted values to
+a safe disabled state.
+
+Both clients persist per-model settings under `${providerId}::${modelId}` in the
+default shared settings file. On desktop startup, shared settings are read before
+the initial export; active provider, active model, and thinking settings are
+imported while desktop-only settings remain local. Synchronization is launch-based,
+without a live file watcher, and a TUI `--config` path remains isolated.
+
 ---
 
 ## SDD (Spec-Driven Development) Engine

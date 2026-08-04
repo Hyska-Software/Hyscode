@@ -49,8 +49,21 @@ export interface CustomModel {
 
 export interface ModelThinkingConfig {
   enabled: boolean;
-  level?: 'low' | 'medium' | 'high' | 'enabled' | 'disabled' | 'none' | 'minimal' | 'xhigh' | 'max';
+  level?:
+    | 'low'
+    | 'medium'
+    | 'high'
+    | 'enabled'
+    | 'disabled'
+    | 'none'
+    | 'minimal'
+    | 'xhigh'
+    | 'max'
+    | 'adaptive'
+    | 'default';
+  mode?: 'standard' | 'pro';
   budgetTokens?: number;
+  type?: 'enabled' | 'adaptive' | 'disabled';
   display?: 'summarized' | 'omitted';
 }
 
