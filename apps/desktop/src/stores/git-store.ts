@@ -139,6 +139,8 @@ interface GitState {
 
   // Actions
   refresh: () => Promise<void>;
+  /** Clear repository data before another project becomes active. */
+  resetForProjectSwitch: () => void;
   stageFiles: (paths: string[]) => Promise<void>;
   stageAll: () => Promise<void>;
   unstageFiles: (paths: string[]) => Promise<void>;
@@ -228,6 +230,7 @@ function resetRepositoryState(state: GitState, repositoryState: GitState['reposi
   state.graphLog = [];
   state.stashes = [];
   state.isLoading = false;
+  state.commitMessage = '';
 }
 
 function getRootPath(): string | null {
@@ -322,6 +325,11 @@ export const useGitStore = create<GitState>()(
         });
       }
     },
+
+    resetForProjectSwitch: () =>
+      set((state) => {
+        resetRepositoryState(state, 'checking');
+      }),
 
     stageFiles: async (paths) => {
       const rootPath = getRootPath();
@@ -882,10 +890,8 @@ useFileStore.subscribe((state) => {
     _prevRootPath = rootPath;
     useGitStore.getState().stopAutoRefresh();
     if (rootPath) {
-      useGitStore.setState({
-        repositoryState: 'checking',
-        repositoryError: null,
-        isGitRepo: false,
+      useGitStore.setState((state) => {
+        resetRepositoryState(state, 'checking');
       });
       void useGitStore
         .getState()

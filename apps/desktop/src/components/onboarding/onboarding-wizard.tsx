@@ -53,6 +53,16 @@ const THEME_OPTIONS: ThemeOption[] = [
     muted: '#8e8ea0',
   },
   {
+    id: 'aura',
+    name: 'Aura',
+    desc: 'Purple focus with mint controls',
+    bg: '#110f18',
+    surface: '#15141b',
+    accent: '#a277ff',
+    fg: '#edecee',
+    muted: '#adacae',
+  },
+  {
     id: 'hyscode-light',
     name: 'Light',
     desc: 'Editor-matched light',

@@ -30,6 +30,29 @@ describe('agent tab turn ownership', () => {
     expect(useAgentStore.getState().openTabs).toHaveLength(1);
   });
 
+  it('resets every project-owned chat tab and returns to a clean conversation', () => {
+    useAgentStore.getState().addMessage({
+      id: 'old-message',
+      role: 'assistant',
+      content: 'Previous project response',
+      timestamp: 0,
+    });
+    useAgentStore.getState().openNewTab('build');
+    useAgentStore.getState().setStreaming(true);
+    useAgentStore.getState().setConnectionState('degraded', 'stale project');
+
+    useAgentStore.getState().resetProjectState();
+
+    const state = useAgentStore.getState();
+    expect(state.openTabs).toEqual([{ id: '__default__', title: 'New Chat' }]);
+    expect(state.activeTabId).toBe('__default__');
+    expect(state.tabStates).toEqual({});
+    expect(state.messages).toEqual([]);
+    expect(state.conversationId).toBeNull();
+    expect(state.isStreaming).toBe(false);
+    expect(state.connectionState).toBe('idle');
+  });
+
   it('tracks degraded connection and recoverable error state per tab', () => {
     useAgentStore.getState().setConnectionState('degraded', 'Stream interrupted');
     useAgentStore.getState().setRecoverableError({

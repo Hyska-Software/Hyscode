@@ -414,6 +414,8 @@ interface AgentState {
   }) => void;
   removeGatheredContextFile: (path: string) => void;
   clearConversation: () => void;
+  /** Reset every project-owned conversation and agent tab. */
+  resetProjectState: () => void;
 
   // Tool calls
   addToolCall: (tc: ToolCallDisplay) => void;
@@ -719,6 +721,27 @@ export const useAgentStore = create<AgentState>()(
         state.delegationChain = [];
         state.pendingUserQuestion = null;
       }),
+
+    resetProjectState: () => {
+      get().clearConversation();
+      set((state) => {
+        state.mode = 'chat';
+        state.isStreaming = false;
+        state.subAgents = [];
+        state.terminalStatus = null;
+        state.connectionState = 'idle';
+        state.connectionMessage = null;
+        state.recoverableError = null;
+        state.openTabs = [{ id: '__default__', title: 'New Chat' }];
+        state.activeTabId = '__default__';
+        state.tabStates = {};
+        state.sessions = [];
+        state.sessionsLoading = false;
+        state.historyOpen = false;
+        state.debugLines = [];
+        state.debugExpanded = false;
+      });
+    },
 
     // ─── Tool Calls ──────────────────────────────────────────────────
 

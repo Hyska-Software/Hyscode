@@ -72,6 +72,8 @@ interface MemoryState {
   // ─── Actions ────────────────────────────────────────────────────────
 
   setProjectId: (id: string) => void;
+  /** Clear cached data before another project becomes active. */
+  resetProjectState: () => void;
   setSearchQuery: (q: string) => void;
 
   /** Load all active memories for the current project */
@@ -96,6 +98,10 @@ interface MemoryState {
   addOrUpdateMemory: (memory: Memory) => void;
 }
 
+let projectGeneration = 0;
+let memoriesRequestGeneration = 0;
+let statsRequestGeneration = 0;
+
 // ─── Store ──────────────────────────────────────────────────────────────────
 
 export const useMemoryStore = create<MemoryState>()(
@@ -108,7 +114,24 @@ export const useMemoryStore = create<MemoryState>()(
 
     setProjectId: (id) =>
       set((state) => {
+        if (state.projectId !== id) {
+          projectGeneration += 1;
+          state.memories = [];
+          state.stats = null;
+          state.loading = false;
+          state.searchQuery = '';
+        }
         state.projectId = id;
+      }),
+
+    resetProjectState: () =>
+      set((state) => {
+        projectGeneration += 1;
+        state.memories = [];
+        state.stats = null;
+        state.loading = false;
+        state.searchQuery = '';
+        state.projectId = '';
       }),
 
     setSearchQuery: (q) =>
@@ -119,6 +142,12 @@ export const useMemoryStore = create<MemoryState>()(
     loadMemories: async () => {
       const { projectId, searchQuery } = get();
       if (!projectId) return;
+      const projectRequest = projectGeneration;
+      const requestId = ++memoriesRequestGeneration;
+      const isCurrent = () =>
+        projectRequest === projectGeneration &&
+        requestId === memoriesRequestGeneration &&
+        get().projectId === projectId;
 
       set((state) => { state.loading = true; });
       try {
@@ -130,6 +159,7 @@ export const useMemoryStore = create<MemoryState>()(
             minRelevance: 0.0,
             limit: 50,
           });
+          if (!isCurrent()) return;
           set((state) => {
             state.memories = rows.map(rowToMemory);
             state.loading = false;
@@ -142,6 +172,7 @@ export const useMemoryStore = create<MemoryState>()(
             limit: 100,
             offset: 0,
           });
+          if (!isCurrent()) return;
           set((state) => {
             state.memories = rows.map(rowToMemory);
             state.loading = false;
@@ -149,13 +180,19 @@ export const useMemoryStore = create<MemoryState>()(
         }
       } catch (err) {
         console.warn('[MemoryStore] loadMemories failed:', err);
-        set((state) => { state.loading = false; });
+        if (isCurrent()) set((state) => { state.loading = false; });
       }
     },
 
     searchMemories: async (query) => {
       const { projectId } = get();
       if (!projectId) return;
+      const projectRequest = projectGeneration;
+      const requestId = ++memoriesRequestGeneration;
+      const isCurrent = () =>
+        projectRequest === projectGeneration &&
+        requestId === memoriesRequestGeneration &&
+        get().projectId === projectId;
 
       set((state) => {
         state.searchQuery = query;
@@ -171,6 +208,7 @@ export const useMemoryStore = create<MemoryState>()(
             minRelevance: 0.0,
             limit: 50,
           });
+          if (!isCurrent()) return;
           set((state) => {
             state.memories = rows.map(rowToMemory);
             state.loading = false;
@@ -180,19 +218,26 @@ export const useMemoryStore = create<MemoryState>()(
         }
       } catch (err) {
         console.warn('[MemoryStore] searchMemories failed:', err);
-        set((state) => { state.loading = false; });
+        if (isCurrent()) set((state) => { state.loading = false; });
       }
     },
 
     loadStats: async () => {
       const { projectId } = get();
       if (!projectId) return;
+      const projectRequest = projectGeneration;
+      const requestId = ++statsRequestGeneration;
+      const isCurrent = () =>
+        projectRequest === projectGeneration &&
+        requestId === statsRequestGeneration &&
+        get().projectId === projectId;
 
       try {
         const raw = await tauriInvokeRaw<{ total: number; by_type: string; archived: number }>(
           'db_get_memory_stats',
           { projectId },
         );
+        if (!isCurrent()) return;
         let byType: Record<string, number> = {};
         try { byType = JSON.parse(raw.by_type); } catch { byType = {}; }
         set((state) => {

@@ -124,7 +124,7 @@ export const BUILTIN_GROUPS: SettingsGroup[] = [
         id: 'theme',
         label: 'Themes',
         icon: Palette,
-        keywords: ['color', 'appearance', 'monokai', 'nord', 'dracula', 'icon', 'border'],
+        keywords: ['color', 'appearance', 'aura', 'monokai', 'nord', 'dracula', 'icon', 'border'],
       },
       {
         kind: 'leaf',

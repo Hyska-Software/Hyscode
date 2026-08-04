@@ -7,6 +7,18 @@
 import { useEditorStore, type Tab } from '@/stores/editor-store';
 import { useAgentStore, type AgentMode } from '@/stores/agent-store';
 import { useLayoutStore, type WorkspaceMode } from '@/stores/layout-store';
+import { useDbViewerStore } from '@/stores/db-viewer-store';
+import { useDiagnosticsStore } from '@/stores/diagnostics-store';
+import { useFileStore } from '@/stores/file-store';
+import { useGitStore } from '@/stores/git-store';
+import { useLspStore } from '@/stores/lsp-store';
+import { useMemoryStore } from '@/stores/memory-store';
+import { useProjectStore } from '@/stores/project-store';
+import { useRulesStore } from '@/stores/rules-store';
+import { useSchemaDiagramStore } from '@/stores/schema-diagram-store';
+import { useSkillsStore } from '@/stores/skills-store';
+import { useTerminalStore } from '@/stores/terminal-store';
+import { HarnessBridge } from './harness-bridge';
 import { tauriInvoke } from './tauri-invoke';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
@@ -32,6 +44,31 @@ export interface ProjectSnapshot {
 // ─── Key Generation ─────────────────────────────────────────────────────────
 
 const STORAGE_PREFIX = 'hyscode-project-state:';
+let projectSwitchGeneration = 0;
+
+function normalizeProjectPath(path: string): string {
+  const normalized = path.trim().replace(/\\/g, '/');
+  if (normalized.length <= 1) return normalized;
+  if (/^[A-Za-z]:\/$/.test(normalized)) return normalized;
+  return normalized.replace(/\/$/, '');
+}
+
+function projectPathKey(path: string): string {
+  const normalized = normalizeProjectPath(path);
+  return /^[A-Za-z]:\//.test(normalized) ? normalized.toLowerCase() : normalized;
+}
+
+export function areSameProjectPath(left: string | null, right: string | null): boolean {
+  if (!left || !right) return left === right;
+  return projectPathKey(left) === projectPathKey(right);
+}
+
+function isCurrentProjectSwitch(switchId: number, rootPath: string): boolean {
+  return (
+    switchId === projectSwitchGeneration &&
+    areSameProjectPath(useProjectStore.getState().rootPath, rootPath)
+  );
+}
 
 /**
  * Simple djb2 hash → hex string.
@@ -66,6 +103,34 @@ function getEditorSnapshot(): EditorSnapshot {
 function getAgentSnapshot(): AgentSnapshot {
   const { conversationId, mode } = useAgentStore.getState();
   return { conversationId, mode };
+}
+
+function toAgentMode(mode: string): AgentMode {
+  return ['chat', 'build', 'review', 'debug', 'plan'].includes(mode)
+    ? (mode as AgentMode)
+    : 'chat';
+}
+
+/** Persist the agent's open tabs for a project before its store is reset. */
+export function saveOpenAgentTabs(rootPath: string): void {
+  const { openTabs, activeTabId, tabStates, conversationId, mode } = useAgentStore.getState();
+  const activeTab = openTabs.find((tab) => tab.id === activeTabId);
+  if (!activeTab) return;
+
+  openTabs.forEach((tab, tabIndex) => {
+    const isActive = tab.id === activeTabId;
+    const tabState = tabStates[tab.id];
+    tauriInvoke('db_upsert_open_tab', {
+      id: tab.id,
+      projectId: rootPath,
+      conversationId: isActive ? conversationId : (tabState?.conversationId ?? null),
+      title: tab.title,
+      mode: isActive ? mode : (tabState?.mode ?? 'chat'),
+      tabIndex,
+    }).catch(() => {
+      // Open-tab persistence is best effort during teardown.
+    });
+  });
 }
 
 // ─── Public API ─────────────────────────────────────────────────────────────
@@ -117,9 +182,12 @@ export function clearProjectState(rootPath: string): void {
  * Restore editor tabs from a snapshot.
  */
 function restoreEditorState(snapshot: EditorSnapshot): void {
+  const activeTabId = snapshot.tabs.some((tab) => tab.id === snapshot.activeTabId)
+    ? snapshot.activeTabId
+    : (snapshot.tabs[0]?.id ?? null);
   useEditorStore.setState({
     tabs: snapshot.tabs.map((t) => ({ ...t, isPreview: false })),
-    activeTabId: snapshot.activeTabId,
+    activeTabId,
   });
 }
 
@@ -128,8 +196,12 @@ function restoreEditorState(snapshot: EditorSnapshot): void {
  * Sets mode + conversationId, then loads messages from DB if a conversation
  * was previously active.
  */
-async function restoreAgentState(snapshot: AgentSnapshot): Promise<void> {
+async function restoreAgentState(
+  snapshot: AgentSnapshot,
+  isCurrent: () => boolean,
+): Promise<void> {
   const store = useAgentStore.getState();
+  if (!isCurrent()) return;
   store.clearConversation();
   store.setMode(snapshot.mode);
 
@@ -139,7 +211,7 @@ async function restoreAgentState(snapshot: AgentSnapshot): Promise<void> {
       const conv = await tauriInvoke('db_get_conversation', {
         conversationId: snapshot.conversationId,
       });
-      if (!conv) return;
+      if (!conv || !isCurrent()) return;
 
       store.setConversationId(snapshot.conversationId);
 
@@ -149,6 +221,7 @@ async function restoreAgentState(snapshot: AgentSnapshot): Promise<void> {
       });
 
       for (const m of dbMessages) {
+        if (!isCurrent()) return;
         if (m.role === 'system') continue;
         const message = {
           id: m.id,
@@ -165,9 +238,8 @@ async function restoreAgentState(snapshot: AgentSnapshot): Promise<void> {
 
       // Sync harness bridge if available
       try {
-        const { HarnessBridge } = await import('./harness-bridge');
-        const bridge = HarnessBridge.get();
-        if (bridge) bridge.restoreSession(snapshot.conversationId);
+        if (!isCurrent()) return;
+        HarnessBridge.get().restoreSession(snapshot.conversationId);
       } catch {
         // Bridge might not be initialised yet — that's fine
       }
@@ -181,17 +253,20 @@ async function restoreAgentState(snapshot: AgentSnapshot): Promise<void> {
 
 /**
  * Load the session history list for a project from the DB.
- * Fire-and-forget — failures are silently ignored.
+ * The caller awaits this so the workspace is not considered ready until the
+ * new project's history has either loaded or failed safely.
  */
-async function loadSessionsForProject(rootPath: string): Promise<void> {
+async function loadSessionsForProject(rootPath: string, isCurrent: () => boolean): Promise<void> {
   const store = useAgentStore.getState();
+  if (!isCurrent()) return;
   store.setSessionsLoading(true);
   try {
     const rows = await tauriInvoke('db_list_conversations', { projectId: rootPath });
-    const mapped = rows.map((r: any) => ({
+    if (!isCurrent()) return;
+    const mapped = rows.map((r) => ({
       id: r.id,
       title: r.title,
-      mode: r.mode || 'chat',
+      mode: toAgentMode(r.mode),
       modelId: r.model_id,
       providerId: r.provider_id,
       messageCount: r.message_count ?? 0,
@@ -202,7 +277,7 @@ async function loadSessionsForProject(rootPath: string): Promise<void> {
   } catch {
     // DB not available yet — leave empty
   } finally {
-    useAgentStore.getState().setSessionsLoading(false);
+    if (isCurrent()) useAgentStore.getState().setSessionsLoading(false);
   }
 }
 
@@ -211,51 +286,105 @@ async function loadSessionsForProject(rootPath: string): Promise<void> {
 /**
  * Reset all project-scoped stores to their clean initial state.
  */
-export function clearAllProjectState(): void {
+export async function clearAllProjectState(): Promise<void> {
+  HarnessBridge.destroy();
+  useLayoutStore.getState().resetProjectState();
+  useFileStore.getState().closeFolder();
   useEditorStore.getState().closeAllTabs();
-  useAgentStore.getState().clearConversation();
-  useAgentStore.getState().setSessions([]);
+  useAgentStore.getState().resetProjectState();
+  useDbViewerStore.getState().reset();
+  useDiagnosticsStore.getState().clearAll();
+  useGitStore.getState().resetForProjectSwitch();
+  useLspStore.getState().clearAll();
+  useMemoryStore.getState().resetProjectState();
+  useRulesStore.getState().resetProjectState();
+  useSchemaDiagramStore.getState().reset();
+  useSkillsStore.getState().resetProjectState();
+
+  const ptyIds = useTerminalStore.getState().clearSessions();
+  await Promise.all(
+    ptyIds.map((ptyId) => tauriInvoke('pty_kill', { ptyId }).catch(() => undefined)),
+  );
 }
 
 /**
- * Full project-open lifecycle:
- * 1. Save current project state (if any)
- * 2. Clear all project-scoped stores
- * 3. Load snapshot for the new project (if it exists)
- * 4. Apply the snapshot (or leave clean for new projects)
+ * Open a project through the complete desktop lifecycle.
+ *
+ * The selected project becomes active only after the old project has been
+ * persisted, cancelled, and removed from every project-scoped store. All
+ * asynchronous work is guarded by a monotonically increasing switch id.
  */
-export async function switchProject(
-  currentRootPath: string | null,
-  newRootPath: string,
-): Promise<void> {
-  // 1. Save outgoing project
-  if (currentRootPath) {
+export async function openProjectWorkspace(newRootPath: string): Promise<void> {
+  await performProjectOpen(newRootPath, true);
+}
+
+/** Restore the persisted project that was present when the app last closed. */
+export async function hydrateProjectWorkspace(rootPath: string): Promise<void> {
+  await performProjectOpen(rootPath, false);
+}
+
+async function performProjectOpen(newRootPath: string, saveCurrentProject: boolean): Promise<void> {
+  const rootPath = normalizeProjectPath(newRootPath);
+  if (!rootPath) throw new Error('Cannot open an empty project path.');
+
+  const switchId = ++projectSwitchGeneration;
+  const currentRootPath = useProjectStore.getState().rootPath;
+  const previousTerminalVisible = useLayoutStore.getState().terminalVisible;
+
+  if (saveCurrentProject && currentRootPath && !areSameProjectPath(currentRootPath, rootPath)) {
     saveProjectState(currentRootPath);
+    saveOpenAgentTabs(currentRootPath);
   }
 
-  // 2. Clear everything
-  clearAllProjectState();
+  useProjectStore.getState().setLoading(true);
 
-  // 3. Load new project snapshot
-  const snapshot = loadProjectState(newRootPath);
+  try {
+    await clearAllProjectState();
+    if (switchId !== projectSwitchGeneration) return;
 
-  // 4. Apply (or leave clean for never-opened projects)
-  if (snapshot) {
-    restoreEditorState(snapshot.editor);
-    await restoreAgentState(snapshot.agent);
-    if (snapshot.workspaceMode) {
-      useLayoutStore.getState().setWorkspaceMode(snapshot.workspaceMode);
+    useProjectStore.getState().openProject(rootPath);
+    useProjectStore.getState().setLoading(true);
+
+    const snapshot = loadProjectState(rootPath);
+    if (snapshot) {
+      restoreEditorState(snapshot.editor);
+      if (snapshot.workspaceMode) {
+        useLayoutStore.getState().setWorkspaceMode(snapshot.workspaceMode);
+      }
     }
-  }
 
-  // 5. Eagerly load agent sessions list for the new project
-  loadSessionsForProject(newRootPath);
+    await useFileStore.getState().openFolder(rootPath);
+    if (!isCurrentProjectSwitch(switchId, rootPath)) return;
+
+    const isCurrent = () => isCurrentProjectSwitch(switchId, rootPath);
+    if (snapshot) await restoreAgentState(snapshot.agent, isCurrent);
+    await loadSessionsForProject(rootPath, isCurrent);
+    if (!isCurrent()) return;
+
+    useProjectStore.getState().setLoading(false);
+    useLayoutStore.getState().setTerminalVisible(previousTerminalVisible);
+  } catch (error) {
+    if (isCurrentProjectSwitch(switchId, rootPath)) {
+      useProjectStore.getState().setLoading(false);
+      useLayoutStore.getState().setTerminalVisible(previousTerminalVisible);
+    }
+    throw error;
+  }
 }
 
-/**
- * Save current state and clean up for project close.
- */
-export function closeCurrentProject(rootPath: string): void {
-  saveProjectState(rootPath);
-  clearAllProjectState();
+/** Save current state and clean up for project close. */
+export async function closeProjectWorkspace(): Promise<void> {
+  const switchId = ++projectSwitchGeneration;
+  const rootPath = useProjectStore.getState().rootPath;
+  if (rootPath) {
+    saveProjectState(rootPath);
+    saveOpenAgentTabs(rootPath);
+  }
+
+  await clearAllProjectState();
+  if (switchId !== projectSwitchGeneration) return;
+
+  useFileStore.getState().closeFolder();
+  useProjectStore.getState().closeProject();
+  useProjectStore.getState().setLoading(false);
 }

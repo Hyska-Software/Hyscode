@@ -2,18 +2,17 @@ import { useState, useCallback } from 'react';
 import { FolderOpen, RefreshCw, FilePlus, FolderPlus, Eye, EyeOff, Loader2 } from 'lucide-react';
 import { useFileStore, useProjectStore } from '../../../stores';
 import { pickFolder } from '../../../lib/tauri-dialog';
+import { openProjectWorkspace } from '../../../lib/project-persistence';
 import { tauriFs } from '../../../lib/tauri-fs';
 import { promptInput } from '../../ui/dialogs';
 import { FileTree } from './file-tree';
 
 export function FileExplorerView() {
   const rootPath = useFileStore((s) => s.rootPath);
-  const openFolder = useFileStore((s) => s.openFolder);
   const refreshExpandedDirs = useFileStore((s) => s.refreshExpandedDirs);
   const showHidden = useFileStore((s) => s.showHidden);
   const toggleShowHidden = useFileStore((s) => s.toggleShowHidden);
   const projectName = useProjectStore((s) => s.name);
-  const openProject = useProjectStore((s) => s.openProject);
 
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [pendingAction, setPendingAction] = useState<string | null>(null);
@@ -21,8 +20,7 @@ export function FileExplorerView() {
   const handleOpenFolder = async () => {
     const path = await pickFolder();
     if (path) {
-      openProject(path);
-      await openFolder(path);
+      await openProjectWorkspace(path);
     }
   };
 

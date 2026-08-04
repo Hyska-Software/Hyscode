@@ -128,6 +128,20 @@ describe('terminal store — user sessions', () => {
     expect(state.sessions).toHaveLength(1);
     expect(state.activeSessionId).not.toBe(first);
   });
+
+  it('clears all project sessions and returns PTYs that require termination', () => {
+    const first = createUserSession();
+    const second = useTerminalStore.getState().createAgentSession({ conversationId: 'old-project' });
+    useTerminalStore.getState().setPtyId(first, 'pty-user');
+    useTerminalStore.getState().setPtyId(second, 'pty-agent');
+
+    const ptyIds = useTerminalStore.getState().clearSessions();
+
+    expect(ptyIds).toEqual(['pty-user', 'pty-agent']);
+    expect(useTerminalStore.getState().sessions).toEqual([]);
+    expect(useTerminalStore.getState().activeSessionId).toBeNull();
+    expect(useTerminalStore.getState().nextIndex).toBe(1);
+  });
 });
 
 describe('terminal store — agent sessions', () => {

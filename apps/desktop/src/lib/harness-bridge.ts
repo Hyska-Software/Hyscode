@@ -172,6 +172,7 @@ function createSddDatabase(): SddDatabase {
 // ─── Singleton ──────────────────────────────────────────────────────────────
 
 let _instance: HarnessBridge | null = null;
+let _lifecycleGeneration = 0;
 
 type MutationSnapshot = {
   diskBefore: string | null;
@@ -182,6 +183,7 @@ type MutationSnapshot = {
 
 export class HarnessBridge {
   private harness: Harness;
+  private disposed = false;
   private _projectId: string = '';
   private approvalResolvers = new Map<string, (approved: boolean) => void>();
   private modeSwitchResolvers = new Map<string, (approved: boolean) => void>();
@@ -401,6 +403,7 @@ export class HarnessBridge {
 
     // Listen for PTY exits so we can mark agent sessions as dead and avoid reuse
     tauriListen<{ pty_id: string }>('pty:exit', (e) => {
+      if (this.disposed) return;
       const deadPtyId = e.payload.pty_id;
       const ts = useTerminalStore.getState();
       const session = ts.sessions.find((s) => s.ptyId === deadPtyId && s.isAgentSession);
@@ -433,6 +436,7 @@ export class HarnessBridge {
 
   static async init(workspacePath: string, projectId: string): Promise<HarnessBridge> {
     if (_instance) return _instance;
+    const generation = _lifecycleGeneration;
 
     // Resolve home directory via Rust (reliable cross-platform)
     let homePath: string;
@@ -443,21 +447,39 @@ export class HarnessBridge {
     }
     HarnessBridge._homePathCache = homePath;
 
-    _instance = new HarnessBridge(workspacePath, projectId, homePath);
+    if (generation !== _lifecycleGeneration) {
+      throw new Error('HarnessBridge initialization was cancelled by a project switch.');
+    }
 
-    // Load mode policy overrides from the database (best-effort)
-    await _instance.loadModePolicies();
+    const instance = new HarnessBridge(workspacePath, projectId, homePath);
+    _instance = instance;
 
-    // Load rules and sync with store so they're active from the first turn
-    await _instance.loadAndSyncRules();
+    try {
+      // Load mode policy overrides from the database (best-effort)
+      await instance.loadModePolicies();
 
-    // Register the spawn_subagent built-in tool
-    _instance.registerSpawnSubagentTool();
+      // Load rules and sync with store so they're active from the first turn
+      await instance.loadAndSyncRules();
 
-    // Subscribe to tab switches: keep harness in sync with the active tab
-    _instance.subscribeToTabSwitches();
+      // Register the spawn_subagent built-in tool
+      instance.registerSpawnSubagentTool();
 
-    return _instance;
+      // Subscribe to tab switches: keep harness in sync with the active tab
+      instance.subscribeToTabSwitches();
+
+      if (generation !== _lifecycleGeneration || _instance !== instance) {
+        instance.disposed = true;
+        instance.cancel();
+        throw new Error('HarnessBridge initialization was cancelled by a project switch.');
+      }
+
+      return instance;
+    } catch (error) {
+      if (_instance === instance) _instance = null;
+      instance.disposed = true;
+      instance.cancel();
+      throw error;
+    }
   }
 
   static get(): HarnessBridge {
@@ -467,9 +489,12 @@ export class HarnessBridge {
   }
 
   static destroy(): void {
-    if (_instance) {
-      _instance.cancel();
-      _instance = null;
+    _lifecycleGeneration += 1;
+    const instance = _instance;
+    _instance = null;
+    if (instance) {
+      instance.disposed = true;
+      instance.cancel();
     }
   }
 
@@ -1294,6 +1319,7 @@ Investigate the error, fix the underlying issue in the affected files, and verif
   async loadSkills(): Promise<Skill[]> {
     try {
       await this.harness.loadSkills();
+      if (this.disposed) return [];
       const loader = this.harness.getSkillLoader();
       const all = loader?.getAll() ?? [];
       this.debug(`Skills loaded: ${all.length} total`);
@@ -1326,6 +1352,7 @@ Investigate the error, fix the underlying issue in the affected files, and verif
       const loader = this.harness.getRuleLoader();
       if (!loader) return [];
       const all = await loader.loadAll();
+      if (this.disposed) return [];
       this.debug(`Rules loaded: ${all.length} total`);
       return all;
     } catch (err) {
@@ -1355,7 +1382,7 @@ Investigate the error, fix the underlying issue in the affected files, and verif
   async loadAndSyncRules(): Promise<void> {
     try {
       const discovered = await this.loadRules();
-      if (discovered.length > 0) {
+      if (!this.disposed && discovered.length > 0) {
         useRulesStore.getState().setDiscoveredRules(discovered);
         const active = useRulesStore.getState().getActiveRules();
         this.syncActiveRules(active.map((r) => r.id));
@@ -1621,6 +1648,7 @@ Investigate the error, fix the underlying issue in the affected files, and verif
   }
 
   private handleEvent(event: HarnessEvent): void {
+    if (this.disposed) return;
     const store = useAgentStore.getState();
 
     if (event.type === 'turn_start' && !this.activeTurnId) {

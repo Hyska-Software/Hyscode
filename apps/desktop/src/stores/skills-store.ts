@@ -38,6 +38,8 @@ interface SkillsState {
 
   /** Populate skills from harness discovery. Merges with persisted prefs. */
   setDiscoveredSkills: (skills: Skill[]) => void;
+  /** Clear discovered workspace skills while a new project is loading. */
+  resetProjectState: () => void;
 
   /** Toggle a skill on/off */
   toggleSkill: (id: string) => void;
@@ -103,6 +105,12 @@ export const useSkillsStore = create<SkillsState>()(
               status: s.status ?? 'ok',
             };
           });
+          state.loading = false;
+        }),
+
+      resetProjectState: () =>
+        set((state) => {
+          state.skills = [];
           state.loading = false;
         }),
 

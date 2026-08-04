@@ -731,6 +731,57 @@ body {
   --color-border-active: transparent;
 }
 
+/* ── Theme: Aura ───────────────────────────────────────────────────────── */
+.theme-aura {
+  /* Aura Dark palette: purple focus, mint controls, and warm syntax accents. */
+  --background: #110f18;
+  --foreground: #edecee;
+  --card: #15141b;
+  --card-foreground: #edecee;
+  --popover: #121016;
+  --popover-foreground: #cdccce;
+  --primary: #61ffca;
+  --primary-foreground: #15141b;
+  --secondary: #2e2b38;
+  --secondary-foreground: #edecee;
+  --muted: #2e2b38;
+  --muted-foreground: #adacae;
+  --accent: #a277ff;
+  --accent-foreground: #15141b;
+  --destructive: #ff6767;
+  --destructive-foreground: #15141b;
+  --border: #2d2d2d;
+  --input: #3b334b;
+  --ring: #a277ff;
+  --chart-1: #a277ff;
+  --chart-2: #61ffca;
+  --chart-3: #ffca85;
+  --chart-4: #ff6767;
+  --chart-5: #82e2ff;
+  --radius: 0.625rem;
+  --sidebar: #110f18;
+  --sidebar-foreground: #cdccce;
+  --sidebar-primary: #61ffca;
+  --sidebar-primary-foreground: #15141b;
+  --sidebar-accent: #2e2b38;
+  --sidebar-accent-foreground: #edecee;
+  --sidebar-border: #2d2d2d;
+  --sidebar-ring: #a277ff;
+  /* HysCode custom tokens */
+  --color-surface: #15141b;
+  --color-surface-raised: #2e2b38;
+  --color-accent-muted: rgba(162, 119, 255, 0.16);
+  --color-success: #61ffca;
+  --color-warning: #ffca85;
+  --color-error: #ff6767;
+  --color-border-hover: #3b334b;
+  --color-border-active: #a277ff;
+  --editor-bg: #15141b;
+  --editor-gutter: #110f18;
+  --terminal-bg: #15141b;
+  --terminal-fg: #cdccce;
+}
+
 /*
  * ═══════════════════════════════════════════════════════════════════════════
  * MARKDOWN PREVIEW — IDE-integrated rendering using theme CSS variables.
@@ -1066,3 +1117,23 @@ body {
 .theme-github-dark .markdown-preview .hljs-regexp { color: #7ee787; }
 .theme-github-dark .markdown-preview .hljs-literal { color: #79c0ff; }
 .theme-github-dark .markdown-preview .hljs-meta { color: #8b949e; }
+
+/* ── Aura ───────────────────────────────────────────────────────────────── */
+.theme-aura .markdown-preview .hljs-keyword,
+.theme-aura .markdown-preview .hljs-selector-tag { color: #a277ff; }
+.theme-aura .markdown-preview .hljs-string,
+.theme-aura .markdown-preview .hljs-addition { color: #61ffca; }
+.theme-aura .markdown-preview .hljs-number { color: #ffca85; }
+.theme-aura .markdown-preview .hljs-type,
+.theme-aura .markdown-preview .hljs-built_in { color: #82e2ff; }
+.theme-aura .markdown-preview .hljs-function,
+.theme-aura .markdown-preview .hljs-title { color: #ffca85; }
+.theme-aura .markdown-preview .hljs-comment,
+.theme-aura .markdown-preview .hljs-quote { color: #6d6d6d; font-style: italic; }
+.theme-aura .markdown-preview .hljs-variable,
+.theme-aura .markdown-preview .hljs-template-variable { color: #edecee; }
+.theme-aura .markdown-preview .hljs-attr { color: #f694ff; }
+.theme-aura .markdown-preview .hljs-deletion { color: #ff6767; }
+.theme-aura .markdown-preview .hljs-regexp { color: #ffca85; }
+.theme-aura .markdown-preview .hljs-literal { color: #61ffca; }
+.theme-aura .markdown-preview .hljs-meta { color: #adacae; }

@@ -79,6 +79,76 @@ const THEMES: Record<string, ThemeDef> = {
     },
   },
 
+  // Aura Dark palette adapted from Dalton Menezes' MIT-licensed Aura theme.
+  'hyscode-aura': {
+    base: 'vs-dark',
+    rules: [
+      { token: 'comment', foreground: '6d6d6d', fontStyle: 'italic' },
+      { token: 'keyword', foreground: 'a277ff' },
+      { token: 'keyword.control', foreground: 'a277ff' },
+      { token: 'string', foreground: '61ffca' },
+      { token: 'constant', foreground: '61ffca' },
+      { token: 'number', foreground: 'ffca85' },
+      { token: 'type', foreground: '82e2ff' },
+      { token: 'type.identifier', foreground: '82e2ff' },
+      { token: 'function', foreground: 'ffca85' },
+      { token: 'variable', foreground: 'edecee' },
+      { token: 'property', foreground: 'f694ff' },
+      { token: 'variable.other.property', foreground: 'f694ff' },
+      { token: 'operator', foreground: 'a277ff' },
+      { token: 'delimiter', foreground: 'cdccce' },
+      { token: 'tag', foreground: 'a277ff' },
+      { token: 'attribute.name', foreground: 'f694ff' },
+      { token: 'attribute.value', foreground: '61ffca' },
+      { token: 'regexp', foreground: 'ffca85' },
+      // SpectraLang / grammar scopes (entity.*, support.*, storage.*, etc.)
+      { token: 'entity.name.type', foreground: '82e2ff' },
+      { token: 'entity.name.function', foreground: 'ffca85' },
+      { token: 'support.type', foreground: '82e2ff' },
+      { token: 'support.namespace.std-api', foreground: '82e2ff' },
+      { token: 'support.function.std-api', foreground: 'ffca85' },
+      { token: 'storage.modifier', foreground: 'a277ff' },
+      { token: 'constant.language', foreground: '61ffca' },
+      { token: 'constant.character.escape', foreground: '61ffca' },
+      { token: 'meta.interpolation', foreground: 'edecee' },
+    ],
+    colors: {
+      'editor.background': '#15141b',
+      'editor.foreground': '#edecee',
+      'editorLineNumber.foreground': '#a394f033',
+      'editorLineNumber.activeForeground': '#adacae',
+      'editor.selectionBackground': '#3d375e7f',
+      'editor.lineHighlightBackground': '#a394f033',
+      'editor.lineHighlightBorder': '#a394f000',
+      'editorCursor.foreground': '#a277ff',
+      'editorIndentGuide.background': '#2d2d2d',
+      'editorIndentGuide.activeBackground': '#6d6d6d',
+      'editorBracketMatch.background': '#3d375e7f',
+      'editorBracketMatch.border': '#a277ff',
+      'editor.wordHighlightBackground': '#3d375e7f',
+      'editorWidget.background': '#121016',
+      'editorWidget.border': '#2d2d2d',
+      'input.background': '#15141b',
+      'input.foreground': '#cdccce',
+      'input.border': '#3b334b',
+      'inputOption.activeBorder': '#a277ff',
+      'minimap.background': '#110f18',
+      'minimap.selectionHighlight': '#3d375e7f',
+      'minimapGutter.addedBackground': '#61ffca',
+      'minimapGutter.modifiedBackground': '#ffca85',
+      'minimapGutter.deletedBackground': '#ff6767',
+      'editorOverviewRuler.addedForeground': '#61ffca88',
+      'editorOverviewRuler.modifiedForeground': '#ffca8588',
+      'editorOverviewRuler.deletedForeground': '#ff676788',
+      'editorGhostText.foreground': '#6d6d6d',
+      'editorGhostText.border': '#3b334b',
+      'editorInlineSuggest.foreground': '#6d6d6d',
+      'scrollbarSlider.background': '#a394f033',
+      'scrollbarSlider.hoverBackground': '#a394f033',
+      'scrollbarSlider.activeBackground': '#3d375e7f',
+    },
+  },
+
   'hyscode-light': {
     base: 'vs',
     rules: [
@@ -405,6 +475,7 @@ export function getMonacoThemeName(themeId: string): string {
   // Built-in themes map
   switch (themeId) {
     case 'hyscode-dark':   return 'hyscode-dark';
+    case 'aura':           return 'hyscode-aura';
     case 'hyscode-light':  return 'hyscode-light';
     case 'nord':           return 'hyscode-nord';
     case 'monokai':        return 'hyscode-monokai';
@@ -591,6 +662,14 @@ const XTERM_THEMES: Record<string, XtermTheme> = {
     blue: '#60a5fa', magenta: '#10a37f', cyan: '#22d3ee', white: '#ececf1',
     brightBlack: '#8e8ea0', brightRed: '#fca5a5', brightGreen: '#86efac', brightYellow: '#fde68a',
     brightBlue: '#93c5fd', brightMagenta: '#2fb28f', brightCyan: '#67e8f9', brightWhite: '#ffffff',
+  },
+  'aura': {
+    background: '#15141b', foreground: '#cdccce', cursor: '#a277ff', cursorAccent: '#15141b',
+    selectionBackground: 'rgba(61,55,94,0.5)',
+    black: '#15141b', red: '#ff6767', green: '#61ffca', yellow: '#ffca85',
+    blue: '#a277ff', magenta: '#61ffca', cyan: '#a277ff', white: '#cdccce',
+    brightBlack: '#2d2d2d', brightRed: '#ffca85', brightGreen: '#a277ff', brightYellow: '#ffca85',
+    brightBlue: '#a277ff', brightMagenta: '#61ffca', brightCyan: '#61ffca', brightWhite: '#edecee',
   },
   'hyscode-light': {
     background: '#f7f7f8', foreground: '#0d0d0f', cursor: '#0d8a6c', cursorAccent: '#f7f7f8',

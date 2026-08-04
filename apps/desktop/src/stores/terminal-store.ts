@@ -81,6 +81,8 @@ interface TerminalState {
   setOutputSequence: (sessionId: string, sequence: number) => void;
   /** Kill the PTY and remove the session from store */
   removeAgentSession: (id: string) => void;
+  /** Remove every project-owned terminal session and return their PTY ids. */
+  clearSessions: () => string[];
 }
 
 let _counter = 0;
@@ -248,6 +250,19 @@ export const useTerminalStore = create<TerminalState>()(
           }
         }
       });
+    },
+
+    clearSessions: () => {
+      const ptyIds = get()
+        .sessions
+        .map((session) => session.ptyId)
+        .filter((ptyId): ptyId is string => Boolean(ptyId));
+      set((state) => {
+        state.sessions = [];
+        state.activeSessionId = null;
+        state.nextIndex = 1;
+      });
+      return ptyIds;
     },
   })),
 );
