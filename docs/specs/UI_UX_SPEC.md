@@ -115,6 +115,38 @@ Total viewport
 - Hover: cursor changes to col-resize/row-resize
 - Active: blue highlight line
 
+### VORTEX Project and Session Navigator
+
+VORTEX uses the left agent panel to federate project and session navigation while keeping one
+project runtime active at a time. The navigator is not a second workspace store: selecting a
+project invokes the existing guarded project lifecycle, then restores that project's saved UI
+state and the explicitly selected conversation.
+
+The navigator hierarchy is:
+
+```
+VORTEX sidebar
+├── New session
+├── Open/add project + search
+├── Recent sessions (five visible by default)
+└── Projects
+    ├── Project header + session count + actions
+    └── Sessions or "No sessions in this workspace yet"
+```
+
+- Recent sessions are globally ordered and always show their project name.
+- Project groups merge durable SQLite projects with locally recent projects so empty projects are
+  visible after they are opened.
+- Project actions can hide a project from VORTEX without deleting its folder or persisted data.
+- Session rename uses the application input dialog; session deletion is confirmed
+  and destructive.
+- The project/session list owns the only scroll region. The toolbar and Settings/Extensions
+  footer remain fixed.
+- Long titles truncate with a full-title tooltip. Icon-only controls have accessible labels.
+- Keyboard focus, Enter/Space activation, loading, empty, unavailable-project, retry, and active
+  turn confirmation states are required.
+- EDITOR does not show federated project groups and continues to manage one active project.
+
 ---
 
 ## Component Specifications

@@ -201,8 +201,21 @@ Zustand Stores (client-side)
 ├── agentStore      — conversations, messages, streaming state, tool calls
 ├── fileStore       — file tree, file contents cache, watch events
 ├── settingsStore   — user preferences, AI config, keybindings
-└── projectStore    — active project, recent projects, workspace config
+└── projectStore    — active project, recent projects, workspace config, VORTEX visibility
 ```
+
+### VORTEX Project/Session Federation
+
+The VORTEX layout presents a federated index of known projects and persisted conversations. The
+index is read from the Rust-owned SQLite `projects` and `conversations` tables through the typed
+`db_list_vortex_project_sessions` command and is merged with the local recent-project registry so
+projects with no sessions remain discoverable.
+
+Federation does not create concurrent runtimes. Exactly one `HarnessBridge`, file workspace, and
+project-scoped store set is active. Selecting a project or session goes through the existing
+project-persistence coordinator, which saves the previous project's snapshot, tears down its
+runtime, hydrates the target project, and applies the selected conversation only after generation
+and path guards pass. EDITOR continues to expose only the active project's state.
 
 ---
 

@@ -74,6 +74,7 @@ describe('project workspace lifecycle', () => {
       rootPath: null,
       isLoading: false,
       recentProjects: [],
+      vortexHiddenProjectPaths: [],
     });
     fileStore.useFileStore.setState({
       rootPath: null,
@@ -136,5 +137,150 @@ describe('project workspace lifecycle', () => {
     expect(openFolderMock).toHaveBeenCalledWith('C:/new-project');
     expect(invokeMock).toHaveBeenCalledWith('pty_kill', { ptyId: 'old-pty' });
     expect(destroyMock).toHaveBeenCalled();
+  });
+
+  it('switches VORTEX projects and restores the explicitly selected conversation', async () => {
+    projectStore.useProjectStore.getState().openProject('C:/old-project');
+    fileStore.useFileStore.setState({ rootPath: 'C:/old-project' });
+    layoutStore.useLayoutStore.getState().setWorkspaceMode('agent');
+
+    invokeMock.mockImplementation(async (command: string) => {
+      if (command === 'db_list_conversations') return [];
+      if (command === 'db_get_conversation') {
+        return {
+          id: 'target-session',
+          title: 'Target session',
+          mode: 'build',
+          model_id: null,
+          provider_id: null,
+          project_id: 'C:/new-project',
+          created_at: '2026-08-04 10:00:00',
+          updated_at: '2026-08-04 10:01:00',
+        };
+      }
+      if (command === 'db_list_messages') {
+        return [
+          {
+            id: 'target-message',
+            role: 'assistant',
+            content: 'Restored target project',
+            tool_calls: null,
+            blocks: null,
+            turn_summary: null,
+            token_input: 0,
+            token_output: 0,
+            created_at: '2026-08-04 10:01:00',
+          },
+        ];
+      }
+      return undefined;
+    });
+
+    const openFolderMock = vi.fn(async (path: string) => {
+      fileStore.useFileStore.setState({ rootPath: path, tree: [] });
+    });
+    fileStore.useFileStore.setState({ openFolder: openFolderMock });
+
+    await persistence.activateVortexSession('C:/new-project', 'target-session');
+
+    expect(projectStore.useProjectStore.getState().rootPath).toBe('C:/new-project');
+    expect(layoutStore.useLayoutStore.getState().workspaceMode).toBe('agent');
+    expect(agentStore.useAgentStore.getState().conversationId).toBe('target-session');
+    expect(agentStore.useAgentStore.getState().mode).toBe('build');
+    expect(agentStore.useAgentStore.getState().messages[0]?.content).toBe('Restored target project');
+    expect(invokeMock).toHaveBeenCalledWith('db_ensure_project', {
+      id: 'C:/new-project',
+      path: 'C:/new-project',
+    });
+  });
+
+  it('keeps VORTEX active when the target project was last saved in EDITOR', async () => {
+    projectStore.useProjectStore.getState().openProject('C:/old-project');
+    fileStore.useFileStore.setState({ rootPath: 'C:/old-project' });
+    layoutStore.useLayoutStore.getState().setWorkspaceMode('editor');
+    persistence.saveProjectState('C:/new-project');
+
+    invokeMock.mockImplementation(async (command: string) => {
+      if (command === 'db_list_conversations') return [];
+      if (command === 'db_get_conversation') {
+        return {
+          id: 'target-session',
+          title: 'Target session',
+          mode: 'chat',
+          model_id: null,
+          provider_id: null,
+          project_id: 'C:/new-project',
+          created_at: '2026-08-04 10:00:00',
+          updated_at: '2026-08-04 10:01:00',
+        };
+      }
+      if (command === 'db_list_messages') return [];
+      return undefined;
+    });
+    fileStore.useFileStore.setState({
+      openFolder: vi.fn(async (path: string) => fileStore.useFileStore.setState({ rootPath: path })),
+    });
+
+    await persistence.activateVortexSession('C:/new-project', 'target-session');
+
+    expect(layoutStore.useLayoutStore.getState().workspaceMode).toBe('agent');
+  });
+
+  it('restores a project session on return without duplicating the selected tab', async () => {
+    projectStore.useProjectStore.getState().openProject('C:/project-a');
+    fileStore.useFileStore.setState({ rootPath: 'C:/project-a' });
+    layoutStore.useLayoutStore.getState().setWorkspaceMode('agent');
+    agentStore.useAgentStore.getState().setConversationId('session-a');
+    agentStore.useAgentStore.getState().addMessage({
+      id: 'message-a',
+      role: 'assistant',
+      content: 'Project A state',
+      timestamp: 0,
+    });
+
+    const openFolderMock = vi.fn(async (path: string) => {
+      fileStore.useFileStore.setState({ rootPath: path, tree: [] });
+    });
+    fileStore.useFileStore.setState({ openFolder: openFolderMock });
+    invokeMock.mockImplementation(async (command: string) => {
+      if (command === 'db_list_conversations') return [];
+      if (command === 'db_get_conversation') {
+        return {
+          id: 'session-a',
+          title: 'Project A session',
+          mode: 'chat',
+          model_id: null,
+          provider_id: null,
+          project_id: 'C:/project-a',
+          created_at: '2026-08-04 10:00:00',
+          updated_at: '2026-08-04 10:01:00',
+        };
+      }
+      if (command === 'db_list_messages') {
+        return [
+          {
+            id: 'message-a',
+            role: 'assistant',
+            content: 'Project A state',
+            tool_calls: null,
+            blocks: null,
+            turn_summary: null,
+            token_input: 0,
+            token_output: 0,
+            created_at: '2026-08-04 10:01:00',
+          },
+        ];
+      }
+      return undefined;
+    });
+
+    await persistence.openProjectWorkspace('C:/project-b', { workspaceMode: 'agent' });
+    await persistence.activateVortexSession('C:/project-a', 'session-a');
+
+    expect(projectStore.useProjectStore.getState().rootPath).toBe('C:/project-a');
+    expect(agentStore.useAgentStore.getState().conversationId).toBe('session-a');
+    expect(agentStore.useAgentStore.getState().messages).toHaveLength(1);
+    expect(agentStore.useAgentStore.getState().openTabs).toHaveLength(1);
+    expect(openFolderMock).toHaveBeenCalledWith('C:/project-a');
   });
 });

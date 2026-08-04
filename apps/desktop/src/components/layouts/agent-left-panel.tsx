@@ -8,7 +8,7 @@ import {
   X,
   PanelLeftClose,
 } from 'lucide-react';
-import { SessionHistory } from '../agent/session-history';
+import { VortexProjectSessionNavigator } from '../agent/vortex-project-session-navigator';
 import { ExtensionsView } from '../sidebar/views/extensions-view';
 import { useSettingsStore } from '../../stores/settings-store';
 import { useLayoutStore } from '../../stores/layout-store';
@@ -98,14 +98,25 @@ export function AgentLeftPanel() {
         </button>
       </div>
 
-          {/* Sessions section */}
-          <CollapsibleSection title="Sessions" icon={({ className }: { className?: string }) => (
-            <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-            </svg>
-          )}>
-            <SessionHistory />
-          </CollapsibleSection>
+      {/* Projects and sessions */}
+      <CollapsibleSection
+        title="Projects & Sessions"
+        icon={({ className }: { className?: string }) => (
+          <svg
+            className={className}
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+          </svg>
+        )}
+      >
+        <VortexProjectSessionNavigator />
+      </CollapsibleSection>
 
       {/* Footer: Quick access */}
       <div className="flex shrink-0 items-center gap-1 border-t border-border/30 px-2 py-1">
