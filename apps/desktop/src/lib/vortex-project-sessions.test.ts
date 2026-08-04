@@ -124,4 +124,36 @@ describe('VORTEX project/session index', () => {
 
     expect(index.projects[0].sessions[0].mode).toBe('chat');
   });
+
+  it('combines sessions from equivalent Windows path representations', () => {
+    const index = mergeVortexProjectSessionIndex(
+      {
+        projects: [
+          {
+            id: 'project-slash',
+            name: 'HysCode',
+            path: 'C:/Users/estev/Hyscode',
+            last_activity_at: '2026-08-04 20:37:14',
+            sessions: [conversation('new-session', 'New session', '2026-08-04 20:37:14')],
+          },
+          {
+            id: 'project-backslash',
+            name: 'HysCode',
+            path: 'C:\\Users\\estev\\Hyscode',
+            last_activity_at: '2026-08-04 16:07:22',
+            sessions: [conversation('old-session', 'Old session', '2026-08-04 16:07:22')],
+          },
+        ],
+        recent_sessions: [],
+      },
+      [{ name: 'HysCode', path: 'C:/Users/estev/Hyscode', lastOpened: 20 }],
+      [],
+    );
+
+    expect(index.projects).toHaveLength(1);
+    expect(index.projects[0].sessions.map((session) => session.id)).toEqual([
+      'new-session',
+      'old-session',
+    ]);
+  });
 });

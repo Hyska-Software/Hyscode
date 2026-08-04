@@ -1,6 +1,6 @@
 /* @vitest-environment jsdom */
 
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { VortexProjectSessionNavigator } from './vortex-project-session-navigator';
 import { useAgentStore } from '@/stores/agent-store';
@@ -17,6 +17,7 @@ const { loadIndexMock, activateSessionMock, openProjectMock, invokeMock, pickFol
 
 vi.mock('@/lib/vortex-project-sessions', () => ({
   loadVortexProjectSessionIndex: loadIndexMock,
+  VORTEX_SESSION_INDEX_UPDATED_EVENT: 'hyscode:vortex-session-index-updated',
 }));
 vi.mock('@/lib/project-persistence', () => ({
   activateVortexSession: activateSessionMock,
@@ -153,6 +154,68 @@ describe('VortexProjectSessionNavigator', () => {
 
     await waitFor(() => {
       expect(activateSessionMock).toHaveBeenCalledWith('C:/project-a', 'session-a');
+    });
+  });
+
+  it('refreshes the index and shows the working indicator for the active turn', async () => {
+    render(<VortexProjectSessionNavigator />);
+    await screen.findByText('Recent');
+    const initialLoadCount = loadIndexMock.mock.calls.length;
+
+    useAgentStore.setState({
+      conversationId: 'session-a',
+      messages: [{ id: 'message-a', role: 'user', content: 'Hello', timestamp: Date.now() }],
+      isStreaming: true,
+    });
+
+    await waitFor(() => {
+      expect(loadIndexMock.mock.calls.length).toBeGreaterThan(initialLoadCount);
+      expect(screen.getAllByRole('status', { name: /Agent working/i }).length).toBeGreaterThan(0);
+    });
+
+    const eventLoadCount = loadIndexMock.mock.calls.length;
+    act(() => {
+      window.dispatchEvent(new Event('hyscode:vortex-session-index-updated'));
+    });
+    await waitFor(() => {
+      expect(loadIndexMock.mock.calls.length).toBeGreaterThan(eventLoadCount);
+    });
+  });
+
+  it('shows a newly started session in Recent and its project after refresh', async () => {
+    const newSession = { ...session, id: 'new-session', title: 'New session', messageCount: 1 };
+    let refreshCount = 0;
+    loadIndexMock.mockImplementation(async () => {
+      refreshCount += 1;
+      const sessions = refreshCount > 1 ? [newSession] : [];
+      return {
+        projects: [
+          {
+            id: 'project-a',
+            name: 'Project A',
+            path: 'C:/project-a',
+            lastActivityAt: '2026-08-04 10:01:00',
+            lastOpened: Date.now(),
+            sessions,
+          },
+        ],
+        recentSessions: sessions,
+      };
+    });
+
+    render(<VortexProjectSessionNavigator />);
+    await screen.findByText('Recent');
+    expect(screen.queryAllByTitle('New session')).toHaveLength(0);
+
+    useAgentStore.setState({
+      conversationId: 'new-session',
+      messages: [{ id: 'message-new', role: 'user', content: 'Hello', timestamp: Date.now() }],
+      isStreaming: true,
+    });
+
+    await waitFor(() => {
+      expect(screen.getAllByTitle('New session').length).toBeGreaterThanOrEqual(2);
+      expect(screen.getAllByRole('status', { name: /Agent working/i }).length).toBeGreaterThan(0);
     });
   });
 

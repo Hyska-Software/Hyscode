@@ -24,7 +24,12 @@ import {
   activateVortexSession,
   openProjectWorkspace,
 } from '@/lib/project-persistence';
-import { loadVortexProjectSessionIndex, type VortexProjectSummary, type VortexSessionSummary } from '@/lib/vortex-project-sessions';
+import {
+  loadVortexProjectSessionIndex,
+  VORTEX_SESSION_INDEX_UPDATED_EVENT,
+  type VortexProjectSummary,
+  type VortexSessionSummary,
+} from '@/lib/vortex-project-sessions';
 import { tauriInvoke } from '@/lib/tauri-invoke';
 import { HarnessBridge } from '@/lib/harness-bridge';
 import { useAgentStore, type AgentMode } from '@/stores/agent-store';
@@ -87,6 +92,7 @@ export function VortexProjectSessionNavigator() {
   const projectLoading = useProjectStore((state) => state.isLoading);
   const hideFromVortex = useProjectStore((state) => state.hideFromVortex);
   const currentConversationId = useAgentStore((state) => state.conversationId);
+  const messageCount = useAgentStore((state) => state.messages.length);
   const isStreaming = useAgentStore((state) => state.isStreaming);
   const pendingApprovals = useAgentStore((state) => state.pendingApprovals.length);
   const pendingUserQuestion = useAgentStore((state) => state.pendingUserQuestion);
@@ -100,15 +106,17 @@ export function VortexProjectSessionNavigator() {
   const [collapsedProjects, setCollapsedProjects] = useState<Set<string>>(new Set());
   const [pendingAction, setPendingAction] = useState<string | null>(null);
   const requestId = useRef(0);
+  const hasLoadedIndex = useRef(false);
 
   const refresh = useCallback(async () => {
     const currentRequest = ++requestId.current;
-    setLoading(true);
+    if (!hasLoadedIndex.current) setLoading(true);
     setError(null);
     try {
       const nextIndex = await loadVortexProjectSessionIndex(recentProjects, hiddenProjectPaths);
       if (currentRequest !== requestId.current) return;
       setIndex(nextIndex);
+      hasLoadedIndex.current = true;
     } catch (cause) {
       if (currentRequest !== requestId.current) return;
       setError(cause instanceof Error ? cause.message : 'Unable to load VORTEX projects.');
@@ -119,8 +127,19 @@ export function VortexProjectSessionNavigator() {
   }, [hiddenProjectPaths, recentProjects]);
 
   useEffect(() => {
-    if (projectLoading) return;
+    if (projectLoading) {
+      hasLoadedIndex.current = false;
+      return;
+    }
     void refresh();
+  }, [currentConversationId, messageCount, projectLoading, refresh]);
+
+  useEffect(() => {
+    const handleIndexUpdated = () => {
+      if (!projectLoading) void refresh();
+    };
+    window.addEventListener(VORTEX_SESSION_INDEX_UPDATED_EVENT, handleIndexUpdated);
+    return () => window.removeEventListener(VORTEX_SESSION_INDEX_UPDATED_EVENT, handleIndexUpdated);
   }, [projectLoading, refresh]);
 
   const normalizedQuery = query.trim().toLowerCase();
@@ -406,6 +425,7 @@ export function VortexProjectSessionNavigator() {
                           key={`recent:${session.id}`}
                           session={session}
                           isActive={session.id === currentConversationId && areSameProjectPath(session.projectPath, activeProjectPath)}
+                          isWorking={isStreaming && session.id === currentConversationId && areSameProjectPath(session.projectPath, activeProjectPath)}
                           showProjectName
                           busy={pendingAction !== null}
                           onOpen={() => void handleSessionClick(session)}
@@ -445,6 +465,7 @@ export function VortexProjectSessionNavigator() {
                       project={project}
                       activeProjectPath={activeProjectPath}
                       currentConversationId={currentConversationId}
+                      isWorking={isStreaming && areSameProjectPath(project.path, activeProjectPath)}
                       collapsed={collapsedProjects.has(project.path)}
                       pendingAction={pendingAction}
                       onToggle={() => toggleProject(project.path)}
@@ -472,6 +493,7 @@ function VortexProjectGroup({
   project,
   activeProjectPath,
   currentConversationId,
+  isWorking,
   collapsed,
   pendingAction,
   onToggle,
@@ -486,6 +508,7 @@ function VortexProjectGroup({
   project: VortexProjectSummary;
   activeProjectPath: string | null;
   currentConversationId: string | null;
+  isWorking: boolean;
   collapsed: boolean;
   pendingAction: string | null;
   onToggle: () => void;
@@ -517,6 +540,13 @@ function VortexProjectGroup({
           {isActiveProject ? <FolderOpen className="h-3.5 w-3.5 shrink-0 text-primary" /> : <Folder className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />}
           <span className="truncate" title={project.path}>{project.name}</span>
           <span className="shrink-0 text-[9px] text-muted-foreground">{project.sessions.length}</span>
+          {isWorking && (
+            <Loader2
+              className="h-3 w-3 shrink-0 animate-spin text-primary"
+              role="status"
+              aria-label={`Agent working in ${project.name}`}
+            />
+          )}
         </button>
         <DropdownMenu>
           <DropdownMenuTrigger
@@ -572,6 +602,7 @@ function VortexProjectGroup({
                 key={session.id}
                 session={session}
                 isActive={session.id === currentConversationId && isActiveProject}
+                isWorking={isWorking && session.id === currentConversationId}
                 busy={pendingAction !== null}
                 onOpen={() => onOpen(session)}
                 onRename={() => onRename(session)}
@@ -588,6 +619,7 @@ function VortexProjectGroup({
 function VortexSessionRow({
   session,
   isActive,
+  isWorking,
   showProjectName = false,
   busy,
   onOpen,
@@ -596,6 +628,7 @@ function VortexSessionRow({
 }: {
   session: VortexSessionSummary;
   isActive: boolean;
+  isWorking: boolean;
   showProjectName?: boolean;
   busy: boolean;
   onOpen: () => void;
@@ -622,7 +655,15 @@ function VortexSessionRow({
       )}
       title={session.title}
     >
-      <Icon className={cn('mt-0.5 h-3.5 w-3.5 shrink-0', isActive && 'text-primary')} />
+      {isWorking ? (
+        <Loader2
+          className="mt-0.5 h-3.5 w-3.5 shrink-0 animate-spin text-primary"
+          role="status"
+          aria-label="Agent working"
+        />
+      ) : (
+        <Icon className={cn('mt-0.5 h-3.5 w-3.5 shrink-0', isActive && 'text-primary')} />
+      )}
       <div className="min-w-0 flex-1">
         <div className="flex min-w-0 items-center gap-1">
           <span className="truncate text-[11px] font-medium">{session.title}</span>

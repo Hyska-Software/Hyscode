@@ -54,6 +54,7 @@ import { SubAgentRunner } from './sub-agent-runner';
 import { SubAgentCoordinator, type SubAgentResourceMode } from './sub-agent-coordinator';
 import { eventBelongsToOwner } from './turn-event-ownership';
 import { configureProviderResilience } from './init-providers';
+import { notifyVortexProjectSessionIndexUpdated } from './vortex-project-sessions';
 
 // ─── Error Parser ────────────────────────────────────────────────────────────
 // Converts raw technical error messages into friendly user-facing text.
@@ -589,6 +590,16 @@ export class HarnessBridge {
       this.harness.setConversationId(store.conversationId);
     }
 
+    // Start indexing immediately, but do not hold back the local message and
+    // working state while SQLite responds. The agent run still awaits this
+    // promise before contacting the provider, so VORTEX sees the session as
+    // soon as the user submits while persistence remains ordered.
+    const conversationReady = this.ensureConversationExists(userMessage).catch((error) => {
+      dbg(
+        `Could not index the conversation before the turn: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    });
+
     // Clear any context carried over from a previous tab before injecting fresh sources
     this.clearTabContext();
 
@@ -730,6 +741,8 @@ export class HarnessBridge {
         historyMessages.pop();
       }
       const history = this.buildHistory(historyMessages);
+
+      await conversationReady;
 
       // Reset iteration tracking for the new turn
       // The conversation-scoped terminal runtime acquires a visible session only
@@ -2773,25 +2786,23 @@ ${hints.map((h) => `- ${h}`).join('\n')}
         durationMs: record.durationMs,
       }),
     });
+    notifyVortexProjectSessionIndexUpdated();
   }
 
   private async ensureConversationExists(titleSource: string): Promise<void> {
     const store = useAgentStore.getState();
     const conversationId = store.conversationId;
-    if (!conversationId) throw new Error('Cannot start SDD without a conversation ID.');
+    if (!conversationId) throw new Error('Cannot persist a turn without a conversation ID.');
     await tauriInvokeRaw('db_ensure_project', { id: this._projectId, path: this._projectId });
-    try {
-      await tauriInvokeRaw('db_create_conversation', {
-        id: conversationId,
-        projectId: this._projectId,
-        title: titleSource.slice(0, 80) || 'SDD Session',
-        mode: store.mode,
-        modelId: useSettingsStore.getState().activeModelId ?? null,
-        providerId: useSettingsStore.getState().activeProviderId ?? null,
-      });
-    } catch {
-      // Existing conversation is the expected path after the first SDD action.
-    }
+    await tauriInvokeRaw('db_create_conversation', {
+      id: conversationId,
+      projectId: this._projectId,
+      title: titleSource.slice(0, 80) || 'SDD Session',
+      mode: store.mode,
+      modelId: useSettingsStore.getState().activeModelId ?? null,
+      providerId: useSettingsStore.getState().activeProviderId ?? null,
+    });
+    notifyVortexProjectSessionIndexUpdated();
   }
 
   /** Shared Tauri invoke for agent tool execution (main agent AND sub-agents):

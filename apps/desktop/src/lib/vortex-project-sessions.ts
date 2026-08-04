@@ -28,6 +28,14 @@ export interface VortexProjectSessionIndex {
   recentSessions: VortexSessionSummary[];
 }
 
+export const VORTEX_SESSION_INDEX_UPDATED_EVENT = 'hyscode:vortex-session-index-updated';
+
+export function notifyVortexProjectSessionIndexUpdated(): void {
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new Event(VORTEX_SESSION_INDEX_UPDATED_EVENT));
+  }
+}
+
 const AGENT_MODES: readonly AgentMode[] = ['chat', 'build', 'review', 'debug', 'plan'];
 
 export function toAgentMode(mode: string): AgentMode {
@@ -68,6 +76,32 @@ function activityTimestamp(project: VortexProjectSummary): number {
   return 0;
 }
 
+function latestTimestamp(left: string | null, right: string | null): string | null {
+  if (!left) return right;
+  if (!right) return left;
+  const leftTime = Date.parse(left);
+  const rightTime = Date.parse(right);
+  if (Number.isNaN(leftTime)) return right;
+  if (Number.isNaN(rightTime)) return left;
+  return rightTime > leftTime ? right : left;
+}
+
+function mergeSessions(
+  current: VortexSessionSummary[],
+  incoming: VortexSessionSummary[],
+): VortexSessionSummary[] {
+  const sessionsById = new Map(current.map((session) => [session.id, session]));
+  for (const session of incoming) {
+    const existing = sessionsById.get(session.id);
+    if (!existing || session.updatedAt.localeCompare(existing.updatedAt) > 0) {
+      sessionsById.set(session.id, session);
+    }
+  }
+  return [...sessionsById.values()].sort((left, right) =>
+    right.updatedAt.localeCompare(left.updatedAt),
+  );
+}
+
 /**
  * Merge durable database projects with the local recent-project registry.
  * The local registry is needed for projects opened before they had a session,
@@ -89,7 +123,7 @@ export function mergeVortexProjectSessionIndex(
     const pathKey = projectPathKey(normalizedPath);
     if (hiddenKeys.has(pathKey)) continue;
     const recentProject = recentByKey.get(pathKey);
-    projectsByKey.set(pathKey, {
+    const nextProject: VortexProjectSummary = {
       id: project.id,
       name: project.name || recentProject?.name || normalizedPath,
       path: normalizedPath,
@@ -98,7 +132,19 @@ export function mergeVortexProjectSessionIndex(
       sessions: project.sessions.map((session) =>
         mapSession(session, project.id, project.name || recentProject?.name || normalizedPath, normalizedPath),
       ),
-    });
+    };
+    const existingProject = projectsByKey.get(pathKey);
+    if (existingProject) {
+      projectsByKey.set(pathKey, {
+        ...existingProject,
+        name: recentProject?.name || existingProject.name || nextProject.name,
+        lastActivityAt: latestTimestamp(existingProject.lastActivityAt, nextProject.lastActivityAt),
+        lastOpened: Math.max(existingProject.lastOpened ?? 0, nextProject.lastOpened ?? 0) || null,
+        sessions: mergeSessions(existingProject.sessions, nextProject.sessions),
+      });
+    } else {
+      projectsByKey.set(pathKey, nextProject);
+    }
   }
 
   for (const recentProject of recentProjects) {

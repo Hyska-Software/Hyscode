@@ -225,6 +225,17 @@ pub struct MessageRow {
 
 // ─── Conversation commands ──────────────────────────────────────────────────
 
+const UPSERT_CONVERSATION_SQL: &str = "INSERT INTO conversations
+    (id, project_id, title, mode, model_id, provider_id)
+    VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+    ON CONFLICT(id) DO UPDATE SET
+        project_id = excluded.project_id,
+        title = excluded.title,
+        mode = excluded.mode,
+        model_id = excluded.model_id,
+        provider_id = excluded.provider_id,
+        updated_at = datetime('now')";
+
 #[tauri::command]
 pub fn db_list_conversations(
     state: State<'_, DbState>,
@@ -423,8 +434,7 @@ pub fn db_create_conversation(
 ) -> Result<(), String> {
     let conn = state.0.lock().map_err(|e| e.to_string())?;
     conn.execute(
-        "INSERT INTO conversations (id, project_id, title, mode, model_id, provider_id)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        UPSERT_CONVERSATION_SQL,
         params![id, project_id, title, mode, model_id, provider_id],
     )
     .map_err(|e| e.to_string())?;
@@ -648,11 +658,7 @@ pub fn db_commit_agent_turn(
         .map_err(|error| error.to_string())?;
     transaction
         .execute(
-            "INSERT INTO conversations (id, project_id, title, mode, model_id, provider_id)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)
-             ON CONFLICT(id) DO UPDATE SET title=excluded.title, mode=excluded.mode,
-               model_id=excluded.model_id, provider_id=excluded.provider_id,
-               updated_at=datetime('now')",
+            UPSERT_CONVERSATION_SQL,
             params![
                 conversation_id,
                 project_id,
@@ -2026,7 +2032,8 @@ pub fn db_sdd_get_tasks(
 
 #[cfg(test)]
 mod database_tests {
-    use super::{list_vortex_project_sessions, open_database};
+    use super::{list_vortex_project_sessions, open_database, UPSERT_CONVERSATION_SQL};
+    use rusqlite::params;
     use std::error::Error;
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -2109,6 +2116,46 @@ mod database_tests {
         assert_eq!(index.projects[0].name, "Empty Project");
         assert!(index.projects[0].sessions.is_empty());
         assert!(index.recent_sessions.is_empty());
+
+        drop(connection);
+        std::fs::remove_dir_all(directory)?;
+        Ok(())
+    }
+
+    #[test]
+    fn upserts_an_active_conversation_into_its_current_project() -> Result<(), Box<dyn Error>> {
+        let suffix = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
+        let directory =
+            std::env::temp_dir().join(format!("hyscode-vortex-session-upsert-{suffix}"));
+        let connection = open_database(&directory);
+        connection.execute_batch(
+            "INSERT INTO projects (id,name,path) VALUES
+               ('project-old','Old Project','C:/old-project'),
+               ('project-current','Current Project','C:/current-project');
+             INSERT INTO conversations (id,project_id,title,mode)
+               VALUES ('session','project-old','Old title','chat');",
+        )?;
+
+        connection.execute(
+            UPSERT_CONVERSATION_SQL,
+            params![
+                "session",
+                "project-current",
+                "New title",
+                "build",
+                Option::<&str>::None,
+                Option::<&str>::None,
+            ],
+        )?;
+
+        let (project_id, title, mode): (String, String, String) = connection.query_row(
+            "SELECT project_id, title, mode FROM conversations WHERE id='session'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )?;
+        assert_eq!(project_id, "project-current");
+        assert_eq!(title, "New title");
+        assert_eq!(mode, "build");
 
         drop(connection);
         std::fs::remove_dir_all(directory)?;
