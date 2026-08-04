@@ -38,7 +38,14 @@ import { LspBridge } from './lib/lsp-bridge';
 import { startExtensionLspSync } from './lib/extension-lsp-bridge';
 import { getViewerType } from './lib/utils';
 import { UpdateDialog } from './components/updater/update-dialog';
-import { saveProjectState, switchProject, closeCurrentProject } from './lib/project-persistence';
+import {
+  areSameProjectPath,
+  closeProjectWorkspace,
+  hydrateProjectWorkspace,
+  openProjectWorkspace,
+  saveOpenAgentTabs,
+  saveProjectState,
+} from './lib/project-persistence';
 
 import { isLightTheme } from './lib/monaco-themes';
 import { tauriInvoke } from './lib/tauri-invoke';
@@ -49,9 +56,14 @@ import type { AgentMode, ChatMessage } from './stores/agent-store';
 // ─── Open tabs persistence ───────────────────────────────────────────────────
 
 async function restoreOpenTabs(projectId: string): Promise<void> {
+  const isCurrentProject = () =>
+    areSameProjectPath(useProjectStore.getState().rootPath, projectId) &&
+    areSameProjectPath(useFileStore.getState().rootPath, projectId);
+  if (!isCurrentProject()) return;
+
   try {
     const rows = await tauriInvoke('db_get_open_tabs', { projectId });
-    if (rows.length === 0) return;
+    if (rows.length === 0 || !isCurrentProject()) return;
 
     // Load messages for each tab
     const tabsWithMessages = await Promise.all(
@@ -84,11 +96,12 @@ async function restoreOpenTabs(projectId: string): Promise<void> {
       }),
     );
 
+    if (!isCurrentProject()) return;
     useAgentStore.getState().loadSavedTabs(tabsWithMessages);
 
     // Sync active conversationId into harness
     const store = useAgentStore.getState();
-    if (store.conversationId) {
+    if (store.conversationId && isCurrentProject()) {
       try {
         HarnessBridge.get().restoreSession(store.conversationId);
       } catch {
@@ -98,30 +111,6 @@ async function restoreOpenTabs(projectId: string): Promise<void> {
   } catch {
     // open_tabs not available — first launch
   }
-}
-
-/** Persist current open tabs state to DB (fire-and-forget). */
-function persistOpenTabs(projectId: string): void {
-  const { openTabs, activeTabId, tabStates, conversationId, mode } = useAgentStore.getState();
-  // Build the flat active tab data
-  const activeTab = openTabs.find((t) => t.id === activeTabId);
-  if (!activeTab) return;
-
-  openTabs.forEach((tab, idx) => {
-    const isActive = tab.id === activeTabId;
-    const convId = isActive ? conversationId : (tabStates[tab.id]?.conversationId ?? null);
-    const tabMode = isActive ? mode : (tabStates[tab.id]?.mode ?? 'chat');
-    tauriInvoke('db_upsert_open_tab', {
-      id: tab.id,
-      projectId,
-      conversationId: convId,
-      title: tab.title,
-      mode: tabMode,
-      tabIndex: idx,
-    }).catch(() => {
-      // Best-effort persistence
-    });
-  });
 }
 
 // ── Theme effect — applies CSS class on <html> whenever themeId changes ──────
@@ -153,28 +142,23 @@ function useRoundedBordersEffect() {
 
 function IDE() {
   const projectRootPath = useProjectStore((s) => s.rootPath);
+  const projectLoading = useProjectStore((s) => s.isLoading);
   const fileRootPath = useFileStore((s) => s.rootPath);
-  const openFolder = useFileStore((s) => s.openFolder);
   const bridgeInitRef = useRef(false);
   const lspInitRef = useRef(false);
   const extSyncRef = useRef<(() => void) | null>(null);
-  const restoredRef = useRef(false);
 
   const workspaceMode = useLayoutStore((s) => s.workspaceMode);
 
   useThemeEffect();
   useRoundedBordersEffect();
 
-  // On mount: if fileStore is empty but projectStore has a path (from persistence),
-  // reload the directory tree and restore per-project state
+  // On mount, hydrate the project path persisted by the project store. User-driven
+  // switches use openProjectWorkspace directly and must not start a second loader.
   useEffect(() => {
-    if (projectRootPath && !fileRootPath) {
-      openFolder(projectRootPath).catch(console.error);
-    }
-    // Restore per-project state on first mount (startup)
-    if (projectRootPath && !restoredRef.current) {
-      restoredRef.current = true;
-      switchProject(null, projectRootPath).catch(console.error);
+    const persistedProjectPath = useProjectStore.getState().rootPath;
+    if (persistedProjectPath && !useFileStore.getState().rootPath) {
+      hydrateProjectWorkspace(persistedProjectPath).catch(console.error);
     }
   }, []);
 
@@ -184,7 +168,7 @@ function IDE() {
       const currentPath = useProjectStore.getState().rootPath;
       if (currentPath) {
         saveProjectState(currentPath);
-        persistOpenTabs(currentPath);
+        saveOpenAgentTabs(currentPath);
       }
     };
     window.addEventListener('beforeunload', handleBeforeUnload);
@@ -193,34 +177,52 @@ function IDE() {
 
   // Initialize HarnessBridge when project is open
   useEffect(() => {
-    if (!projectRootPath || bridgeInitRef.current) return;
+    if (
+      !projectRootPath ||
+      projectLoading ||
+      !areSameProjectPath(fileRootPath, projectRootPath) ||
+      bridgeInitRef.current
+    ) return;
     bridgeInitRef.current = true;
+    let cancelled = false;
 
     // HarnessBridge.init is async (resolves home dir via Rust)
     (async () => {
       try {
         const bridge = await HarnessBridge.init(projectRootPath, projectRootPath);
+        if (cancelled || !areSameProjectPath(useProjectStore.getState().rootPath, projectRootPath)) {
+          return;
+        }
         const skills = await bridge.loadSkills();
+        if (cancelled || !areSameProjectPath(useProjectStore.getState().rootPath, projectRootPath)) {
+          return;
+        }
         // Populate the skills store with discovered skills
         useSkillsStore.getState().setDiscoveredSkills(skills);
         await bridge.registerMcpTools();
 
         // Restore persisted open tabs from previous session
-        await restoreOpenTabs(projectRootPath);
+        if (!cancelled) await restoreOpenTabs(projectRootPath);
       } catch (err) {
         console.warn('[App] Failed to initialize harness:', err);
       }
     })();
 
     return () => {
+      cancelled = true;
       HarnessBridge.destroy();
       bridgeInitRef.current = false;
     };
-  }, [projectRootPath]);
+  }, [fileRootPath, projectLoading, projectRootPath]);
 
   // Initialize LspBridge when project is open
   useEffect(() => {
-    if (!projectRootPath || lspInitRef.current) return;
+    if (
+      !projectRootPath ||
+      projectLoading ||
+      !areSameProjectPath(fileRootPath, projectRootPath) ||
+      lspInitRef.current
+    ) return;
     lspInitRef.current = true;
 
     (async () => {
@@ -245,7 +247,7 @@ function IDE() {
       LspBridge.destroy();
       lspInitRef.current = false;
     };
-  }, [projectRootPath]);
+  }, [fileRootPath, projectLoading, projectRootPath]);
 
   return (
     <div className="flex h-screen w-screen flex-col bg-background text-foreground">
@@ -268,10 +270,6 @@ function IDE() {
 
 export function App() {
   const rootPath = useProjectStore((s) => s.rootPath);
-  const openProject = useProjectStore((s) => s.openProject);
-  const closeProject = useProjectStore((s) => s.closeProject);
-  const openFolder = useFileStore((s) => s.openFolder);
-  const closeFolder = useFileStore((s) => s.closeFolder);
   const openUntitled = useEditorStore((s) => s.openUntitled);
   const openTab = useEditorStore((s) => s.openTab);
   const closeTab = useEditorStore((s) => s.closeTab);
@@ -284,23 +282,15 @@ export function App() {
   // Project lifecycle: open a new project with state save/restore
   const handleOpenProject = useCallback(
     async (path: string) => {
-      const currentPath = useProjectStore.getState().rootPath;
-      await switchProject(currentPath, path);
-      openProject(path);
-      await openFolder(path);
+      await openProjectWorkspace(path);
     },
-    [openProject, openFolder],
+    [],
   );
 
   // Project lifecycle: close current project with state save
-  const handleCloseProject = useCallback(() => {
-    const currentPath = useProjectStore.getState().rootPath;
-    if (currentPath) {
-      closeCurrentProject(currentPath);
-    }
-    closeProject();
-    closeFolder();
-  }, [closeProject, closeFolder]);
+  const handleCloseProject = useCallback(async () => {
+    await closeProjectWorkspace();
+  }, []);
 
   // Initialize AI providers on app startup (once)
   useEffect(() => {

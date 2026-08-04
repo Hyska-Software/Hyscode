@@ -18,9 +18,7 @@ import {
 import { useGithubStore, type GitHubRepo } from '../../stores/github-store';
 import { useGitStore } from '../../stores';
 import { pickFolder } from '../../lib/tauri-dialog';
-import { switchProject } from '../../lib/project-persistence';
-import { useProjectStore } from '../../stores/project-store';
-import { useFileStore } from '../../stores/file-store';
+import { openProjectWorkspace } from '../../lib/project-persistence';
 import { GithubAccountSection } from '../settings/tabs/github-account-section';
 
 interface CloneRepositoryDialogProps {
@@ -149,9 +147,7 @@ export function CloneRepositoryDialog({ open, onClose }: CloneRepositoryDialogPr
         branchInput.trim() || null,
       );
       setStatus({ type: 'success', message: targetPath });
-      await switchProject(null, targetPath);
-      useProjectStore.getState().openProject(targetPath);
-      await useFileStore.getState().openFolder(targetPath);
+      await openProjectWorkspace(targetPath);
       setTimeout(onClose, 250);
     } catch (error) {
       setStatus({

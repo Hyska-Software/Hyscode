@@ -1,16 +1,14 @@
 import { useState, useEffect } from 'react';
 import { FolderOpen, GitBranch, Clock, Trash2, ArrowRight, Sparkles, Settings, RotateCcw } from 'lucide-react';
-import { useProjectStore, useFileStore, useSettingsStore } from '../../stores';
+import { useProjectStore, useSettingsStore } from '../../stores';
 import { useGithubStore } from '../../stores/github-store';
 import { pickFolder } from '../../lib/tauri-dialog';
-import { switchProject } from '../../lib/project-persistence';
+import { openProjectWorkspace } from '../../lib/project-persistence';
 import type { RecentProject } from '../../stores/project-store';
 import { BrandMark } from '../brand-mark';
 import { useOnboardingStore } from '../../stores/onboarding-store';
 
 export function WelcomePage() {
-  const openProject = useProjectStore((s) => s.openProject);
-  const openFolder = useFileStore((s) => s.openFolder);
   const recentProjects = useProjectStore((s) => s.recentProjects);
   const removeRecent = useProjectStore((s) => s.removeRecent);
   const openSettings = useSettingsStore((s) => s.openSettings);
@@ -26,16 +24,12 @@ export function WelcomePage() {
   const handleOpenFolder = async () => {
     const path = await pickFolder();
     if (path) {
-      await switchProject(null, path);
-      openProject(path);
-      await openFolder(path);
+      await openProjectWorkspace(path);
     }
   };
 
   const handleOpenRecent = async (project: RecentProject) => {
-    await switchProject(null, project.path);
-    openProject(project.path);
-    await openFolder(project.path);
+    await openProjectWorkspace(project.path);
   };
 
   const formatDate = (timestamp: number) => {

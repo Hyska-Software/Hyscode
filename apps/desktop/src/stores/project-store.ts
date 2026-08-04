@@ -14,6 +14,7 @@ interface ProjectState {
   isLoading: boolean;
   recentProjects: RecentProject[];
   openProject: (path: string) => void;
+  setLoading: (isLoading: boolean) => void;
   closeProject: () => void;
   removeRecent: (path: string) => void;
   clearRecent: () => void;
@@ -40,6 +41,11 @@ export const useProjectStore = create<ProjectState>()(
           filtered.unshift({ name: projectName, path, lastOpened: Date.now() });
           // Keep only 10 recent projects
           state.recentProjects = filtered.slice(0, 10);
+        }),
+
+      setLoading: (isLoading) =>
+        set((state) => {
+          state.isLoading = isLoading;
         }),
 
       closeProject: () =>

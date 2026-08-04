@@ -35,6 +35,8 @@ interface RulesState {
 
   /** Populate rules from harness discovery. Merges with persisted prefs. */
   setDiscoveredRules: (rules: Rule[]) => void;
+  /** Clear discovered workspace rules while a new project is loading. */
+  resetProjectState: () => void;
 
   /** Toggle a rule on/off */
   toggleRule: (id: string) => void;
@@ -86,6 +88,14 @@ export const useRulesStore = create<RulesState>()(
             };
           });
           state.loading = false;
+        }),
+
+      resetProjectState: () =>
+        set((state) => {
+          state.rules = [];
+          state.loading = false;
+          state.ruleEditorOpen = false;
+          state.ruleEditorExistingId = null;
         }),
 
       toggleRule: (id: string) =>

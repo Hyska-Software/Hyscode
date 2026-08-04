@@ -13,6 +13,7 @@ import {
 import { useEditorStore, useFileStore, useProjectStore, useSettingsStore } from '../../stores';
 import { pickFile, pickFolder, saveFileDialog } from '../../lib/tauri-dialog';
 import { tauriFs } from '../../lib/tauri-fs';
+import { closeProjectWorkspace, openProjectWorkspace } from '../../lib/project-persistence';
 import { getViewerType } from '../../lib/utils';
 import { promptInput } from '../ui/dialogs';
 import { detectLanguage } from '../../lib/lsp-bridge';
@@ -28,15 +29,9 @@ export function FileMenu() {
   const markDirty = useEditorStore((s) => s.markDirty);
 
   const rootPath = useFileStore((s) => s.rootPath);
-  const openFolder = useFileStore((s) => s.openFolder);
-  const closeFolder = useFileStore((s) => s.closeFolder);
   const setFileContent = useFileStore((s) => s.setFileContent);
 
-  const openProject = useProjectStore((s) => s.openProject);
-  const closeProject = useProjectStore((s) => s.closeProject);
   const recentProjects = useProjectStore((s) => s.recentProjects);
-
-  const closeAllTabs = useEditorStore((s) => s.closeAllTabs);
 
   const autoSave = useSettingsStore((s) => s.autoSave);
   const setSetting = useSettingsStore((s) => s.set);
@@ -86,14 +81,12 @@ export function FileMenu() {
   const handleOpenFolder = async () => {
     const path = await pickFolder();
     if (path) {
-      openProject(path);
-      await openFolder(path);
+      await openProjectWorkspace(path);
     }
   };
 
   const handleOpenRecent = async (path: string) => {
-    openProject(path);
-    await openFolder(path);
+    await openProjectWorkspace(path);
   };
 
   const handleAutoSaveToggle = () => {
@@ -119,15 +112,12 @@ export function FileMenu() {
     if (activeTabId) closeTab(activeTabId);
   };
 
-  const handleCloseFolder = () => {
-    closeProject();
-    closeFolder();
+  const handleCloseFolder = async () => {
+    await closeProjectWorkspace();
   };
 
-  const handleGoHome = () => {
-    closeProject();
-    closeFolder();
-    closeAllTabs();
+  const handleGoHome = async () => {
+    await closeProjectWorkspace();
   };
 
   const handleSave = async () => {

@@ -1,17 +1,13 @@
 import { FolderOpen } from 'lucide-react';
-import { useProjectStore, useFileStore } from '../../stores';
 import { pickFolder } from '../../lib/tauri-dialog';
+import { openProjectWorkspace } from '../../lib/project-persistence';
 import { BrandMark } from '../brand-mark';
 
 export function EditorWelcome() {
-  const openProject = useProjectStore((s) => s.openProject);
-  const openFolder = useFileStore((s) => s.openFolder);
-
   const handleOpenFolder = async () => {
     const path = await pickFolder();
     if (path) {
-      openProject(path);
-      await openFolder(path);
+      await openProjectWorkspace(path);
     }
   };
 

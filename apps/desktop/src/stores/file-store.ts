@@ -115,6 +115,8 @@ function getParentPathFromTree(nodes: FileNode[], path: string, parentPath = '')
   return undefined;
 }
 
+let folderLoadGeneration = 0;
+
 export const useFileStore = create<FileState>()(
   immer((set, get) => ({
     rootPath: null,
@@ -131,9 +133,11 @@ export const useFileStore = create<FileState>()(
 
     setRootPath: (path) =>
       set((state) => {
+        folderLoadGeneration += 1;
         state.rootPath = path;
         state.tree = [];
         state.fileCache.clear();
+        state.externalConflicts.clear();
         state._pathIndex.clear();
         state._parentMap.clear();
       }),
@@ -174,38 +178,50 @@ export const useFileStore = create<FileState>()(
     },
 
     openFolder: async (path) => {
+      const requestId = ++folderLoadGeneration;
       await get().stopWatching();
+      if (requestId !== folderLoadGeneration) return;
       useDiagnosticsStore.getState().clearAll();
 
       set((state) => {
         state.rootPath = path;
         state.tree = [];
         state.fileCache.clear();
+        state.externalConflicts.clear();
         state._pathIndex.clear();
         state._parentMap.clear();
       });
       const nodes = await get().loadDirectory(path);
+      if (requestId !== folderLoadGeneration || get().rootPath !== path) return;
       set((state) => {
         state.tree = nodes;
         rebuildIndex(state);
       });
 
       await get().startWatching();
+      if (requestId !== folderLoadGeneration || get().rootPath !== path) {
+        await get().stopWatching();
+      }
     },
 
     closeFolder: () => {
+      folderLoadGeneration += 1;
       get().stopWatching();
       useDiagnosticsStore.getState().clearAll();
       set((state) => {
         state.rootPath = null;
         state.tree = [];
         state.fileCache.clear();
+        state.externalConflicts.clear();
         state._pathIndex.clear();
         state._parentMap.clear();
       });
     },
 
     expandDirectory: async (path) => {
+      const requestId = folderLoadGeneration;
+      const rootPath = get().rootPath;
+      if (!rootPath) return;
       set((state) => {
         const markLoading = (nodes: FileNode[]): boolean => {
           for (const n of nodes) {
@@ -222,6 +238,7 @@ export const useFileStore = create<FileState>()(
       });
 
       const children = await get().loadDirectory(path);
+      if (requestId !== folderLoadGeneration || get().rootPath !== rootPath) return;
 
       set((state) => {
         const assignChildren = (nodes: FileNode[]): boolean => {
@@ -243,6 +260,7 @@ export const useFileStore = create<FileState>()(
     refreshExpandedDirs: async () => {
       const { rootPath, loadDirectory } = get();
       if (!rootPath) return;
+      const requestId = folderLoadGeneration;
 
       // Collect all expanded directory paths from current tree
       const expandedPaths: string[] = [];
@@ -258,6 +276,7 @@ export const useFileStore = create<FileState>()(
 
       // Refresh root
       const rootNodes = await loadDirectory(rootPath);
+      if (requestId !== folderLoadGeneration || get().rootPath !== rootPath) return;
       set((state) => {
         state.tree = rootNodes;
       });
@@ -266,6 +285,7 @@ export const useFileStore = create<FileState>()(
       for (const dirPath of expandedPaths) {
         try {
           const children = await loadDirectory(dirPath);
+          if (requestId !== folderLoadGeneration || get().rootPath !== rootPath) return;
           set((state) => {
             const assign = (nodes: FileNode[]): boolean => {
               for (const n of nodes) {
@@ -287,6 +307,7 @@ export const useFileStore = create<FileState>()(
       }
 
       // Rebuild index once at the end
+      if (requestId !== folderLoadGeneration || get().rootPath !== rootPath) return;
       set((state) => {
         rebuildIndex(state);
       });
@@ -315,6 +336,8 @@ export const useFileStore = create<FileState>()(
     startWatching: async () => {
       const { rootPath } = get();
       if (!rootPath) return;
+      const watchedPath = rootPath;
+      const watchGeneration = folderLoadGeneration;
 
       try {
         await tauriFs.watch(rootPath);
@@ -323,12 +346,23 @@ export const useFileStore = create<FileState>()(
         return;
       }
 
+      if (watchGeneration !== folderLoadGeneration || get().rootPath !== watchedPath) {
+        try {
+          await tauriFs.unwatch(watchedPath);
+        } catch {
+          // Ignore stale watcher cleanup failures
+        }
+        return;
+      }
+
       const unlisten = await listen<FsChangePayload>('fs:changed', (event) => {
+        if (watchGeneration !== folderLoadGeneration || get().rootPath !== watchedPath) return;
         const current = get();
         if (current._refreshTimer) {
           clearTimeout(current._refreshTimer);
         }
         const timer = setTimeout(() => {
+          if (watchGeneration !== folderLoadGeneration || get().rootPath !== watchedPath) return;
           // For real-time updates, do a smart partial refresh:
           // If it's a simple create/remove in an expanded dir, just refresh that dir.
           // Otherwise, do a full expanded refresh.
@@ -341,7 +375,9 @@ export const useFileStore = create<FileState>()(
 
         if (event.payload.kind === 'modify') {
           void Promise.all([import('./editor-store'), import('./agent-store')]).then(async ([editorModule, agentModule]) => {
+            if (watchGeneration !== folderLoadGeneration || get().rootPath !== watchedPath) return;
             for (const path of event.payload.paths) {
+              if (watchGeneration !== folderLoadGeneration || get().rootPath !== watchedPath) return;
               const hasAgentEdit = agentModule.useAgentStore.getState().agentEditSessions.some((session) =>
                 session.filePath === path && (session.phase === 'streaming' || session.phase === 'pending_review'),
               );
@@ -358,6 +394,7 @@ export const useFileStore = create<FileState>()(
               }
               try {
                 const content = await tauriFs.readFile(path);
+                if (watchGeneration !== folderLoadGeneration || get().rootPath !== watchedPath) return;
                 set((state) => {
                   state.fileCache.set(path, content);
                   state.externalConflicts.delete(path);
@@ -369,6 +406,16 @@ export const useFileStore = create<FileState>()(
           });
         }
       });
+
+      if (watchGeneration !== folderLoadGeneration || get().rootPath !== watchedPath) {
+        (unlisten as UnlistenFn)();
+        try {
+          await tauriFs.unwatch(watchedPath);
+        } catch {
+          // Ignore stale watcher cleanup failures
+        }
+        return;
+      }
 
       set((state) => {
         state._watchUnlisten = unlisten as any;

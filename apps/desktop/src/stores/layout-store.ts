@@ -127,6 +127,8 @@ interface LayoutState {
   setSidebarActiveView: (view: SidebarView) => void;
   setAgentLeftCollapsed: (collapsed: boolean) => void;
   setAgentRightCollapsed: (collapsed: boolean) => void;
+  /** Reset transient layout state before another project becomes active. */
+  resetProjectState: () => void;
   toggleTerminal: () => void;
   toggleSidebar: () => void;
   focusSidebarView: (view: SidebarView) => void;
@@ -229,6 +231,23 @@ export const useLayoutStore = create<LayoutState>()(
       setSidebarActiveView: (view) => set({ sidebarActiveView: view }),
       setAgentLeftCollapsed: (collapsed) => set({ agentLeftCollapsed: collapsed }),
       setAgentRightCollapsed: (collapsed) => set({ agentRightCollapsed: collapsed }),
+
+      resetProjectState: () =>
+        set({
+          workspaceMode: 'editor',
+          terminalLocation: 'bottom',
+          terminalVisible: false,
+          sidebarActiveTab: 'chat',
+          agentRightTab: 'changes',
+          agentPreviewFile: null,
+          agentSelectedChangeFile: null,
+          agentChangesFilter: 'session',
+          rulesPanelOpen: false,
+          sidebarVisible: true,
+          sidebarActiveView: 'files',
+          agentLeftCollapsed: false,
+          agentRightCollapsed: false,
+        }),
 
       toggleTerminal: () => set((state) => ({ terminalVisible: !state.terminalVisible })),
 

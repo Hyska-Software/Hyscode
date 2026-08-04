@@ -48,11 +48,19 @@ export function SessionHistory() {
   const loading = useAgentStore((s) => s.sessionsLoading);
   const currentConversationId = useAgentStore((s) => s.conversationId);
   const projectId = useProjectStore((s) => s.rootPath ?? undefined);
+  const projectLoading = useProjectStore((s) => s.isLoading);
 
   useEffect(() => {
-    if (!projectId) return;
-    loadSessions(projectId);
-  }, [projectId]);
+    let cancelled = false;
+    if (!projectId || projectLoading) return () => { cancelled = true; };
+
+    const isCurrent = () =>
+      !cancelled &&
+      !useProjectStore.getState().isLoading &&
+      useProjectStore.getState().rootPath === projectId;
+    void loadSessions(projectId, isCurrent);
+    return () => { cancelled = true; };
+  }, [projectId, projectLoading]);
 
   return (
     <div className="flex h-full flex-col">
@@ -168,10 +176,12 @@ function SessionRow({
 
 // ─── Data operations ────────────────────────────────────────────────────────
 
-async function loadSessions(projectId: string): Promise<void> {
+async function loadSessions(projectId: string, isCurrent: () => boolean): Promise<void> {
+  if (!isCurrent()) return;
   useAgentStore.getState().setSessionsLoading(true);
   try {
     const rows = await tauriInvoke('db_list_conversations', { projectId });
+    if (!isCurrent()) return;
     const mapped: SessionSummary[] = rows.map((r) => ({
       id: r.id,
       title: r.title,
@@ -182,11 +192,11 @@ async function loadSessions(projectId: string): Promise<void> {
       createdAt: r.created_at,
       updatedAt: r.updated_at,
     }));
-    useAgentStore.getState().setSessions(mapped);
+    if (isCurrent()) useAgentStore.getState().setSessions(mapped);
   } catch {
     // DB not available yet — leave empty
   } finally {
-    useAgentStore.getState().setSessionsLoading(false);
+    if (isCurrent()) useAgentStore.getState().setSessionsLoading(false);
   }
 }
 
