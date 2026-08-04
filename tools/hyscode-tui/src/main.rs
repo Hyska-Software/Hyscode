@@ -7,10 +7,6 @@ use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
 };
 use ratatui::backend::CrosstermBackend;
-use ratatui::layout::{Constraint, Direction, Layout, Rect};
-use ratatui::style::{Color, Modifier, Style};
-use ratatui::text::{Line, Span, Text};
-use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
 use ratatui::Terminal;
 use serde_json::{json, Value};
 use std::collections::{HashMap, VecDeque};
@@ -27,9 +23,11 @@ use std::time::{Duration, Instant};
 
 mod input;
 mod pty;
+mod ui;
 
 use input::InputEvent;
 use pty::PtyManager;
+use ui::{CommandFlow, Focus, Overlay};
 
 const MAX_TRANSCRIPT_CHARS: usize = 16_000;
 
@@ -226,7 +224,7 @@ fn resolve_bridge_command(repo_root: &Path) -> Result<(PathBuf, Vec<String>, Pat
 }
 
 #[derive(Clone, Copy)]
-enum TranscriptKind {
+pub(crate) enum TranscriptKind {
     User,
     Assistant,
     Thinking,
@@ -236,13 +234,13 @@ enum TranscriptKind {
     Error,
 }
 
-struct TranscriptItem {
-    kind: TranscriptKind,
-    text: String,
+pub(crate) struct TranscriptItem {
+    pub(crate) kind: TranscriptKind,
+    pub(crate) text: String,
 }
 
 #[derive(Clone)]
-enum Interaction {
+pub(crate) enum Interaction {
     Approval {
         request_id: String,
         tool_name: String,
@@ -262,6 +260,34 @@ enum Interaction {
     },
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct SessionSummary {
+    pub(crate) id: String,
+    pub(crate) title: String,
+    pub(crate) message_count: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct ProjectSummary {
+    pub(crate) workspace_path: String,
+    pub(crate) session_count: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct ModelOption {
+    pub(crate) id: String,
+    pub(crate) name: String,
+    pub(crate) provider: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct ProviderOption {
+    pub(crate) id: String,
+    pub(crate) name: String,
+    pub(crate) configured: bool,
+    pub(crate) models: Vec<ModelOption>,
+}
+
 struct CliOptions {
     workspace: PathBuf,
     provider: Option<String>,
@@ -272,26 +298,38 @@ struct CliOptions {
 
 struct App {
     bridge: BridgeClient,
-    transcript: VecDeque<TranscriptItem>,
-    input: String,
-    input_cursor: usize,
+    pub(crate) transcript: VecDeque<TranscriptItem>,
+    pub(crate) input: String,
+    pub(crate) input_cursor: usize,
     input_history: Vec<String>,
     history_index: Option<usize>,
-    workspace: String,
-    project_id: String,
-    provider: String,
-    model: String,
-    mode: String,
-    status: String,
-    running: bool,
+    pub(crate) workspace: String,
+    pub(crate) project_id: String,
+    pub(crate) provider: String,
+    pub(crate) model: String,
+    pub(crate) mode: String,
+    pub(crate) status: String,
+    pub(crate) running: bool,
     should_quit: bool,
-    interaction: Option<Interaction>,
-    scroll: u16,
-    last_error: Option<String>,
+    pub(crate) interaction: Option<Interaction>,
+    pub(crate) scroll: u16,
+    pub(crate) last_error: Option<String>,
     pending_requests: HashMap<String, String>,
-    current_session_id: Option<String>,
+    pub(crate) current_session_id: Option<String>,
     last_user_message: Option<String>,
     config_path: Option<String>,
+    pub(crate) focus: Focus,
+    pub(crate) overlay: Overlay,
+    pub(crate) overlay_index: usize,
+    pub(crate) sidebar_index: usize,
+    pub(crate) sessions: Vec<SessionSummary>,
+    pub(crate) projects: Vec<ProjectSummary>,
+    pub(crate) providers: Vec<ProviderOption>,
+    pub(crate) models: Vec<ModelOption>,
+    pub(crate) command_query: String,
+    pub(crate) command_flow: Option<CommandFlow>,
+    pub(crate) frame_tick: u64,
+    last_viewport_width: u16,
 }
 
 impl App {
@@ -318,6 +356,18 @@ impl App {
             current_session_id: None,
             last_user_message: None,
             config_path: options.config_path.clone(),
+            focus: Focus::Composer,
+            overlay: Overlay::None,
+            overlay_index: 0,
+            sidebar_index: 0,
+            sessions: Vec::new(),
+            projects: Vec::new(),
+            providers: Vec::new(),
+            models: Vec::new(),
+            command_query: String::new(),
+            command_flow: None,
+            frame_tick: 0,
+            last_viewport_width: 120,
         }
     }
 
@@ -456,6 +506,7 @@ impl App {
     }
 
     fn apply_runtime_ready(&mut self, payload: &Value) {
+        self.apply_provider_catalog(payload);
         self.workspace = payload
             .get("workspacePath")
             .and_then(Value::as_str)
@@ -489,6 +540,44 @@ impl App {
         if let Some(session) = payload.get("session") {
             self.apply_session(session);
         }
+    }
+
+    fn apply_provider_catalog(&mut self, payload: &Value) {
+        self.models = payload
+            .get("models")
+            .and_then(Value::as_array)
+            .map(|models| models.iter().filter_map(parse_model_option).collect())
+            .unwrap_or_default();
+        self.providers = payload
+            .get("providers")
+            .and_then(Value::as_array)
+            .map(|providers| {
+                providers
+                    .iter()
+                    .map(|provider| ProviderOption {
+                        id: provider
+                            .get("id")
+                            .and_then(Value::as_str)
+                            .unwrap_or_default()
+                            .to_string(),
+                        name: provider
+                            .get("name")
+                            .and_then(Value::as_str)
+                            .unwrap_or("Provider")
+                            .to_string(),
+                        configured: provider
+                            .get("configured")
+                            .and_then(Value::as_bool)
+                            .unwrap_or(false),
+                        models: provider
+                            .get("models")
+                            .and_then(Value::as_array)
+                            .map(|models| models.iter().filter_map(parse_model_option).collect())
+                            .unwrap_or_default(),
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
     }
 
     fn apply_session(&mut self, session: &Value) {
@@ -530,50 +619,66 @@ impl App {
 
     fn apply_session_list(&mut self, result: &Value) {
         let Some(sessions) = result.as_array() else {
+            self.sessions.clear();
             return;
         };
-        if sessions.is_empty() {
-            self.push(
-                TranscriptKind::System,
-                "No saved sessions for this workspace.".to_string(),
-            );
-            return;
-        }
-        for session in sessions {
-            let id = session
-                .get("id")
-                .and_then(Value::as_str)
-                .unwrap_or("unknown");
-            let title = session
-                .get("title")
-                .and_then(Value::as_str)
-                .unwrap_or("Untitled");
-            let count = session
-                .get("messageCount")
-                .and_then(Value::as_u64)
-                .unwrap_or(0);
-            self.push(
-                TranscriptKind::System,
-                format!("{id} · {title} · {count} messages"),
-            );
-        }
+        self.sessions = sessions
+            .iter()
+            .map(|session| SessionSummary {
+                id: session
+                    .get("id")
+                    .and_then(Value::as_str)
+                    .unwrap_or("unknown")
+                    .to_string(),
+                title: session
+                    .get("title")
+                    .and_then(Value::as_str)
+                    .unwrap_or("Untitled")
+                    .to_string(),
+                message_count: session
+                    .get("messageCount")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(0),
+            })
+            .collect();
+        self.overlay_index = self
+            .overlay_index
+            .min(self.sessions.len().saturating_sub(1));
+        self.status = if self.sessions.is_empty() {
+            "No saved sessions for this workspace".to_string()
+        } else {
+            format!("{} saved session(s)", self.sessions.len())
+        };
     }
 
     fn apply_project_list(&mut self, result: &Value) {
         let Some(projects) = result.as_array() else {
-            self.push(
-                TranscriptKind::Error,
-                "Project list response was invalid".to_string(),
-            );
+            self.projects.clear();
+            self.last_error = Some("Project list response was invalid".to_string());
             return;
         };
-        if projects.is_empty() {
-            self.push(TranscriptKind::System, "No saved projects.".to_string());
-            return;
-        }
-        for project in projects {
-            self.push(TranscriptKind::System, format_project_summary(project));
-        }
+        self.projects = projects
+            .iter()
+            .map(|project| ProjectSummary {
+                workspace_path: project
+                    .get("workspacePath")
+                    .and_then(Value::as_str)
+                    .unwrap_or("unknown")
+                    .to_string(),
+                session_count: project
+                    .get("sessionCount")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(0),
+            })
+            .collect();
+        self.overlay_index = self
+            .overlay_index
+            .min(self.projects.len().saturating_sub(1));
+        self.status = if self.projects.is_empty() {
+            "No saved projects".to_string()
+        } else {
+            format!("{} project(s) available", self.projects.len())
+        };
     }
 
     fn apply_diagnostics(&mut self, result: &Value) {
@@ -759,6 +864,8 @@ impl App {
             .get("kind")
             .and_then(Value::as_str)
             .unwrap_or_default();
+        self.overlay = Overlay::None;
+        self.focus = Focus::Composer;
         match kind {
             "approval" => {
                 let tool = payload.get("toolCall").unwrap_or(&Value::Null);
@@ -843,8 +950,24 @@ impl App {
             return Ok(());
         }
         let key = normalize_input_key(key);
+        if key.code == KeyCode::F(1) {
+            if self.overlay == Overlay::Help {
+                self.return_from_command_overlay();
+            } else {
+                self.overlay = Overlay::Help;
+                self.overlay_index = 0;
+            }
+            return Ok(());
+        }
+        if self.overlay != Overlay::None {
+            return self.handle_overlay_key(key);
+        }
         if let Some(interaction) = self.interaction.clone() {
             return self.handle_interaction_key(key, &interaction);
+        }
+        if key.code == KeyCode::Char('/') && self.focus != Focus::Composer {
+            self.start_command_mode();
+            return Ok(());
         }
         if key.modifiers.contains(KeyModifiers::CONTROL) {
             match key.code {
@@ -859,6 +982,9 @@ impl App {
                         self.input_cursor = 0;
                     }
                 }
+                KeyCode::Char('k') => {
+                    self.start_command_mode();
+                }
                 KeyCode::Char('u') => {
                     self.input.clear();
                     self.input_cursor = 0;
@@ -866,6 +992,29 @@ impl App {
                 KeyCode::Char('w') => delete_previous_word(&mut self.input, &mut self.input_cursor),
                 _ => {}
             }
+            return Ok(());
+        }
+        if key.code == KeyCode::Tab {
+            self.cycle_focus();
+            return Ok(());
+        }
+        match self.focus {
+            Focus::Composer => self.handle_composer_key(key)?,
+            Focus::Sidebar => self.handle_sidebar_key(key)?,
+            Focus::Transcript => self.handle_transcript_key(key),
+        }
+        Ok(())
+    }
+
+    fn handle_composer_key(&mut self, key: KeyEvent) -> Result<()> {
+        if self.command_flow.is_none() && self.input.is_empty() && key.code == KeyCode::Char('/') {
+            self.start_command_mode();
+            return Ok(());
+        }
+        if self.command_flow.is_none() && self.input.starts_with('/') {
+            let query = std::mem::take(&mut self.input);
+            self.input_cursor = 0;
+            self.start_command_mode_with_query(query);
             return Ok(());
         }
         match key.code {
@@ -877,10 +1026,19 @@ impl App {
                 } else {
                     self.input.clear();
                     self.input_cursor = 0;
+                    self.overlay_index = 0;
                 }
             }
-            KeyCode::Char(character) => self.insert_char(character),
-            KeyCode::Backspace => self.delete_previous_char(),
+            KeyCode::Char(character) => {
+                self.insert_char(character);
+                if character != '/' {
+                    self.overlay_index = 0;
+                }
+            }
+            KeyCode::Backspace => {
+                self.delete_previous_char();
+                self.overlay_index = 0;
+            }
             KeyCode::Delete => self.delete_next_char(),
             KeyCode::Left => self.input_cursor = self.input_cursor.saturating_sub(1),
             KeyCode::Right => {
@@ -890,14 +1048,409 @@ impl App {
             KeyCode::End => self.input_cursor = self.input.chars().count(),
             KeyCode::Up => self.history_previous(),
             KeyCode::Down => self.history_next(),
-            KeyCode::PageUp => self.scroll = self.scroll.saturating_add(5),
-            KeyCode::PageDown => self.scroll = self.scroll.saturating_sub(5),
             _ => {}
         }
         Ok(())
     }
 
+    fn handle_sidebar_key(&mut self, key: KeyEvent) -> Result<()> {
+        match key.code {
+            KeyCode::Up | KeyCode::Char('k') => {
+                self.sidebar_index = self.sidebar_index.saturating_sub(1);
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                self.sidebar_index = (self.sidebar_index + 1).min(ui::SIDEBAR_ACTIONS.len() - 1);
+            }
+            KeyCode::Enter | KeyCode::Right => self.activate_sidebar_action()?,
+            KeyCode::Char('n') | KeyCode::Char('N') => {
+                self.sidebar_index = 0;
+                self.activate_sidebar_action()?
+            }
+            KeyCode::Char('s') | KeyCode::Char('S') => {
+                self.sidebar_index = 1;
+                self.activate_sidebar_action()?
+            }
+            KeyCode::Char('p') | KeyCode::Char('P') => {
+                self.sidebar_index = 2;
+                self.activate_sidebar_action()?
+            }
+            KeyCode::Char('d') | KeyCode::Char('D') => {
+                self.sidebar_index = 3;
+                self.activate_sidebar_action()?
+            }
+            KeyCode::Char('r') | KeyCode::Char('R') => {
+                self.sidebar_index = 4;
+                self.activate_sidebar_action()?
+            }
+            KeyCode::Char('h') | KeyCode::Char('H') => {
+                self.sidebar_index = 5;
+                self.activate_sidebar_action()?
+            }
+            KeyCode::Esc | KeyCode::Left => self.focus = Focus::Composer,
+            _ => {}
+        }
+        Ok(())
+    }
+
+    fn handle_transcript_key(&mut self, key: KeyEvent) {
+        match key.code {
+            KeyCode::Up | KeyCode::Char('k') | KeyCode::PageUp => {
+                self.scroll = self.scroll.saturating_add(5)
+            }
+            KeyCode::Down | KeyCode::Char('j') | KeyCode::PageDown => {
+                self.scroll = self.scroll.saturating_sub(5)
+            }
+            KeyCode::Home => self.scroll = u16::MAX,
+            KeyCode::End => self.scroll = 0,
+            KeyCode::Esc | KeyCode::Left => self.focus = Focus::Composer,
+            _ => {}
+        }
+    }
+
+    fn handle_overlay_key(&mut self, key: KeyEvent) -> Result<()> {
+        if key.code == KeyCode::Esc {
+            self.return_from_command_overlay();
+            return Ok(());
+        }
+        if key.code == KeyCode::F(1) {
+            self.return_from_command_overlay();
+            return Ok(());
+        }
+        match self.overlay {
+            Overlay::Help => {
+                if matches!(key.code, KeyCode::Char('q') | KeyCode::Char('Q')) {
+                    self.return_from_command_overlay();
+                }
+            }
+            Overlay::CommandPalette => self.handle_command_palette_key(key)?,
+            Overlay::SessionList => match key.code {
+                KeyCode::Up | KeyCode::Char('k') => {
+                    self.overlay_index = self.overlay_index.saturating_sub(1)
+                }
+                KeyCode::Down | KeyCode::Char('j') => {
+                    self.overlay_index =
+                        (self.overlay_index + 1).min(self.sessions.len().saturating_sub(1))
+                }
+                KeyCode::Enter => self.load_selected_session()?,
+                _ => {}
+            },
+            Overlay::ProjectList => match key.code {
+                KeyCode::Up | KeyCode::Char('k') => {
+                    self.overlay_index = self.overlay_index.saturating_sub(1)
+                }
+                KeyCode::Down | KeyCode::Char('j') => {
+                    self.overlay_index =
+                        (self.overlay_index + 1).min(self.projects.len().saturating_sub(1))
+                }
+                KeyCode::Enter => self.switch_to_selected_project()?,
+                _ => {}
+            },
+            Overlay::None => {}
+        }
+        Ok(())
+    }
+
+    fn handle_command_palette_key(&mut self, key: KeyEvent) -> Result<()> {
+        let options = ui::command_flow_options(self);
+        let selected = ui::command_flow_selected(self);
+        let is_root = matches!(self.command_flow, Some(CommandFlow::Root { .. }));
+        match key.code {
+            KeyCode::Up => self.move_command_selection(-1, options.len()),
+            KeyCode::Down => self.move_command_selection(1, options.len()),
+            KeyCode::Char('k') if !is_root => self.move_command_selection(-1, options.len()),
+            KeyCode::Char('j') if !is_root => self.move_command_selection(1, options.len()),
+            KeyCode::Enter => self.accept_command_selection(selected)?,
+            KeyCode::Char(character) => {
+                if is_root {
+                    self.command_query.push(character);
+                    self.set_command_selection(0);
+                }
+            }
+            KeyCode::Backspace => {
+                if is_root {
+                    self.command_query.pop();
+                    if self.command_query.is_empty() {
+                        self.command_query.push('/');
+                    }
+                    self.set_command_selection(0);
+                }
+            }
+            KeyCode::Home => self.set_command_selection(0),
+            KeyCode::End if !options.is_empty() => self.set_command_selection(options.len() - 1),
+            _ => {}
+        }
+        Ok(())
+    }
+
+    fn move_command_selection(&mut self, delta: isize, length: usize) {
+        if length == 0 {
+            return;
+        }
+        let selected = ui::command_flow_selected(self) as isize;
+        let next = (selected + delta).clamp(0, length.saturating_sub(1) as isize) as usize;
+        self.set_command_selection(next);
+    }
+
+    fn set_command_selection(&mut self, selected: usize) {
+        match self.command_flow.as_mut() {
+            Some(CommandFlow::Root { selected: current })
+            | Some(CommandFlow::Mode { selected: current })
+            | Some(CommandFlow::Provider { selected: current })
+            | Some(CommandFlow::Model {
+                selected: current, ..
+            }) => *current = selected,
+            None => {}
+        }
+    }
+
+    fn start_command_mode(&mut self) {
+        self.start_command_mode_with_query("/".to_string());
+    }
+
+    fn start_command_mode_with_query(&mut self, query: String) {
+        self.command_query = if query.starts_with('/') {
+            query
+        } else {
+            format!("/{query}")
+        };
+        self.command_flow = Some(CommandFlow::Root { selected: 0 });
+        self.overlay = Overlay::CommandPalette;
+        self.overlay_index = 0;
+        self.focus = Focus::Composer;
+    }
+
+    fn return_to_command_root(&mut self) {
+        self.set_command_root_state();
+        self.overlay = Overlay::CommandPalette;
+    }
+
+    fn set_command_root_state(&mut self) {
+        self.command_query = "/".to_string();
+        self.command_flow = Some(CommandFlow::Root { selected: 0 });
+        self.overlay_index = 0;
+        self.focus = Focus::Composer;
+    }
+
+    fn cancel_command_mode(&mut self) {
+        self.command_query.clear();
+        self.command_flow = None;
+        self.overlay = Overlay::None;
+        self.overlay_index = 0;
+        self.focus = Focus::Composer;
+    }
+
+    fn return_from_command_overlay(&mut self) {
+        if self.command_flow.is_some() {
+            if self.overlay == Overlay::CommandPalette
+                && !matches!(self.command_flow, Some(CommandFlow::Root { .. }))
+            {
+                self.return_to_command_root();
+            } else if self.overlay == Overlay::CommandPalette {
+                self.cancel_command_mode();
+            } else {
+                self.overlay = Overlay::CommandPalette;
+                self.overlay_index = 0;
+            }
+        } else {
+            self.overlay = Overlay::None;
+            self.overlay_index = 0;
+        }
+    }
+
+    pub(crate) fn models_for_provider(&self, provider_index: usize) -> Vec<ModelOption> {
+        let Some(provider) = self.providers.get(provider_index) else {
+            return Vec::new();
+        };
+        if !provider.models.is_empty() {
+            return provider.models.clone();
+        }
+        self.models
+            .iter()
+            .filter(|model| model.provider == provider.id)
+            .cloned()
+            .collect()
+    }
+
+    fn accept_command_selection(&mut self, selected: usize) -> Result<()> {
+        let Some(flow) = self.command_flow.clone() else {
+            return Ok(());
+        };
+        match flow {
+            CommandFlow::Root { .. } => {
+                let commands = ui::command_palette_items(&self.command_query);
+                let Some(command) = commands.get(selected) else {
+                    return Ok(());
+                };
+                self.enter_visual_command(command.name)?;
+            }
+            CommandFlow::Mode { .. } => {
+                let Some((mode, _)) = ui::MODE_OPTIONS.get(selected) else {
+                    return Ok(());
+                };
+                self.send_simple("set_mode", json!({ "agentType": mode }))?;
+                self.mode = (*mode).to_string();
+                self.status = format!("Mode set to {mode}");
+                self.return_to_command_root();
+            }
+            CommandFlow::Provider { .. } => {
+                let Some((configured, provider_name)) = self
+                    .providers
+                    .get(selected)
+                    .map(|provider| (provider.configured, provider.name.clone()))
+                else {
+                    self.status = "No providers are available".to_string();
+                    return Ok(());
+                };
+                if !configured {
+                    self.status = format!("{provider_name} is not configured");
+                    return Ok(());
+                }
+                let model_count = self.models_for_provider(selected).len();
+                if model_count == 0 {
+                    self.status = format!("{provider_name} has no configured models");
+                    return Ok(());
+                }
+                self.command_flow = Some(CommandFlow::Model {
+                    provider_index: selected,
+                    selected: 0,
+                });
+            }
+            CommandFlow::Model { provider_index, .. } => {
+                let Some(provider) = self.providers.get(provider_index).cloned() else {
+                    self.return_to_command_root();
+                    return Ok(());
+                };
+                let models = self.models_for_provider(provider_index);
+                let Some(model) = models.get(selected).cloned() else {
+                    return Ok(());
+                };
+                self.send_simple(
+                    "set_config",
+                    json!({ "providerId": provider.id, "modelId": model.id }),
+                )?;
+                self.provider = provider.id.clone();
+                self.model = model.id.clone();
+                self.status = format!("Model set to {} / {}", provider.name, model.name);
+                self.return_to_command_root();
+            }
+        }
+        Ok(())
+    }
+
+    fn enter_visual_command(&mut self, name: &str) -> Result<()> {
+        match name {
+            "/mode" => {
+                let selected = ui::MODE_OPTIONS
+                    .iter()
+                    .position(|(mode, _)| *mode == self.mode)
+                    .unwrap_or(0);
+                self.command_flow = Some(CommandFlow::Mode { selected });
+            }
+            "/model" | "/models" => {
+                let selected = self
+                    .providers
+                    .iter()
+                    .position(|provider| provider.id == self.provider)
+                    .unwrap_or(0);
+                self.command_flow = Some(CommandFlow::Provider { selected });
+            }
+            "/load" => {
+                self.command("/sessions".to_string())?;
+                self.return_to_command_root();
+                self.overlay = Overlay::SessionList;
+            }
+            "/project" => {
+                self.command("/projects".to_string())?;
+                self.return_to_command_root();
+                self.overlay = Overlay::ProjectList;
+            }
+            command => {
+                self.command(command.to_string())?;
+                if self.should_quit {
+                    self.cancel_command_mode();
+                } else {
+                    self.set_command_root_state();
+                    if self.overlay == Overlay::None {
+                        self.overlay = Overlay::CommandPalette;
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn cycle_focus(&mut self) {
+        self.focus = ui::next_focus(self.focus, self.last_viewport_width >= 92);
+    }
+
+    fn activate_sidebar_action(&mut self) -> Result<()> {
+        self.focus = Focus::Composer;
+        match self.sidebar_index {
+            0 => self.command("/new".to_string())?,
+            1 => self.command("/sessions".to_string())?,
+            2 => self.command("/projects".to_string())?,
+            3 => self.command("/diagnostics".to_string())?,
+            4 => self.command("/retry".to_string())?,
+            5 => self.command("/help".to_string())?,
+            _ => {}
+        }
+        Ok(())
+    }
+
+    fn load_selected_session(&mut self) -> Result<()> {
+        let Some(session) = self.sessions.get(self.overlay_index).cloned() else {
+            return Ok(());
+        };
+        self.send_simple("session_load", json!({ "id": session.id }))?;
+        self.status = format!("Loading {}", session.title);
+        if self.command_flow.is_some() {
+            self.return_to_command_root();
+        } else {
+            self.overlay = Overlay::None;
+            self.overlay_index = 0;
+        }
+        Ok(())
+    }
+
+    fn switch_to_selected_project(&mut self) -> Result<()> {
+        let Some(project) = self.projects.get(self.overlay_index).cloned() else {
+            return Ok(());
+        };
+        self.send_simple(
+            "project_switch",
+            json!({ "workspacePath": project.workspace_path }),
+        )?;
+        self.status = format!("Switching project to {}", project.workspace_path);
+        if self.command_flow.is_some() {
+            self.return_to_command_root();
+        } else {
+            self.overlay = Overlay::None;
+            self.overlay_index = 0;
+        }
+        Ok(())
+    }
+
     fn handle_paste(&mut self, text: &str) {
+        if self.command_flow.is_some() {
+            let pasted = text
+                .chars()
+                .filter(|character| *character != '\r' && *character != '\n')
+                .collect::<String>();
+            if matches!(self.command_flow, Some(CommandFlow::Root { .. }))
+                && self.command_query == "/"
+                && pasted.starts_with('/')
+            {
+                self.command_query = pasted;
+            } else {
+                self.command_query.push_str(&pasted);
+            }
+            self.set_command_selection(0);
+            return;
+        }
+        if self.input.is_empty() && text.trim_start().starts_with('/') {
+            self.start_command_mode_with_query(text.trim().to_string());
+            return;
+        }
         for character in text.chars() {
             self.insert_char(if character == '\r' || character == '\n' {
                 ' '
@@ -942,12 +1495,14 @@ impl App {
         self.input.clear();
         self.input_cursor = 0;
         self.history_index = None;
+        self.overlay_index = 0;
         if input.is_empty() || self.running {
             return Ok(());
         }
         self.input_history.push(input.clone());
         if input.starts_with('/') {
-            return self.command(input);
+            self.start_command_mode_with_query(input);
+            return Ok(());
         }
         self.last_user_message = Some(input.clone());
         self.push(TranscriptKind::User, input.clone());
@@ -1011,7 +1566,10 @@ impl App {
         let mut parts = input.split_whitespace();
         let command = parts.next().unwrap_or_default();
         match command {
-            "/help" => self.push(TranscriptKind::System, "/mode <chat|build|review|debug|plan> · /model <provider> <model> · /projects · /project <path> · /new · /sessions · /load <id> · /diagnostics [path] · /retry · /cancel · /quit".to_string()),
+            "/help" => {
+                self.overlay = Overlay::Help;
+                self.overlay_index = 0;
+            }
             "/mode" => {
                 let mode = parts.next().unwrap_or("chat");
                 self.send_simple("set_mode", json!({ "agentType": mode }))?;
@@ -1021,7 +1579,10 @@ impl App {
             "/model" => {
                 let provider = parts.next().unwrap_or_default();
                 let model = parts.collect::<Vec<_>>().join(" ");
-                self.send_simple("set_config", json!({ "providerId": provider, "modelId": model }))?;
+                self.send_simple(
+                    "set_config",
+                    json!({ "providerId": provider, "modelId": model }),
+                )?;
                 self.provider = provider.to_string();
                 self.model = model;
             }
@@ -1031,12 +1592,25 @@ impl App {
                 self.last_user_message = None;
                 self.status = "New session".to_string();
             }
-            "/sessions" => { self.send_simple("session_list", json!({}))?; self.status = "Session list requested".to_string(); }
-            "/projects" => { self.send_simple("project_list", json!({}))?; self.status = "Project list requested".to_string(); }
+            "/sessions" => {
+                self.send_simple("session_list", json!({}))?;
+                self.overlay = Overlay::SessionList;
+                self.overlay_index = 0;
+                self.status = "Loading saved sessions".to_string();
+            }
+            "/projects" => {
+                self.send_simple("project_list", json!({}))?;
+                self.overlay = Overlay::ProjectList;
+                self.overlay_index = 0;
+                self.status = "Loading saved projects".to_string();
+            }
             "/project" => {
                 let project = command_argument(&input, "/project");
                 if project.is_empty() {
-                    self.push(TranscriptKind::System, "Usage: /project <workspace-path>".to_string());
+                    self.push(
+                        TranscriptKind::System,
+                        "Usage: /project <workspace-path>".to_string(),
+                    );
                 } else {
                     self.send_simple("project_switch", json!({ "workspacePath": project }))?;
                     self.status = format!("Switching project to {project}");
@@ -1044,13 +1618,34 @@ impl App {
             }
             "/load" => {
                 let id = parts.next().unwrap_or_default();
-                if id.is_empty() { self.push(TranscriptKind::System, "Usage: /load <session-id>".to_string()); }
-                else { self.send_simple("session_load", json!({ "id": id }))?; self.status = format!("Loading session {id}"); }
+                if id.is_empty() {
+                    self.push(
+                        TranscriptKind::System,
+                        "Usage: /load <session-id>".to_string(),
+                    );
+                } else {
+                    self.send_simple("session_load", json!({ "id": id }))?;
+                    self.status = format!("Loading session {id}");
+                }
             }
-            "/cancel" => { self.send_simple("cancel", json!({}))?; self.status = "Cancellation requested".to_string(); }
+            "/cancel" => {
+                self.send_simple("cancel", json!({}))?;
+                self.status = "Cancellation requested".to_string();
+            }
+            "/clear" => {
+                self.transcript.clear();
+                self.status = "Conversation cleared".to_string();
+            }
             "/diagnostics" => {
                 let file = command_argument(&input, "/diagnostics");
-                self.send_simple("diagnostics", if file.is_empty() { json!({}) } else { json!({ "path": file }) })?;
+                self.send_simple(
+                    "diagnostics",
+                    if file.is_empty() {
+                        json!({})
+                    } else {
+                        json!({ "path": file })
+                    },
+                )?;
                 self.status = "Diagnostics requested".to_string();
             }
             "/quit" | "/exit" => self.should_quit = true,
@@ -1058,9 +1653,20 @@ impl App {
                 if let Some(message) = self.last_user_message.clone() {
                     self.send_simple("send_message", json!({ "message": message }))?;
                     self.running = true;
-                } else { self.push(TranscriptKind::System, "There is no previous user message to retry.".to_string()); }
+                } else {
+                    self.push(
+                        TranscriptKind::System,
+                        "There is no previous user message to retry.".to_string(),
+                    );
+                }
             }
-            _ => self.push(TranscriptKind::System, format!("Unknown command: {command}. Use /help.")),
+            _ => {
+                self.status = format!("Unknown command: {command} · press F1 for commands");
+                self.push(
+                    TranscriptKind::System,
+                    format!("Unknown command: {command}"),
+                );
+            }
         }
         Ok(())
     }
@@ -1070,6 +1676,10 @@ impl App {
         let request_id = self.bridge.request(method, params)?;
         self.pending_requests.insert(request_id, method.to_string());
         Ok(())
+    }
+
+    pub(crate) fn pending_request_count(&self) -> usize {
+        self.pending_requests.len()
     }
 
     fn resolve_interaction(&mut self, request_id: &str, params: Value) -> Result<()> {
@@ -1138,140 +1748,13 @@ impl App {
     }
 
     fn draw(&mut self, terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> Result<()> {
-        terminal.draw(|frame| {
-            let layout = Layout::default()
-                .direction(Direction::Vertical)
-                .constraints(
-                    [
-                        Constraint::Length(2),
-                        Constraint::Min(4),
-                        Constraint::Length(3),
-                    ]
-                    .as_ref(),
-                )
-                .split(frame.area());
-            let header = Paragraph::new(Line::from(vec![
-                Span::styled(
-                    " HysCode ",
-                    Style::default()
-                        .fg(Color::Black)
-                        .bg(Color::Cyan)
-                        .add_modifier(Modifier::BOLD),
-                ),
-                Span::raw(format!(
-                    "  {}  ·  {}  ·  {}",
-                    self.mode,
-                    if self.provider.is_empty() {
-                        "no provider"
-                    } else {
-                        &self.provider
-                    },
-                    if self.model.is_empty() {
-                        "no model"
-                    } else {
-                        &self.model
-                    }
-                )),
-            ]))
-            .block(
-                Block::default()
-                    .borders(Borders::BOTTOM)
-                    .border_style(Style::default().fg(Color::DarkGray)),
-            );
-            frame.render_widget(header, layout[0]);
-
-            let transcript_area = layout[1];
-            let lines = self.transcript_lines(transcript_area.width.saturating_sub(2));
-            let transcript = Paragraph::new(Text::from(lines))
-                .scroll((self.scroll, 0))
-                .wrap(Wrap { trim: false })
-                .block(
-                    Block::default()
-                        .title(" Conversation ")
-                        .borders(Borders::ALL)
-                        .border_style(Style::default().fg(Color::DarkGray)),
-                );
-            frame.render_widget(transcript, transcript_area);
-
-            let input_title = if self.interaction.is_some() {
-                " Response "
-            } else {
-                " Message · Enter send · Ctrl-C cancel/quit · /help "
-            };
-            let input = Paragraph::new(self.input.as_str()).block(
-                Block::default()
-                    .title(input_title)
-                    .borders(Borders::ALL)
-                    .border_style(if self.interaction.is_some() {
-                        Style::default().fg(Color::Yellow)
-                    } else {
-                        Style::default().fg(Color::Cyan)
-                    }),
-            );
-            frame.render_widget(input, layout[2]);
-            let cursor_x = layout[2].x + 1 + self.input_cursor as u16;
-            frame.set_cursor_position((
-                cursor_x.min(layout[2].right().saturating_sub(1)),
-                layout[2].y + 1,
-            ));
-
-            if let Some(interaction) = &self.interaction {
-                self.draw_interaction(frame, interaction, frame.area());
-            }
-        })?;
+        self.last_viewport_width = terminal.size()?.width;
+        terminal.draw(|frame| ui::draw(frame, self))?;
         Ok(())
     }
 
-    fn transcript_lines(&self, width: u16) -> Vec<Line<'static>> {
-        let mut lines = Vec::new();
-        for item in &self.transcript {
-            let (prefix, color) = match item.kind {
-                TranscriptKind::User => ("you", Color::Green),
-                TranscriptKind::Assistant => ("agent", Color::Cyan),
-                TranscriptKind::Thinking => ("thinking", Color::Magenta),
-                TranscriptKind::Tool => ("tool", Color::Yellow),
-                TranscriptKind::Result => ("result", Color::Gray),
-                TranscriptKind::System => ("system", Color::Blue),
-                TranscriptKind::Error => ("error", Color::Red),
-            };
-            lines.push(Line::from(Span::styled(
-                format!("{prefix}> {}", item.text),
-                Style::default().fg(color),
-            )));
-            if item.text.len() > usize::from(width).saturating_mul(2) {
-                lines.push(Line::from("  …"));
-            }
-        }
-        lines
-    }
-
-    fn draw_interaction(&self, frame: &mut ratatui::Frame, interaction: &Interaction, area: Rect) {
-        let height = match interaction {
-            Interaction::Question { .. } => 7,
-            _ => 6,
-        };
-        let width = area.width.saturating_sub(8).min(100);
-        let x = area.x + area.width.saturating_sub(width) / 2;
-        let y = area.y + area.height.saturating_sub(height + 4) / 2;
-        let popup = Rect {
-            x,
-            y,
-            width,
-            height,
-        };
-        frame.render_widget(Clear, popup);
-        let text = match interaction {
-            Interaction::Approval { tool_name, description, risk, .. } => format!("Approval required\n\nTool: {tool_name}\nRisk: {risk}\n{description}\n\ny allow · n deny · t allow and trust"),
-            Interaction::ModeSwitch { from, to, reason, .. } => format!("Agent mode switch\n\n{from} → {to}\n{reason}\n\ny allow · n deny"),
-            Interaction::Question { title, question, .. } => format!("{title}\n\n{question}\n\nType the answer below and press Enter"),
-        };
-        let widget = Paragraph::new(text).wrap(Wrap { trim: true }).block(
-            Block::default()
-                .title(" Agent interaction ")
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::Yellow)),
-        );
-        frame.render_widget(widget, popup);
+    fn tick(&mut self) {
+        self.frame_tick = self.frame_tick.wrapping_add(1);
     }
 
     fn poll_bridge(&mut self) {
@@ -1301,6 +1784,7 @@ fn run_app(mut app: App) -> Result<()> {
     let result = (|| -> Result<()> {
         loop {
             app.poll_bridge();
+            app.tick();
             app.draw(&mut terminal)?;
             if app.should_quit {
                 break;
@@ -1383,6 +1867,24 @@ fn command_argument(input: &str, command: &str) -> String {
         .to_string()
 }
 
+fn parse_model_option(value: &Value) -> Option<ModelOption> {
+    let id = value.get("id").and_then(Value::as_str)?.to_string();
+    Some(ModelOption {
+        name: value
+            .get("name")
+            .and_then(Value::as_str)
+            .unwrap_or(&id)
+            .to_string(),
+        provider: value
+            .get("provider")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string(),
+        id,
+    })
+}
+
+#[cfg(test)]
 fn format_project_summary(project: &Value) -> String {
     let path = project
         .get("workspacePath")
@@ -1507,7 +2009,8 @@ fn main() -> Result<()> {
 mod tests {
     use super::{
         command_argument, delete_previous_word, format_diagnostic, format_json,
-        format_project_summary, normalize_input_key, parse_bridge_line, TranscriptKind,
+        format_project_summary, normalize_input_key, parse_bridge_line, parse_model_option,
+        TranscriptKind,
     };
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     use serde_json::json;
@@ -1548,6 +2051,20 @@ mod tests {
         assert!(matches!(kind, TranscriptKind::Error));
         assert_eq!(message, "src/lib.rs:4:8 [error] mismatched types");
         assert!(format_json(&json!({ "message": "ok" })).contains("ok"));
+    }
+
+    #[test]
+    fn parses_runtime_model_catalog_entries() {
+        let model = parse_model_option(&json!({
+            "id": "claude-sonnet",
+            "name": "Claude Sonnet",
+            "provider": "anthropic"
+        }))
+        .expect("valid model entry");
+        assert_eq!(model.id, "claude-sonnet");
+        assert_eq!(model.name, "Claude Sonnet");
+        assert_eq!(model.provider, "anthropic");
+        assert!(parse_model_option(&json!({ "name": "missing id" })).is_none());
     }
 
     #[test]
