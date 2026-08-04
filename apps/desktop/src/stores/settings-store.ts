@@ -28,6 +28,7 @@ export type TerminalCursorStyle = 'block' | 'underline' | 'bar';
 
 export type ThemeId =
   | 'hyscode-dark'
+  | 'aura'
   | 'hyscode-light'
   | 'nord'
   | 'monokai'

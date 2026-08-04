@@ -39,6 +39,19 @@ const THEMES: ThemeOption[] = [
     },
   },
   {
+    id: 'aura',
+    name: 'Aura',
+    description: 'Purple focus with mint controls and warm syntax accents',
+    colors: {
+      bg: '#110f18',
+      surface: '#15141b',
+      sidebar: '#110f18',
+      accent: '#a277ff',
+      fg: '#edecee',
+      muted: '#adacae',
+    },
+  },
+  {
     id: 'hyscode-light',
     name: 'HysCode Light',
     description: 'Editor-matched light surfaces with a teal accent',
