@@ -156,7 +156,7 @@ fn apply_migration_013(conn: &Connection) {
 
 // ─── Row types ──────────────────────────────────────────────────────────────
 
-#[derive(Serialize)]
+#[derive(Clone, Serialize)]
 pub struct ConversationRow {
     pub id: String,
     pub title: String,
@@ -175,8 +175,39 @@ pub struct ConversationDetail {
     pub mode: String,
     pub model_id: Option<String>,
     pub provider_id: Option<String>,
+    pub project_id: Option<String>,
     pub created_at: String,
     pub updated_at: String,
+}
+
+#[derive(Serialize)]
+pub struct VortexSessionRow {
+    pub id: String,
+    pub title: String,
+    pub mode: String,
+    pub model_id: Option<String>,
+    pub provider_id: Option<String>,
+    pub message_count: i64,
+    pub created_at: String,
+    pub updated_at: String,
+    pub project_id: String,
+    pub project_name: String,
+    pub project_path: String,
+}
+
+#[derive(Serialize)]
+pub struct VortexProjectRow {
+    pub id: String,
+    pub name: String,
+    pub path: String,
+    pub last_activity_at: String,
+    pub sessions: Vec<ConversationRow>,
+}
+
+#[derive(Serialize)]
+pub struct VortexProjectSessionIndexRow {
+    pub projects: Vec<VortexProjectRow>,
+    pub recent_sessions: Vec<VortexSessionRow>,
 }
 
 #[derive(Serialize)]
@@ -230,6 +261,101 @@ pub fn db_list_conversations(
 }
 
 #[tauri::command]
+pub fn db_list_vortex_project_sessions(
+    state: State<'_, DbState>,
+) -> Result<VortexProjectSessionIndexRow, String> {
+    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    list_vortex_project_sessions(&conn)
+}
+
+fn list_vortex_project_sessions(conn: &Connection) -> Result<VortexProjectSessionIndexRow, String> {
+    let mut project_stmt = conn
+        .prepare(
+            "SELECT p.id, p.name, p.path,
+                    COALESCE(MAX(c.updated_at), p.updated_at)
+             FROM projects p
+             LEFT JOIN conversations c ON c.project_id = p.id
+             GROUP BY p.id, p.name, p.path, p.updated_at
+             ORDER BY COALESCE(MAX(c.updated_at), p.updated_at) DESC",
+        )
+        .map_err(|e| e.to_string())?;
+    let project_rows = project_stmt
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+            ))
+        })
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+    drop(project_stmt);
+
+    let mut projects = Vec::with_capacity(project_rows.len());
+    let mut recent_sessions = Vec::new();
+
+    for (project_id, project_name, project_path, last_activity_at) in project_rows {
+        let mut session_stmt = conn
+            .prepare(
+                "SELECT c.id, c.title, c.mode, c.model_id, c.provider_id,
+                        COALESCE((SELECT COUNT(*) FROM messages m WHERE m.conversation_id = c.id), 0),
+                        c.created_at, c.updated_at
+                 FROM conversations c
+                 WHERE c.project_id = ?1
+                 ORDER BY c.updated_at DESC",
+            )
+            .map_err(|e| e.to_string())?;
+        let sessions = session_stmt
+            .query_map(params![project_id], |row| {
+                Ok(ConversationRow {
+                    id: row.get(0)?,
+                    title: row.get(1)?,
+                    mode: row.get(2)?,
+                    model_id: row.get(3)?,
+                    provider_id: row.get(4)?,
+                    message_count: row.get(5)?,
+                    created_at: row.get(6)?,
+                    updated_at: row.get(7)?,
+                })
+            })
+            .map_err(|e| e.to_string())?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())?;
+        drop(session_stmt);
+
+        recent_sessions.extend(sessions.iter().cloned().map(|session| VortexSessionRow {
+            id: session.id,
+            title: session.title,
+            mode: session.mode,
+            model_id: session.model_id,
+            provider_id: session.provider_id,
+            message_count: session.message_count,
+            created_at: session.created_at,
+            updated_at: session.updated_at,
+            project_id: project_id.clone(),
+            project_name: project_name.clone(),
+            project_path: project_path.clone(),
+        }));
+
+        projects.push(VortexProjectRow {
+            id: project_id,
+            name: project_name,
+            path: project_path,
+            last_activity_at,
+            sessions,
+        });
+    }
+
+    recent_sessions.sort_by(|left, right| right.updated_at.cmp(&left.updated_at));
+    Ok(VortexProjectSessionIndexRow {
+        projects,
+        recent_sessions,
+    })
+}
+
+#[tauri::command]
 pub fn db_get_conversation(
     state: State<'_, DbState>,
     conversation_id: String,
@@ -237,7 +363,7 @@ pub fn db_get_conversation(
     let conn = state.0.lock().map_err(|e| e.to_string())?;
     let mut stmt = conn
         .prepare(
-            "SELECT id, title, mode, model_id, provider_id, created_at, updated_at
+            "SELECT id, title, mode, model_id, provider_id, project_id, created_at, updated_at
              FROM conversations WHERE id = ?1",
         )
         .map_err(|e| e.to_string())?;
@@ -249,8 +375,9 @@ pub fn db_get_conversation(
                 mode: row.get(2)?,
                 model_id: row.get(3)?,
                 provider_id: row.get(4)?,
-                created_at: row.get(5)?,
-                updated_at: row.get(6)?,
+                project_id: row.get(5)?,
+                created_at: row.get(6)?,
+                updated_at: row.get(7)?,
             })
         })
         .ok();
@@ -274,6 +401,11 @@ pub fn db_ensure_project(
     conn.execute(
         "INSERT OR IGNORE INTO projects (id, name, path) VALUES (?1, ?2, ?3)",
         params![id, name, path],
+    )
+    .map_err(|e| e.to_string())?;
+    conn.execute(
+        "UPDATE projects SET name = ?1, updated_at = datetime('now') WHERE id = ?2",
+        params![name, id],
     )
     .map_err(|e| e.to_string())?;
     Ok(())
@@ -1893,8 +2025,8 @@ pub fn db_sdd_get_tasks(
 }
 
 #[cfg(test)]
-mod sdd_migration_tests {
-    use super::open_database;
+mod database_tests {
+    use super::{list_vortex_project_sessions, open_database};
     use std::error::Error;
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -1925,6 +2057,58 @@ mod sdd_migration_tests {
         )?;
         assert_eq!(session_status, "executing");
         assert_eq!(task_status, "in_progress");
+
+        drop(connection);
+        std::fs::remove_dir_all(directory)?;
+        Ok(())
+    }
+
+    #[test]
+    fn lists_projects_with_sessions_and_global_recent_order() -> Result<(), Box<dyn Error>> {
+        let suffix = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
+        let directory = std::env::temp_dir().join(format!("hyscode-vortex-index-{suffix}"));
+        let connection = open_database(&directory);
+        connection.execute_batch(
+            "INSERT INTO projects (id,name,path,updated_at) VALUES
+               ('project-a','Project A','C:/project-a','2026-08-04 10:00:00'),
+               ('project-b','Project B','C:/project-b','2026-08-04 09:00:00');
+             INSERT INTO conversations (id,project_id,title,mode,updated_at) VALUES
+               ('conversation-a','project-a','Older','chat','2026-08-04 10:01:00'),
+               ('conversation-b','project-b','Newest','build','2026-08-04 10:02:00');
+             INSERT INTO messages (id,conversation_id,role,content) VALUES
+               ('message-a','conversation-a','user','hello'),
+               ('message-b','conversation-b','user','world');",
+        )?;
+
+        let index = list_vortex_project_sessions(&connection)?;
+        assert_eq!(index.projects.len(), 2);
+        assert_eq!(index.projects[0].name, "Project B");
+        assert_eq!(index.projects[0].sessions[0].title, "Newest");
+        assert_eq!(index.projects[0].sessions[0].message_count, 1);
+        assert_eq!(index.recent_sessions.len(), 2);
+        assert_eq!(index.recent_sessions[0].title, "Newest");
+        assert_eq!(index.recent_sessions[0].project_path, "C:/project-b");
+
+        drop(connection);
+        std::fs::remove_dir_all(directory)?;
+        Ok(())
+    }
+
+    #[test]
+    fn includes_empty_projects_in_the_vortex_index() -> Result<(), Box<dyn Error>> {
+        let suffix = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
+        let directory = std::env::temp_dir().join(format!("hyscode-vortex-empty-{suffix}"));
+        let connection = open_database(&directory);
+        connection.execute(
+            "INSERT INTO projects (id,name,path) VALUES (?1,?2,?3)",
+            ("empty", "Empty Project", "C:/empty-project"),
+        )?;
+
+        let index = list_vortex_project_sessions(&connection)?;
+        assert_eq!(index.projects.len(), 1);
+        assert_eq!(index.projects[0].name, "Empty Project");
+        assert!(index.projects[0].sessions.is_empty());
+        assert!(index.recent_sessions.is_empty());
 
         drop(connection);
         std::fs::remove_dir_all(directory)?;

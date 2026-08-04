@@ -62,6 +62,36 @@ export interface GitCommitContextContract {
   patch_bytes_omitted: number;
 }
 
+export interface DatabaseConversationRow {
+  id: string;
+  title: string;
+  mode: string;
+  model_id: string | null;
+  provider_id: string | null;
+  message_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface VortexSessionRow extends DatabaseConversationRow {
+  project_id: string;
+  project_name: string;
+  project_path: string;
+}
+
+export interface VortexProjectRow {
+  id: string;
+  name: string;
+  path: string;
+  last_activity_at: string;
+  sessions: DatabaseConversationRow[];
+}
+
+export interface VortexProjectSessionIndexRow {
+  projects: VortexProjectRow[];
+  recent_sessions: VortexSessionRow[];
+}
+
 // ─── Command signatures ─────────────────────────────────────────────────────
 
 interface TauriCommands {
@@ -78,6 +108,7 @@ interface TauriCommands {
     args: { path: string };
     ret: { path: string; is_dir: boolean; is_file: boolean; size: number; modified: number | null };
   };
+  reveal_path: { args: { path: string }; ret: void };
   rename_path: { args: { from: string; to: string }; ret: void };
   create_directory: { args: { path: string }; ret: void };
   search_files: {
@@ -474,16 +505,11 @@ interface TauriCommands {
   // Database: Conversations
   db_list_conversations: {
     args: { projectId: string };
-    ret: Array<{
-      id: string;
-      title: string;
-      mode: string;
-      model_id: string | null;
-      provider_id: string | null;
-      message_count: number;
-      created_at: string;
-      updated_at: string;
-    }>;
+    ret: DatabaseConversationRow[];
+  };
+  db_list_vortex_project_sessions: {
+    args: Record<string, never>;
+    ret: VortexProjectSessionIndexRow;
   };
   db_get_conversation: {
     args: { conversationId: string };
@@ -493,6 +519,7 @@ interface TauriCommands {
       mode: string;
       model_id: string | null;
       provider_id: string | null;
+      project_id: string | null;
       created_at: string;
       updated_at: string;
     } | null;

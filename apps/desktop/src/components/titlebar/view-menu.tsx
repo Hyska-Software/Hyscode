@@ -76,7 +76,7 @@ export function ViewMenu() {
           onClick={() => setWorkspaceMode('agent')}
           className={workspaceMode === 'agent' ? 'bg-primary text-primary-foreground' : ''}
         >
-          Agent Mode
+          Vortex Mode
         </DropdownMenuItem>
 
         <DropdownMenuSeparator />

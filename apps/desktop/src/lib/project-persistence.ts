@@ -5,7 +5,13 @@
 // deterministic hash of the project path.
 
 import { useEditorStore, type Tab } from '@/stores/editor-store';
-import { useAgentStore, type AgentMode } from '@/stores/agent-store';
+import {
+  useAgentStore,
+  type AgentMode,
+  type ChatMessage,
+  type ToolCallDisplay,
+  type TurnSummary,
+} from '@/stores/agent-store';
 import { useLayoutStore, type WorkspaceMode } from '@/stores/layout-store';
 import { useDbViewerStore } from '@/stores/db-viewer-store';
 import { useDiagnosticsStore } from '@/stores/diagnostics-store';
@@ -19,7 +25,10 @@ import { useSchemaDiagramStore } from '@/stores/schema-diagram-store';
 import { useSkillsStore } from '@/stores/skills-store';
 import { useTerminalStore } from '@/stores/terminal-store';
 import { HarnessBridge } from './harness-bridge';
+import { areSameProjectPath, normalizeProjectPath } from './project-path';
 import { tauriInvoke } from './tauri-invoke';
+
+export { areSameProjectPath } from './project-path';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -41,27 +50,15 @@ export interface ProjectSnapshot {
   workspaceMode?: WorkspaceMode;
 }
 
+export interface ProjectOpenOptions {
+  /** Override a saved layout when navigation originates in a specific mode. */
+  workspaceMode?: WorkspaceMode;
+}
+
 // ─── Key Generation ─────────────────────────────────────────────────────────
 
 const STORAGE_PREFIX = 'hyscode-project-state:';
 let projectSwitchGeneration = 0;
-
-function normalizeProjectPath(path: string): string {
-  const normalized = path.trim().replace(/\\/g, '/');
-  if (normalized.length <= 1) return normalized;
-  if (/^[A-Za-z]:\/$/.test(normalized)) return normalized;
-  return normalized.replace(/\/$/, '');
-}
-
-function projectPathKey(path: string): string {
-  const normalized = normalizeProjectPath(path);
-  return /^[A-Za-z]:\//.test(normalized) ? normalized.toLowerCase() : normalized;
-}
-
-export function areSameProjectPath(left: string | null, right: string | null): boolean {
-  if (!left || !right) return left === right;
-  return projectPathKey(left) === projectPathKey(right);
-}
 
 function isCurrentProjectSwitch(switchId: number, rootPath: string): boolean {
   return (
@@ -109,6 +106,38 @@ function toAgentMode(mode: string): AgentMode {
   return ['chat', 'build', 'review', 'debug', 'plan'].includes(mode)
     ? (mode as AgentMode)
     : 'chat';
+}
+
+function parseJsonValue<T>(value: string | null): T | undefined {
+  if (!value) return undefined;
+  try {
+    return JSON.parse(value) as T;
+  } catch {
+    return undefined;
+  }
+}
+
+function mapDatabaseMessage(message: {
+  id: string;
+  role: string;
+  content: string;
+  tool_calls: string | null;
+  blocks: string | null;
+  turn_summary: string | null;
+  created_at: string;
+}): ChatMessage | null {
+  if (message.role === 'system' || (message.role !== 'user' && message.role !== 'assistant')) {
+    return null;
+  }
+  return {
+    id: message.id,
+    role: message.role,
+    content: message.content,
+    toolCalls: parseJsonValue<ToolCallDisplay[]>(message.tool_calls),
+    blocks: parseJsonValue<NonNullable<ChatMessage['blocks']>>(message.blocks),
+    turnSummary: parseJsonValue<TurnSummary>(message.turn_summary),
+    timestamp: new Date(message.created_at).getTime(),
+  };
 }
 
 /** Persist the agent's open tabs for a project before its store is reset. */
@@ -198,6 +227,7 @@ function restoreEditorState(snapshot: EditorSnapshot): void {
  */
 async function restoreAgentState(
   snapshot: AgentSnapshot,
+  expectedProjectPath: string,
   isCurrent: () => boolean,
 ): Promise<void> {
   const store = useAgentStore.getState();
@@ -212,6 +242,13 @@ async function restoreAgentState(
         conversationId: snapshot.conversationId,
       });
       if (!conv || !isCurrent()) return;
+      if (conv.project_id && !areSameProjectPath(conv.project_id, expectedProjectPath)) {
+        console.warn(
+          '[project-persistence] Ignoring a snapshot conversation owned by another project:',
+          snapshot.conversationId,
+        );
+        return;
+      }
 
       store.setConversationId(snapshot.conversationId);
 
@@ -223,15 +260,8 @@ async function restoreAgentState(
       for (const m of dbMessages) {
         if (!isCurrent()) return;
         if (m.role === 'system') continue;
-        const message = {
-          id: m.id,
-          role: m.role as 'user' | 'assistant',
-          content: m.content,
-          toolCalls: m.tool_calls ? JSON.parse(m.tool_calls) : undefined,
-          blocks: m.blocks ? JSON.parse(m.blocks) : undefined,
-          turnSummary: m.turn_summary ? JSON.parse(m.turn_summary) : undefined,
-          timestamp: new Date(m.created_at).getTime(),
-        };
+        const message = mapDatabaseMessage(m);
+        if (!message) continue;
         store.addMessage(message);
         if (message.turnSummary) store.hydrateTurnSummary(message.turnSummary);
       }
@@ -281,6 +311,62 @@ async function loadSessionsForProject(rootPath: string, isCurrent: () => boolean
   }
 }
 
+/**
+ * Restore one explicitly selected conversation in the currently active
+ * project. This is intentionally separate from snapshot restoration so a
+ * VORTEX click always wins over the target project's previously active tab.
+ */
+export async function restoreProjectConversation(
+  conversationId: string,
+  expectedProjectPath: string,
+): Promise<void> {
+  const switchId = projectSwitchGeneration;
+  const rootPath = normalizeProjectPath(expectedProjectPath);
+  const isCurrent = () =>
+    switchId === projectSwitchGeneration &&
+    !useProjectStore.getState().isLoading &&
+    areSameProjectPath(useProjectStore.getState().rootPath, rootPath);
+
+  if (!isCurrent()) return;
+
+  const conversation = await tauriInvoke('db_get_conversation', { conversationId });
+  if (!isCurrent()) return;
+  if (!conversation) {
+    throw new Error('The selected session is no longer available.');
+  }
+  if (conversation.project_id && !areSameProjectPath(conversation.project_id, rootPath)) {
+    throw new Error('The selected session belongs to a different project.');
+  }
+
+  const rows = await tauriInvoke('db_list_messages', { conversationId });
+  if (!isCurrent()) return;
+
+  const store = useAgentStore.getState();
+  if (store.conversationId === conversationId || store.messages.length === 0) {
+    store.clearConversation();
+  } else {
+    store.openNewTab(toAgentMode(conversation.mode));
+  }
+
+  store.setMode(toAgentMode(conversation.mode));
+  store.setConversationId(conversationId);
+  store.updateTabTitle(store.activeTabId, conversation.title || 'Conversation');
+
+  for (const row of rows) {
+    const message = mapDatabaseMessage(row);
+    if (!message || !isCurrent()) continue;
+    store.addMessage(message);
+    if (message.turnSummary) store.hydrateTurnSummary(message.turnSummary);
+  }
+
+  try {
+    HarnessBridge.get().restoreSession(conversationId);
+  } catch {
+    // The bridge is initialized after the project coordinator finishes.
+  }
+  store.setHistoryOpen(false);
+}
+
 // ─── Orchestration ──────────────────────────────────────────────────────────
 
 /**
@@ -314,8 +400,34 @@ export async function clearAllProjectState(): Promise<void> {
  * persisted, cancelled, and removed from every project-scoped store. All
  * asynchronous work is guarded by a monotonically increasing switch id.
  */
-export async function openProjectWorkspace(newRootPath: string): Promise<void> {
-  await performProjectOpen(newRootPath, true);
+export async function openProjectWorkspace(
+  newRootPath: string,
+  options: ProjectOpenOptions = {},
+): Promise<void> {
+  await performProjectOpen(newRootPath, true, options);
+}
+
+/**
+ * Activate a VORTEX session, switching projects through the canonical
+ * lifecycle when necessary and then making the clicked conversation active.
+ */
+export async function activateVortexSession(
+  projectPath: string,
+  conversationId: string,
+): Promise<void> {
+  const targetPath = normalizeProjectPath(projectPath);
+  const projectState = useProjectStore.getState();
+  if (projectState.isLoading) {
+    throw new Error('A project switch is already in progress.');
+  }
+
+  if (!areSameProjectPath(projectState.rootPath, targetPath)) {
+    await performProjectOpen(targetPath, true, { workspaceMode: 'agent' });
+  } else {
+    useLayoutStore.getState().setWorkspaceMode('agent');
+  }
+
+  await restoreProjectConversation(conversationId, targetPath);
 }
 
 /** Restore the persisted project that was present when the app last closed. */
@@ -323,7 +435,11 @@ export async function hydrateProjectWorkspace(rootPath: string): Promise<void> {
   await performProjectOpen(rootPath, false);
 }
 
-async function performProjectOpen(newRootPath: string, saveCurrentProject: boolean): Promise<void> {
+async function performProjectOpen(
+  newRootPath: string,
+  saveCurrentProject: boolean,
+  options: ProjectOpenOptions = {},
+): Promise<void> {
   const rootPath = normalizeProjectPath(newRootPath);
   if (!rootPath) throw new Error('Cannot open an empty project path.');
 
@@ -345,19 +461,27 @@ async function performProjectOpen(newRootPath: string, saveCurrentProject: boole
     useProjectStore.getState().openProject(rootPath);
     useProjectStore.getState().setLoading(true);
 
+    await tauriInvoke('db_ensure_project', { id: rootPath, path: rootPath }).catch((error) => {
+      console.warn('[project-persistence] Failed to register project in the database:', error);
+    });
+    if (switchId !== projectSwitchGeneration) return;
+
     const snapshot = loadProjectState(rootPath);
     if (snapshot) {
       restoreEditorState(snapshot.editor);
-      if (snapshot.workspaceMode) {
+      if (snapshot.workspaceMode && !options.workspaceMode) {
         useLayoutStore.getState().setWorkspaceMode(snapshot.workspaceMode);
       }
+    }
+    if (options.workspaceMode) {
+      useLayoutStore.getState().setWorkspaceMode(options.workspaceMode);
     }
 
     await useFileStore.getState().openFolder(rootPath);
     if (!isCurrentProjectSwitch(switchId, rootPath)) return;
 
     const isCurrent = () => isCurrentProjectSwitch(switchId, rootPath);
-    if (snapshot) await restoreAgentState(snapshot.agent, isCurrent);
+    if (snapshot) await restoreAgentState(snapshot.agent, rootPath, isCurrent);
     await loadSessionsForProject(rootPath, isCurrent);
     if (!isCurrent()) return;
 

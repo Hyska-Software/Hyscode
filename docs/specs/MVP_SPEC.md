@@ -69,7 +69,7 @@
 
 ## Out of Scope (MVP)
 
-- Multi-window / multi-workspace support
+- Multi-window and concurrent multi-runtime workspaces (VORTEX federated project/session navigation is in scope; EDITOR remains single-project)
 - Extension/plugin marketplace
 - Collaborative editing (multi-user)
 - Remote development (SSH/containers)

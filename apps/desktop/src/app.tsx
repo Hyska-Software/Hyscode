@@ -97,6 +97,36 @@ async function restoreOpenTabs(projectId: string): Promise<void> {
     );
 
     if (!isCurrentProject()) return;
+
+    // A VORTEX click may have selected a conversation before the bridge
+    // finished initializing. Merge that explicit selection into the durable
+    // open-tab list instead of letting startup hydration replace it.
+    const currentAgentState = useAgentStore.getState();
+    const preferredConversationId = currentAgentState.conversationId;
+    if (preferredConversationId) {
+      const currentTab = {
+        id: currentAgentState.activeTabId,
+        title:
+          currentAgentState.openTabs.find((tab) => tab.id === currentAgentState.activeTabId)?.title ??
+          'Selected session',
+        conversationId: preferredConversationId,
+        mode: currentAgentState.mode,
+        messages: currentAgentState.messages,
+      };
+      const existingIndex = tabsWithMessages.findIndex(
+        (tab) => tab.conversationId === preferredConversationId,
+      );
+      if (existingIndex >= 0) {
+        tabsWithMessages[existingIndex] = currentTab;
+      } else {
+        tabsWithMessages.unshift(currentTab);
+      }
+      tabsWithMessages.sort((left, right) => {
+        if (left.conversationId === preferredConversationId) return -1;
+        if (right.conversationId === preferredConversationId) return 1;
+        return 0;
+      });
+    }
     useAgentStore.getState().loadSavedTabs(tabsWithMessages);
 
     // Sync active conversationId into harness

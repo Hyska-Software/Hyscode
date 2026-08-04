@@ -183,6 +183,7 @@ pub fn run() {
             // Database commands
             commands::db::db_ensure_project,
             commands::db::db_list_conversations,
+            commands::db::db_list_vortex_project_sessions,
             commands::db::db_get_conversation,
             commands::db::db_create_conversation,
             commands::db::db_update_conversation,

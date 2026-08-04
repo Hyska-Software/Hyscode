@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { immer } from 'zustand/middleware/immer';
 import { persist, createJSONStorage } from 'zustand/middleware';
+import { normalizeProjectPath, projectPathKey } from '@/lib/project-path';
 
 export interface RecentProject {
   name: string;
@@ -13,11 +14,14 @@ interface ProjectState {
   rootPath: string | null;
   isLoading: boolean;
   recentProjects: RecentProject[];
+  vortexHiddenProjectPaths: string[];
   openProject: (path: string) => void;
   setLoading: (isLoading: boolean) => void;
   closeProject: () => void;
   removeRecent: (path: string) => void;
   clearRecent: () => void;
+  hideFromVortex: (path: string) => void;
+  unhideFromVortex: (path: string) => void;
 }
 
 export const useProjectStore = create<ProjectState>()(
@@ -27,20 +31,26 @@ export const useProjectStore = create<ProjectState>()(
       rootPath: null,
       isLoading: false,
       recentProjects: [],
+      vortexHiddenProjectPaths: [],
 
       openProject: (path) =>
         set((state) => {
-          const parts = path.replace(/\\/g, '/').split('/');
+          const normalizedPath = normalizeProjectPath(path);
+          const parts = normalizedPath.split('/');
           const projectName = parts[parts.length - 1] || 'project';
           state.name = projectName;
-          state.rootPath = path;
+          state.rootPath = normalizedPath;
           state.isLoading = false;
 
           // Update recent projects, move this to top
-          const filtered = state.recentProjects.filter((p) => p.path !== path);
-          filtered.unshift({ name: projectName, path, lastOpened: Date.now() });
+          const pathKey = projectPathKey(normalizedPath);
+          const filtered = state.recentProjects.filter((p) => projectPathKey(p.path) !== pathKey);
+          filtered.unshift({ name: projectName, path: normalizedPath, lastOpened: Date.now() });
           // Keep only 10 recent projects
           state.recentProjects = filtered.slice(0, 10);
+          state.vortexHiddenProjectPaths = state.vortexHiddenProjectPaths.filter(
+            (hiddenPath) => projectPathKey(hiddenPath) !== pathKey,
+          );
         }),
 
       setLoading: (isLoading) =>
@@ -56,12 +66,31 @@ export const useProjectStore = create<ProjectState>()(
 
       removeRecent: (path) =>
         set((state) => {
-          state.recentProjects = state.recentProjects.filter((p) => p.path !== path);
+          const pathKey = projectPathKey(path);
+          state.recentProjects = state.recentProjects.filter(
+            (project) => projectPathKey(project.path) !== pathKey,
+          );
         }),
 
       clearRecent: () =>
         set((state) => {
           state.recentProjects = [];
+        }),
+
+      hideFromVortex: (path) =>
+        set((state) => {
+          const pathKey = projectPathKey(path);
+          if (!state.vortexHiddenProjectPaths.some((hiddenPath) => projectPathKey(hiddenPath) === pathKey)) {
+            state.vortexHiddenProjectPaths.push(normalizeProjectPath(path));
+          }
+        }),
+
+      unhideFromVortex: (path) =>
+        set((state) => {
+          const pathKey = projectPathKey(path);
+          state.vortexHiddenProjectPaths = state.vortexHiddenProjectPaths.filter(
+            (hiddenPath) => projectPathKey(hiddenPath) !== pathKey,
+          );
         }),
     })),
     {
@@ -71,6 +100,7 @@ export const useProjectStore = create<ProjectState>()(
         name: state.name,
         rootPath: state.rootPath,
         recentProjects: state.recentProjects,
+        vortexHiddenProjectPaths: state.vortexHiddenProjectPaths,
       }),
     },
   ),
