@@ -56,6 +56,7 @@ export type RuntimeReadyPayload = {
   activeAgentType: AgentType;
   activeProviderId: string;
   activeModelId: string;
+  activeThinking: ThinkingConfig;
   session?: SessionRecord;
 };
 

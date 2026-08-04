@@ -275,10 +275,23 @@ pub(crate) struct ProjectSummary {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct ThinkingCapability {
+    pub(crate) levels: Vec<String>,
+    pub(crate) default_level: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) struct ThinkingState {
+    pub(crate) enabled: bool,
+    pub(crate) level: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct ModelOption {
     pub(crate) id: String,
     pub(crate) name: String,
     pub(crate) provider: String,
+    pub(crate) thinking: Option<ThinkingCapability>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -309,6 +322,7 @@ struct App {
     pub(crate) provider: String,
     pub(crate) model: String,
     pub(crate) mode: String,
+    pub(crate) thinking: ThinkingState,
     pub(crate) status: String,
     pub(crate) running: bool,
     should_quit: bool,
@@ -348,6 +362,7 @@ impl App {
             provider: options.provider.clone().unwrap_or_default(),
             model: options.model.clone().unwrap_or_default(),
             mode: options.mode.clone().unwrap_or_else(|| "chat".to_string()),
+            thinking: ThinkingState::default(),
             status: "Starting shared runtime…".to_string(),
             running: false,
             should_quit: false,
@@ -535,10 +550,11 @@ impl App {
             .and_then(Value::as_str)
             .unwrap_or_default()
             .to_string();
+        self.thinking = parse_thinking_state(payload.get("activeThinking"));
         self.status = if self.provider.is_empty() {
             "No configured provider".to_string()
         } else {
-            "Ready".to_string()
+            format!("Ready · Thinking {}", self.thinking_label())
         };
         if let Some(session) = payload.get("session") {
             self.apply_session(session);
@@ -1179,6 +1195,7 @@ impl App {
             | Some(CommandFlow::Model {
                 selected: current, ..
             }) => *current = selected,
+            Some(CommandFlow::Thinking { selected: current }) => *current = selected,
             None => {}
         }
     }
@@ -1251,6 +1268,23 @@ impl App {
             .collect()
     }
 
+    pub(crate) fn active_model_thinking(&self) -> Option<ThinkingCapability> {
+        self.models
+            .iter()
+            .find(|model| model.provider == self.provider && model.id == self.model)
+            .and_then(|model| model.thinking.clone())
+    }
+
+    pub(crate) fn thinking_label(&self) -> String {
+        if !self.thinking.enabled {
+            return "off".to_string();
+        }
+        self.thinking
+            .level
+            .clone()
+            .unwrap_or_else(|| "on".to_string())
+    }
+
     fn accept_command_selection(&mut self, selected: usize) -> Result<()> {
         let Some(flow) = self.command_flow.clone() else {
             return Ok(());
@@ -1313,6 +1347,42 @@ impl App {
                 self.status = format!("Model set to {} / {}", provider.name, model.name);
                 self.return_to_command_root();
             }
+            CommandFlow::Thinking { selected } => {
+                let Some(capability) = self.active_model_thinking() else {
+                    self.status = "Thinking is not available for the selected model".to_string();
+                    self.return_to_command_root();
+                    return Ok(());
+                };
+                let Some(thinking) =
+                    thinking_config_for_selection(&self.thinking, &capability, selected)
+                else {
+                    return Ok(());
+                };
+                self.send_simple(
+                    "set_config",
+                    json!({
+                        "providerId": self.provider,
+                        "modelId": self.model,
+                        "thinking": thinking,
+                    }),
+                )?;
+                self.status = if selected == 0 {
+                    if self.thinking.enabled {
+                        "Thinking disable requested".to_string()
+                    } else {
+                        "Thinking enable requested".to_string()
+                    }
+                } else {
+                    format!(
+                        "Thinking {} requested",
+                        thinking
+                            .get("level")
+                            .and_then(Value::as_str)
+                            .unwrap_or("default")
+                    )
+                };
+                self.return_to_command_root();
+            }
         }
         Ok(())
     }
@@ -1333,6 +1403,9 @@ impl App {
                     .position(|provider| provider.id == self.provider)
                     .unwrap_or(0);
                 self.command_flow = Some(CommandFlow::Provider { selected });
+            }
+            "/thinking" => {
+                self.command_flow = Some(CommandFlow::Thinking { selected: 0 });
             }
             "/load" => {
                 self.command("/sessions".to_string())?;
@@ -1942,7 +2015,69 @@ fn parse_model_option(value: &Value) -> Option<ModelOption> {
             .and_then(Value::as_str)
             .unwrap_or_default()
             .to_string(),
+        thinking: value
+            .get("thinkingVariants")
+            .and_then(parse_thinking_capability),
         id,
+    })
+}
+
+fn parse_thinking_capability(value: &Value) -> Option<ThinkingCapability> {
+    if value.get("kind").and_then(Value::as_str) == Some("none") {
+        return None;
+    }
+    Some(ThinkingCapability {
+        levels: value
+            .get("levels")
+            .and_then(Value::as_array)
+            .map(|levels| {
+                levels
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .map(str::to_string)
+                    .collect()
+            })
+            .unwrap_or_default(),
+        default_level: value
+            .get("defaultLevel")
+            .and_then(Value::as_str)
+            .map(str::to_string),
+    })
+}
+
+fn parse_thinking_state(value: Option<&Value>) -> ThinkingState {
+    let Some(value) = value else {
+        return ThinkingState::default();
+    };
+    ThinkingState {
+        enabled: value
+            .get("enabled")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        level: value
+            .get("level")
+            .and_then(Value::as_str)
+            .map(str::to_string),
+    }
+}
+
+fn thinking_config_for_selection(
+    state: &ThinkingState,
+    capability: &ThinkingCapability,
+    selected: usize,
+) -> Option<Value> {
+    if selected == 0 {
+        let mut config = json!({ "enabled": !state.enabled });
+        if let Some(level) = state.level.clone().or(capability.default_level.clone()) {
+            config["level"] = Value::String(level);
+        }
+        return Some(config);
+    }
+    capability.levels.get(selected - 1).map(|level| {
+        json!({
+            "enabled": true,
+            "level": level,
+        })
     })
 }
 
@@ -2121,13 +2256,86 @@ mod tests {
         let model = parse_model_option(&json!({
             "id": "claude-sonnet",
             "name": "Claude Sonnet",
-            "provider": "anthropic"
+            "provider": "anthropic",
+            "thinkingVariants": {
+                "kind": "anthropic",
+                "levels": ["low", "medium", "high"],
+                "defaultLevel": "medium"
+            }
         }))
         .expect("valid model entry");
         assert_eq!(model.id, "claude-sonnet");
         assert_eq!(model.name, "Claude Sonnet");
         assert_eq!(model.provider, "anthropic");
+        assert_eq!(
+            model.thinking,
+            Some(super::ThinkingCapability {
+                levels: vec!["low".to_string(), "medium".to_string(), "high".to_string()],
+                default_level: Some("medium".to_string()),
+            })
+        );
+        assert_eq!(
+            parse_model_option(&json!({
+                "id": "plain-model",
+                "name": "Plain model",
+                "provider": "openai"
+            }))
+            .and_then(|model| model.thinking),
+            None
+        );
         assert!(parse_model_option(&json!({ "name": "missing id" })).is_none());
+    }
+
+    #[test]
+    fn parses_active_thinking_state_with_a_safe_disabled_fallback() {
+        let state = super::parse_thinking_state(Some(&json!({
+            "enabled": true,
+            "level": "high"
+        })));
+        assert!(state.enabled);
+        assert_eq!(state.level.as_deref(), Some("high"));
+        assert_eq!(
+            super::parse_thinking_state(None),
+            super::ThinkingState::default()
+        );
+    }
+
+    #[test]
+    fn builds_visual_thinking_payloads_for_toggle_and_levels() {
+        let capability = super::ThinkingCapability {
+            levels: vec!["low".to_string(), "medium".to_string(), "high".to_string()],
+            default_level: Some("medium".to_string()),
+        };
+        assert_eq!(
+            super::thinking_config_for_selection(&super::ThinkingState::default(), &capability, 0),
+            Some(json!({ "enabled": true, "level": "medium" }))
+        );
+        assert_eq!(
+            super::thinking_config_for_selection(
+                &super::ThinkingState {
+                    enabled: true,
+                    level: Some("high".to_string()),
+                },
+                &capability,
+                0,
+            ),
+            Some(json!({ "enabled": false, "level": "high" }))
+        );
+        assert_eq!(
+            super::thinking_config_for_selection(
+                &super::ThinkingState {
+                    enabled: true,
+                    level: Some("low".to_string()),
+                },
+                &capability,
+                3,
+            ),
+            Some(json!({ "enabled": true, "level": "high" }))
+        );
+        assert_eq!(
+            super::thinking_config_for_selection(&super::ThinkingState::default(), &capability, 4),
+            None
+        );
     }
 
     #[test]

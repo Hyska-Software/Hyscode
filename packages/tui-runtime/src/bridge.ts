@@ -215,7 +215,11 @@ export class TuiBridge {
         maxOutputTokens: this.settings.maxTokens,
         turnTimeoutMs: this.settings.agentRequestTimeoutMs,
         approval: buildApprovalConfig(this.settings),
-        thinking: buildThinkingConfig(this.settings, activeProviderId, activeModelId),
+        thinking: normalizeStoredThinkingConfig(
+          buildThinkingConfig(this.settings, activeProviderId, activeModelId) ?? { enabled: false },
+          activeProviderId,
+          activeModelId,
+        ),
         costOptimization: true,
       },
     });
@@ -294,7 +298,9 @@ export class TuiBridge {
     const providerId = typeof params.providerId === 'string' ? params.providerId : this.currentProviderId();
     const modelId = typeof params.modelId === 'string' ? params.modelId : this.currentModelId();
     const approvalMode = normalizeApprovalMode(params.approvalMode ?? settings.approvalMode);
-    const thinking = params.thinking ? normalizeThinkingConfig(params.thinking) : buildThinkingConfig(settings, providerId, modelId) ?? { enabled: false };
+    const thinking = params.thinking
+      ? validateRequestedThinkingConfig(normalizeThinkingConfig(params.thinking), providerId, modelId)
+      : normalizeStoredThinkingConfig(buildThinkingConfig(settings, providerId, modelId) ?? { enabled: false }, providerId, modelId);
     harness.setConfig({
       providerId,
       modelId,
@@ -679,6 +685,11 @@ export class TuiBridge {
       activeAgentType: harness.getAgentType(),
       activeProviderId: this.currentProviderId(),
       activeModelId: this.currentModelId(),
+      activeThinking: normalizeStoredThinkingConfig(
+        buildThinkingConfig(this.requireSettings(), this.currentProviderId(), this.currentModelId()) ?? { enabled: false },
+        this.currentProviderId(),
+        this.currentModelId(),
+      ),
       ...(this.session ? { session: this.session } : {}),
     };
   }
@@ -907,6 +918,40 @@ function normalizeThinkingConfig(value: ThinkingConfig): ThinkingConfig {
     ...(value.type ? { type: value.type } : {}),
     ...(value.display ? { display: value.display } : {}),
   };
+}
+
+function modelThinkingVariants(providerId: string, modelId: string) {
+  const provider = getProviderRegistry().get(providerId);
+  return provider?.models.find((model) => model.id === modelId)?.thinkingVariants;
+}
+
+function validateRequestedThinkingConfig(value: ThinkingConfig, providerId: string, modelId: string): ThinkingConfig {
+  const normalized = normalizeThinkingConfig(value);
+  if (!normalized.enabled) return normalized;
+
+  const variants = modelThinkingVariants(providerId, modelId);
+  if (!variants || variants.kind === 'none') {
+    throw new Error(`Thinking is not supported by model "${modelId || 'the selected model'}".`);
+  }
+  if (normalized.level && (!variants.levels || !variants.levels.includes(normalized.level))) {
+    throw new Error(`Thinking level "${normalized.level}" is not supported by model "${modelId}".`);
+  }
+  return normalized;
+}
+
+function normalizeStoredThinkingConfig(value: ThinkingConfig, providerId: string, modelId: string): ThinkingConfig {
+  const normalized = normalizeThinkingConfig(value);
+  if (!normalized.enabled) return normalized;
+
+  const variants = modelThinkingVariants(providerId, modelId);
+  if (!variants || variants.kind === 'none') return { enabled: false };
+  if (normalized.level && (!variants.levels || !variants.levels.includes(normalized.level))) {
+    return {
+      enabled: false,
+      ...(variants.defaultLevel ? { level: variants.defaultLevel } : {}),
+    };
+  }
+  return normalized;
 }
 
 function numberOrDefault(value: unknown, fallback: number): number {

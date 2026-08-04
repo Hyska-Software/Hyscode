@@ -252,6 +252,7 @@ describe('shared harness bridge protocol', () => {
     }));
     expect(initialized.protocolVersion).toBe(1);
     expect(initialized.workspacePath).toBe(directory);
+    expect(initialized.activeThinking).toEqual({ enabled: false });
     expect(initialized.session?.messageCount).toBe(0);
     expect(events.some((event) => event.event === 'runtime_ready')).toBe(true);
 
@@ -309,9 +310,46 @@ describe('shared harness bridge protocol', () => {
       const configured = successfulResult<RuntimeReadyPayload>(await bridge.handle({
         id: 'config',
         method: 'set_config',
-        params: { providerId: 'openai', modelId: 'gpt-5.4-mini' },
+        params: {
+          providerId: 'openai',
+          modelId: 'gpt-5.4-mini',
+          thinking: { enabled: true, level: 'high' },
+        },
       }));
       expect(configured.activeProviderId).toBe('openai');
+      expect(configured.activeThinking).toEqual({ enabled: true, level: 'high' });
+      expect(
+        (JSON.parse(await readFile(path.join(directory, 'settings.json'), 'utf8')) as {
+          thinkingSettings: Record<string, unknown>;
+        }).thinkingSettings['openai::gpt-5.4-mini'],
+      ).toEqual({ enabled: true, level: 'high' });
+
+      const rejected = await bridge.handle({
+        id: 'invalid-thinking',
+        method: 'set_config',
+        params: {
+          providerId: 'openai',
+          modelId: 'gpt-5.4-mini',
+          thinking: { enabled: true, level: 'adaptive' },
+        },
+      });
+      expect(rejected.ok).toBe(false);
+
+      const disabled = successfulResult<RuntimeReadyPayload>(await bridge.handle({
+        id: 'disable-thinking',
+        method: 'set_config',
+        params: {
+          providerId: 'openai',
+          modelId: 'gpt-5.4-mini',
+          thinking: { enabled: false, level: 'high' },
+        },
+      }));
+      expect(disabled.activeThinking).toEqual({ enabled: false, level: 'high' });
+      expect(
+        (JSON.parse(await readFile(path.join(directory, 'settings.json'), 'utf8')) as {
+          thinkingSettings: Record<string, unknown>;
+        }).thinkingSettings['openai::gpt-5.4-mini'],
+      ).toEqual({ enabled: false, level: 'high' });
 
       const turnPromise = bridge.handle({
         id: 'turn',

@@ -47,6 +47,9 @@ pub(crate) enum CommandFlow {
         provider_index: usize,
         selected: usize,
     },
+    Thinking {
+        selected: usize,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -79,7 +82,7 @@ pub(crate) const MODE_OPTIONS: [(&str, &str); 5] = [
     ),
 ];
 
-const COMMANDS: [CommandSpec; 15] = [
+const COMMANDS: [CommandSpec; 16] = [
     CommandSpec {
         name: "/help",
         description: "Open the keyboard and command reference",
@@ -89,6 +92,11 @@ const COMMANDS: [CommandSpec; 15] = [
         name: "/mode",
         description: "Change the active agent mode",
         usage: "/mode <chat|build|review|debug|plan>",
+    },
+    CommandSpec {
+        name: "/thinking",
+        description: "Change thinking effort for the active model",
+        usage: "/thinking",
     },
     CommandSpec {
         name: "/model",
@@ -235,6 +243,33 @@ pub(crate) fn command_flow_options(app: &App) -> Vec<FlowOption> {
                     .collect()
             })
             .unwrap_or_default(),
+        Some(CommandFlow::Thinking { .. }) => {
+            let Some(capability) = app.active_model_thinking() else {
+                return vec![FlowOption {
+                    label: "Unavailable".to_string(),
+                    description: "The selected model does not expose thinking settings".to_string(),
+                }];
+            };
+            let mut options = vec![FlowOption {
+                label: if app.thinking.enabled {
+                    "Disable thinking".to_string()
+                } else {
+                    "Enable thinking".to_string()
+                },
+                description: format!("Current value: {}", app.thinking_label()),
+            }];
+            if app.thinking.enabled {
+                options.extend(capability.levels.into_iter().map(|level| FlowOption {
+                    description: if app.thinking.level.as_deref() == Some(level.as_str()) {
+                        "Current effort".to_string()
+                    } else {
+                        "Select this effort level".to_string()
+                    },
+                    label: level,
+                }));
+            }
+            options
+        }
         None => Vec::new(),
     }
 }
@@ -245,6 +280,7 @@ pub(crate) fn command_flow_selected(app: &App) -> usize {
         | Some(CommandFlow::Mode { selected })
         | Some(CommandFlow::Provider { selected }) => *selected,
         Some(CommandFlow::Model { selected, .. }) => *selected,
+        Some(CommandFlow::Thinking { selected }) => *selected,
         None => 0,
     }
 }
@@ -255,6 +291,7 @@ pub(crate) fn command_flow_title(app: &App) -> &'static str {
         Some(CommandFlow::Mode { .. }) => "MODE",
         Some(CommandFlow::Provider { .. }) => "PROVIDERS",
         Some(CommandFlow::Model { .. }) => "MODELS",
+        Some(CommandFlow::Thinking { .. }) => "THINKING",
         None => "COMMANDS",
     }
 }
@@ -394,7 +431,13 @@ fn draw_topbar(frame: &mut Frame<'_>, app: &App, area: Rect) {
     } else {
         app.model.clone()
     };
-    let status = format!("{}  {} / {}", status_marker, provider, model);
+    let status = format!(
+        "{}  {} / {}  · thinking {}",
+        status_marker,
+        provider,
+        model,
+        app.thinking_label(),
+    );
     frame.render_widget(
         Paragraph::new(Line::from(Span::styled(
             shorten(&status, columns[1].width as usize),
@@ -863,7 +906,7 @@ fn draw_help(frame: &mut Frame<'_>, area: Rect) {
             "COMMANDS",
             Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
         )),
-        Line::from("/new  /sessions  /projects  /mode  /model  /models"),
+        Line::from("/new  /sessions  /projects  /mode  /thinking  /model  /models"),
         Line::from("/diagnostics  /retry  /cancel  /clear  /quit"),
     ];
     frame.render_widget(
@@ -1285,7 +1328,14 @@ mod tests {
             vec!["/models"]
         );
         assert!(matching_commands("/unknown").is_empty());
-        assert_eq!(command_palette_items("/").len(), 15);
+        assert_eq!(command_palette_items("/").len(), 16);
+        assert_eq!(
+            matching_commands("/thinking")
+                .iter()
+                .map(|item| item.name)
+                .collect::<Vec<_>>(),
+            vec!["/thinking"]
+        );
         assert!(command_palette_items("/unknown").is_empty());
     }
 
