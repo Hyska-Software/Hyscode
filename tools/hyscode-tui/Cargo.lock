@@ -194,10 +194,12 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "crossterm",
+ "crossterm_winapi",
  "portable-pty",
  "ratatui",
  "serde",
  "serde_json",
+ "winapi",
 ]
 
 [[package]]

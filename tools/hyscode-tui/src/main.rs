@@ -1,5 +1,7 @@
 use anyhow::{anyhow, Context, Result};
-use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
+use crossterm::event::{
+    DisableBracketedPaste, EnableBracketedPaste, KeyCode, KeyEvent, KeyEventKind, KeyModifiers,
+};
 use crossterm::execute;
 use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
@@ -23,8 +25,10 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
+mod input;
 mod pty;
 
+use input::InputEvent;
 use pty::PtyManager;
 
 const MAX_TRANSCRIPT_CHARS: usize = 16_000;
@@ -838,6 +842,7 @@ impl App {
         if key.kind == KeyEventKind::Release {
             return Ok(());
         }
+        let key = normalize_input_key(key);
         if let Some(interaction) = self.interaction.clone() {
             return self.handle_interaction_key(key, &interaction);
         }
@@ -890,6 +895,16 @@ impl App {
             _ => {}
         }
         Ok(())
+    }
+
+    fn handle_paste(&mut self, text: &str) {
+        for character in text.chars() {
+            self.insert_char(if character == '\r' || character == '\n' {
+                ' '
+            } else {
+                character
+            });
+        }
     }
 
     fn handle_interaction_key(&mut self, key: KeyEvent, interaction: &Interaction) -> Result<()> {
@@ -1280,7 +1295,7 @@ fn run_app(mut app: App) -> Result<()> {
     }
     enable_raw_mode()?;
     let mut stdout = std::io::stdout();
-    execute!(stdout, EnterAlternateScreen)?;
+    execute!(stdout, EnterAlternateScreen, EnableBracketedPaste)?;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
     let result = (|| -> Result<()> {
@@ -1290,19 +1305,34 @@ fn run_app(mut app: App) -> Result<()> {
             if app.should_quit {
                 break;
             }
-            if event::poll(Duration::from_millis(50))? {
-                if let Event::Key(key) = event::read()? {
-                    app.handle_key(key)?;
+            if let Some(input_event) = input::poll(Duration::from_millis(50))? {
+                match input_event {
+                    InputEvent::Key(key) => app.handle_key(key)?,
+                    InputEvent::Paste(text) => app.handle_paste(&text),
                 }
             }
         }
         Ok(())
     })();
     disable_raw_mode()?;
-    execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
+    execute!(
+        terminal.backend_mut(),
+        DisableBracketedPaste,
+        LeaveAlternateScreen
+    )?;
     terminal.show_cursor()?;
     app.bridge.stop();
     result
+}
+
+fn normalize_input_key(mut key: KeyEvent) -> KeyEvent {
+    if key.code == KeyCode::Char('/') {
+        // AltGr is reported as Ctrl+Alt by some Windows keyboard layouts. It is still a text
+        // character here, not one of the TUI's control shortcuts.
+        key.modifiers
+            .remove(KeyModifiers::CONTROL | KeyModifiers::ALT);
+    }
+    key
 }
 
 fn delete_previous_word(input: &mut String, cursor: &mut usize) {
@@ -1477,8 +1507,9 @@ fn main() -> Result<()> {
 mod tests {
     use super::{
         command_argument, delete_previous_word, format_diagnostic, format_json,
-        format_project_summary, parse_bridge_line, TranscriptKind,
+        format_project_summary, normalize_input_key, parse_bridge_line, TranscriptKind,
     };
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     use serde_json::json;
 
     #[test]
@@ -1517,5 +1548,16 @@ mod tests {
         assert!(matches!(kind, TranscriptKind::Error));
         assert_eq!(message, "src/lib.rs:4:8 [error] mismatched types");
         assert!(format_json(&json!({ "message": "ok" })).contains("ok"));
+    }
+
+    #[test]
+    fn keeps_slash_as_text_even_when_the_layout_reports_altgr_control() {
+        let key = normalize_input_key(KeyEvent::new(
+            KeyCode::Char('/'),
+            KeyModifiers::CONTROL | KeyModifiers::ALT,
+        ));
+        assert_eq!(key.code, KeyCode::Char('/'));
+        assert!(!key.modifiers.contains(KeyModifiers::CONTROL));
+        assert!(!key.modifiers.contains(KeyModifiers::ALT));
     }
 }
