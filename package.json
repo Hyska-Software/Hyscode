@@ -11,6 +11,7 @@
     "dev": "turbo dev",
     "build": "turbo build",
     "build:sidecars": "turbo build --filter=@hyscode/codex-sidecar --filter=@hyscode/claude-agent-sidecar",
+    "build:tui": "pwsh -ExecutionPolicy Bypass -File ./scripts/build-tui.ps1",
     "copy:sidecars": "node scripts/copy-sidecars.mjs",
     "lint": "turbo lint",
     "typecheck": "turbo typecheck",
