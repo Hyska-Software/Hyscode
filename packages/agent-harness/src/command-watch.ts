@@ -51,9 +51,15 @@ export class CommandWatch {
     this.lastDataAt = Date.now();
   }
 
-  /** Replace the accumulator with an authoritative snapshot (e.g. from the registry). */
+  /** Reconcile with an authoritative snapshot without allowing older data to overwrite live output. */
   syncSnapshot(data: string, sequence: number): void {
-    this.rawOutput = data.length <= MAX_CAPTURE_CHARS ? data : data.slice(-MAX_CAPTURE_CHARS);
+    if (sequence < this.maxSequence) return;
+    const nextOutput = data.length <= MAX_CAPTURE_CHARS ? data : data.slice(-MAX_CAPTURE_CHARS);
+    const current = this.parsed();
+    const next = parseTerminalFrame(nextOutput, this.config.nonce);
+    if ((current.started && !next.started) || (current.complete && !next.complete)) return;
+    if (nextOutput !== this.rawOutput) this.lastDataAt = Date.now();
+    this.rawOutput = nextOutput;
     this.maxSequence = Math.max(this.maxSequence, sequence);
   }
 

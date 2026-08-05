@@ -3,10 +3,11 @@ import { enableMapSet } from 'immer';
 
 enableMapSet();
 
-const { invokeMock, destroyMock, getHarnessMock, listenMock } = vi.hoisted(() => ({
+const { invokeMock, destroyMock, getHarnessMock, createSessionMock, listenMock } = vi.hoisted(() => ({
   invokeMock: vi.fn(),
   destroyMock: vi.fn(),
   getHarnessMock: vi.fn(),
+  createSessionMock: vi.fn(),
   listenMock: vi.fn(),
 }));
 
@@ -19,6 +20,7 @@ vi.mock('./harness-bridge', () => ({
   HarnessBridge: {
     destroy: destroyMock,
     get: getHarnessMock,
+    createSession: createSessionMock,
   },
 }));
 
@@ -40,11 +42,12 @@ describe('project workspace lifecycle', () => {
   let agentStore: typeof import('@/stores/agent-store');
   let terminalStore: typeof import('@/stores/terminal-store');
   let layoutStore: typeof import('@/stores/layout-store');
+  let runtimeModule: typeof import('./vortex-session-runtime');
   let originalOpenFolder: ReturnType<typeof fileStore.useFileStore.getState>['openFolder'];
 
   beforeAll(async () => {
     vi.stubGlobal('localStorage', localStorageMock);
-    [persistence, projectStore, fileStore, editorStore, agentStore, terminalStore, layoutStore] =
+    [persistence, projectStore, fileStore, editorStore, agentStore, terminalStore, layoutStore, runtimeModule] =
       await Promise.all([
         import('./project-persistence'),
         import('@/stores/project-store'),
@@ -53,11 +56,18 @@ describe('project workspace lifecycle', () => {
         import('@/stores/agent-store'),
         import('@/stores/terminal-store'),
         import('@/stores/layout-store'),
+        import('./vortex-session-runtime'),
       ]);
     originalOpenFolder = fileStore.useFileStore.getState().openFolder;
   });
 
   beforeEach(() => {
+    for (const [projectPath, conversationId] of [
+      ['C:/new-project', 'target-session'],
+      ['C:/project-a', 'session-a'],
+    ] as const) {
+      runtimeModule.vortexSessionRuntimeManager.forgetSession(projectPath, conversationId);
+    }
     storageValues.clear();
     invokeMock.mockReset();
     invokeMock.mockImplementation(async (command: string) => {
@@ -67,6 +77,13 @@ describe('project workspace lifecycle', () => {
     });
     destroyMock.mockClear();
     getHarnessMock.mockReset();
+    createSessionMock.mockReset().mockResolvedValue({
+      loadSkills: vi.fn().mockResolvedValue(undefined),
+      registerMcpTools: vi.fn().mockResolvedValue(undefined),
+      restoreSession: vi.fn(),
+      dispose: vi.fn(),
+      cancel: vi.fn(),
+    });
     listenMock.mockReset().mockResolvedValue(vi.fn());
 
     projectStore.useProjectStore.setState({

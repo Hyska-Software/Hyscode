@@ -26,7 +26,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useAgentStore } from '../../../stores';
 import { useSettingsStore } from '../../../stores/settings-store';
 import { useProjectStore } from '../../../stores/project-store';
-import { HarnessBridge } from '../../../lib/harness-bridge';
+import { getActiveAgentBridge } from '../../../lib/active-agent-bridge';
 import { McpBridge } from '../../../lib/mcp-bridge';
 import { tauriInvoke } from '../../../lib/tauri-invoke';
 import { cn } from '../../../lib/utils';
@@ -123,7 +123,7 @@ async function restoreSession(conversationId: string): Promise<void> {
     store.setConversationId(conversationId);
     for (const msg of messages) store.addMessage(msg);
     try {
-      HarnessBridge.get().restoreSession(conversationId);
+      getActiveAgentBridge().restoreSession(conversationId);
     } catch {
       /* bridge not ready */
     }
@@ -151,7 +151,7 @@ function startNewSession(): void {
   const newId = crypto.randomUUID();
   store.setConversationId(newId);
   try {
-    HarnessBridge.get().restoreSession(newId);
+    getActiveAgentBridge().restoreSession(newId);
   } catch {
     /* bridge not ready */
   }
@@ -202,7 +202,7 @@ function ModeSection() {
 
   const handleSelect = useCallback((mode: AgentMode) => {
     try {
-      HarnessBridge.get().setAgentType(mode);
+      getActiveAgentBridge().setAgentType(mode);
     } catch {
       useAgentStore.getState().setMode(mode);
     }

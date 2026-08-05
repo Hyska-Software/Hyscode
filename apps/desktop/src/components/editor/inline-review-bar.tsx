@@ -1,6 +1,6 @@
 import { Check, Undo2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { HarnessBridge } from '@/lib/harness-bridge';
+import { getActiveAgentBridge } from '@/lib/active-agent-bridge';
 import type { AgentEditSession } from '@/stores/agent-store';
 
 interface InlineReviewBarProps {
@@ -11,11 +11,11 @@ export function InlineReviewBar({ session }: InlineReviewBarProps) {
   if (session.phase !== 'pending_review') return null;
 
   const handleAccept = () => {
-    HarnessBridge.get().resolveEditSession(session.id, true);
+    getActiveAgentBridge().resolveEditSession(session.id, true);
   };
 
   const handleReject = () => {
-    HarnessBridge.get().resolveEditSession(session.id, false);
+    getActiveAgentBridge().resolveEditSession(session.id, false);
   };
 
   return (

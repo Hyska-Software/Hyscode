@@ -6,17 +6,28 @@ import { VortexProjectSessionNavigator } from './vortex-project-session-navigato
 import { useAgentStore } from '@/stores/agent-store';
 import { useLayoutStore } from '@/stores/layout-store';
 import { useProjectStore } from '@/stores/project-store';
+import { useVortexRuntimeStore, vortexSessionRuntimeManager } from '@/lib/vortex-session-runtime';
 
-const { loadIndexMock, activateSessionMock, openProjectMock, invokeMock, pickFolderMock } = vi.hoisted(() => ({
+const { loadIndexMock, activateSessionMock, openProjectMock, invokeMock, pickFolderMock, managerMock } = vi.hoisted(() => ({
   loadIndexMock: vi.fn(),
   activateSessionMock: vi.fn(),
   openProjectMock: vi.fn(),
   invokeMock: vi.fn(),
   pickFolderMock: vi.fn(),
+  managerMock: {
+    getFocusedSnapshot: vi.fn(() => null),
+    focusSession: vi.fn().mockResolvedValue({}),
+    createAndFocus: vi.fn().mockResolvedValue({ conversationId: 'new-session', bridge: {} }),
+    updateSessionTitle: vi.fn(),
+    forgetSession: vi.fn(),
+    cancelSession: vi.fn(),
+    retrySession: vi.fn().mockResolvedValue(undefined),
+  },
 }));
 
 vi.mock('@/lib/vortex-project-sessions', () => ({
   loadVortexProjectSessionIndex: loadIndexMock,
+  mergeVortexRuntimeSessions: (index: unknown) => index,
   VORTEX_SESSION_INDEX_UPDATED_EVENT: 'hyscode:vortex-session-index-updated',
 }));
 vi.mock('@/lib/project-persistence', () => ({
@@ -28,6 +39,10 @@ vi.mock('@/lib/tauri-dialog', () => ({ pickFolder: pickFolderMock }));
 vi.mock('@/lib/harness-bridge', () => ({
   HarnessBridge: { get: vi.fn(() => ({ restoreSession: vi.fn() })) },
 }));
+vi.mock('@/lib/vortex-session-runtime', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/vortex-session-runtime')>();
+  return { ...actual, vortexSessionRuntimeManager: managerMock };
+});
 vi.mock('@/components/ui/dialogs', () => ({
   promptConfirm: vi.fn(async () => false),
   promptInput: vi.fn(async () => null),
@@ -91,6 +106,8 @@ describe('VortexProjectSessionNavigator', () => {
       pendingApprovals: [],
       pendingUserQuestion: null,
     });
+    useVortexRuntimeStore.setState({ snapshots: {}, focusedKey: null });
+    vi.mocked(vortexSessionRuntimeManager.getFocusedSnapshot).mockReturnValue(null);
     useLayoutStore.setState({ workspaceMode: 'agent' });
   });
 
@@ -157,6 +174,18 @@ describe('VortexProjectSessionNavigator', () => {
     });
   });
 
+  it('activates a session when the render identity matches but its runtime is not focused', async () => {
+    useAgentStore.setState({ conversationId: 'session-a' });
+    vi.mocked(vortexSessionRuntimeManager.getFocusedSnapshot).mockReturnValue(null);
+    render(<VortexProjectSessionNavigator />);
+
+    fireEvent.click((await screen.findAllByText('Target session'))[0]);
+
+    await waitFor(() => {
+      expect(activateSessionMock).toHaveBeenCalledWith('C:/project-a', 'session-a');
+    });
+  });
+
   it('refreshes the index and shows the working indicator for the active turn', async () => {
     render(<VortexProjectSessionNavigator />);
     await screen.findByText('Recent');
@@ -165,12 +194,31 @@ describe('VortexProjectSessionNavigator', () => {
     useAgentStore.setState({
       conversationId: 'session-a',
       messages: [{ id: 'message-a', role: 'user', content: 'Hello', timestamp: Date.now() }],
-      isStreaming: true,
+    });
+    useVortexRuntimeStore.setState({
+      snapshots: {
+        'c:/project-a::session-a': {
+          key: 'c:/project-a::session-a',
+          projectPath: 'C:/project-a',
+          projectName: 'Project A',
+          conversationId: 'session-a',
+          title: 'Target session',
+          mode: 'build',
+          status: 'running',
+          messageCount: 1,
+          pendingApprovals: 0,
+          pendingUserQuestion: false,
+          startedAt: Date.now(),
+          updatedAt: Date.now(),
+          error: null,
+        },
+      },
+      focusedKey: 'c:/project-a::session-a',
     });
 
     await waitFor(() => {
       expect(loadIndexMock.mock.calls.length).toBeGreaterThan(initialLoadCount);
-      expect(screen.getAllByRole('status', { name: /Agent working/i }).length).toBeGreaterThan(0);
+      expect(screen.getAllByRole('status', { name: /Running/i }).length).toBeGreaterThan(0);
     });
 
     const eventLoadCount = loadIndexMock.mock.calls.length;
@@ -210,12 +258,34 @@ describe('VortexProjectSessionNavigator', () => {
     useAgentStore.setState({
       conversationId: 'new-session',
       messages: [{ id: 'message-new', role: 'user', content: 'Hello', timestamp: Date.now() }],
-      isStreaming: true,
+    });
+    useVortexRuntimeStore.setState({
+      snapshots: {
+        'c:/project-a::new-session': {
+          key: 'c:/project-a::new-session',
+          projectPath: 'C:/project-a',
+          projectName: 'Project A',
+          conversationId: 'new-session',
+          title: 'New session',
+          mode: 'build',
+          status: 'running',
+          messageCount: 1,
+          pendingApprovals: 0,
+          pendingUserQuestion: false,
+          startedAt: Date.now(),
+          updatedAt: Date.now(),
+          error: null,
+        },
+      },
+      focusedKey: 'c:/project-a::new-session',
+    });
+    act(() => {
+      window.dispatchEvent(new Event('hyscode:vortex-session-index-updated'));
     });
 
     await waitFor(() => {
-      expect(screen.getAllByTitle('New session').length).toBeGreaterThanOrEqual(2);
-      expect(screen.getAllByRole('status', { name: /Agent working/i }).length).toBeGreaterThan(0);
+      expect(screen.getAllByTitle(/New session/).length).toBeGreaterThanOrEqual(2);
+      expect(screen.getAllByRole('status', { name: /Running/i }).length).toBeGreaterThan(0);
     });
   });
 

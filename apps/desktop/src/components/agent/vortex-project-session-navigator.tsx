@@ -16,6 +16,9 @@ import {
   Pencil,
   Plus,
   Search,
+  CheckCircle2,
+  CircleAlert,
+  CircleStop,
   Trash2,
   X,
 } from 'lucide-react';
@@ -26,14 +29,21 @@ import {
 } from '@/lib/project-persistence';
 import {
   loadVortexProjectSessionIndex,
+  mergeVortexRuntimeSessions,
   VORTEX_SESSION_INDEX_UPDATED_EVENT,
   type VortexProjectSummary,
   type VortexSessionSummary,
 } from '@/lib/vortex-project-sessions';
 import { tauriInvoke } from '@/lib/tauri-invoke';
-import { HarnessBridge } from '@/lib/harness-bridge';
 import { useAgentStore, type AgentMode } from '@/stores/agent-store';
 import { useProjectStore } from '@/stores/project-store';
+import {
+  getVortexRuntimeKey,
+  useVortexRuntimeStore,
+  vortexSessionRuntimeManager,
+} from '@/lib/vortex-session-runtime';
+import type { VortexRuntimeSnapshot } from '@/lib/vortex-runtime-types';
+import { isVortexRuntimeActive } from '@/lib/vortex-runtime-types';
 import { cn, writeClipboard } from '@/lib/utils';
 import { promptConfirm, promptInput } from '@/components/ui/dialogs';
 import {
@@ -68,21 +78,34 @@ function relativeTime(dateString: string): string {
   return new Date(timestamp).toLocaleDateString();
 }
 
-function startNewSession(): void {
-  const store = useAgentStore.getState();
-  if (store.messages.length === 0) {
-    const newId = crypto.randomUUID();
-    store.setMode('chat');
-    store.setConversationId(newId);
-    try {
-      HarnessBridge.get().restoreSession(newId);
-    } catch {
-      // The bridge will pick up the conversation id when it initializes.
-    }
-  } else {
-    store.openNewTab('chat');
+function runtimeStatusLabel(status: VortexRuntimeSnapshot['status']): string | null {
+  switch (status) {
+    case 'starting':
+      return 'Starting';
+    case 'queued':
+      return 'Queued';
+    case 'running':
+      return 'Running';
+    case 'waiting':
+      return 'Waiting';
+    case 'cancelling':
+      return 'Stopping';
+    case 'completed':
+      return 'Completed';
+    case 'error':
+      return 'Needs attention';
+    case 'cancelled':
+      return 'Cancelled';
+    case 'idle':
+      return null;
   }
-  store.setHistoryOpen(false);
+}
+
+async function startNewSession(): Promise<void> {
+  const projectPath = useProjectStore.getState().rootPath;
+  if (!projectPath) throw new Error('Open a project before starting a session.');
+  await vortexSessionRuntimeManager.createAndFocus(projectPath);
+  useAgentStore.getState().setHistoryOpen(false);
 }
 
 export function VortexProjectSessionNavigator() {
@@ -93,9 +116,8 @@ export function VortexProjectSessionNavigator() {
   const hideFromVortex = useProjectStore((state) => state.hideFromVortex);
   const currentConversationId = useAgentStore((state) => state.conversationId);
   const messageCount = useAgentStore((state) => state.messages.length);
-  const isStreaming = useAgentStore((state) => state.isStreaming);
-  const pendingApprovals = useAgentStore((state) => state.pendingApprovals.length);
-  const pendingUserQuestion = useAgentStore((state) => state.pendingUserQuestion);
+  const runtimeSnapshots = useVortexRuntimeStore((state) => state.snapshots);
+  const runtimeList = useMemo(() => Object.values(runtimeSnapshots), [runtimeSnapshots]);
 
   const [index, setIndex] = useState<{ projects: VortexProjectSummary[]; recentSessions: VortexSessionSummary[] } | null>(null);
   const [loading, setLoading] = useState(true);
@@ -135,6 +157,17 @@ export function VortexProjectSessionNavigator() {
   }, [currentConversationId, messageCount, projectLoading, refresh]);
 
   useEffect(() => {
+    if (projectLoading || !activeProjectPath || !currentConversationId) return;
+    const focused = vortexSessionRuntimeManager.getFocusedSnapshot();
+    if (focused?.key === getVortexRuntimeKey(activeProjectPath, currentConversationId)) return;
+    void vortexSessionRuntimeManager
+      .focusSession(activeProjectPath, currentConversationId, { allowMissing: true })
+      .catch((cause) => {
+        setError(cause instanceof Error ? cause.message : 'Unable to prepare the VORTEX runtime.');
+      });
+  }, [activeProjectPath, currentConversationId, projectLoading]);
+
+  useEffect(() => {
     const handleIndexUpdated = () => {
       if (!projectLoading) void refresh();
     };
@@ -143,9 +176,17 @@ export function VortexProjectSessionNavigator() {
   }, [projectLoading, refresh]);
 
   const normalizedQuery = query.trim().toLowerCase();
+  const liveIndex = useMemo(
+    () =>
+      index
+        ? mergeVortexRuntimeSessions(index, runtimeList, hiddenProjectPaths)
+        : null,
+    [hiddenProjectPaths, index, runtimeList],
+  );
+
   const visibleProjects = useMemo(() => {
-    if (!index) return [];
-    return index.projects.filter((project) => {
+    if (!liveIndex) return [];
+    return liveIndex.projects.filter((project) => {
       if (!normalizedQuery) return true;
       return (
         project.name.toLowerCase().includes(normalizedQuery) ||
@@ -153,21 +194,24 @@ export function VortexProjectSessionNavigator() {
         project.sessions.some((session) => session.title.toLowerCase().includes(normalizedQuery))
       );
     });
-  }, [index, normalizedQuery]);
+  }, [liveIndex, normalizedQuery]);
 
   const visibleRecentSessions = useMemo(() => {
-    if (!index) return [];
+    if (!liveIndex) return [];
     const sessions = normalizedQuery
-      ? index.recentSessions.filter(
+      ? liveIndex.recentSessions.filter(
           (session) =>
             session.title.toLowerCase().includes(normalizedQuery) ||
             session.projectName.toLowerCase().includes(normalizedQuery),
         )
-      : index.recentSessions;
+      : liveIndex.recentSessions;
     return showAllRecent || normalizedQuery ? sessions : sessions.slice(0, RECENT_SESSION_LIMIT);
-  }, [index, normalizedQuery, showAllRecent]);
+  }, [liveIndex, normalizedQuery, showAllRecent]);
 
-  const hasActiveTurn = isStreaming || pendingApprovals > 0 || pendingUserQuestion !== null;
+  const runtimeByKey = useMemo(
+    () => new Map(runtimeList.map((runtime) => [runtime.key, runtime])),
+    [runtimeList],
+  );
 
   const runAction = useCallback(async (actionId: string, action: () => Promise<void>) => {
     setPendingAction(actionId);
@@ -184,19 +228,10 @@ export function VortexProjectSessionNavigator() {
   const handleOpenProject = useCallback(async () => {
     const path = await pickFolder();
     if (!path) return;
-    if (hasActiveTurn && !areSameProjectPath(path, activeProjectPath)) {
-      const confirmed = await promptConfirm({
-        title: 'Switch VORTEX project?',
-        description: 'The active turn will be cancelled when the project runtime is replaced. Persisted project state will remain available.',
-        confirmLabel: 'Switch project',
-        danger: true,
-      });
-      if (!confirmed) return;
-    }
     await runAction(`project:${path}`, async () => {
       await openProjectWorkspace(path, { workspaceMode: 'agent' });
     });
-  }, [activeProjectPath, hasActiveTurn, runAction]);
+  }, [runAction]);
 
   const handleNewSession = useCallback(async () => {
     if (!activeProjectPath) {
@@ -204,11 +239,11 @@ export function VortexProjectSessionNavigator() {
       if (!path) return;
       await runAction(`project:${path}`, async () => {
         await openProjectWorkspace(path, { workspaceMode: 'agent' });
-        startNewSession();
+        await startNewSession();
       });
       return;
     }
-    startNewSession();
+    await startNewSession();
   }, [activeProjectPath, runAction]);
 
   const handleCopyProjectPath = useCallback(
@@ -231,46 +266,35 @@ export function VortexProjectSessionNavigator() {
 
   const handleSessionClick = useCallback(
     async (session: VortexSessionSummary) => {
-      if (session.id === currentConversationId && areSameProjectPath(session.projectPath, activeProjectPath)) {
+      const liveProjectPath = useProjectStore.getState().rootPath;
+      const liveConversationId = useAgentStore.getState().conversationId;
+      const focusedSnapshot = vortexSessionRuntimeManager.getFocusedSnapshot();
+      if (
+        session.id === liveConversationId &&
+        areSameProjectPath(session.projectPath, liveProjectPath) &&
+        focusedSnapshot?.key === getVortexRuntimeKey(session.projectPath, session.id)
+      ) {
         return;
-      }
-      if (hasActiveTurn) {
-        const confirmed = await promptConfirm({
-          title: 'Switch VORTEX session?',
-          description: 'The active turn will be cancelled when the project runtime is replaced. Persisted project state will remain available.',
-          confirmLabel: 'Switch session',
-          danger: true,
-        });
-        if (!confirmed) return;
       }
       await runAction(`session:${session.id}`, async () => {
         await activateVortexSession(session.projectPath, session.id);
       });
     },
-    [activeProjectPath, currentConversationId, hasActiveTurn, runAction],
+    [runAction],
   );
 
   const handleProjectNewSession = useCallback(
     async (project: VortexProjectSummary) => {
       if (areSameProjectPath(project.path, activeProjectPath)) {
-        startNewSession();
+        await startNewSession();
         return;
-      }
-      if (hasActiveTurn) {
-        const confirmed = await promptConfirm({
-          title: 'Switch VORTEX project?',
-          description: 'The active turn will be cancelled when the project runtime is replaced. Persisted project state will remain available.',
-          confirmLabel: 'Switch project',
-          danger: true,
-        });
-        if (!confirmed) return;
       }
       await runAction(`project:${project.path}`, async () => {
         await openProjectWorkspace(project.path, { workspaceMode: 'agent' });
-        startNewSession();
+        await startNewSession();
       });
     },
-    [activeProjectPath, hasActiveTurn, runAction],
+    [activeProjectPath, runAction],
   );
 
   const handleRenameSession = useCallback(
@@ -283,6 +307,7 @@ export function VortexProjectSessionNavigator() {
       if (!title || title === session.title) return;
       await runAction(`rename:${session.id}`, async () => {
         await tauriInvoke('db_update_conversation', { conversationId: session.id, title });
+        vortexSessionRuntimeManager.updateSessionTitle(session.projectPath, session.id, title);
         if (session.id === currentConversationId) {
           useAgentStore.getState().updateTabTitle(useAgentStore.getState().activeTabId, title);
         }
@@ -302,7 +327,12 @@ export function VortexProjectSessionNavigator() {
       });
       if (!confirmed) return;
       await runAction(`delete:${session.id}`, async () => {
+        const runtime = runtimeByKey.get(getVortexRuntimeKey(session.projectPath, session.id));
+        if (runtime && isVortexRuntimeActive(runtime.status)) {
+          throw new Error('Stop the running session before deleting it.');
+        }
         await tauriInvoke('db_delete_conversation', { conversationId: session.id });
+        vortexSessionRuntimeManager.forgetSession(session.projectPath, session.id);
         if (session.id === currentConversationId) {
           useAgentStore.getState().clearConversation();
         }
@@ -310,7 +340,24 @@ export function VortexProjectSessionNavigator() {
         await refresh();
       });
     },
-    [currentConversationId, refresh, runAction],
+    [currentConversationId, refresh, runAction, runtimeByKey],
+  );
+
+  const handleCancelSession = useCallback(
+    (session: VortexSessionSummary) => {
+      vortexSessionRuntimeManager.cancelSession(session.projectPath, session.id);
+    },
+    [],
+  );
+
+  const handleRetrySession = useCallback(
+    async (session: VortexSessionSummary) => {
+      await runAction(`retry:${session.id}`, async () => {
+        await activateVortexSession(session.projectPath, session.id);
+        await vortexSessionRuntimeManager.retrySession(session.projectPath, session.id);
+      });
+    },
+    [runAction],
   );
 
   const handleHideProject = useCallback(
@@ -400,7 +447,7 @@ export function VortexProjectSessionNavigator() {
               <div className="flex items-center justify-between px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
                 <span id="vortex-recent-heading">Recent</span>
                 <div className="flex items-center gap-0.5">
-                  <span>{index?.recentSessions.length ?? 0}</span>
+                  <span>{liveIndex?.recentSessions.length ?? 0}</span>
                   <button
                     type="button"
                     onClick={() => setRecentExpanded((current) => !current)}
@@ -425,17 +472,19 @@ export function VortexProjectSessionNavigator() {
                           key={`recent:${session.id}`}
                           session={session}
                           isActive={session.id === currentConversationId && areSameProjectPath(session.projectPath, activeProjectPath)}
-                          isWorking={isStreaming && session.id === currentConversationId && areSameProjectPath(session.projectPath, activeProjectPath)}
+                          runtime={runtimeByKey.get(getVortexRuntimeKey(session.projectPath, session.id))}
                           showProjectName
                           busy={pendingAction !== null}
                           onOpen={() => void handleSessionClick(session)}
                           onRename={() => void handleRenameSession(session)}
                           onDelete={() => void handleDeleteSession(session)}
+                          onCancel={() => handleCancelSession(session)}
+                          onRetry={() => void handleRetrySession(session)}
                         />
                       ))}
                     </div>
                   )}
-                  {!normalizedQuery && (index?.recentSessions.length ?? 0) > RECENT_SESSION_LIMIT && (
+                  {!normalizedQuery && (liveIndex?.recentSessions.length ?? 0) > RECENT_SESSION_LIMIT && (
                     <button
                       onClick={() => setShowAllRecent((current) => !current)}
                       className="w-full px-2 py-1.5 text-left text-[10px] text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
@@ -465,7 +514,7 @@ export function VortexProjectSessionNavigator() {
                       project={project}
                       activeProjectPath={activeProjectPath}
                       currentConversationId={currentConversationId}
-                      isWorking={isStreaming && areSameProjectPath(project.path, activeProjectPath)}
+                      runtimes={runtimeList.filter((runtime) => areSameProjectPath(runtime.projectPath, project.path))}
                       collapsed={collapsedProjects.has(project.path)}
                       pendingAction={pendingAction}
                       onToggle={() => toggleProject(project.path)}
@@ -475,6 +524,8 @@ export function VortexProjectSessionNavigator() {
                       onOpen={(session) => void handleSessionClick(session)}
                       onRename={(session) => void handleRenameSession(session)}
                       onDelete={(session) => void handleDeleteSession(session)}
+                      onCancel={(session) => handleCancelSession(session)}
+                      onRetry={(session) => void handleRetrySession(session)}
                       onHide={() => handleHideProject(project)}
                     />
                   ))}
@@ -493,7 +544,7 @@ function VortexProjectGroup({
   project,
   activeProjectPath,
   currentConversationId,
-  isWorking,
+  runtimes,
   collapsed,
   pendingAction,
   onToggle,
@@ -503,12 +554,14 @@ function VortexProjectGroup({
   onOpen,
   onRename,
   onDelete,
+  onCancel,
+  onRetry,
   onHide,
 }: {
   project: VortexProjectSummary;
   activeProjectPath: string | null;
   currentConversationId: string | null;
-  isWorking: boolean;
+  runtimes: VortexRuntimeSnapshot[];
   collapsed: boolean;
   pendingAction: string | null;
   onToggle: () => void;
@@ -518,9 +571,13 @@ function VortexProjectGroup({
   onOpen: (session: VortexSessionSummary) => void;
   onRename: (session: VortexSessionSummary) => void;
   onDelete: (session: VortexSessionSummary) => void;
+  onCancel: (session: VortexSessionSummary) => void;
+  onRetry: (session: VortexSessionSummary) => void;
   onHide: () => void;
 }) {
   const isActiveProject = areSameProjectPath(project.path, activeProjectPath);
+  const activeRuntimeCount = runtimes.filter((runtime) => isVortexRuntimeActive(runtime.status)).length;
+  const runtimesByKey = new Map(runtimes.map((runtime) => [runtime.key, runtime]));
   return (
     <div className="rounded-md">
       <div className={cn('group flex items-center gap-1 rounded-md px-1 py-1', isActiveProject && 'bg-primary/10')}>
@@ -540,12 +597,10 @@ function VortexProjectGroup({
           {isActiveProject ? <FolderOpen className="h-3.5 w-3.5 shrink-0 text-primary" /> : <Folder className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />}
           <span className="truncate" title={project.path}>{project.name}</span>
           <span className="shrink-0 text-[9px] text-muted-foreground">{project.sessions.length}</span>
-          {isWorking && (
-            <Loader2
-              className="h-3 w-3 shrink-0 animate-spin text-primary"
-              role="status"
-              aria-label={`Agent working in ${project.name}`}
-            />
+          {activeRuntimeCount > 0 && (
+            <span className="shrink-0 text-[9px] text-primary" role="status">
+              {activeRuntimeCount} active
+            </span>
           )}
         </button>
         <DropdownMenu>
@@ -602,11 +657,13 @@ function VortexProjectGroup({
                 key={session.id}
                 session={session}
                 isActive={session.id === currentConversationId && isActiveProject}
-                isWorking={isWorking && session.id === currentConversationId}
+                runtime={runtimesByKey.get(getVortexRuntimeKey(session.projectPath, session.id))}
                 busy={pendingAction !== null}
                 onOpen={() => onOpen(session)}
                 onRename={() => onRename(session)}
                 onDelete={() => onDelete(session)}
+                onCancel={() => onCancel(session)}
+                onRetry={() => onRetry(session)}
               />
             ))
           )}
@@ -619,23 +676,37 @@ function VortexProjectGroup({
 function VortexSessionRow({
   session,
   isActive,
-  isWorking,
+  runtime,
   showProjectName = false,
   busy,
   onOpen,
   onRename,
   onDelete,
+  onCancel,
+  onRetry,
 }: {
   session: VortexSessionSummary;
   isActive: boolean;
-  isWorking: boolean;
+  runtime?: VortexRuntimeSnapshot;
   showProjectName?: boolean;
   busy: boolean;
   onOpen: () => void;
   onRename: () => void;
   onDelete: () => void;
+  onCancel: () => void;
+  onRetry: () => void;
 }) {
-  const Icon = MODE_ICONS[session.mode] ?? MessageSquare;
+  const runtimeIsActive = runtime ? isVortexRuntimeActive(runtime.status) : false;
+  const Icon = runtimeIsActive
+    ? Loader2
+    : runtime?.status === 'error'
+      ? CircleAlert
+      : runtime?.status === 'completed'
+        ? CheckCircle2
+        : runtime?.status === 'cancelled'
+          ? CircleStop
+          : MODE_ICONS[session.mode] ?? MessageSquare;
+  const statusLabel = runtime ? runtimeStatusLabel(runtime.status) : null;
   return (
     <div
       role="button"
@@ -653,16 +724,16 @@ function VortexSessionRow({
         isActive ? 'bg-primary/15 text-foreground' : 'text-muted-foreground hover:bg-surface-raised hover:text-foreground',
         busy && 'pointer-events-none opacity-60',
       )}
-      title={session.title}
+      title={statusLabel ? `${session.title} · ${statusLabel}` : session.title}
     >
-      {isWorking ? (
+      {runtimeIsActive ? (
         <Loader2
           className="mt-0.5 h-3.5 w-3.5 shrink-0 animate-spin text-primary"
           role="status"
-          aria-label="Agent working"
+          aria-label={statusLabel ?? 'Agent working'}
         />
       ) : (
-        <Icon className={cn('mt-0.5 h-3.5 w-3.5 shrink-0', isActive && 'text-primary')} />
+        <Icon className={cn('mt-0.5 h-3.5 w-3.5 shrink-0', isActive && 'text-primary', runtime?.status === 'error' && 'text-destructive')} />
       )}
       <div className="min-w-0 flex-1">
         <div className="flex min-w-0 items-center gap-1">
@@ -675,6 +746,14 @@ function VortexSessionRow({
           <span>{session.messageCount} msgs</span>
           <span>·</span>
           <span>{relativeTime(session.updatedAt)}</span>
+          {statusLabel && (
+            <>
+              <span>·</span>
+              <span className={cn(runtime?.status === 'error' ? 'text-destructive' : runtimeIsActive && 'text-primary')}>
+                {statusLabel}
+              </span>
+            </>
+          )}
         </div>
       </div>
       <DropdownMenu>
@@ -689,12 +768,25 @@ function VortexSessionRow({
           <MoreHorizontal className="h-3.5 w-3.5" />
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" side="right" className="w-36">
+          {runtimeIsActive && (
+            <DropdownMenuItem onClick={onCancel}>
+              <CircleStop className="h-3.5 w-3.5" />
+              Stop session
+            </DropdownMenuItem>
+          )}
+          {runtime?.status === 'error' && (
+            <DropdownMenuItem onClick={onRetry}>
+              <History className="h-3.5 w-3.5" />
+              Retry session
+            </DropdownMenuItem>
+          )}
+          {(runtimeIsActive || runtime?.status === 'error') && <DropdownMenuSeparator />}
           <DropdownMenuItem onClick={onRename}>
             <Pencil className="h-3.5 w-3.5" />
             Rename
           </DropdownMenuItem>
           <DropdownMenuSeparator />
-          <DropdownMenuItem onClick={onDelete} variant="destructive">
+          <DropdownMenuItem onClick={onDelete} disabled={runtimeIsActive} variant="destructive">
             <Trash2 className="h-3.5 w-3.5" />
             Delete
           </DropdownMenuItem>

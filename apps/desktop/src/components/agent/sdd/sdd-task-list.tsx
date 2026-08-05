@@ -10,7 +10,7 @@ import {
 } from 'lucide-react';
 import { useState } from 'react';
 import { useAgentStore } from '@/stores/agent-store';
-import { HarnessBridge } from '@/lib/harness-bridge';
+import { getActiveAgentBridge } from '@/lib/active-agent-bridge';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
@@ -42,7 +42,7 @@ export function SddTaskList() {
 
   const handlePauseResume = () => {
     try {
-      const bridge = HarnessBridge.get();
+      const bridge = getActiveAgentBridge();
       if (paused || failedTask) {
         void bridge.resumeSdd();
         useAgentStore.getState().setSddFailedTask(null);
@@ -57,7 +57,7 @@ export function SddTaskList() {
 
   const handleRetryTask = async (taskId: string) => {
     try {
-      await HarnessBridge.get().retrySddTask(taskId);
+      await getActiveAgentBridge().retrySddTask(taskId);
       useAgentStore.getState().setSddFailedTask(null);
       setPaused(true);
     } catch {
@@ -67,7 +67,7 @@ export function SddTaskList() {
 
   const handleSkipTask = async (taskId: string) => {
     try {
-      await HarnessBridge.get().skipSddTask(taskId);
+      await getActiveAgentBridge().skipSddTask(taskId);
       if (failedTask?.id === taskId) {
         useAgentStore.getState().setSddFailedTask(null);
         setPaused(true);
@@ -79,7 +79,7 @@ export function SddTaskList() {
 
   const handleApprovePlan = async () => {
     try {
-      await HarnessBridge.get().approveSddPlan();
+      await getActiveAgentBridge().approveSddPlan();
     } catch {
       // bridge not ready
     }

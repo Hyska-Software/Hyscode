@@ -310,7 +310,28 @@ fn list_vortex_project_sessions(conn: &Connection) -> Result<VortexProjectSessio
     for (project_id, project_name, project_path, last_activity_at) in project_rows {
         let mut session_stmt = conn
             .prepare(
-                "SELECT c.id, c.title, c.mode, c.model_id, c.provider_id,
+                "SELECT c.id,
+                        CASE
+                          WHEN lower(trim(c.title)) IN ('new chat', 'new conversation') THEN
+                            COALESCE(
+                              (
+                                SELECT CASE
+                                  WHEN length(trim(m.content)) > 40
+                                  THEN substr(trim(m.content), 1, 40) || '…'
+                                  ELSE trim(m.content)
+                                END
+                                FROM messages m
+                                WHERE m.conversation_id = c.id
+                                  AND m.role = 'user'
+                                  AND length(trim(m.content)) > 0
+                                ORDER BY m.created_at ASC, m.id ASC
+                                LIMIT 1
+                              ),
+                              c.title
+                            )
+                          ELSE c.title
+                        END,
+                        c.mode, c.model_id, c.provider_id,
                         COALESCE((SELECT COUNT(*) FROM messages m WHERE m.conversation_id = c.id), 0),
                         c.created_at, c.updated_at
                  FROM conversations c
@@ -2095,6 +2116,71 @@ mod database_tests {
         assert_eq!(index.recent_sessions.len(), 2);
         assert_eq!(index.recent_sessions[0].title, "Newest");
         assert_eq!(index.recent_sessions[0].project_path, "C:/project-b");
+
+        drop(connection);
+        std::fs::remove_dir_all(directory)?;
+        Ok(())
+    }
+
+    #[test]
+    fn repairs_placeholder_titles_for_display_without_backfilling_sqlite(
+    ) -> Result<(), Box<dyn Error>> {
+        let suffix = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
+        let directory = std::env::temp_dir().join(format!("hyscode-vortex-title-repair-{suffix}"));
+        let connection = open_database(&directory);
+        connection.execute_batch(
+            "INSERT INTO projects (id,name,path) VALUES ('project','Project','C:/project');
+             INSERT INTO conversations (id,project_id,title,mode,updated_at) VALUES
+               ('legacy-chat','project','New Chat','chat','2026-08-04 10:01:00'),
+               ('legacy-conversation','project','New Conversation','chat','2026-08-04 10:02:00'),
+               ('empty-chat','project','New Chat','chat','2026-08-04 10:03:00');",
+        )?;
+        connection.execute(
+            "INSERT INTO messages (id,conversation_id,role,content) VALUES (?1,?2,?3,?4)",
+            params![
+                "legacy-message",
+                "legacy-chat",
+                "user",
+                "Investigate why this persisted VORTEX session cannot be reopened",
+            ],
+        )?;
+        connection.execute(
+            "INSERT INTO messages (id,conversation_id,role,content) VALUES (?1,?2,?3,?4)",
+            params![
+                "conversation-message",
+                "legacy-conversation",
+                "user",
+                "Recover the legacy session",
+            ],
+        )?;
+
+        let index = list_vortex_project_sessions(&connection)?;
+        let sessions = &index.projects[0].sessions;
+        let legacy_chat = sessions.iter().find(|session| session.id == "legacy-chat");
+        let legacy_conversation = sessions
+            .iter()
+            .find(|session| session.id == "legacy-conversation");
+        let empty_chat = sessions.iter().find(|session| session.id == "empty-chat");
+        assert_eq!(
+            legacy_chat.map(|session| session.title.as_str()),
+            Some("Investigate why this persisted VORTEX se…")
+        );
+        assert_eq!(
+            legacy_conversation.map(|session| session.title.as_str()),
+            Some("Recover the legacy session")
+        );
+        assert_eq!(
+            empty_chat.map(|session| session.title.as_str()),
+            Some("New Chat")
+        );
+        assert_eq!(index.recent_sessions[0].id, "empty-chat");
+
+        let stored_title: String = connection.query_row(
+            "SELECT title FROM conversations WHERE id = 'legacy-chat'",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(stored_title, "New Chat");
 
         drop(connection);
         std::fs::remove_dir_all(directory)?;

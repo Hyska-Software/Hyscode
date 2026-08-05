@@ -2,7 +2,7 @@ import { ArrowRight, Check, X, ChevronDown, ChevronRight } from 'lucide-react';
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { useAgentStore } from '@/stores/agent-store';
-import { HarnessBridge } from '@/lib/harness-bridge';
+import { getActiveAgentBridge } from '@/lib/active-agent-bridge';
 import type { ModeSwitchRequest } from '@hyscode/agent-harness';
 
 // Agent mode display config
@@ -25,11 +25,11 @@ export function ModeSwitchDialog() {
   const to = MODE_DISPLAY[req.toMode] ?? { label: req.toMode, color: 'text-foreground' };
 
   const handleApprove = () => {
-    HarnessBridge.get().resolveModeSwitch(true);
+    getActiveAgentBridge().resolveModeSwitch(true);
   };
 
   const handleDeny = () => {
-    HarnessBridge.get().resolveModeSwitch(false);
+    getActiveAgentBridge().resolveModeSwitch(false);
   };
 
   return (

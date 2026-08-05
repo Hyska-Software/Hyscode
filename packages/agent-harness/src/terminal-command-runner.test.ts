@@ -123,6 +123,43 @@ describe('terminal command framing', () => {
     expect(progress).toHaveBeenCalledWith(expect.objectContaining({ state: 'running' }));
   });
 
+  it('reconciles a completed command from the authoritative snapshot when live output is missed', async () => {
+    let completed = false;
+    let output = '';
+    const adapter: TerminalRuntimeAdapter = {
+      acquire: vi.fn(async () => mockBinding('terminal-snapshot', 'pty-snapshot')),
+      snapshot: vi.fn(async () => ({
+        data: completed ? output : '',
+        fromSequence: completed ? 1 : 0,
+        toSequence: completed ? 1 : 0,
+        truncated: false,
+        alive: true,
+        exitCode: null,
+      })),
+      write: vi.fn(async (_terminalId, data) => {
+        const frame = String(data);
+        const nonce = frame.match(/__HYSCODE_BEGIN_([a-z0-9]+)__/i)?.[1] ?? '';
+        output = `__HYSCODE_BEGIN_${nonce}__\nsnapshot output\n__HYSCODE_END_${nonce}__:0\n`;
+        completed = true;
+      }),
+      interrupt: vi.fn(async () => undefined),
+      kill: vi.fn(async () => undefined),
+      subscribe: vi.fn(async () => () => undefined),
+    };
+
+    const result = await new TerminalCommandRunner().run(
+      { command: 'snapshot-only-completion', timeoutMs: 100 },
+      contextWith(adapter),
+    );
+
+    expect(result).toMatchObject({
+      success: true,
+      output: 'snapshot output',
+      metadata: { exitCode: 0 },
+    });
+    expect(adapter.snapshot).toHaveBeenCalled();
+  });
+
   it('removes ANSI control sequences without removing command output', () => {
     const nonce = 'ansi';
     const raw = `__HYSCODE_BEGIN_${nonce}__\n\u001b[31mfailed\u001b[0m\n__HYSCODE_END_${nonce}__:1\n`;
@@ -402,6 +439,44 @@ describe('terminal command runner — run paths', () => {
     const result = await pending;
     expect(result).toMatchObject({ success: false, error: 'Command timed out after 10s.' });
     expect(result.metadata).toMatchObject({ timedOut: false });
+  });
+
+  it('reconciles the final snapshot when PTY exit races the last data event', async () => {
+    let completed = false;
+    let output = '';
+    let exitHandler: ((code: number | null) => void) | null = null;
+    const adapter = staticAdapter({
+      snapshot: vi.fn(async () => ({
+        data: completed ? output : '',
+        fromSequence: completed ? 1 : 0,
+        toSequence: completed ? 1 : 0,
+        truncated: false,
+        alive: !completed,
+        exitCode: completed ? 0 : null,
+      })),
+      subscribe: vi.fn(async (_terminalId, _onData, onExit) => {
+        exitHandler = onExit;
+        return () => {
+          exitHandler = null;
+        };
+      }),
+      write: vi.fn(async (_terminalId, data) => {
+        const nonce = String(data).match(/__HYSCODE_BEGIN_([a-z0-9]+)__/i)?.[1] ?? '';
+        setTimeout(() => {
+          output = `__HYSCODE_BEGIN_${nonce}__\nfinal output\n__HYSCODE_END_${nonce}__:0\n`;
+          completed = true;
+          exitHandler?.(0);
+        }, 10);
+      }),
+    });
+
+    const result = await new TerminalCommandRunner().run(
+      { command: 'exit-race', timeoutMs: 2_000 },
+      contextWith(adapter),
+    );
+
+    expect(result).toMatchObject({ success: true, output: 'final output' });
+    expect(adapter.snapshot).toHaveBeenCalled();
   });
 
   it('falls back to the raw event bus when the adapter has no subscribe', async () => {

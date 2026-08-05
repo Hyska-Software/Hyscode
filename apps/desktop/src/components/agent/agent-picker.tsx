@@ -7,7 +7,7 @@ import {
   ChevronRight,
 } from 'lucide-react';
 import { useAgentStore } from '@/stores/agent-store';
-import { HarnessBridge } from '@/lib/harness-bridge';
+import { getActiveAgentBridge } from '@/lib/active-agent-bridge';
 import { cn } from '@/lib/utils';
 import type { AgentMode } from '@/stores/agent-store';
 import { getAllAgentDefinitions } from '@hyscode/agent-harness';
@@ -35,7 +35,7 @@ export function AgentPicker() {
 
   const handleSelect = (mode: AgentMode) => {
     try {
-      HarnessBridge.get().setAgentType(mode);
+      getActiveAgentBridge().setAgentType(mode);
     } catch {
       useAgentStore.getState().setMode(mode);
     }

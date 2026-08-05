@@ -290,7 +290,7 @@ export interface PendingUserQuestion {
 
 // ─── State ──────────────────────────────────────────────────────────────────
 
-interface AgentState {
+export interface AgentState {
   // Core — mode IS the agent type (single source of truth)
   mode: AgentMode;
   conversationId: string | null;
@@ -484,7 +484,8 @@ interface AgentState {
 
 // ─── Store ──────────────────────────────────────────────────────────────────
 
-export const useAgentStore = create<AgentState>()(
+export const createAgentStore = () =>
+  create<AgentState>()(
   immer<AgentState>((set, get) => ({
     // Defaults
     mode: 'chat',
@@ -1183,7 +1184,19 @@ export const useAgentStore = create<AgentState>()(
         state.debugExpanded = v;
       }),
   })),
-);
+  );
+
+export type AgentStoreApi = ReturnType<typeof createAgentStore>;
+export const useAgentStore = createAgentStore();
+
+/** Return only mutable data fields so one session can be projected to another store. */
+export function extractAgentStateData(state: AgentState): Partial<AgentState> {
+  const data: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(state)) {
+    if (typeof value !== 'function') data[key] = value;
+  }
+  return data as Partial<AgentState>;
+}
 
 // ─── Tab helpers (used inside immer set() callbacks) ────────────────────────
 

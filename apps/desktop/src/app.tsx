@@ -52,6 +52,7 @@ import { tauriInvoke } from './lib/tauri-invoke';
 import { chooseDefaultGitRemote, shouldConfirmGitDiscard } from './lib/git-workflow';
 import { registerSpectraSupport } from './lib/spectra-language';
 import type { AgentMode, ChatMessage } from './stores/agent-store';
+import { vortexSessionRuntimeManager } from './lib/vortex-session-runtime';
 
 // ─── Open tabs persistence ───────────────────────────────────────────────────
 
@@ -60,6 +61,7 @@ async function restoreOpenTabs(projectId: string): Promise<void> {
     areSameProjectPath(useProjectStore.getState().rootPath, projectId) &&
     areSameProjectPath(useFileStore.getState().rootPath, projectId);
   if (!isCurrentProject()) return;
+  if (vortexSessionRuntimeManager.getFocusedSnapshot()) return;
 
   try {
     const rows = await tauriInvoke('db_get_open_tabs', { projectId });

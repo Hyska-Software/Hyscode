@@ -7,6 +7,7 @@ import { useProjectStore } from '../../../stores/project-store';
 import { defineAllMonacoThemes, getMonacoThemeName } from '../../../lib/monaco-themes';
 import { tauriFs } from '../../../lib/tauri-fs';
 import { HarnessBridge } from '../../../lib/harness-bridge';
+import { getActiveAgentBridge } from '../../../lib/active-agent-bridge';
 import type { RuleScope } from '@hyscode/agent-harness';
 import { SettingInput, SettingSelect } from '../controls';
 
@@ -108,7 +109,7 @@ export function RuleEditorDialog({ open, onClose, existingRule, initialScope = '
 
       // Re-discover rules in harness
       try {
-        const discovered = await HarnessBridge.get().loadRules();
+        const discovered = await getActiveAgentBridge().loadRules();
         useRulesStore.getState().setDiscoveredRules(discovered);
       } catch {
         // ignore

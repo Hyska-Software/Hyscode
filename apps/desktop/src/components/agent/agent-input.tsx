@@ -39,7 +39,11 @@ import {
 import { cn } from '@/lib/utils';
 import { useAgentStore } from '@/stores/agent-store';
 import { useSettingsStore } from '@/stores/settings-store';
-import { HarnessBridge } from '@/lib/harness-bridge';
+import {
+  cancelActiveAgentRun,
+  sendActiveAgentMessage,
+  setActiveAgentType,
+} from '@/lib/active-agent-bridge';
 import type { AgentMode, AttachedImage } from '@/stores/agent-store';
 import type { ApprovalMode } from '@/stores/settings-store';
 import {
@@ -313,30 +317,19 @@ export function AgentInput() {
     const hasImages = useAgentStore.getState().attachedImages.length > 0;
     const hasTerminal = Boolean(useAgentStore.getState().attachedTerminal);
     if ((!input.trim() && !hasImages && !hasTerminal) || isStreaming) return;
-    try {
-      HarnessBridge.get().sendMessage(
-        input.trim() || (hasTerminal ? '(terminal output attached)' : '(image attached)'),
-      );
-    } catch {
-      // Bridge not initialized yet
-    }
+    void sendActiveAgentMessage(
+      input.trim() || (hasTerminal ? '(terminal output attached)' : '(image attached)'),
+    ).catch(() => undefined);
     setInput('');
   };
 
   const handleStop = () => {
-    try {
-      HarnessBridge.get().cancel();
-    } catch {
-      // ignore
-    }
+    cancelActiveAgentRun();
   };
 
   const handleModeChange = (newMode: AgentMode) => {
-    try {
-      HarnessBridge.get().setAgentType(newMode);
-    } catch {
-      setMode(newMode);
-    }
+    setActiveAgentType(newMode);
+    setMode(newMode);
   };
 
   const handleApprovalChange = (mode: ApprovalMode) => {

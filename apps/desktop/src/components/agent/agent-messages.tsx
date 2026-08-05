@@ -17,7 +17,10 @@ import type { ChatMessage } from '@/stores/agent-store';
 import { TurnSummaryCard } from './turn-summary-card';
 import { FileActivity, isFileMutation } from './file-activity';
 import { MarkdownContent } from './markdown-renderer';
-import { HarnessBridge } from '@/lib/harness-bridge';
+import {
+  continueActiveAgentTurn,
+  retryActiveAgentTurn,
+} from '@/lib/active-agent-bridge';
 import { useSettingsStore } from '@/stores/settings-store';
 import { ThinkingBlock } from './thinking-block';
 import { TypingIndicator as AuroraTypingIndicator } from '@hyscode/ui';
@@ -64,8 +67,8 @@ function RecoveryCard() {
   const recovery = useAgentStore((state) => state.recoverableError);
   if (!recovery) return null;
   const handleAction = (): void => {
-    if (recovery.action === 'continue') void HarnessBridge.get().continuePartialTurn();
-    else void HarnessBridge.get().retryTurn();
+    if (recovery.action === 'continue') void continueActiveAgentTurn();
+    else void retryActiveAgentTurn();
   };
   return (
     <div className="mt-3 rounded-lg border border-destructive/30 bg-card p-3 text-[11px]">

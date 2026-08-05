@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { Plus, Pencil, Trash2, Loader2, BookText } from 'lucide-react';
 import { useRulesStore } from '../../../stores/rules-store';
 import { useProjectStore } from '../../../stores/project-store';
-import { HarnessBridge } from '../../../lib/harness-bridge';
+import { getActiveAgentBridge } from '../../../lib/active-agent-bridge';
 import { tauriFs } from '../../../lib/tauri-fs';
 import { RuleEditorDialog } from './rule-editor-dialog';
 import type { RuleEntry } from '../../../stores/rules-store';
@@ -33,7 +33,7 @@ export function RulesTab() {
     async function load() {
       try {
         useRulesStore.getState().setLoading(true);
-        const bridge = HarnessBridge.get();
+        const bridge = getActiveAgentBridge();
         const discovered = await bridge.loadRules();
         if (!cancelled) {
           setDiscoveredRules(discovered);
@@ -58,7 +58,7 @@ export function RulesTab() {
       removeRule(rule.id);
       // Re-discover
       try {
-        const discovered = await HarnessBridge.get().loadRules();
+        const discovered = await getActiveAgentBridge().loadRules();
         setDiscoveredRules(discovered);
       } catch {
         // ignore
@@ -211,5 +211,4 @@ function RuleRow({
     </div>
   );
 }
-
 

@@ -12,7 +12,9 @@ import {
 } from 'lucide-react';
 import { useAgentStore } from '@/stores/agent-store';
 import { useProjectStore } from '@/stores/project-store';
-import { HarnessBridge } from '@/lib/harness-bridge';
+import { useLayoutStore } from '@/stores/layout-store';
+import { getActiveAgentBridge } from '@/lib/active-agent-bridge';
+import { vortexSessionRuntimeManager } from '@/lib/vortex-session-runtime';
 import { tauriInvoke } from '@/lib/tauri-invoke';
 import { cn } from '@/lib/utils';
 import type { AgentMode, SessionSummary, ChatMessage } from '@/stores/agent-store';
@@ -72,7 +74,7 @@ export function SessionHistory() {
           {sessions.length} session{sessions.length !== 1 ? 's' : ''}
         </span>
         <button
-          onClick={startNewSession}
+          onClick={() => void startNewSession()}
           title="New session"
           className="ml-auto flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
         >
@@ -202,6 +204,12 @@ async function loadSessions(projectId: string, isCurrent: () => boolean): Promis
 
 async function restoreSession(conversationId: string): Promise<void> {
   try {
+    const projectPath = useProjectStore.getState().rootPath;
+    if (useLayoutStore.getState().workspaceMode === 'agent' && projectPath) {
+      await vortexSessionRuntimeManager.focusSession(projectPath, conversationId);
+      useAgentStore.getState().setHistoryOpen(false);
+      return;
+    }
     const rows = await tauriInvoke('db_list_messages', { conversationId });
     const messages: ChatMessage[] = rows.map((r) => ({
       id: r.id,
@@ -238,7 +246,7 @@ async function restoreSession(conversationId: string): Promise<void> {
     // Sync the Harness's internal conversationId so subsequent messages
     // are persisted under the correct session.
     try {
-      HarnessBridge.get().restoreSession(conversationId);
+      getActiveAgentBridge().restoreSession(conversationId);
     } catch {
       // Bridge not yet initialized — the conversationId set in the store
       // will be picked up when the bridge is next initialized.
@@ -263,14 +271,21 @@ async function deleteSession(conversationId: string, _projectId?: string): Promi
   }
 }
 
-function startNewSession(): void {
+async function startNewSession(): Promise<void> {
+  if (useLayoutStore.getState().workspaceMode === 'agent') {
+    const projectPath = useProjectStore.getState().rootPath;
+    if (!projectPath) return;
+    await vortexSessionRuntimeManager.createAndFocus(projectPath);
+    useAgentStore.getState().setHistoryOpen(false);
+    return;
+  }
   const store = useAgentStore.getState();
   // If current tab already empty, just reset its conversationId
   if (store.messages.length === 0) {
     const newId = crypto.randomUUID();
     store.setConversationId(newId);
     try {
-      HarnessBridge.get().restoreSession(newId);
+      getActiveAgentBridge().restoreSession(newId);
     } catch {
       // Bridge not yet ready
     }

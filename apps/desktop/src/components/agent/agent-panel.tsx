@@ -23,7 +23,7 @@ import { AgentQuestionCard } from './agent-question-card';
 import { RulesPanelDialog } from './rules-panel-dialog';
 import { useAgentStore } from '@/stores/agent-store';
 import { useLayoutStore } from '@/stores/layout-store';
-import { HarnessBridge } from '@/lib/harness-bridge';
+import { getActiveAgentBridge } from '@/lib/active-agent-bridge';
 import { cn } from '@/lib/utils';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import type { TokenUsage } from '@/stores/agent-store';
@@ -354,7 +354,7 @@ export function AgentPanel() {
 
   const handleSpecApprove = async () => {
     try {
-      await HarnessBridge.get().approveSddSpec();
+      await getActiveAgentBridge().approveSddSpec();
     } catch {
       // Bridge not ready
     }
@@ -362,7 +362,7 @@ export function AgentPanel() {
 
   const handleSpecReject = async () => {
     try {
-      await HarnessBridge.get().rejectSddSpec();
+      await getActiveAgentBridge().rejectSddSpec();
     } catch {
       // Bridge not ready
     }

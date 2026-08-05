@@ -2,7 +2,7 @@ import { MessageCircleQuestion, ChevronLeft, ChevronRight, Send, SkipForward } f
 import { useState, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { useAgentStore } from '@/stores/agent-store';
-import { HarnessBridge } from '@/lib/harness-bridge';
+import { getActiveAgentBridge } from '@/lib/active-agent-bridge';
 import type { AgentQuestion, AgentQuestionAnswer } from '@hyscode/agent-harness';
 
 export function AgentQuestionCard() {
@@ -36,7 +36,7 @@ export function AgentQuestionCard() {
       }))
       .filter((a) => a.answer.length > 0);
 
-    HarnessBridge.get().resolveUserQuestion(pending.id, resolved);
+    getActiveAgentBridge().resolveUserQuestion(pending.id, resolved);
     setCurrentIdx(0);
     setAnswers({});
     setFreeformInputs({});
@@ -44,7 +44,7 @@ export function AgentQuestionCard() {
 
   const handleSkip = useCallback(() => {
     if (!pending) return;
-    HarnessBridge.get().resolveUserQuestion(pending.id, []);
+    getActiveAgentBridge().resolveUserQuestion(pending.id, []);
     setCurrentIdx(0);
     setAnswers({});
     setFreeformInputs({});
