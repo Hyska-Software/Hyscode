@@ -6,7 +6,7 @@ import {
   type StreamChunk,
 } from '@hyscode/ai-providers';
 import { Harness } from './harness';
-import type { HarnessEvent } from './types';
+import type { HarnessEvent, TerminalRuntimeAdapter } from './types';
 
 const model = {
   id: 'test-model',
@@ -98,6 +98,100 @@ function modeSwitchProvider(onRequest?: (params: ChatParams, call: number) => vo
 afterEach(() => getProviderRegistry().unregister('harness-test'));
 
 describe('Harness lifecycle', () => {
+  it('returns failed terminal output to the next model request', async () => {
+    let providerCall = 0;
+    let observedToolResult = '';
+    let onData: ((data: string, sequence: number) => void) | undefined;
+
+    const failingTerminalProvider: AIProvider = {
+      id: 'harness-test',
+      name: 'Harness Test',
+      models: [model],
+      isConfigured: () => true,
+      listModels: async () => [model],
+      async *chat(params: ChatParams): AsyncIterable<StreamChunk> {
+        providerCall++;
+        if (providerCall === 1) {
+          yield { type: 'tool_call_start', id: 'terminal-call', name: 'run_terminal_command' };
+          yield {
+            type: 'tool_call_delta',
+            id: 'terminal-call',
+            input: JSON.stringify({ command: 'npm test' }),
+          };
+          yield { type: 'tool_call_end', id: 'terminal-call' };
+          yield { type: 'done', stopReason: 'tool_use' };
+          return;
+        }
+
+        const toolResult = params.messages
+          .flatMap((message) => message.content)
+          .find((content) => content.type === 'tool_result');
+        if (toolResult?.type === 'tool_result') observedToolResult = toolResult.output;
+
+        yield { type: 'text_delta', text: 'The command failure was received.' };
+        yield { type: 'done', stopReason: 'end_turn' };
+      },
+    };
+    getProviderRegistry().register(failingTerminalProvider);
+
+    const terminalRuntime: TerminalRuntimeAdapter = {
+      acquire: async () => ({
+        terminalId: 'terminal-1',
+        ptyId: 'pty-1',
+        persistent: true,
+        frameLanguage: 'bash',
+      }),
+      snapshot: async () => ({
+        data: '',
+        fromSequence: 0,
+        toSequence: 0,
+        truncated: false,
+        alive: true,
+        exitCode: null,
+      }),
+      write: async (_terminalId, frame) => {
+        const nonce = String(frame).match(/__HYSCODE_BEGIN_([a-z0-9]+)__/i)?.[1];
+        if (!nonce) throw new Error('Terminal frame nonce was not generated.');
+        onData?.(
+          `__HYSCODE_BEGIN_${nonce}__\nstdout from command\nstderr from command\n__HYSCODE_END_${nonce}__:1\n`,
+          1,
+        );
+      },
+      interrupt: async () => undefined,
+      kill: async () => undefined,
+      subscribe: async (_terminalId, dataHandler) => {
+        onData = dataHandler;
+        return () => {
+          onData = undefined;
+        };
+      },
+    };
+
+    const harness = new Harness({
+      workspacePath: 'C:/workspace',
+      projectId: 'project',
+      invoke: async () => undefined as never,
+      listen: async () => () => undefined,
+      terminalRuntime,
+      config: {
+        providerId: 'harness-test',
+        modelId: 'test-model',
+        approval: { mode: 'yolo' },
+        costOptimization: false,
+      },
+    });
+    harness.setAgentType('build');
+    harness.setConversationId('conversation');
+
+    const result = await harness.run('run the tests', []);
+
+    expect(result.status).toBe('complete');
+    expect(result.response).toBe('The command failure was received.');
+    expect(observedToolResult).toContain('stdout from command');
+    expect(observedToolResult).toContain('stderr from command');
+    expect(observedToolResult).toContain('Error: Exit code: 1');
+  });
+
   it('runs beyond the former 25-iteration default when unlimited', async () => {
     getProviderRegistry().register(longRunningProvider(26));
     const harness = new Harness({

@@ -18,6 +18,7 @@ const DEFAULT_TIMEOUT_MS = 30_000;
 const DEFAULT_STARTUP_TIMEOUT_MS = 15_000;
 const INTERRUPT_GRACE_MS = 750;
 const POLL_MS = 50;
+const SNAPSHOT_RECONCILE_MS = 250;
 
 type SuspendedCommand = {
   binding: TerminalBinding;
@@ -105,6 +106,20 @@ export class TerminalCommandRunner {
     const abort = () => void stopCommand(adapter, binding.terminalId);
     ctx.signal.addEventListener('abort', abort, { once: true });
     const listen = ctx.listen;
+    let lastSnapshotAt = 0;
+
+    // Events are the low-latency path, but the PTY snapshot is the authoritative
+    // source. Reconcile after the write and periodically so a missed event cannot
+    // hold a completed command until the user-visible timeout.
+    const reconcileSnapshot = async (): Promise<void> => {
+      try {
+        const snapshot = await adapter.snapshot(binding.terminalId);
+        watch.syncSnapshot(snapshot.data, snapshot.toSequence);
+        if (!snapshot.alive) watch.pushExit(snapshot.exitCode);
+      } finally {
+        lastSnapshotAt = Date.now();
+      }
+    };
 
     // Prefer the adapter's replay-capable stream; fall back to raw events for
     // adapters that only expose the generic event bus.
@@ -141,11 +156,16 @@ export class TerminalCommandRunner {
       emitProgress(ctx, binding, 'started');
       await subscribeToStream();
       await adapter.write(binding.terminalId, frame);
+      await reconcileSnapshot().catch(() => undefined);
       const waitLimit = background
         ? (input.startupTimeoutMs ?? DEFAULT_STARTUP_TIMEOUT_MS)
         : (input.timeoutMs ?? DEFAULT_TIMEOUT_MS);
+      let exitReconciled = false;
 
       while (Date.now() - startedAt < waitLimit && !ctx.signal.aborted) {
+        if (Date.now() - lastSnapshotAt >= SNAPSHOT_RECONCILE_MS) {
+          await reconcileSnapshot().catch(() => undefined);
+        }
         const outcome = watch.evaluate(Date.now());
         if (outcome.kind === 'complete') {
           this.interactiveCommands.delete(binding.terminalId);
@@ -198,7 +218,12 @@ export class TerminalCommandRunner {
             },
           };
         }
-        if (watch.hasExited) break;
+        if (watch.hasExited) {
+          if (exitReconciled) break;
+          exitReconciled = true;
+          await reconcileSnapshot().catch(() => undefined);
+          continue;
+        }
         await new Promise((resolve) => setTimeout(resolve, POLL_MS));
       }
 

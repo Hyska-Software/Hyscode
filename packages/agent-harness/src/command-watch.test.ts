@@ -50,6 +50,20 @@ describe('CommandWatch syncSnapshot', () => {
     expect(watch.evaluate(Date.now())).toMatchObject({ kind: 'complete' });
   });
 
+  it('does not let an older snapshot erase newer live output', () => {
+    const watch = makeWatch();
+    watch.pushData(2, '__HYSCODE_BEGIN_watch__\nlive\n');
+    watch.syncSnapshot('stale snapshot', 1);
+    expect(watch.output()).toBe('__HYSCODE_BEGIN_watch__\nlive\n');
+  });
+
+  it('keeps the current frame while a newer snapshot has not replayed it yet', () => {
+    const watch = makeWatch();
+    watch.pushData(2, '__HYSCODE_BEGIN_watch__\nlive\n');
+    watch.syncSnapshot('older terminal output', 5);
+    expect(watch.output()).toBe('__HYSCODE_BEGIN_watch__\nlive\n');
+  });
+
   it('caps oversized snapshots to the capture bound', () => {
     const watch = makeWatch();
     const huge = 'x'.repeat(MAX_CAPTURE_CHARS + 10);

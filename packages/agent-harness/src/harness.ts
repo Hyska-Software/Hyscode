@@ -17,6 +17,7 @@ import {
   type AgentType,
   type ToolCallRecord,
   type TerminalRuntimeAdapter,
+  type ToolResult,
   type ConversationMode,
   type ToolExecutionContext,
   type ToolHandler,
@@ -65,6 +66,12 @@ import {
   estimateActualCost,
   recordRequestUsageMetrics,
 } from './request-preparation';
+
+function formatToolResultForAgent(result: ToolResult): string {
+  if (result.success || !result.error) return result.output;
+
+  return [result.output, `Error: ${result.error}`].filter(Boolean).join('\n\n');
+}
 
 export interface HarnessOptions {
   config?: Partial<HarnessConfig>;
@@ -1450,9 +1457,7 @@ export class Harness {
 
         // ── Tool output compaction ──
         // Compact large outputs to prevent context rot
-        const rawOutput = record.output.success
-          ? record.output.output
-          : `Error: ${record.output.error}`;
+        const rawOutput = formatToolResultForAgent(record.output);
         const compactedOutput = compactToolOutput(rawOutput, tc.name);
 
         toolResults.content.push({
