@@ -4,6 +4,7 @@ pub mod claude_agent;
 pub mod codex;
 pub mod db;
 pub mod devices;
+pub mod diagnostics;
 pub mod docker;
 pub mod extension;
 pub mod fs;

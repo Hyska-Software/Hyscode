@@ -31,6 +31,9 @@ import type {
 } from '@hyscode/agent-harness';
 import type { Message, ToolDefinition, MessageContent, TokenUsage } from '@hyscode/ai-providers';
 import { tauriInvoke, tauriInvokeRaw } from './tauri-invoke';
+import { diagnosticPathsEqual, type DiagnosticContract } from './diagnostics-types';
+import { getEditorDiagnostics, getOpenDiagnosticFiles } from './diagnostics-tracker';
+import { mergeDiagnostics } from './diagnostics-merge';
 import { tauriFs } from './tauri-fs';
 import { listen as tauriListen } from '@tauri-apps/api/event';
 import { McpBridge } from './mcp-bridge';
@@ -3016,6 +3019,28 @@ ${hints.map((h) => `- ${h}`).join('\n')}
    *  so every agent edit — including sub-agent edits — can be reviewed/reverted. */
   async invokeForHarness<T>(command: string, args?: Record<string, unknown>): Promise<T> {
     const path = typeof args?.path === 'string' ? args.path : null;
+    if (command === 'get_diagnostics') {
+      const requestedFile = path ?? undefined;
+      const editorDiagnostics = getEditorDiagnostics(requestedFile);
+      const openFiles = getOpenDiagnosticFiles();
+      const requestedFileIsOpen =
+        requestedFile !== undefined &&
+        openFiles.some((openFile) => diagnosticPathsEqual(openFile, requestedFile));
+      let compilerDiagnostics: DiagnosticContract[] = [];
+      if (!requestedFileIsOpen) {
+        const diagnosticArgs: { workspacePath: string; path?: string } = {
+          workspacePath: this.harness.getWorkspacePath(),
+        };
+        if (requestedFile) diagnosticArgs.path = requestedFile;
+        compilerDiagnostics = await tauriInvoke('get_diagnostics', diagnosticArgs);
+      }
+      return mergeDiagnostics(
+        editorDiagnostics,
+        compilerDiagnostics,
+        openFiles,
+        requestedFile,
+      ) as T;
+    }
     if (command === 'read_file' && path) {
       const tab = useEditorStore
         .getState()

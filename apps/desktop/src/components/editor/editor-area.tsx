@@ -276,7 +276,7 @@ export function EditorArea() {
   );
 
   // Sync Monaco diagnostics to the file tree
-  useDiagnosticsSync(monacoInstanceRef);
+  useDiagnosticsSync(monacoInstanceRef, editorVersion);
 
   // AI-powered inline completion (ghost text)
   useInlineCompletion({

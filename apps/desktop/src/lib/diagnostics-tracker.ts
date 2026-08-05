@@ -1,55 +1,86 @@
-import { useDiagnosticsStore, type FileDiagnostics } from '../stores/diagnostics-store';
+import {
+  diagnosticPathsEqual,
+  uriToDiagnosticPath,
+  type DiagnosticContract,
+  type DiagnosticSeverity,
+} from './diagnostics-types';
+import { useDiagnosticsStore } from '../stores/diagnostics-store';
 
-let initialized = false;
+const initializedMonacoInstances = new WeakSet<object>();
 
-function uriToPath(uri: string): string {
-  // file:///C:/Users/... → C:/Users/...
-  let path = uri.replace(/^file:\/\//, '');
-  // On Windows, paths may come as /C:/Users/... (leading slash)
-  if (path.startsWith('/')) {
-    path = path.slice(1);
-  }
-  return path.replace(/\//g, '\\');
+export function uriToPath(uri: string): string | null {
+  return uriToDiagnosticPath(uri);
 }
 
-function countMarkers(markers: Array<{ severity?: number }>): FileDiagnostics {
-  let errors = 0;
-  let warnings = 0;
-  for (const m of markers) {
-    if (m.severity === 8) errors++;      // monaco.MarkerSeverity.Error
-    else if (m.severity === 4) warnings++; // monaco.MarkerSeverity.Warning
-  }
-  return { errors, warnings };
+function markerSeverity(severity: number | undefined): DiagnosticSeverity {
+  if (severity === 8) return 'error';
+  if (severity === 4) return 'warning';
+  if (severity === 2) return 'info';
+  return 'hint';
 }
 
-export function initDiagnosticsTracker(monaco: typeof import('monaco-editor')) {
-  if (initialized) return;
-  initialized = true;
+function markerToDiagnostic(
+  file: string,
+  marker: import('monaco-editor').editor.IMarker,
+): DiagnosticContract {
+  const code =
+    typeof marker.code === 'string' || typeof marker.code === 'number' ? marker.code : undefined;
+  return {
+    file,
+    line: Math.max(1, marker.startLineNumber),
+    col: Math.max(1, marker.startColumn),
+    severity: markerSeverity(marker.severity),
+    message: marker.message,
+    source: marker.source ?? 'monaco',
+    ...(code === undefined ? {} : { code }),
+  };
+}
+
+function syncModel(
+  monaco: typeof import('monaco-editor'),
+  model: import('monaco-editor').editor.ITextModel,
+): void {
+  const file = uriToPath(model.uri.toString());
+  if (!file) return;
+  const markers = monaco.editor.getModelMarkers({ resource: model.uri });
+  const diagnostics = markers.map((marker) => markerToDiagnostic(file, marker));
+  useDiagnosticsStore.getState().setModelDiagnostics(file, diagnostics);
+}
+
+export function getEditorDiagnostics(file?: string): DiagnosticContract[] {
+  const details = useDiagnosticsStore.getState().details;
+  const diagnostics = Array.from(details.entries()).flatMap(([, items]) =>
+    items
+      .filter((item) => item.severity === 'error' || item.severity === 'warning')
+      .filter((item) => !file || diagnosticPathsEqual(item.file, file))
+      .map((item) => ({ ...item })),
+  );
+  if (!file) return diagnostics;
+  return diagnostics.filter((item) => diagnosticPathsEqual(item.file, file));
+}
+
+export function getOpenDiagnosticFiles(): string[] {
+  return Array.from(useDiagnosticsStore.getState().openFiles.keys());
+}
+
+export function initDiagnosticsTracker(monaco: typeof import('monaco-editor')): void {
+  if (initializedMonacoInstances.has(monaco)) return;
+  initializedMonacoInstances.add(monaco);
 
   const originalSetModelMarkers = monaco.editor.setModelMarkers;
-
-  monaco.editor.setModelMarkers = function (
+  monaco.editor.setModelMarkers = function setModelMarkers(
     model: import('monaco-editor').editor.ITextModel,
-    owner: string,
+    _owner: string,
     markers: import('monaco-editor').editor.IMarkerData[],
   ) {
-    originalSetModelMarkers.call(monaco.editor, model, owner, markers);
-
-    const rawUri = model.uri.toString();
-    const path = uriToPath(rawUri);
-    const counts = countMarkers(markers);
-
-    if (counts.errors === 0 && counts.warnings === 0) {
-      useDiagnosticsStore.getState().clearDiagnostics(path);
-    } else {
-      useDiagnosticsStore.getState().setDiagnostics(path, counts);
-    }
+    originalSetModelMarkers.call(monaco.editor, model, _owner, markers);
+    syncModel(monaco, model);
   };
 
-  // Listen for model disposal to clear diagnostics immediately
-  monaco.editor.onWillDisposeModel((model: import('monaco-editor').editor.ITextModel) => {
-    const rawUri = model.uri.toString();
-    const path = uriToPath(rawUri);
-    useDiagnosticsStore.getState().clearDiagnostics(path);
+  monaco.editor.onWillDisposeModel((model) => {
+    const file = uriToPath(model.uri.toString());
+    if (file) useDiagnosticsStore.getState().clearModelDiagnostics(file);
   });
+
+  for (const model of monaco.editor.getModels()) syncModel(monaco, model);
 }

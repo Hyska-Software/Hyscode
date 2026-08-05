@@ -35,6 +35,28 @@ HysCode is a **desktop-native agentic IDE** built on Tauri v2 where AI agents wr
 └──────────────────────────────────────────────────────────────────┘
 ```
 
+## Desktop diagnostics contract
+
+The desktop agent's `get_diagnostics` tool is backed by the registered Tauri
+command `get_diagnostics`. The command receives the validated workspace path and
+an optional file path, then returns typed records with `file`, `line`, `col`,
+`severity`, `message`, and `source`.
+
+Monaco/LSP markers are authoritative for every open model, including unsaved
+content. The desktop bridge uses Cargo and TypeScript compiler output for closed
+files and global queries, and Python syntax compilation for a requested Python
+file. Global results combine Rust and TypeScript providers; compiler results for
+open models are discarded so stale disk output cannot override the buffer.
+Provider startup, configuration, timeout, and process failures are returned as
+errors instead of being represented as an empty diagnostic list. Python checks
+compile source bytes in memory and therefore do not create `__pycache__`.
+
+The tracker is initialized after the Monaco instance mounts, aggregates markers
+from every owner, keeps per-file details and open-model state, decodes file URIs
+(including spaces and UNC paths), and removes model state on disposal. Compiler
+records are normalized, filtered case-insensitively on Windows, deduplicated,
+and sorted before reaching the agent.
+
 ## Standalone Rust TUI Client
 
 The repository also ships a standalone Ratatui client in `tools/hyscode-tui`.

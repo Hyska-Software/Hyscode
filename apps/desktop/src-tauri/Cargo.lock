@@ -2249,7 +2249,7 @@ dependencies = [
 
 [[package]]
 name = "hyscode"
-version = "0.8.2-build.82"
+version = "0.8.2-build.83"
 dependencies = [
  "base64 0.22.1",
  "chrono",
@@ -6278,6 +6278,7 @@ dependencies = [
  "libc",
  "mio 1.2.0",
  "pin-project-lite",
+ "signal-hook-registry",
  "socket2",
  "tokio-macros",
  "windows-sys 0.61.2",

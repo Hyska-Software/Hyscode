@@ -2,6 +2,7 @@
 // Centralises invoke usage and provides per-command type safety.
 
 import { invoke } from '@tauri-apps/api/core';
+import type { DiagnosticContract } from './diagnostics-types';
 
 // ─── Shared types ───────────────────────────────────────────────────────────
 
@@ -96,6 +97,10 @@ export interface VortexProjectSessionIndexRow {
 
 interface TauriCommands {
   // FS
+  get_diagnostics: {
+    args: { workspacePath: string; path?: string };
+    ret: DiagnosticContract[];
+  };
   read_file: { args: { path: string }; ret: string };
   write_file: { args: { path: string; content: string }; ret: void };
   create_file: { args: { path: string; content?: string }; ret: void };

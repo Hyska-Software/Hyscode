@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { ToolExecutionContext } from './types';
-import { webFetchTool, webSearchTool } from './tools';
+import { getDiagnosticsTool, webFetchTool, webSearchTool } from './tools';
 
 function mockContext(invoke: (cmd: string, args?: Record<string, unknown>) => Promise<unknown>): ToolExecutionContext {
   return {
@@ -61,6 +61,51 @@ describe('webSearchTool', () => {
     const result = await webSearchTool.execute({ query: 'x' }, mockContext(invoke));
     expect(result.success).toBe(false);
     expect(result.error).toBe('random failure');
+  });
+});
+
+describe('getDiagnosticsTool', () => {
+  it('formats filtered diagnostics and reports the count', async () => {
+    const invoke = vi.fn().mockResolvedValue([
+      {
+        file: '/workspace/src/app.ts',
+        line: 4,
+        col: 2,
+        severity: 'error',
+        message: 'Type mismatch.',
+        source: 'typescript',
+      },
+      {
+        file: '/workspace/src/app.ts',
+        line: 8,
+        col: 1,
+        severity: 'warning',
+        message: 'Unused value.',
+        source: 'typescript',
+      },
+    ]);
+
+    const result = await getDiagnosticsTool.execute(
+      { file: 'src/app.ts' },
+      mockContext(invoke),
+    );
+
+    expect(result).toEqual({
+      success: true,
+      output:
+        '2 diagnostic(s):\n/workspace/src/app.ts:4:2 [error] Type mismatch. (typescript)\n/workspace/src/app.ts:8:1 [warning] Unused value. (typescript)',
+      metadata: { count: 2 },
+    });
+    expect(invoke).toHaveBeenCalledWith('get_diagnostics', { path: '/workspace/src/app.ts' });
+  });
+
+  it('propagates backend failures instead of turning them into an empty result', async () => {
+    const invoke = vi.fn().mockRejectedValue(new Error('TypeScript diagnostics failed.'));
+
+    const result = await getDiagnosticsTool.execute({}, mockContext(invoke));
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('TypeScript diagnostics failed.');
   });
 });
 

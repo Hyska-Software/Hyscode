@@ -30,7 +30,7 @@ chrono = "0.4"
 reqwest = { version = "0.12", features = ["stream", "json"] }
 rusqlite = { version = "0.31", features = ["bundled"] }
 futures-util = "0.3"
-tokio = { version = "1", features = ["sync", "net", "time"] }
+tokio = { version = "1", features = ["sync", "net", "time", "process"] }
 thiserror = "2"
 notify = { version = "6", features = ["macos_fsevent"] }
 notify-debouncer-mini = "0.4"

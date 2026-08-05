@@ -23,6 +23,7 @@ import type { FileDiagnostics } from '../../../stores/diagnostics-store';
 import { tauriFs } from '../../../lib/tauri-fs';
 import { getViewerType, writeClipboard } from '../../../lib/utils';
 import { detectLanguage } from '../../../lib/lsp-bridge';
+import { diagnosticRelativePath } from '../../../lib/diagnostics-types';
 import { getFileIcon, getFolderIcon, FolderIcon as DefaultFolderIcon } from './file-icons';
 import { promptInput, promptConfirm } from '../../ui/dialogs';
 import { FileHistoryModal } from '../../editor/file-history-modal';
@@ -579,12 +580,9 @@ export function FileTree() {
   const diagnosticsMap = useMemo(() => {
     const map = new Map<string, FileDiagnostics>();
     if (!rootPath) return map;
-    const rootNormalized = rootPath.replace(/\\/g, '/');
-    const rootPrefix = rootNormalized.endsWith('/') ? rootNormalized : rootNormalized + '/';
     for (const [absPath, counts] of diagnosticsRaw) {
-      const normalized = absPath.replace(/\\/g, '/');
-      const relPath = normalized.startsWith(rootPrefix) ? normalized.slice(rootPrefix.length) : normalized;
-      map.set(relPath, counts);
+      const relativePath = diagnosticRelativePath(rootPath, absPath);
+      if (relativePath !== null) map.set(relativePath, counts);
     }
     return map;
   }, [diagnosticsRaw, rootPath]);

@@ -56,6 +56,8 @@ pub fn run() {
             commands::fs::copy_path,
             commands::fs::reveal_path,
             commands::fs::find_files,
+            // Diagnostics
+            commands::diagnostics::get_diagnostics,
             // Git commands
             commands::git::git_is_repo,
             commands::git::git_init,
