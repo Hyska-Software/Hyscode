@@ -27,6 +27,7 @@ import { useTerminalStore } from '@/stores/terminal-store';
 import { HarnessBridge } from './harness-bridge';
 import { areSameProjectPath, normalizeProjectPath } from './project-path';
 import { tauriInvoke } from './tauri-invoke';
+import { vortexSessionRuntimeManager } from './vortex-session-runtime';
 
 export { areSameProjectPath } from './project-path';
 
@@ -372,7 +373,15 @@ export async function restoreProjectConversation(
 /**
  * Reset all project-scoped stores to their clean initial state.
  */
-export async function clearAllProjectState(): Promise<void> {
+export async function clearAllProjectState(
+  options: { preserveVortexRuntimes?: boolean } = {},
+): Promise<void> {
+  const preserveVortexRuntimes =
+    options.preserveVortexRuntimes ??
+    (useLayoutStore.getState().workspaceMode === 'agent' &&
+      vortexSessionRuntimeManager.hasActiveRuntimes());
+  vortexSessionRuntimeManager.suspendProjection();
+  vortexSessionRuntimeManager.clearFocus();
   HarnessBridge.destroy();
   useLayoutStore.getState().resetProjectState();
   useFileStore.getState().closeFolder();
@@ -387,7 +396,7 @@ export async function clearAllProjectState(): Promise<void> {
   useSchemaDiagramStore.getState().reset();
   useSkillsStore.getState().resetProjectState();
 
-  const ptyIds = useTerminalStore.getState().clearSessions();
+  const ptyIds = preserveVortexRuntimes ? [] : useTerminalStore.getState().clearSessions();
   await Promise.all(
     ptyIds.map((ptyId) => tauriInvoke('pty_kill', { ptyId }).catch(() => undefined)),
   );
@@ -427,7 +436,7 @@ export async function activateVortexSession(
     useLayoutStore.getState().setWorkspaceMode('agent');
   }
 
-  await restoreProjectConversation(conversationId, targetPath);
+  await vortexSessionRuntimeManager.focusSession(targetPath, conversationId);
 }
 
 /** Restore the persisted project that was present when the app last closed. */
@@ -446,6 +455,9 @@ async function performProjectOpen(
   const switchId = ++projectSwitchGeneration;
   const currentRootPath = useProjectStore.getState().rootPath;
   const previousTerminalVisible = useLayoutStore.getState().terminalVisible;
+  const preserveVortexRuntimes =
+    useLayoutStore.getState().workspaceMode === 'agent' &&
+    vortexSessionRuntimeManager.hasActiveRuntimes();
 
   if (saveCurrentProject && currentRootPath && !areSameProjectPath(currentRootPath, rootPath)) {
     saveProjectState(currentRootPath);
@@ -455,7 +467,7 @@ async function performProjectOpen(
   useProjectStore.getState().setLoading(true);
 
   try {
-    await clearAllProjectState();
+    await clearAllProjectState({ preserveVortexRuntimes });
     if (switchId !== projectSwitchGeneration) return;
 
     useProjectStore.getState().openProject(rootPath);
@@ -487,6 +499,7 @@ async function performProjectOpen(
 
     useProjectStore.getState().setLoading(false);
     useLayoutStore.getState().setTerminalVisible(previousTerminalVisible);
+    vortexSessionRuntimeManager.resumeProjection();
   } catch (error) {
     if (isCurrentProjectSwitch(switchId, rootPath)) {
       useProjectStore.getState().setLoading(false);

@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react';
 import { Square, Timer } from 'lucide-react';
 import type { SubAgentState, ToolCallDisplay } from '@/stores/agent-store';
 import { useSettingsStore } from '@/stores/settings-store';
-import { HarnessBridge } from '@/lib/harness-bridge';
+import { getActiveAgentBridge } from '@/lib/active-agent-bridge';
 import { CompactToolCallRow } from './tool-call-card';
 import { MarkdownContent } from './markdown-renderer';
 import { ThinkingBlock } from './thinking-block';
@@ -85,7 +85,7 @@ export function SubAgentDetails({
       )}
       {showCancel && isCancellable && (
         <button
-          onClick={() => HarnessBridge.get().cancelSubAgent(subAgent.id)}
+          onClick={() => getActiveAgentBridge().cancelSubAgent(subAgent.id)}
           className="flex items-center gap-1 rounded px-1 py-0.5 text-[10px] text-muted-foreground transition-colors hover:bg-muted hover:text-destructive"
         >
           <Square className="h-2.5 w-2.5" />

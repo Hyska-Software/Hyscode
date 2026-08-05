@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { areSameProjectPath } from './project-path';
-import { mergeVortexProjectSessionIndex } from './vortex-project-sessions';
+import { mergeVortexProjectSessionIndex, mergeVortexRuntimeSessions } from './vortex-project-sessions';
+import type { VortexRuntimeSnapshot } from './vortex-runtime-types';
 
 function conversation(
   id: string,
@@ -155,5 +156,60 @@ describe('VORTEX project/session index', () => {
       'new-session',
       'old-session',
     ]);
+  });
+
+  it('overlays live runtimes from multiple projects before database refresh', () => {
+    const index = mergeVortexRuntimeSessions(
+      {
+        projects: [
+          {
+            id: 'project-a',
+            name: 'Project A',
+            path: 'C:/project-a',
+            lastActivityAt: null,
+            lastOpened: null,
+            sessions: [],
+          },
+        ],
+        recentSessions: [],
+      },
+      [
+        {
+          key: 'c:/project-a::session-a',
+          projectPath: 'C:/project-a',
+          projectName: 'Project A',
+          conversationId: 'session-a',
+          title: 'Session A',
+          mode: 'build',
+          status: 'running',
+          messageCount: 1,
+          pendingApprovals: 0,
+          pendingUserQuestion: false,
+          startedAt: 20_000,
+          updatedAt: 20_000,
+          error: null,
+        },
+        {
+          key: 'c:/project-b::session-b',
+          projectPath: 'C:/project-b',
+          projectName: 'Project B',
+          conversationId: 'session-b',
+          title: 'Session B',
+          mode: 'chat',
+          status: 'waiting',
+          messageCount: 2,
+          pendingApprovals: 1,
+          pendingUserQuestion: false,
+          startedAt: 30_000,
+          updatedAt: 30_000,
+          error: null,
+        },
+      ] satisfies VortexRuntimeSnapshot[],
+    );
+
+    expect(index.projects.map((project) => project.name)).toEqual(['Project B', 'Project A']);
+    expect(index.projects[0].sessions[0].id).toBe('session-b');
+    expect(index.projects[1].sessions[0].id).toBe('session-a');
+    expect(index.recentSessions.map((session) => session.id)).toEqual(['session-b', 'session-a']);
   });
 });

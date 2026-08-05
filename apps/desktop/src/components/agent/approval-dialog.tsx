@@ -12,7 +12,7 @@ import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import type { PendingApproval } from '@/stores/agent-store';
 import { useSettingsStore } from '@/stores/settings-store';
-import { HarnessBridge } from '@/lib/harness-bridge';
+import { getActiveAgentBridge } from '@/lib/active-agent-bridge';
 
 // ─── Risk badge config ───────────────────────────────────────────────────────
 
@@ -81,20 +81,20 @@ export function ApprovalDialog({ approval }: ApprovalDialogProps) {
   const riskDisplay = RISK_DISPLAY[risk];
 
   const handleApprove = () => {
-    HarnessBridge.get().resolveApproval(approval.id, true);
+    getActiveAgentBridge().resolveApproval(approval.id, true);
   };
 
   const handleApproveAll = () => {
-    HarnessBridge.get().resolveApproval(approval.id, true);
+    getActiveAgentBridge().resolveApproval(approval.id, true);
     // Temporarily switch to yolo for this session
     useSettingsStore.getState().set('approvalMode', 'yolo');
   };
 
   const handleTrustTool = () => {
-    HarnessBridge.get().resolveApproval(approval.id, true);
+    getActiveAgentBridge().resolveApproval(approval.id, true);
     // Scope the trust to the owning agent: sub-agent approvals trust the
     // sub-agent's router, main approvals trust the main router.
-    HarnessBridge.get().trustToolForSession(approval.toolName, approval.id);
+    getActiveAgentBridge().trustToolForSession(approval.toolName, approval.id);
     // Switch to session-trust mode if not already
     if (approvalMode === 'manual') {
       useSettingsStore.getState().set('approvalMode', 'session-trust');
@@ -102,7 +102,7 @@ export function ApprovalDialog({ approval }: ApprovalDialogProps) {
   };
 
   const handleDeny = () => {
-    HarnessBridge.get().resolveApproval(approval.id, false);
+    getActiveAgentBridge().resolveApproval(approval.id, false);
   };
 
   return (

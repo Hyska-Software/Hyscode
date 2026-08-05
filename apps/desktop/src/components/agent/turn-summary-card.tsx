@@ -13,7 +13,7 @@ import {
 import type { TurnSummary, TurnSummaryFile, TurnSummaryFileKind } from '@/stores/agent-store';
 import { useAgentStore } from '@/stores/agent-store';
 import { useLayoutStore } from '@/stores/layout-store';
-import { HarnessBridge } from '@/lib/harness-bridge';
+import { getActiveAgentBridge } from '@/lib/active-agent-bridge';
 import { cn } from '@/lib/utils';
 
 const INITIAL_FILE_COUNT = 3;
@@ -184,7 +184,7 @@ export function TurnSummaryCard({ summary }: { summary: TurnSummary }) {
                 <button
                   type="button"
                   onClick={() =>
-                    void HarnessBridge.get().resolveTurnEditSessions(liveSummary.turnId, true)
+                    void getActiveAgentBridge().resolveTurnEditSessions(liveSummary.turnId, true)
                   }
                   className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-[10px] text-emerald-400 transition-colors hover:bg-emerald-500/10"
                 >
@@ -193,7 +193,7 @@ export function TurnSummaryCard({ summary }: { summary: TurnSummary }) {
                 <button
                   type="button"
                   onClick={() =>
-                    void HarnessBridge.get().resolveTurnEditSessions(liveSummary.turnId, false)
+                    void getActiveAgentBridge().resolveTurnEditSessions(liveSummary.turnId, false)
                   }
                   className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-[10px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
                 >

@@ -30,7 +30,7 @@ import { useSettingsStore } from '@/stores/settings-store';
 import { useFileStore } from '@/stores/file-store';
 import { useEditorStore, type MarkdownViewMode } from '@/stores/editor-store';
 import { useTerminalStore } from '@/stores/terminal-store';
-import { HarnessBridge } from '@/lib/harness-bridge';
+import { getActiveAgentBridge } from '@/lib/active-agent-bridge';
 import { tauriFs } from '@/lib/tauri-fs';
 import { defineAllMonacoThemes, getMonacoThemeName } from '@/lib/monaco-themes';
 import { cn, getViewerType } from '@/lib/utils';
@@ -433,11 +433,11 @@ function AgentChangesContent() {
   };
 
   const handleAcceptOne = (id: string) => {
-    HarnessBridge.get().resolveEditSession(id, true);
+    getActiveAgentBridge().resolveEditSession(id, true);
   };
 
   const handleRejectOne = (id: string) => {
-    HarnessBridge.get().resolveEditSession(id, false);
+    getActiveAgentBridge().resolveEditSession(id, false);
   };
 
   return (
@@ -687,7 +687,7 @@ function AgentChangesToolbar() {
     if (filter === 'last-turn' && lastTurnId) {
       useAgentStore.getState().resolveTurnEditSessions(lastTurnId, true);
     } else {
-      HarnessBridge.get().resolveAllEditSessions(true);
+      getActiveAgentBridge().resolveAllEditSessions(true);
     }
   };
 
@@ -695,7 +695,7 @@ function AgentChangesToolbar() {
     if (filter === 'last-turn' && lastTurnId) {
       useAgentStore.getState().resolveTurnEditSessions(lastTurnId, false);
     } else {
-      HarnessBridge.get().resolveAllEditSessions(false);
+      getActiveAgentBridge().resolveAllEditSessions(false);
     }
   };
 

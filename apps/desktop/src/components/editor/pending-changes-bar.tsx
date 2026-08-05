@@ -1,7 +1,7 @@
 import { Check, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useAgentStore } from '@/stores/agent-store';
-import { HarnessBridge } from '@/lib/harness-bridge';
+import { getActiveAgentBridge } from '@/lib/active-agent-bridge';
 
 export function PendingChangesBar() {
   const pendingSessionCount = useAgentStore(
@@ -14,11 +14,11 @@ export function PendingChangesBar() {
   if (pendingSessionCount === 0) return null;
 
   const handleAcceptAll = () => {
-    HarnessBridge.get().resolveAllEditSessions(true);
+    getActiveAgentBridge().resolveAllEditSessions(true);
   };
 
   const handleRejectAll = () => {
-    HarnessBridge.get().resolveAllEditSessions(false);
+    getActiveAgentBridge().resolveAllEditSessions(false);
   };
 
   return (

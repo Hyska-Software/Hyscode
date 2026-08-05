@@ -211,11 +211,18 @@ index is read from the Rust-owned SQLite `projects` and `conversations` tables t
 `db_list_vortex_project_sessions` command and is merged with the local recent-project registry so
 projects with no sessions remain discoverable.
 
-Federation does not create concurrent runtimes. Exactly one `HarnessBridge`, file workspace, and
-project-scoped store set is active. Selecting a project or session goes through the existing
-project-persistence coordinator, which saves the previous project's snapshot, tears down its
-runtime, hydrates the target project, and applies the selected conversation only after generation
-and path guards pass. EDITOR continues to expose only the active project's state.
+VORTEX keeps one isolated `HarnessBridge` and `AgentStoreApi` per project/conversation runtime.
+Multiple sessions in the same project and sessions in different projects can therefore execute at
+the same time. The runtime manager owns lifecycle, cancellation, retry, status publication, and
+focus selection; only the focused runtime is projected into the shared agent-panel store used by
+the rest of the layout. Background runtimes continue receiving harness events and publish their
+own live status and message counts to the navigator.
+
+Selecting a project or session still goes through the existing project-persistence coordinator
+when the file workspace must change. That coordinator clears the shared projection without
+disposing VORTEX runtimes, hydrates the target project, and resumes projection after generation
+and path guards pass. EDITOR continues to use the legacy singleton bridge and exposes only one
+active project's runtime.
 
 ---
 

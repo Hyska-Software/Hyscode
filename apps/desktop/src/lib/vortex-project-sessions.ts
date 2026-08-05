@@ -7,6 +7,7 @@ import type {
 import { tauriInvoke } from './tauri-invoke';
 import type { RecentProject } from '@/stores/project-store';
 import { normalizeProjectPath, projectPathKey } from './project-path';
+import type { VortexRuntimeSnapshot } from './vortex-runtime-types';
 
 export interface VortexSessionSummary extends SessionSummary {
   projectId: string;
@@ -172,6 +173,107 @@ export function mergeVortexProjectSessionIndex(
     .map(mapIndexedSession)
     .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
 
+  return { projects, recentSessions };
+}
+
+/** Overlay live runtimes so sessions are visible before their next DB refresh. */
+export function mergeVortexRuntimeSessions(
+  index: VortexProjectSessionIndex,
+  runtimes: VortexRuntimeSnapshot[],
+  hiddenProjectPaths: string[] = [],
+): VortexProjectSessionIndex {
+  const hiddenKeys = new Set(hiddenProjectPaths.map(projectPathKey));
+  const projectsByKey = new Map(
+    index.projects.map((project) => [
+      projectPathKey(project.path),
+      { ...project, sessions: [...project.sessions] },
+    ]),
+  );
+
+  for (const runtime of runtimes) {
+    const normalizedPath = normalizeProjectPath(runtime.projectPath);
+    const pathKey = projectPathKey(normalizedPath);
+    if (hiddenKeys.has(pathKey)) continue;
+
+    const updatedAt = new Date(runtime.updatedAt).toISOString();
+    const existingProject = projectsByKey.get(pathKey);
+    const runtimeSession: VortexSessionSummary = {
+      id: runtime.conversationId,
+      title: runtime.title,
+      mode: runtime.mode,
+      modelId: null,
+      providerId: null,
+      messageCount: runtime.messageCount,
+      createdAt: new Date(runtime.startedAt).toISOString(),
+      updatedAt,
+      projectId: existingProject?.id ?? normalizedPath,
+      projectName: existingProject?.name ?? runtime.projectName,
+      projectPath: normalizedPath,
+    };
+
+    if (existingProject) {
+      const sessionIndex = existingProject.sessions.findIndex(
+        (session) => session.id === runtime.conversationId,
+      );
+      const sessions = [...existingProject.sessions];
+      if (sessionIndex >= 0) {
+        const current = sessions[sessionIndex];
+        sessions[sessionIndex] = {
+          ...current,
+          title: runtime.title || current.title,
+          mode: runtime.mode,
+          messageCount: Math.max(current.messageCount, runtime.messageCount),
+          updatedAt: updatedAt > current.updatedAt ? updatedAt : current.updatedAt,
+        };
+      } else {
+        sessions.push(runtimeSession);
+      }
+      sessions.sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+      projectsByKey.set(pathKey, {
+        ...existingProject,
+        lastActivityAt: latestTimestamp(existingProject.lastActivityAt, updatedAt),
+        sessions,
+      });
+    } else {
+      projectsByKey.set(pathKey, {
+        id: normalizedPath,
+        name: runtime.projectName,
+        path: normalizedPath,
+        lastActivityAt: updatedAt,
+        lastOpened: runtime.startedAt,
+        sessions: [runtimeSession],
+      });
+    }
+  }
+
+  const recentById = new Map(index.recentSessions.map((session) => [session.id, session]));
+  for (const project of projectsByKey.values()) {
+    for (const session of project.sessions) {
+      const runtime = runtimes.find(
+        (item) =>
+          item.conversationId === session.id &&
+          projectPathKey(item.projectPath) === projectPathKey(project.path),
+      );
+      if (runtime) {
+        recentById.set(session.id, {
+          ...session,
+          title: runtime.title || session.title,
+          mode: runtime.mode,
+          messageCount: Math.max(session.messageCount, runtime.messageCount),
+          updatedAt: new Date(runtime.updatedAt).toISOString(),
+        });
+      }
+    }
+  }
+
+  const projects = [...projectsByKey.values()].sort((left, right) => {
+    const activityDifference = activityTimestamp(right) - activityTimestamp(left);
+    if (activityDifference !== 0) return activityDifference;
+    return left.name.localeCompare(right.name);
+  });
+  const recentSessions = [...recentById.values()].sort((left, right) =>
+    right.updatedAt.localeCompare(left.updatedAt),
+  );
   return { projects, recentSessions };
 }
 

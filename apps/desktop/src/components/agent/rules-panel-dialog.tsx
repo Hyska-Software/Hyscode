@@ -3,7 +3,7 @@ import { X, BookText, Settings, Plus, Loader2 } from 'lucide-react';
 import { useRulesStore } from '@/stores/rules-store';
 import { useSettingsStore } from '@/stores/settings-store';
 import { useProjectStore } from '@/stores/project-store';
-import { HarnessBridge } from '@/lib/harness-bridge';
+import { getActiveAgentBridge } from '@/lib/active-agent-bridge';
 import { tauriFs } from '@/lib/tauri-fs';
 import { RuleEditorDialog } from '@/components/settings/tabs/rule-editor-dialog';
 import type { RuleEntry } from '@/stores/rules-store';
@@ -38,7 +38,7 @@ export function RulesPanelDialog({ open, onClose }: RulesPanelDialogProps) {
     let cancelled = false;
     async function load() {
       try {
-        const bridge = HarnessBridge.get();
+        const bridge = getActiveAgentBridge();
         const discovered = await bridge.loadRules();
         if (!cancelled) setDiscoveredRules(discovered);
       } catch {
@@ -60,7 +60,7 @@ export function RulesPanelDialog({ open, onClose }: RulesPanelDialogProps) {
     try {
       await tauriFs.deletePath(rule.filePath);
       removeRule(rule.id);
-      const discovered = await HarnessBridge.get().loadRules();
+      const discovered = await getActiveAgentBridge().loadRules();
       setDiscoveredRules(discovered);
     } catch (err) {
       alert(`Failed to delete: ${err instanceof Error ? err.message : String(err)}`);

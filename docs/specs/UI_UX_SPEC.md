@@ -117,10 +117,11 @@ Total viewport
 
 ### VORTEX Project and Session Navigator
 
-VORTEX uses the left agent panel to federate project and session navigation while keeping one
-project runtime active at a time. The navigator is not a second workspace store: selecting a
-project invokes the existing guarded project lifecycle, then restores that project's saved UI
-state and the explicitly selected conversation.
+VORTEX uses the left agent panel to federate project and session navigation while allowing
+multiple isolated project/session runtimes to execute concurrently. The navigator is not a second
+chat state store: selecting a project invokes the existing guarded project lifecycle when the file
+workspace must change, then focuses the selected runtime into the shared agent-panel projection.
+Background runtimes remain active and continue updating their own status in the navigator.
 
 The navigator hierarchy is:
 
@@ -137,14 +138,21 @@ VORTEX sidebar
 - Recent sessions are globally ordered and always show their project name.
 - Project groups merge durable SQLite projects with locally recent projects so empty projects are
   visible after they are opened.
+- Project headers expand/collapse without activating the project; the header action menu is kept
+  separate from the right-side new-session button.
+- Each live session shows Starting, Queued, Running, Waiting, Stopping, Completed, Needs attention,
+  or Cancelled when applicable. Active sessions can be stopped from their context menu, and failed
+  sessions can be retried without affecting other runtimes.
+- Starting a session creates an independent runtime, including when another session in the same
+  project is already running. Switching focus never cancels a background runtime.
 - Project actions can hide a project from VORTEX without deleting its folder or persisted data.
 - Session rename uses the application input dialog; session deletion is confirmed
   and destructive.
 - The project/session list owns the only scroll region. The toolbar and Settings/Extensions
   footer remain fixed.
 - Long titles truncate with a full-title tooltip. Icon-only controls have accessible labels.
-- Keyboard focus, Enter/Space activation, loading, empty, unavailable-project, retry, and active
-  turn confirmation states are required.
+- Keyboard focus, Enter/Space activation, loading, empty, unavailable-project, retry, cancellation,
+  and live-runtime status states are required.
 - EDITOR does not show federated project groups and continues to manage one active project.
 
 ---

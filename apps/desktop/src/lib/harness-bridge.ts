@@ -1,5 +1,6 @@
 // ─── Harness Bridge ─────────────────────────────────────────────────────────
-// Singleton that owns the Harness instance and wires its events → Zustand stores.
+// Owns a Harness instance and wires its events to an isolated AgentStoreApi.
+// EDITOR uses the legacy singleton instance; VORTEX creates one bridge per runtime.
 // Lives outside React to avoid re-renders during streaming.
 
 import {
@@ -32,7 +33,7 @@ import { tauriInvoke, tauriInvokeRaw } from './tauri-invoke';
 import { tauriFs } from './tauri-fs';
 import { listen as tauriListen } from '@tauri-apps/api/event';
 import { McpBridge } from './mcp-bridge';
-import { useAgentStore } from '@/stores/agent-store';
+import { useAgentStore, type AgentStoreApi } from '@/stores/agent-store';
 import { useSettingsStore } from '@/stores/settings-store';
 import { useMemoryStore } from '@/stores/memory-store';
 import { useSkillsStore } from '@/stores/skills-store';
@@ -184,6 +185,8 @@ type MutationSnapshot = {
 
 export class HarnessBridge {
   private harness: Harness;
+  private readonly agentStore: AgentStoreApi;
+  private readonly isolatedRuntime: boolean;
   private disposed = false;
   private _projectId: string = '';
   private approvalResolvers = new Map<string, (approved: boolean) => void>();
@@ -226,6 +229,7 @@ export class HarnessBridge {
 
   /** Record a completed terminal command under the active conversation. */
   private recordTerminalCommand(command: string, output: string, exitCode: number | null): void {
+    const useAgentStore = this.agentStore;
     const conversationId = useAgentStore.getState().conversationId;
     if (!conversationId) return;
     this._lastTerminalCommands.set(conversationId, {
@@ -242,7 +246,16 @@ export class HarnessBridge {
     }
   }
 
-  private constructor(workspacePath: string, projectId: string, homePath: string) {
+  private constructor(
+    workspacePath: string,
+    projectId: string,
+    homePath: string,
+    agentStore: AgentStoreApi = useAgentStore,
+    isolatedRuntime = false,
+  ) {
+    this.agentStore = agentStore;
+    this.isolatedRuntime = isolatedRuntime;
+    const useAgentStore = this.agentStore;
     this._projectId = projectId;
     const settings = useSettingsStore.getState();
     this.subAgentCoordinator = new SubAgentCoordinator(
@@ -255,6 +268,7 @@ export class HarnessBridge {
       },
     );
     window.addEventListener('offline', () => {
+      if (this.disposed) return;
       if (useAgentStore.getState().isStreaming) {
         useAgentStore
           .getState()
@@ -262,6 +276,7 @@ export class HarnessBridge {
       }
     });
     window.addEventListener('online', () => {
+      if (this.disposed) return;
       if (useAgentStore.getState().isStreaming) {
         useAgentStore
           .getState()
@@ -276,8 +291,10 @@ export class HarnessBridge {
     // Trigger one-time relevance decay on startup (best-effort, non-blocking)
     memoryManager.decayRelevance(projectId).catch(() => {});
 
-    // Sync projectId to memory store so sidebar can query memories
-    useMemoryStore.getState().setProjectId(projectId);
+    // Only the legacy active workspace bridge owns the shared memory-panel
+    // projection. Background VORTEX runtimes keep memory execution scoped to
+    // their own MemoryManager until the runtime is focused.
+    if (!isolatedRuntime) useMemoryStore.getState().setProjectId(projectId);
 
     // Create SkillLoader with Tauri-backed file system callbacks
     const skillLoader = new SkillLoader({
@@ -483,6 +500,40 @@ export class HarnessBridge {
     }
   }
 
+  /**
+   * Create an isolated bridge for a VORTEX conversation.
+   *
+   * The legacy `init()` method remains the singleton bridge used by EDITOR.
+   * VORTEX runtimes provide their own AgentStoreApi so concurrent sessions do
+   * not share transcript, approval, or turn lifecycle state.
+   */
+  static async createSession(
+    workspacePath: string,
+    projectId: string,
+    agentStore: AgentStoreApi,
+  ): Promise<HarnessBridge> {
+    let homePath: string;
+    try {
+      homePath = await tauriInvokeRaw<string>('get_home_dir', {});
+    } catch {
+      homePath = HarnessBridge.getHomePathFallback();
+    }
+    HarnessBridge._homePathCache = homePath;
+
+    const instance = new HarnessBridge(workspacePath, projectId, homePath, agentStore, true);
+    try {
+      await instance.loadModePolicies();
+      await instance.loadAndSyncRules();
+      instance.registerSpawnSubagentTool();
+      instance.subscribeToTabSwitches();
+      return instance;
+    } catch (error) {
+      instance.disposed = true;
+      instance.cancel();
+      throw error;
+    }
+  }
+
   static get(): HarnessBridge {
     if (!_instance)
       throw new Error('HarnessBridge not initialized. Call HarnessBridge.init() first.');
@@ -505,6 +556,7 @@ export class HarnessBridge {
     userMessage: string,
     options: { hidden?: boolean; excludeLastAssistantFromHistory?: boolean } = {},
   ): Promise<void> {
+    const useAgentStore = this.agentStore;
     const store = useAgentStore.getState();
     const settings = useSettingsStore.getState();
 
@@ -571,13 +623,22 @@ export class HarnessBridge {
     this.harness.setMode(harnessMode);
     dbg(`Modo: ${harnessMode} (agent: ${store.mode})`);
 
+    if (this.isolatedRuntime) this.syncSharedAgentPreferences();
+
     // Sync active skills from skills store → harness (respects per-mode assignments)
-    const activeForMode = useSkillsStore.getState().getActiveForMode(store.mode as AgentType);
-    this.syncActiveSkills(activeForMode.map((s) => s.name));
-    dbg(`Skills ativas: ${activeForMode.length}`);
+    const activeSkillNames = this.isolatedRuntime
+      ? (this.harness.getSkillLoader()?.getActive().map((skill) => skill.frontmatter.name) ?? [])
+      : useSkillsStore
+          .getState()
+          .getActiveForMode(store.mode as AgentType)
+          .map((skill) => skill.name);
+    this.syncActiveSkills(activeSkillNames);
+    dbg(`Skills ativas: ${activeSkillNames.length}`);
 
     // Sync active rules from rules store → harness
-    const activeRules = useRulesStore.getState().getActiveRules();
+    const activeRules = this.isolatedRuntime
+      ? (this.harness.getRuleLoader()?.getActive() ?? [])
+      : useRulesStore.getState().getActiveRules();
     this.syncActiveRules(activeRules.map((r) => r.id));
     dbg(`Rules ativas: ${activeRules.length}`);
 
@@ -827,6 +888,7 @@ export class HarnessBridge {
   }
 
   async retryTurn(): Promise<void> {
+    const useAgentStore = this.agentStore;
     const state = useAgentStore.getState();
     if (state.isStreaming || !state.recoverableError) return;
     const lastUserMessage = [...state.messages]
@@ -841,6 +903,7 @@ export class HarnessBridge {
   }
 
   async continuePartialTurn(): Promise<void> {
+    const useAgentStore = this.agentStore;
     const state = useAgentStore.getState();
     const recovery = state.recoverableError;
     if (state.isStreaming || !recovery || recovery.action !== 'continue') return;
@@ -852,6 +915,7 @@ export class HarnessBridge {
   }
 
   cancel(): void {
+    const useAgentStore = this.agentStore;
     useAgentStore.setState((draft) => {
       for (const toolCall of draft.pendingToolCalls) {
         if (toolCall.status === 'running' || toolCall.status === 'approved') {
@@ -868,6 +932,12 @@ export class HarnessBridge {
     this._subAgentRunners.clear();
     this._approvalOwner.clear();
     this.harness.cancel();
+  }
+
+  dispose(): void {
+    if (this.disposed) return;
+    this.disposed = true;
+    this.cancel();
   }
 
   /** Cancel a single sub-agent: queued children never start; active ones abort. */
@@ -888,6 +958,7 @@ export class HarnessBridge {
 
   /** Resume SDD execution */
   async resumeSdd(): Promise<void> {
+    const useAgentStore = this.agentStore;
     const store = useAgentStore.getState();
     store.setStreaming(true);
     try {
@@ -913,6 +984,7 @@ export class HarnessBridge {
   }
 
   async retrySddTask(taskId: string): Promise<void> {
+    const useAgentStore = this.agentStore;
     await this.harness.getSddEngine()?.retryTask(taskId);
     useAgentStore.getState().updateSddTask(taskId, { status: 'pending', agentOutput: null });
     this.debug(`SDD task queued for retry: ${taskId}`);
@@ -923,6 +995,7 @@ export class HarnessBridge {
    * Switches mode to debug and sends the error context as a message.
    */
   async debugFailedSddTask(): Promise<void> {
+    const useAgentStore = this.agentStore;
     const failedTask = this.harness.getSddFailedTask();
     if (!failedTask) {
       this.debug('No failed SDD task to debug');
@@ -953,6 +1026,7 @@ Investigate the error, fix the underlying issue in the affected files, and verif
    * Generates the spec and surfaces it to the store for user review.
    */
   async startSdd(description: string): Promise<void> {
+    const useAgentStore = this.agentStore;
     const store = useAgentStore.getState();
     const settings = useSettingsStore.getState();
 
@@ -993,6 +1067,7 @@ Investigate the error, fix the underlying issue in the affected files, and verif
    * Approve the SDD spec. Generates the plan and surfaces tasks for review.
    */
   async approveSddSpec(): Promise<void> {
+    const useAgentStore = this.agentStore;
     const store = useAgentStore.getState();
     store.setStreaming(true);
 
@@ -1013,6 +1088,7 @@ Investigate the error, fix the underlying issue in the affected files, and verif
    * Reject the SDD spec and regenerate it.
    */
   async rejectSddSpec(feedback?: string): Promise<void> {
+    const useAgentStore = this.agentStore;
     const store = useAgentStore.getState();
     store.setStreaming(true);
     store.setSddSpec(null);
@@ -1034,6 +1110,7 @@ Investigate the error, fix the underlying issue in the affected files, and verif
    * Promote the current build-mode conversation into a structured SDD session.
    */
   async promoteToSdd(): Promise<void> {
+    const useAgentStore = this.agentStore;
     const store = useAgentStore.getState();
     const lastUserMessage = [...store.messages].reverse().find((m) => m.role === 'user');
     const description =
@@ -1075,6 +1152,7 @@ Investigate the error, fix the underlying issue in the affected files, and verif
    * Approve the SDD plan and start execution.
    */
   async approveSddPlan(): Promise<void> {
+    const useAgentStore = this.agentStore;
     const store = useAgentStore.getState();
     store.setStreaming(true);
 
@@ -1099,12 +1177,14 @@ Investigate the error, fix the underlying issue in the affected files, and verif
   }
 
   setAgentType(type: AgentType): void {
+    const useAgentStore = this.agentStore;
     this.harness.setAgentType(type);
     useAgentStore.getState().setMode(type as import('@/stores/agent-store').AgentMode);
   }
 
   /** Resolve a pending mode switch delegation (approve or deny) */
   resolveModeSwitch(approved: boolean): void {
+    const useAgentStore = this.agentStore;
     const store = useAgentStore.getState();
     const req = store.pendingModeSwitch;
     if (!req) return;
@@ -1124,6 +1204,7 @@ Investigate the error, fix the underlying issue in the affected files, and verif
 
   /** Resolve a pending approval from the UI */
   resolveApproval(id: string, approved: boolean): void {
+    const useAgentStore = this.agentStore;
     const resolver = this.approvalResolvers.get(id);
     if (resolver) {
       resolver(approved);
@@ -1163,6 +1244,7 @@ Investigate the error, fix the underlying issue in the affected files, and verif
 
   /** Accept or revert a single pending file change */
   async resolveFileChange(id: string, accepted: boolean): Promise<void> {
+    const useAgentStore = this.agentStore;
     const store = useAgentStore.getState();
     const change = store.pendingFileChanges.find((c) => c.id === id);
     if (!change || change.status !== 'pending') return;
@@ -1178,6 +1260,7 @@ Investigate the error, fix the underlying issue in the affected files, and verif
 
   /** Accept or revert ALL pending file changes in bulk */
   async resolveAllFileChanges(accepted: boolean): Promise<void> {
+    const useAgentStore = this.agentStore;
     const store = useAgentStore.getState();
     const pending = store.pendingFileChanges.filter((c) => c.status === 'pending');
 
@@ -1194,6 +1277,7 @@ Investigate the error, fix the underlying issue in the affected files, and verif
 
   /** Accept or revert a single agent edit session */
   async resolveEditSession(id: string, accepted: boolean): Promise<void> {
+    const useAgentStore = this.agentStore;
     const store = useAgentStore.getState();
     const session = store.agentEditSessions.find(
       (s) => s.id === id && (s.phase === 'streaming' || s.phase === 'pending_review'),
@@ -1216,6 +1300,7 @@ Investigate the error, fix the underlying issue in the affected files, and verif
 
   /** Accept or revert ALL active agent edit sessions */
   async resolveAllEditSessions(accepted: boolean): Promise<void> {
+    const useAgentStore = this.agentStore;
     const store = useAgentStore.getState();
     const active = store.agentEditSessions.filter(
       (s) => s.phase === 'streaming' || s.phase === 'pending_review',
@@ -1232,6 +1317,7 @@ Investigate the error, fix the underlying issue in the affected files, and verif
   }
 
   async resolveTurnEditSessions(turnId: string, accepted: boolean): Promise<void> {
+    const useAgentStore = this.agentStore;
     const store = useAgentStore.getState();
     const active = store.agentEditSessions.filter(
       (session) =>
@@ -1256,6 +1342,7 @@ Investigate the error, fix the underlying issue in the affected files, and verif
 
   /** Sync conversation ID when restoring a previous session */
   restoreSession(conversationId: string): void {
+    const useAgentStore = this.agentStore;
     this.harness.setConversationId(conversationId);
     useAgentStore.getState().setConversationId(conversationId);
     // Clear session trust when switching sessions
@@ -1274,6 +1361,7 @@ Investigate the error, fix the underlying issue in the affected files, and verif
   }
 
   private async restoreSddForConversation(conversationId: string): Promise<void> {
+    const useAgentStore = this.agentStore;
     const rows = await tauriInvokeRaw<string[]>('db_sdd_list_sessions', {
       projectId: this._projectId,
     });
@@ -1295,6 +1383,7 @@ Investigate the error, fix the underlying issue in the affected files, and verif
 
   /** Clear harness context sources (call when switching tabs or restoring sessions). */
   clearTabContext(): void {
+    const useAgentStore = this.agentStore;
     this.harness.getContextManager().clearConversationContext();
     useAgentStore.getState().setGatheredContext([]);
   }
@@ -1304,8 +1393,10 @@ Investigate the error, fix the underlying issue in the affected files, and verif
    * When the user switches tabs, immediately sync the harness to the new tab's state.
    */
   private subscribeToTabSwitches(): void {
+    const useAgentStore = this.agentStore;
     let prevTabId = useAgentStore.getState().activeTabId;
     useAgentStore.subscribe((state) => {
+      if (this.disposed) return;
       if (state.activeTabId !== prevTabId) {
         prevTabId = state.activeTabId;
         this.syncToActiveTab(state);
@@ -1315,6 +1406,7 @@ Investigate the error, fix the underlying issue in the affected files, and verif
 
   /** Sync the harness to whatever tab is currently active (called on tab switch). */
   private syncToActiveTab(state: ReturnType<typeof useAgentStore.getState>): void {
+    const useAgentStore = this.agentStore;
     // Reset context so nothing bleeds from the previous tab
     this.clearTabContext();
     // Point the harness at the new tab's conversation
@@ -1333,6 +1425,7 @@ Investigate the error, fix the underlying issue in the affected files, and verif
     try {
       await this.harness.loadSkills();
       if (this.disposed) return [];
+      this.syncSharedAgentPreferences();
       const loader = this.harness.getSkillLoader();
       const all = loader?.getAll() ?? [];
       this.debug(`Skills loaded: ${all.length} total`);
@@ -1358,6 +1451,33 @@ Investigate the error, fix the underlying issue in the affected files, and verif
     const active = loader.getActive();
     this.harness.setActiveSkills(active);
     this.harness.getContextManager().setAllSkills(loader.getAll());
+  }
+
+  /** Apply persisted UI preferences to an isolated runtime without replacing shared stores. */
+  syncSharedAgentPreferences(): void {
+    if (!this.isolatedRuntime) return;
+
+    const rules = useRulesStore.getState();
+    const ruleLoader = this.harness.getRuleLoader();
+    if (ruleLoader) {
+      for (const rule of ruleLoader.getAll()) {
+        ruleLoader.setEnabled(rule.id, rules.enabledMap[rule.id] ?? rule.enabled);
+      }
+      this.syncActiveRules(ruleLoader.getActive().map((rule) => rule.id));
+    }
+
+    const skills = useSkillsStore.getState();
+    const skillLoader = this.harness.getSkillLoader();
+    if (skillLoader) {
+      const mode = this.agentStore.getState().mode as AgentType;
+      for (const skill of skillLoader.getAll()) {
+        const enabled = skills.enabledMap[skill.id] ?? skill.active;
+        const modes = skills.modeOverrides[skill.id] ?? [];
+        skill.active = enabled && (modes.length === 0 || modes.includes(mode));
+      }
+      this.harness.setActiveSkills(skillLoader.getActive());
+      this.harness.getContextManager().setAllSkills(skillLoader.getAll());
+    }
   }
 
   async loadRules(): Promise<import('@hyscode/agent-harness').Rule[]> {
@@ -1396,10 +1516,15 @@ Investigate the error, fix the underlying issue in the affected files, and verif
     try {
       const discovered = await this.loadRules();
       if (!this.disposed && discovered.length > 0) {
-        useRulesStore.getState().setDiscoveredRules(discovered);
-        const active = useRulesStore.getState().getActiveRules();
-        this.syncActiveRules(active.map((r) => r.id));
-        this.debug(`Rules synced: ${active.length}/${discovered.length} active`);
+        if (this.isolatedRuntime) {
+          this.syncSharedAgentPreferences();
+          this.debug(`Rules synced for isolated runtime: ${discovered.length} discovered`);
+        } else {
+          useRulesStore.getState().setDiscoveredRules(discovered);
+          const active = useRulesStore.getState().getActiveRules();
+          this.syncActiveRules(active.map((r) => r.id));
+          this.debug(`Rules synced: ${active.length}/${discovered.length} active`);
+        }
       }
     } catch (err) {
       this.debug(`Rules init failed: ${err instanceof Error ? err.message : String(err)}`);
@@ -1409,6 +1534,7 @@ Investigate the error, fix the underlying issue in the affected files, and verif
   /** Register the spawn_subagent built-in tool so non-chat agents can delegate subtasks. */
   private registerSpawnSubagentTool(): void {
     const bridge = this;
+    const useAgentStore = this.agentStore;
 
     const handler: ToolHandler = {
       definition: {
@@ -1655,6 +1781,7 @@ Investigate the error, fix the underlying issue in the affected files, and verif
   // ─── Event Handling ─────────────────────────────────────────────────
 
   private debug(msg: string): void {
+    const useAgentStore = this.agentStore;
     const line = `[${new Date().toLocaleTimeString()}] ${msg}`;
     console.log('[Harness]', msg);
     useAgentStore.getState().addDebugLine(line);
@@ -1662,6 +1789,7 @@ Investigate the error, fix the underlying issue in the affected files, and verif
 
   private handleEvent(event: HarnessEvent): void {
     if (this.disposed) return;
+    const useAgentStore = this.agentStore;
     const store = useAgentStore.getState();
 
     if (event.type === 'turn_start' && !this.activeTurnId) {
@@ -2041,7 +2169,10 @@ Investigate the error, fix the underlying issue in the affected files, and verif
 
       case 'memories_extracted': {
         const count = (event as { count?: number }).count ?? 0;
-        if (count > 0) {
+        if (
+          count > 0 &&
+          (!this.isolatedRuntime || useMemoryStore.getState().projectId === this._projectId)
+        ) {
           this.debug(`🧠 Extracted ${count} memory/memories`);
           // Reload from DB so sidebar reflects new memories
           useMemoryStore
@@ -2055,10 +2186,12 @@ Investigate the error, fix the underlying issue in the affected files, and verif
       case 'memory_created': {
         const mem = (event as { memory?: { title?: string } }).memory;
         this.debug(`🧠 Memory created: ${mem?.title ?? '(unknown)'}`);
-        useMemoryStore
-          .getState()
-          .loadMemories()
-          .catch(() => {});
+        if (!this.isolatedRuntime || useMemoryStore.getState().projectId === this._projectId) {
+          useMemoryStore
+            .getState()
+            .loadMemories()
+            .catch(() => {});
+        }
         break;
       }
     }
@@ -2073,6 +2206,7 @@ Investigate the error, fix the underlying issue in the affected files, and verif
     c: import('@hyscode/agent-harness').FileChangePending,
     turnId?: string,
   ): void {
+    const useAgentStore = this.agentStore;
     const store = useAgentStore.getState();
     const snapshot = this.mutationSnapshots.get(c.filePath);
     const isNewFile = c.originalContent === null;
@@ -2139,6 +2273,7 @@ Investigate the error, fix the underlying issue in the affected files, and verif
    * them; a chunk that omits them contributes 0.
    */
   private applyUsageChunk(u: import('@hyscode/ai-providers').TokenUsage): void {
+    const useAgentStore = this.agentStore;
     const current = useAgentStore.getState().tokenUsage;
     const inputTokens = (current?.inputTokens ?? 0) + u.inputTokens;
     const outputTokens = (current?.outputTokens ?? 0) + u.outputTokens;
@@ -2173,6 +2308,7 @@ Investigate the error, fix the underlying issue in the affected files, and verif
    * Called by SubAgentRunner via its onBridgeEvent callback.
    */
   handleSubAgentEvent(_subAgentId: string, event: HarnessEvent): void {
+    const useAgentStore = this.agentStore;
     switch (event.type) {
       case 'file_change_pending': {
         // Sub-agent edits join the parent turn's review pipeline so they can
@@ -2202,6 +2338,7 @@ Investigate the error, fix the underlying issue in the affected files, and verif
     },
     signal: AbortSignal,
   ): Promise<boolean> {
+    const useAgentStore = this.agentStore;
     const settings = useSettingsStore.getState();
     const mode = settings.approvalMode;
 
@@ -2274,6 +2411,7 @@ Investigate the error, fix the underlying issue in the affected files, and verif
     },
     signal: AbortSignal,
   ): Promise<boolean> {
+    const useAgentStore = this.agentStore;
     this.debug(`Delegação solicitada: ${request.fromMode} → ${request.toMode} (${request.reason})`);
 
     // Push to store so ModeSwitchDialog renders
@@ -2305,6 +2443,7 @@ Investigate the error, fix the underlying issue in the affected files, and verif
     title?: string,
     signal?: AbortSignal,
   ): Promise<import('@hyscode/agent-harness').AgentQuestionAnswer[]> {
+    const useAgentStore = this.agentStore;
     this.debug(`Agent is asking ${questions.length} question(s): ${title ?? '(no title)'}`);
 
     // Push to store so AgentQuestionCard renders
@@ -2329,6 +2468,7 @@ Investigate the error, fix the underlying issue in the affected files, and verif
     id: string,
     answers: import('@hyscode/agent-harness').AgentQuestionAnswer[],
   ): void {
+    const useAgentStore = this.agentStore;
     const resolver = this.userQuestionResolvers.get(id);
     if (resolver) {
       this.userQuestionResolvers.delete(id);
@@ -2405,6 +2545,7 @@ Investigate the error, fix the underlying issue in the affected files, and verif
 
   /** Build a deterministic environment context package for any child turn. */
   private async buildEnvironmentContext(): Promise<EnvironmentContext> {
+    const useAgentStore = this.agentStore;
     const env: EnvironmentContext = {
       workspacePath: this.harness.getWorkspacePath() as string,
     };
@@ -2661,6 +2802,7 @@ ${hints.map((h) => `- ${h}`).join('\n')}
     record: TurnRecord,
     recordAlreadyCommitted = false,
   ): Promise<void> {
+    const useAgentStore = this.agentStore;
     const store = useAgentStore.getState();
     const conversationId = record.conversationId || store.conversationId;
     if (!conversationId) return;
@@ -2732,6 +2874,7 @@ ${hints.map((h) => `- ${h}`).join('\n')}
    * `sessionTokenUsage`. Fire-and-forget; the UI only updates best-effort.
    */
   private async refreshSessionUsage(): Promise<void> {
+    const useAgentStore = this.agentStore;
     const conversationId = useAgentStore.getState().conversationId;
     if (!conversationId) return;
     try {
@@ -2747,6 +2890,7 @@ ${hints.map((h) => `- ${h}`).join('\n')}
   }
 
   private async commitTurn(titleSource: string, record: TurnRecord): Promise<void> {
+    const useAgentStore = this.agentStore;
     const store = useAgentStore.getState();
     const settings = useSettingsStore.getState();
     const conversationId = store.conversationId;
@@ -2790,6 +2934,7 @@ ${hints.map((h) => `- ${h}`).join('\n')}
   }
 
   private async ensureConversationExists(titleSource: string): Promise<void> {
+    const useAgentStore = this.agentStore;
     const store = useAgentStore.getState();
     const conversationId = store.conversationId;
     if (!conversationId) throw new Error('Cannot persist a turn without a conversation ID.');
@@ -2869,6 +3014,7 @@ ${hints.map((h) => `- ${h}`).join('\n')}
     path: string,
     session?: Pick<AgentEditSession, 'diskOriginalContent' | 'originalContent' | 'wasDirty'>,
   ): Promise<void> {
+    const useAgentStore = this.agentStore;
     const captured = this.mutationSnapshots.get(path);
     const diskBefore =
       captured?.diskBefore ?? session?.diskOriginalContent ?? session?.originalContent ?? null;

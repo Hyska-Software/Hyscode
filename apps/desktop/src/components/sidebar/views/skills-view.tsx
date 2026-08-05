@@ -26,7 +26,7 @@ import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip
 import { useSkillsStore, type SkillEntry } from '@/stores/skills-store';
 import { useEditorStore } from '@/stores/editor-store';
 import { useProjectStore } from '@/stores/project-store';
-import { HarnessBridge } from '@/lib/harness-bridge';
+import { getActiveAgentBridge } from '@/lib/active-agent-bridge';
 import { tauriInvoke } from '@/lib/tauri-invoke';
 import { writeClipboard } from '@/lib/utils';
 import { getViewerType } from '@/lib/utils';
@@ -205,7 +205,7 @@ export function SkillsView() {
   const handleRefresh = useCallback(async () => {
     setRefreshing(true);
     try {
-      const bridge = HarnessBridge.get();
+      const bridge = getActiveAgentBridge();
       const discovered = await bridge.loadSkills();
       useSkillsStore.getState().setDiscoveredSkills(discovered);
     } catch (err) {
