@@ -227,6 +227,25 @@ interface ToolCallDisplay {
 
 ## Context System
 
+### Native project instructions
+
+When a project is open, the agent resolves `AGENTS.md` and `CLAUDE.md` as
+mandatory, read-only project instructions. Discovery is case-insensitive and
+supports both names simultaneously. Resolution walks from the selected
+workspace root to each `ruleTargetPaths` directory in deterministic order:
+root first, then nested directories, with `AGENTS.md` before `CLAUDE.md` in the
+same directory. The workspace root is the containment boundary; parent and
+external paths are ignored. Discovery diagnostics are surfaced for unreadable,
+empty, missing, or oversized candidates without blocking the session.
+
+Native instructions are refreshed when the session/project opens and before
+each turn, so edits take effect without a permanent watcher or restart. They
+are injected after managed global/workspace rules and before skills in a
+separate project-instructions section. They never supersede system/developer
+instructions, safety controls, approval policy, path policy, or an explicit
+user request. The UI may display these entries, but cannot disable, delete, or
+edit them; only `.hyscode/rules` remains user-managed.
+
 ### Context Chips
 
 Files and symbols added to the conversation context appear as chips:

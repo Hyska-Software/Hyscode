@@ -526,6 +526,8 @@ export type TurnRequest = {
   userMessage: string;
   history: Message[];
   images?: Array<{ base64: string; mediaType: string }>;
+  /** Files/directories that determine the native project-instruction scope. */
+  ruleTargetPaths?: string[];
 };
 
 export type TurnOutcome = {
@@ -666,11 +668,33 @@ export interface AgentQuestionAnswer {
 
 export type RuleScope = 'global' | 'workspace';
 
+export type RuleOrigin = 'managed' | 'native';
+
+export type RuleDiagnosticCode =
+  | 'outside-workspace'
+  | 'missing-file'
+  | 'directory-unreadable'
+  | 'file-unreadable'
+  | 'empty-file'
+  | 'file-too-large'
+  | 'total-size-exceeded';
+
+export interface RuleDiagnostic {
+  code: RuleDiagnosticCode;
+  path: string;
+  message: string;
+}
+
 export interface Rule {
   id: string;
   name: string;
   filePath: string;
   scope: RuleScope;
+  origin: RuleOrigin;
+  /** Native project instructions cannot be disabled or edited in HysCode. */
+  mandatory: boolean;
+  /** Directory from which a native instruction applies. */
+  appliesFrom?: string;
   content: string;
   enabled: boolean;
 }

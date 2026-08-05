@@ -226,6 +226,33 @@ interface SddTask {
 
 Responsible for assembling the context window sent to the LLM.
 
+### Native project instructions
+
+`RuleLoader` is the single owner of rule discovery and resolution. For an open
+workspace it discovers `AGENTS.md` and `CLAUDE.md` case-insensitively from the
+workspace root through each requested target directory. The root is the trust
+boundary: parent directories, the home directory, and targets outside the
+workspace are never searched. Both filenames may be present in one directory;
+the deterministic order is workspace root to target, then `AGENTS.md` before
+`CLAUDE.md` at the same level.
+
+Native rules have path-derived IDs, `origin: 'native'`, `mandatory: true`, and
+an `appliesFrom` directory. They are always active, read-only, and separate
+from the editable `.hyscode/rules` entries. Missing, empty, unreadable, or
+oversized files produce discovery diagnostics and do not prevent a session
+from starting. `TurnRequest.ruleTargetPaths` lets desktop and TUI provide the
+workspace, active file, and context-file scope.
+
+The harness refreshes rules before the first provider request and at the start
+of every later turn. The harness owns the effective injected list; desktop and
+TUI stores are projections of discovery plus preferences for managed rules.
+`Harness.createChild()` forks the loader and copies the resolved target scope,
+so a sub-agent cannot race or mutate its parent's rule state. Native
+instructions are rendered in a dedicated `<project_instructions>` prompt
+section after managed global/workspace rules and before skills. They cannot
+override system or developer instructions, the explicit user request, safety
+rules, tool-approval requirements, or workspace path policy.
+
 ### Context Sources
 
 | Source               | Priority | Description                                  |

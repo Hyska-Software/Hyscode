@@ -1,11 +1,12 @@
-// ─── Rule Loader ────────────────────────────────────────────────────────────
-// Loads rule definitions from global and workspace directories.
-// Rules are plain Markdown files (AGENTS.md-compatible) with no frontmatter.
+import {
+  ProjectInstructionResolver,
+  type ProjectInstructionDirectoryEntry,
+  type ProjectInstructionReadFile,
+} from './project-instructions';
+import type { Rule, RuleDiagnostic, RuleScope } from './types';
 
-import type { Rule, RuleScope } from './types';
-
-export type ReadDirFn = (path: string) => Promise<Array<{ name: string; is_dir: boolean }>>;
-export type ReadFileFn = (path: string) => Promise<string>;
+export type ReadDirFn = (path: string) => Promise<Array<ProjectInstructionDirectoryEntry>>;
+export type ReadFileFn = ProjectInstructionReadFile;
 export type PathExistsFn = (path: string) => Promise<boolean>;
 
 export interface RuleLoaderConfig {
@@ -14,27 +15,59 @@ export interface RuleLoaderConfig {
   readDir: ReadDirFn;
   readFile: ReadFileFn;
   pathExists: PathExistsFn;
+  maxNativeFileBytes?: number;
+  maxNativeTotalBytes?: number;
 }
 
 export class RuleLoader {
   private rules: Rule[] = [];
+  private diagnostics: RuleDiagnostic[] = [];
   private config: RuleLoaderConfig;
 
   constructor(config: RuleLoaderConfig) {
     this.config = config;
   }
 
-  async loadAll(): Promise<Rule[]> {
+  async loadAll(targetPaths: readonly string[] = []): Promise<Rule[]> {
+    const previousEnabled = new Map(this.rules.map((rule) => [rule.id, rule.enabled]));
     const global = await this.loadFromDir(this.config.globalPath, 'global');
 
     let workspace: Rule[] = [];
+    let native: Rule[] = [];
+    let diagnostics: RuleDiagnostic[] = [];
     if (this.config.workspacePath) {
       const wsRulesPath = `${this.config.workspacePath}/.hyscode/rules`;
       workspace = await this.loadFromDir(wsRulesPath, 'workspace');
+
+      const resolver = new ProjectInstructionResolver({
+        workspacePath: this.config.workspacePath,
+        readDir: this.config.readDir,
+        readFile: this.config.readFile,
+        pathExists: this.config.pathExists,
+        maxFileBytes: this.config.maxNativeFileBytes,
+        maxTotalBytes: this.config.maxNativeTotalBytes,
+      });
+      const resolution = await resolver.resolve(targetPaths);
+      diagnostics = resolution.diagnostics;
+      native = resolution.files.map((instruction): Rule => ({
+        id: instruction.id,
+        name: instruction.name,
+        filePath: instruction.filePath,
+        scope: 'workspace',
+        origin: 'native',
+        mandatory: true,
+        appliesFrom: instruction.appliesFrom,
+        content: instruction.content,
+        enabled: true,
+      }));
     }
 
-    // Merge: workspace > global (by name)
-    this.rules = this.mergeRules(global, workspace);
+    const merged = [...this.mergeRules(global, workspace), ...native];
+    this.rules = merged.map((rule) => ({
+      ...rule,
+      enabled: rule.mandatory ? true : previousEnabled.get(rule.id) ?? rule.enabled,
+    }));
+    this.diagnostics = diagnostics;
     return this.rules;
   }
 
@@ -42,15 +75,32 @@ export class RuleLoader {
     return this.rules;
   }
 
-  getById(id: string): Rule | undefined {
-    return this.rules.find((r) => r.id === id);
-  }
-
   getActive(): Rule[] {
-    return this.rules.filter((r) => r.enabled);
+    return this.rules.filter((rule) => rule.enabled || rule.mandatory);
   }
 
-  /** Enable a rule by id */
+  getDiagnostics(): RuleDiagnostic[] {
+    return [...this.diagnostics];
+  }
+
+  /** Update the managed global-rule directory before the next refresh. */
+  setGlobalPath(globalPath: string): void {
+    this.config = { ...this.config, globalPath };
+  }
+
+  /** Create an isolated loader for a child harness without sharing mutable rule state. */
+  fork(): RuleLoader {
+    const child = new RuleLoader(this.config);
+    child.rules = this.rules.map((rule) => ({ ...rule }));
+    child.diagnostics = [...this.diagnostics];
+    return child;
+  }
+
+  getById(id: string): Rule | undefined {
+    return this.rules.find((rule) => rule.id === id);
+  }
+
+  /** Enable a rule by id. Native project instructions are always enabled. */
   enable(id: string): boolean {
     const rule = this.getById(id);
     if (!rule) return false;
@@ -58,31 +108,26 @@ export class RuleLoader {
     return true;
   }
 
-  /** Disable a rule by id */
+  /** Disable a managed rule by id. Native project instructions cannot be disabled. */
   disable(id: string): boolean {
     const rule = this.getById(id);
-    if (!rule) return false;
+    if (!rule || rule.mandatory) return false;
     rule.enabled = false;
     return true;
   }
 
-  /** Set enabled state for a rule by id */
+  /** Set enabled state for a rule by id while preserving mandatory instructions. */
   setEnabled(id: string, enabled: boolean): boolean {
-    const rule = this.getById(id);
-    if (!rule) return false;
-    rule.enabled = enabled;
-    return true;
+    return enabled ? this.enable(id) : this.disable(id);
   }
 
-  /** Compute the file path for a new rule */
+  /** Compute the file path for a new managed rule. */
   getRulePath(name: string, scope: RuleScope): string {
     const dir = scope === 'global'
       ? this.config.globalPath
       : `${this.config.workspacePath}/.hyscode/rules`;
     return `${dir}/${name}.md`;
   }
-
-  // ─── Private ──────────────────────────────────────────────────────────
 
   private async loadFromDir(dirPath: string, scope: RuleScope): Promise<Rule[]> {
     try {
@@ -93,11 +138,11 @@ export class RuleLoader {
       const rules: Rule[] = [];
 
       for (const entry of entries) {
-        if (entry.is_dir || !entry.name.endsWith('.md')) continue;
+        if (entry.is_dir || !entry.name.toLowerCase().endsWith('.md')) continue;
 
         try {
           const filePath = `${dirPath}/${entry.name}`;
-          const content = await this.config.readFile(filePath);
+          const content = (await this.config.readFile(filePath)).trim();
           const name = entry.name.replace(/\.md$/i, '');
 
           rules.push({
@@ -105,11 +150,13 @@ export class RuleLoader {
             name,
             filePath,
             scope,
-            content: content.trim(),
-            enabled: true, // default; actual state managed by store
+            origin: 'managed',
+            mandatory: false,
+            content,
+            enabled: true,
           });
         } catch {
-          // Skip invalid rule files
+          // Managed rule files remain best-effort for backward compatibility.
         }
       }
 
@@ -122,12 +169,8 @@ export class RuleLoader {
   private mergeRules(global: Rule[], workspace: Rule[]): Rule[] {
     const byName = new Map<string, Rule>();
 
-    for (const rule of global) {
-      byName.set(rule.name, rule);
-    }
-    for (const rule of workspace) {
-      byName.set(rule.name, rule);
-    }
+    for (const rule of global) byName.set(rule.name, rule);
+    for (const rule of workspace) byName.set(rule.name, rule);
 
     return Array.from(byName.values());
   }

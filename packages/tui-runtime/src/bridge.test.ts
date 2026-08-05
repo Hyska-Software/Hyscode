@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { createInterface, type Interface } from 'node:readline';
 import os from 'node:os';
 import path from 'node:path';
@@ -290,6 +290,7 @@ describe('shared harness bridge protocol', () => {
   it('streams through the real provider adapter, pauses for approval, executes a tool, and persists completion', async () => {
     const directory = await mkdtemp(path.join(os.tmpdir(), 'hyscode-tui-turn-'));
     temporaryDirectories.push(directory);
+    await writeFile(path.join(directory, 'AGENTS.md'), 'Always verify the fixture output.', 'utf8');
     const fixture = await startProviderFixture();
     const registry = getProviderRegistry();
     vi.stubEnv('HYSCODE_CONFIG_PATH', path.join(directory, 'settings.json'));
@@ -375,6 +376,12 @@ describe('shared harness bridge protocol', () => {
       expect(turn.response).toContain('updated successfully');
       expect(await readFile(path.join(directory, 'fixture-output.txt'), 'utf8')).toBe('updated by fixture');
       expect(fixture.requests.length).toBeGreaterThanOrEqual(2);
+      const firstRequestMessages = Array.isArray(fixture.requests[0]?.messages)
+        ? fixture.requests[0].messages as Array<{ role?: string; content?: string }>
+        : [];
+      expect(firstRequestMessages.find((message) => message.role === 'system')?.content).toContain(
+        'Always verify the fixture output.',
+      );
       const toolResultRequest = fixture.requests.find((request) => (
         Array.isArray(request.messages)
         && (request.messages as Array<{ role?: string }>).some((message) => message.role === 'tool')

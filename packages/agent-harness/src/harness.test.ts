@@ -6,6 +6,7 @@ import {
   type StreamChunk,
 } from '@hyscode/ai-providers';
 import { Harness } from './harness';
+import { RuleLoader } from './rule-loader';
 import type { HarnessEvent, TerminalRuntimeAdapter } from './types';
 
 const model = {
@@ -190,6 +191,69 @@ describe('Harness lifecycle', () => {
     expect(observedToolResult).toContain('stdout from command');
     expect(observedToolResult).toContain('stderr from command');
     expect(observedToolResult).toContain('Error: Exit code: 1');
+  });
+
+  it('refreshes native instructions before provider requests and inherits them in children', async () => {
+    const prompts: string[] = [];
+    let instructionContent = 'first instruction';
+    getProviderRegistry().register({
+      id: 'harness-test',
+      name: 'Harness Test',
+      models: [model],
+      isConfigured: () => true,
+      listModels: async () => [model],
+      async *chat(params: ChatParams): AsyncIterable<StreamChunk> {
+        prompts.push(params.systemPrompt ?? '');
+        yield { type: 'text_delta', text: 'done' };
+        yield { type: 'done', stopReason: 'end_turn' };
+      },
+    });
+
+    const ruleLoader = new RuleLoader({
+      globalPath: 'C:/home/.config/hyscode/rules',
+      workspacePath: 'C:/workspace',
+      pathExists: async () => false,
+      readDir: async (path) => {
+        if (path === 'C:/workspace') return [{ name: 'AGENTS.md', is_dir: false }];
+        throw new Error('not a directory');
+      },
+      readFile: async () => instructionContent,
+    });
+    const harness = new Harness({
+      workspacePath: 'C:/workspace',
+      projectId: 'project',
+      invoke: async () => undefined as never,
+      ruleLoader,
+      config: {
+        providerId: 'harness-test',
+        modelId: 'test-model',
+        approval: { mode: 'yolo' },
+        costOptimization: false,
+      },
+    });
+    harness.setAgentType('chat');
+    harness.setConversationId('conversation');
+
+    await harness.run({
+      userMessage: 'first',
+      history: [],
+      ruleTargetPaths: ['C:/workspace'],
+    });
+    instructionContent = 'updated instruction';
+    await harness.run({
+      userMessage: 'second',
+      history: [],
+      ruleTargetPaths: ['C:/workspace'],
+    });
+
+    const child = harness.createChild({ agentType: 'chat' });
+    await child.run('child', []);
+
+    expect(prompts[0]).toContain('first instruction');
+    expect(prompts[0]).toContain('<project_instructions>');
+    expect(prompts[1]).toContain('updated instruction');
+    expect(prompts[1]).not.toContain('first instruction');
+    expect(prompts[2]).toContain('updated instruction');
   });
 
   it('runs beyond the former 25-iteration default when unlimited', async () => {

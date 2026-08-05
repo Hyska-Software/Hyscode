@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Plus, Pencil, Trash2, Loader2, BookText } from 'lucide-react';
+import { Plus, Pencil, Trash2, Loader2, BookText, Lock } from 'lucide-react';
 import { useRulesStore } from '../../../stores/rules-store';
 import { useProjectStore } from '../../../stores/project-store';
+import { useSettingsStore } from '../../../stores/settings-store';
 import { getActiveAgentBridge } from '../../../lib/active-agent-bridge';
 import { tauriFs } from '../../../lib/tauri-fs';
 import { RuleEditorDialog } from './rule-editor-dialog';
@@ -20,6 +21,7 @@ export function RulesTab() {
   const openRuleEditor = useRulesStore((s) => s.openRuleEditor);
   const closeRuleEditor = useRulesStore((s) => s.closeRuleEditor);
   const projectPath = useProjectStore((s) => s.rootPath);
+  const globalRulesPath = useSettingsStore((s) => s.globalRulesPath);
 
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
@@ -70,8 +72,9 @@ export function RulesTab() {
     }
   }, [removeRule, setDiscoveredRules]);
 
-  const globalRules = rules.filter((r) => r.scope === 'global');
-  const workspaceRules = rules.filter((r) => r.scope === 'workspace');
+  const nativeRules = rules.filter((r) => r.origin === 'native');
+  const globalRules = rules.filter((r) => r.origin !== 'native' && r.scope === 'global');
+  const workspaceRules = rules.filter((r) => r.origin !== 'native' && r.scope === 'workspace');
 
   return (
     <div className="flex flex-col gap-6">
@@ -80,7 +83,7 @@ export function RulesTab() {
         <div className="flex items-center gap-2">
           <BookText className="h-4 w-4 text-muted-foreground" />
           <span className="text-[12px] text-muted-foreground">
-            Rules are injected into the agent system prompt before every turn.
+            Managed rules and native project instructions are injected before every turn.
           </span>
         </div>
         <button
@@ -95,7 +98,7 @@ export function RulesTab() {
       {/* Global Rules */}
       <SettingSection
         title={`Global Rules (${globalRules.length})`}
-        description="~/.config/hyscode/rules/"
+        description={globalRulesPath || '~/.config/hyscode/rules/'}
       >
         {globalRules.length === 0 ? (
           <EmptyState>No global rules yet</EmptyState>
@@ -110,6 +113,24 @@ export function RulesTab() {
                 onDelete={() => handleDelete(rule)}
                 deleting={deletingId === rule.id}
               />
+            ))}
+          </div>
+        )}
+      </SettingSection>
+
+      {/* Native project instructions */}
+      <SettingSection
+        title={`Project Instructions (${nativeRules.length})`}
+        description="AGENTS.md and CLAUDE.md — required and read-only"
+      >
+        {!projectPath ? (
+          <EmptyState>Open a project to discover native instructions</EmptyState>
+        ) : nativeRules.length === 0 ? (
+          <EmptyState>No AGENTS.md or CLAUDE.md found</EmptyState>
+        ) : (
+          <div className="flex flex-col gap-1">
+            {nativeRules.map((rule) => (
+              <RuleRow key={rule.id} rule={rule} readOnly />
             ))}
           </div>
         )}
@@ -173,17 +194,19 @@ function RuleRow({
   onEdit,
   onDelete,
   deleting,
+  readOnly = false,
 }: {
   rule: RuleEntry;
-  onToggle: () => void;
-  onEdit: () => void;
-  onDelete: () => void;
-  deleting: boolean;
+  onToggle?: () => void;
+  onEdit?: () => void;
+  onDelete?: () => void;
+  deleting?: boolean;
+  readOnly?: boolean;
 }) {
   return (
     <div className="flex items-center justify-between rounded-lg bg-surface-raised px-3 py-2">
       <div className="flex items-center gap-2.5">
-        <SettingToggle checked={rule.enabled} onChange={onToggle} />
+        <SettingToggle checked={rule.enabled} onChange={onToggle ?? (() => {})} disabled={readOnly} />
         <div className="flex flex-col">
           <span className="text-[12px] text-foreground">{rule.name}</span>
           <span className="text-[9px] text-muted-foreground truncate max-w-[320px]">
@@ -191,24 +214,27 @@ function RuleRow({
           </span>
         </div>
       </div>
-      <div className="flex items-center gap-1">
-        <button
-          onClick={onEdit}
-          className="flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-          title="Edit"
-        >
-          <Pencil className="h-3 w-3" />
-        </button>
-        <button
-          onClick={onDelete}
-          disabled={deleting}
-          className="flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive disabled:opacity-40"
-          title="Delete"
-        >
-          {deleting ? <Loader2 className="h-3 w-3 animate-spin" /> : <Trash2 className="h-3 w-3" />}
-        </button>
-      </div>
+      {readOnly ? (
+        <Lock className="h-3 w-3 text-muted-foreground/70" aria-label="Required project instruction" />
+      ) : (
+        <div className="flex items-center gap-1">
+          <button
+            onClick={onEdit}
+            className="flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            title="Edit"
+          >
+            <Pencil className="h-3 w-3" />
+          </button>
+          <button
+            onClick={onDelete}
+            disabled={deleting}
+            className="flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive disabled:opacity-40"
+            title="Delete"
+          >
+            {deleting ? <Loader2 className="h-3 w-3 animate-spin" /> : <Trash2 className="h-3 w-3" />}
+          </button>
+        </div>
+      )}
     </div>
   );
 }
-

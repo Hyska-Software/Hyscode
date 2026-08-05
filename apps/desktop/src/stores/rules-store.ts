@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { immer } from 'zustand/middleware/immer';
 import { persist, createJSONStorage } from 'zustand/middleware';
-import type { Rule, RuleScope } from '@hyscode/agent-harness';
+import type { Rule, RuleOrigin, RuleScope } from '@hyscode/agent-harness';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -9,6 +9,9 @@ export interface RuleEntry {
   id: string;
   name: string;
   scope: RuleScope;
+  origin: RuleOrigin;
+  mandatory: boolean;
+  appliesFrom?: string;
   enabled: boolean;
   filePath: string;
   content: string;
@@ -77,12 +80,20 @@ export const useRulesStore = create<RulesState>()(
         set((state) => {
           state.rules = discovered.map((r) => {
             const id = r.id;
-            const enabled = id in state.enabledMap ? state.enabledMap[id] : r.enabled;
+            const enabled = r.mandatory
+              ? true
+              : id in state.enabledMap
+                ? state.enabledMap[id]
+                : r.enabled;
+            if (r.mandatory) delete state.enabledMap[id];
             return {
               id,
               name: r.name,
               scope: r.scope,
               enabled,
+              origin: r.origin,
+              mandatory: r.mandatory,
+              appliesFrom: r.appliesFrom,
               filePath: r.filePath,
               content: r.content,
             };
@@ -101,7 +112,7 @@ export const useRulesStore = create<RulesState>()(
       toggleRule: (id: string) =>
         set((state) => {
           const rule = state.rules.find((r) => r.id === id);
-          if (rule) {
+          if (rule && !rule.mandatory) {
             rule.enabled = !rule.enabled;
             state.enabledMap[id] = rule.enabled;
           }
@@ -110,7 +121,7 @@ export const useRulesStore = create<RulesState>()(
       setRuleEnabled: (id: string, enabled: boolean) =>
         set((state) => {
           const rule = state.rules.find((r) => r.id === id);
-          if (rule) {
+          if (rule && !rule.mandatory) {
             rule.enabled = enabled;
             state.enabledMap[id] = enabled;
           }
@@ -118,17 +129,23 @@ export const useRulesStore = create<RulesState>()(
 
       upsertRule: (entry: RuleEntry) =>
         set((state) => {
-          const idx = state.rules.findIndex((r) => r.id === entry.id);
+          const normalizedEntry = entry.mandatory ? { ...entry, enabled: true } : entry;
+          if (normalizedEntry.mandatory) delete state.enabledMap[normalizedEntry.id];
+          const idx = state.rules.findIndex((r) => r.id === normalizedEntry.id);
           if (idx >= 0) {
-            state.rules[idx] = entry;
+            state.rules[idx] = normalizedEntry;
           } else {
-            state.rules.push(entry);
+            state.rules.push(normalizedEntry);
           }
-          state.enabledMap[entry.id] = entry.enabled;
+          if (!normalizedEntry.mandatory) {
+            state.enabledMap[normalizedEntry.id] = normalizedEntry.enabled;
+          }
         }),
 
       removeRule: (id: string) =>
         set((state) => {
+          const rule = state.rules.find((r) => r.id === id);
+          if (rule?.mandatory) return;
           state.rules = state.rules.filter((r) => r.id !== id);
           delete state.enabledMap[id];
         }),
@@ -145,6 +162,12 @@ export const useRulesStore = create<RulesState>()(
 
       openRuleEditor: (opts) =>
         set((state) => {
+          if (
+            opts?.existingId &&
+            state.rules.some((rule) => rule.id === opts.existingId && rule.mandatory)
+          ) {
+            return;
+          }
           state.ruleEditorOpen = true;
           state.ruleEditorScope = opts?.scope ?? 'global';
           state.ruleEditorExistingId = opts?.existingId ?? null;

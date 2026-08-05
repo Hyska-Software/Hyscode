@@ -38,6 +38,9 @@ export type {
   AgentQuestionAnswer,
   Rule,
   RuleScope,
+  RuleOrigin,
+  RuleDiagnostic,
+  RuleDiagnosticCode,
   SkillScope,
   SkillActivation,
   SkillFrontmatter,
@@ -91,6 +94,21 @@ export type { SkillLoaderConfig } from './skill-loader';
 
 export { RuleLoader } from './rule-loader';
 export type { RuleLoaderConfig } from './rule-loader';
+export {
+  ProjectInstructionResolver,
+  NATIVE_PROJECT_INSTRUCTION_NAMES,
+  MAX_NATIVE_INSTRUCTION_FILE_BYTES,
+  MAX_NATIVE_INSTRUCTION_TOTAL_BYTES,
+} from './project-instructions';
+export type {
+  ProjectInstruction,
+  ProjectInstructionResolution,
+  ProjectInstructionResolverConfig,
+  ProjectInstructionDirectoryEntry,
+  ProjectInstructionReadDir,
+  ProjectInstructionReadFile,
+  ProjectInstructionPathExists,
+} from './project-instructions';
 
 // ─── Middleware ──────────────────────────────────────────────────────────────
 export type { MiddlewareContext, PreCompletionHook, PostToolHook } from './middleware';

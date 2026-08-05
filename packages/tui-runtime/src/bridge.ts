@@ -228,8 +228,7 @@ export class TuiBridge {
     this.harness.setMode(this.harness.getAgentType() === 'chat' ? 'chat' : 'agent');
     await this.harness.loadSkills();
     this.harness.setActiveSkills(this.activeSkillsFor(this.harness.getAgentType(), skillLoader));
-    const rules = await ruleLoader.loadAll();
-    this.harness.setActiveRules(rules.filter((rule) => rule.enabled));
+    await this.harness.refreshRules([workspacePath]);
 
     this.mcp = new McpClientManager(
       (command, args) => this.requireHost().invoke(command, args),
@@ -259,7 +258,12 @@ export class TuiBridge {
     const history = [...(params.history ?? this.session?.messages ?? [])];
     this.activeTurnId = null;
     this.activeTurnMessages = [];
-    const run = this.harness.run({ userMessage: params.message, history, images: params.images });
+    const run = this.harness.run({
+      userMessage: params.message,
+      history,
+      images: params.images,
+      ruleTargetPaths: params.ruleTargetPaths,
+    });
     this.activeRun = run;
     try {
       const outcome = await run;
@@ -987,5 +991,13 @@ function resolveCodexSidecar(repoRoot: string): SidecarCommand | null {
 
 function normalizeSendParams(raw: Record<string, unknown>): SendMessageParams {
   const images = Array.isArray(raw.images) ? raw.images.filter((image): image is { base64: string; mediaType: string } => typeof image === 'object' && image !== null && typeof (image as Record<string, unknown>).base64 === 'string' && typeof (image as Record<string, unknown>).mediaType === 'string') : undefined;
-  return { message: String(raw.message ?? ''), history: Array.isArray(raw.history) ? raw.history as Message[] : undefined, images };
+  const ruleTargetPaths = Array.isArray(raw.ruleTargetPaths)
+    ? raw.ruleTargetPaths.filter((target): target is string => typeof target === 'string' && target.trim().length > 0)
+    : undefined;
+  return {
+    message: String(raw.message ?? ''),
+    history: Array.isArray(raw.history) ? raw.history as Message[] : undefined,
+    images,
+    ruleTargetPaths,
+  };
 }

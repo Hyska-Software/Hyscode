@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { X, BookText, Settings, Plus, Loader2 } from 'lucide-react';
+import { X, BookText, Settings, Plus, Loader2, Lock } from 'lucide-react';
 import { useRulesStore } from '@/stores/rules-store';
 import { useSettingsStore } from '@/stores/settings-store';
 import { useProjectStore } from '@/stores/project-store';
@@ -69,8 +69,9 @@ export function RulesPanelDialog({ open, onClose }: RulesPanelDialogProps) {
     }
   };
 
-  const globalRules = rules.filter((r) => r.scope === 'global');
-  const workspaceRules = rules.filter((r) => r.scope === 'workspace');
+  const nativeRules = rules.filter((r) => r.origin === 'native');
+  const globalRules = rules.filter((r) => r.origin !== 'native' && r.scope === 'global');
+  const workspaceRules = rules.filter((r) => r.origin !== 'native' && r.scope === 'workspace');
 
   if (!open) return null;
 
@@ -144,6 +145,20 @@ export function RulesPanelDialog({ open, onClose }: RulesPanelDialogProps) {
             </div>
           )}
 
+          {/* Native project instructions */}
+          {nativeRules.length > 0 && (
+            <div className="mb-1">
+              <span className="px-1 text-[9px] font-semibold uppercase tracking-wider text-muted-foreground/60">
+                Project Instructions
+              </span>
+              <div className="mt-1 flex flex-col gap-0.5">
+                {nativeRules.map((rule) => (
+                  <RuleItem key={rule.id} rule={rule} readOnly />
+                ))}
+              </div>
+            </div>
+          )}
+
           {rules.length === 0 && (
             <div className="px-1 py-3 text-center text-[10px] text-muted-foreground">
               No rules configured.
@@ -189,36 +204,42 @@ function RuleItem({
   onEdit,
   onDelete,
   deleting,
+  readOnly = false,
 }: {
   rule: RuleEntry;
-  onToggle: () => void;
-  onEdit: () => void;
-  onDelete: () => void;
-  deleting: boolean;
+  onToggle?: () => void;
+  onEdit?: () => void;
+  onDelete?: () => void;
+  deleting?: boolean;
+  readOnly?: boolean;
 }) {
   return (
     <div className="flex items-center justify-between rounded-md px-2 py-1.5 hover:bg-muted/40">
       <div className="flex items-center gap-2">
-        <ToggleMini checked={rule.enabled} onChange={onToggle} />
+        <ToggleMini checked={rule.enabled} onChange={onToggle ?? (() => {})} disabled={readOnly} />
         <span className="text-[11px] text-foreground">{rule.name}</span>
       </div>
-      <div className="flex items-center gap-0.5">
-        <button
-          onClick={onEdit}
-          className="flex h-5 w-5 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-          title="Edit"
-        >
-          <Settings className="h-3 w-3" />
-        </button>
-        <button
-          onClick={onDelete}
-          disabled={deleting}
-          className="flex h-5 w-5 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive disabled:opacity-40"
-          title="Delete"
-        >
-          {deleting ? <Loader2 className="h-3 w-3 animate-spin" /> : <X className="h-3 w-3" />}
-        </button>
-      </div>
+      {readOnly ? (
+        <Lock className="h-3 w-3 text-muted-foreground/70" aria-label="Required project instruction" />
+      ) : (
+        <div className="flex items-center gap-0.5">
+          <button
+            onClick={onEdit}
+            className="flex h-5 w-5 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            title="Edit"
+          >
+            <Settings className="h-3 w-3" />
+          </button>
+          <button
+            onClick={onDelete}
+            disabled={deleting}
+            className="flex h-5 w-5 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive disabled:opacity-40"
+            title="Delete"
+          >
+            {deleting ? <Loader2 className="h-3 w-3 animate-spin" /> : <X className="h-3 w-3" />}
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -226,14 +247,17 @@ function RuleItem({
 function ToggleMini({
   checked,
   onChange,
+  disabled = false,
 }: {
   checked: boolean;
   onChange: () => void;
+  disabled?: boolean;
 }) {
   return (
     <button
       onClick={onChange}
-      className={`relative h-3.5 w-6 rounded-full transition-colors ${
+      disabled={disabled}
+      className={`relative h-3.5 w-6 rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-70 ${
         checked ? 'bg-primary' : 'bg-muted'
       }`}
     >

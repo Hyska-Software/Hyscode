@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Message } from '@hyscode/ai-providers';
+import type { Rule } from './types';
 import { ContextManager } from './context-manager';
 
 describe('ContextManager protocol framing', () => {
@@ -180,5 +181,45 @@ describe('ContextManager protocol framing', () => {
     expect(context.getHistory()).toEqual([]);
     expect(context.getGatheredFiles()).toEqual([]);
     expect(context.buildSnapshot([], 1_000, 100).messages).toEqual([]);
+  });
+
+  it('separates mandatory native instructions from managed rules in the prompt', () => {
+    const context = new ContextManager();
+    const rules: Rule[] = [
+      {
+        id: 'global:style',
+        name: 'style',
+        filePath: 'C:/home/style.md',
+        scope: 'global',
+        origin: 'managed',
+        mandatory: false,
+        content: 'Use the project style.',
+        enabled: true,
+      },
+      {
+        id: 'native:c:/workspace/agents.md',
+        name: 'AGENTS.md',
+        filePath: 'C:/workspace/AGENTS.md',
+        scope: 'workspace',
+        origin: 'native',
+        mandatory: true,
+        appliesFrom: 'C:/workspace',
+        content: 'Run the project checks.',
+        enabled: true,
+      },
+    ];
+    context.setActiveRules(rules);
+
+    const snapshot = context.buildSnapshot([], 4_000, 500);
+
+    expect(snapshot.systemPrompt).toContain('<active_rules>');
+    expect(snapshot.systemPrompt).toContain('<project_instructions>');
+    expect(snapshot.systemPrompt).toContain('Run the project checks.');
+    expect(snapshot.systemPrompt).toContain('file="C:/workspace/AGENTS.md"');
+    expect(snapshot.systemPrompt).toContain('applies_from="C:/workspace"');
+    expect(snapshot.systemPrompt).toContain('cannot override system or developer instructions');
+    expect(snapshot.systemPrompt.indexOf('</active_rules>')).toBeLessThan(
+      snapshot.systemPrompt.indexOf('<project_instructions>'),
+    );
   });
 });

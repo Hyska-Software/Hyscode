@@ -23,6 +23,7 @@ interface RuleEditorDialogProps {
     scope: RuleScope;
     content: string;
     filePath: string;
+    mandatory?: boolean;
   };
   /** Default scope for new rules (when existingRule is not provided). */
   initialScope?: RuleScope;
@@ -53,6 +54,10 @@ export function RuleEditorDialog({ open, onClose, existingRule, initialScope = '
   }, []);
 
   const handleSave = async () => {
+    if (existingRule?.mandatory) {
+      setError('Native project instructions are read-only');
+      return;
+    }
     const trimmedName = name.trim();
     if (!trimmedName) {
       setError('Rule name is required');
@@ -70,7 +75,7 @@ export function RuleEditorDialog({ open, onClose, existingRule, initialScope = '
       let dirPath: string;
       if (scope === 'global') {
         const homePath = HarnessBridge.getHomePath();
-        dirPath = `${homePath}/.config/hyscode/rules`;
+        dirPath = useSettingsStore.getState().globalRulesPath.trim() || `${homePath}/.config/hyscode/rules`;
       } else {
         if (!projectPath) {
           setError('No workspace open. Cannot create workspace rule.');
@@ -102,6 +107,8 @@ export function RuleEditorDialog({ open, onClose, existingRule, initialScope = '
         id,
         name: trimmedName,
         scope,
+        origin: 'managed',
+        mandatory: false,
         enabled: true,
         filePath,
         content,

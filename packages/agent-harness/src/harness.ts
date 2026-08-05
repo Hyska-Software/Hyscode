@@ -23,6 +23,7 @@ import {
   type ToolHandler,
   type Skill,
   type Rule,
+  type RuleDiagnostic,
   type AgentQuestion,
   type AgentQuestionAnswer,
   type TurnStatus,
@@ -118,6 +119,8 @@ export interface HarnessOptions {
   skillLoader?: SkillLoader;
   /** Rule loader config */
   ruleLoader?: RuleLoader;
+  /** Receives the latest resolved rules for adapter/UI projections. */
+  onRulesResolved?: (rules: Rule[], diagnostics: RuleDiagnostic[]) => void;
   /** Callback fired after a terminal command finishes (for environment context tracking). */
   onTerminalCommand?: (command: string, output: string, exitCode: number | null) => void;
   terminalRuntime?: TerminalRuntimeAdapter;
@@ -154,6 +157,8 @@ export class Harness {
   private onUserQuestionRequest: HarnessOptions['onUserQuestionRequest'] = undefined;
   private activeSkills: Skill[] = [];
   private activeRules: Rule[] = [];
+  private onRulesResolved: HarnessOptions['onRulesResolved'];
+  private ruleTargetPaths: string[] = [];
 
   // ─── Agent Terminal Integration ───────────────────────────────────
   private onTerminalCommand:
@@ -201,6 +206,7 @@ export class Harness {
     this.eventHandler = options.onEvent ?? null;
     this.skillLoader = options.skillLoader ?? null;
     this.ruleLoader = options.ruleLoader ?? null;
+    this.onRulesResolved = options.onRulesResolved;
     this.hasDirtyBuffers = options.hasDirtyBuffers;
     this.delegationLevel = options.delegationLevel ?? 0;
     this.environment = {
@@ -337,6 +343,7 @@ export class Harness {
         ...this.config,
         ...options.config,
       },
+      ruleLoader: this.ruleLoader?.fork(),
       onEvent: options.onEvent,
       delegationLevel: this.delegationLevel + 1,
       sddDb: undefined,
@@ -346,7 +353,8 @@ export class Harness {
     child.setAgentType(options.agentType);
     child.setConversationId(this.conversationId);
     child.setActiveSkills(this.activeSkills);
-    child.setActiveRules(this.activeRules);
+    child.setActiveRules(this.activeRules.map((rule) => ({ ...rule })));
+    child.ruleTargetPaths = [...this.ruleTargetPaths];
     child.setDelegationChain(this.delegationChain);
     for (const tool of options.externalTools ?? []) child.registerExternalTool(tool);
     return child;
@@ -488,6 +496,23 @@ export class Harness {
     return this.ruleLoader;
   }
 
+  /** Resolve managed and native rules for the current workspace/turn scope. */
+  async refreshRules(targetPaths: readonly string[] = []): Promise<Rule[]> {
+    if (!this.ruleLoader) return this.activeRules;
+
+    this.ruleTargetPaths = [...targetPaths];
+    const rules = await this.ruleLoader.loadAll(targetPaths);
+    this.setActiveRules(rules.filter((rule) => rule.enabled || rule.mandatory));
+
+    try {
+      this.onRulesResolved?.(rules, this.ruleLoader.getDiagnostics());
+    } catch {
+      // A projection failure must never prevent the agent from executing.
+    }
+
+    return rules;
+  }
+
   /** Get the workspace path for external callers (bridge). */
   getWorkspacePath(): string {
     return this.workspacePath;
@@ -620,9 +645,11 @@ export class Harness {
   ): Promise<TurnOutcome> {
     const userMessage =
       typeof requestOrMessage === 'string' ? requestOrMessage : requestOrMessage.userMessage;
+    let ruleTargetPaths = this.ruleTargetPaths;
     if (typeof requestOrMessage !== 'string') {
       history = requestOrMessage.history;
       imageContent = requestOrMessage.images;
+      ruleTargetPaths = requestOrMessage.ruleTargetPaths ?? [];
     }
     const activeTurn = this.turnController.begin();
     this.cancelled = false;
@@ -632,6 +659,7 @@ export class Harness {
     this.readCache.clear();
     this.readLoop.reset();
     this.contextManager.beginTurn();
+    await this.refreshRules(ruleTargetPaths);
     const turnStart = Date.now();
 
     // Resolve effective policy for this mode + model

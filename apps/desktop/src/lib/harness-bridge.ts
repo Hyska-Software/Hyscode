@@ -27,6 +27,7 @@ import type {
   TurnRecord,
   SddDatabase,
   SddSession,
+  RuleDiagnostic,
 } from '@hyscode/agent-harness';
 import type { Message, ToolDefinition, MessageContent, TokenUsage } from '@hyscode/ai-providers';
 import { tauriInvoke, tauriInvokeRaw } from './tauri-invoke';
@@ -131,6 +132,20 @@ function humanizeErrorMessage(msg: string, raw: string): string {
   return 'An unexpected error occurred. Please try again.';
 }
 
+function collectRuleTargetPaths(workspacePath: string, contextFiles: readonly string[]): string[] {
+  const editorState = useEditorStore.getState();
+  const activeTab = editorState.tabs.find((tab) => tab.id === editorState.activeTabId);
+  const candidates = [workspacePath, activeTab?.filePath, ...contextFiles];
+  return Array.from(
+    new Set(
+      candidates.filter(
+        (path): path is string =>
+          typeof path === 'string' && path.trim().length > 0 && !path.startsWith('untitled:'),
+      ),
+    ),
+  );
+}
+
 function createSddDatabase(): SddDatabase {
   const parseSession = (value: string): SddSession =>
     ({ ...JSON.parse(value), tasks: [] }) as SddSession;
@@ -211,6 +226,7 @@ export class HarnessBridge {
   /** In-flight mutation snapshot captures, keyed by canonical path. */
   private mutationSnapshotPromises = new Map<string, Promise<void>>();
   private memoryManager: MemoryManager | null = null;
+  private ruleDiagnostics: RuleDiagnostic[] = [];
   private externalMcpTools = new Map<
     string,
     { handler: ToolHandler; serverId: string; agentSafe: boolean }
@@ -330,7 +346,7 @@ export class HarnessBridge {
 
     // Create RuleLoader with Tauri-backed file system callbacks
     const ruleLoader = new RuleLoader({
-      globalPath: `${homePath}/.config/hyscode/rules`,
+      globalPath: settings.globalRulesPath.trim() || `${homePath}/.config/hyscode/rules`,
       workspacePath,
       readDir: async (path: string) => {
         try {
@@ -421,6 +437,17 @@ export class HarnessBridge {
         this.recordTerminalCommand(command, output, exitCode),
       skillLoader,
       ruleLoader,
+      onRulesResolved: (rules, diagnostics) => {
+        if (this.disposed) return;
+        this.ruleDiagnostics = diagnostics;
+        if (this.isolatedRuntime) {
+          this.syncSharedAgentPreferences();
+          return;
+        }
+        const rulesStore = useRulesStore.getState();
+        rulesStore.setDiscoveredRules(rules);
+        this.syncActiveRules(rulesStore.getActiveRules().map((rule) => rule.id));
+      },
     });
 
     // Listen for PTY exits so we can mark agent sessions as dead and avoid reuse
@@ -629,6 +656,11 @@ export class HarnessBridge {
 
     if (this.isolatedRuntime) this.syncSharedAgentPreferences();
 
+    const contextFiles = store.contextFiles;
+    const ruleTargetPaths = collectRuleTargetPaths(this.harness.getWorkspacePath(), contextFiles);
+    await this.loadRules(ruleTargetPaths);
+    if (this.disposed) return;
+
     // Sync active skills from skills store → harness (respects per-mode assignments)
     const activeSkillNames = this.isolatedRuntime
       ? (this.harness.getSkillLoader()?.getActive().map((skill) => skill.frontmatter.name) ?? [])
@@ -669,7 +701,6 @@ export class HarnessBridge {
     this.clearTabContext();
 
     // Inject context files into the harness context manager
-    const contextFiles = store.contextFiles;
     if (contextFiles.length > 0) {
       dbg(`Injetando ${contextFiles.length} arquivo(s) de contexto`);
       for (const filePath of contextFiles) {
@@ -826,11 +857,12 @@ export class HarnessBridge {
 
       dbg(`Enviando para LLM (${history.length} msgs no histórico)...`);
 
-      const { turnId, response, turnRecord, status } = await this.harness.run(
+      const { turnId, response, turnRecord, status } = await this.harness.run({
         userMessage,
         history,
-        imageContent.length > 0 ? imageContent : undefined,
-      );
+        images: imageContent.length > 0 ? imageContent : undefined,
+        ruleTargetPaths,
+      });
       notificationOutcome =
         status === 'complete'
           ? 'success'
@@ -1468,7 +1500,9 @@ Investigate the error, fix the underlying issue in the affected files, and verif
     const ruleLoader = this.harness.getRuleLoader();
     if (ruleLoader) {
       for (const rule of ruleLoader.getAll()) {
-        ruleLoader.setEnabled(rule.id, rules.enabledMap[rule.id] ?? rule.enabled);
+        if (!rule.mandatory) {
+          ruleLoader.setEnabled(rule.id, rules.enabledMap[rule.id] ?? rule.enabled);
+        }
       }
       this.syncActiveRules(ruleLoader.getActive().map((rule) => rule.id));
     }
@@ -1487,12 +1521,18 @@ Investigate the error, fix the underlying issue in the affected files, and verif
     }
   }
 
-  async loadRules(): Promise<import('@hyscode/agent-harness').Rule[]> {
+  async loadRules(targetPaths?: readonly string[]): Promise<import('@hyscode/agent-harness').Rule[]> {
     try {
       const loader = this.harness.getRuleLoader();
-      if (!loader) return [];
-      const all = await loader.loadAll();
+      loader?.setGlobalPath(
+        useSettingsStore.getState().globalRulesPath.trim() ||
+          `${HarnessBridge.getHomePath()}/.config/hyscode/rules`,
+      );
+      const all = await this.harness.refreshRules(
+        targetPaths ?? collectRuleTargetPaths(this.harness.getWorkspacePath(), this.agentStore.getState().contextFiles),
+      );
       if (this.disposed) return [];
+      this.ruleDiagnostics = this.harness.getRuleLoader()?.getDiagnostics() ?? [];
       this.debug(`Rules loaded: ${all.length} total`);
       return all;
     } catch (err) {
@@ -1501,13 +1541,17 @@ Investigate the error, fix the underlying issue in the affected files, and verif
     }
   }
 
+  getRuleDiagnostics(): RuleDiagnostic[] {
+    return [...this.ruleDiagnostics];
+  }
+
   /** Sync the active rule set from the rules store to the harness before a run */
   syncActiveRules(activeRuleIds: string[]): void {
     const loader = this.harness.getRuleLoader();
     if (!loader) return;
     // Disable all, then enable only the ones from the store
     for (const rule of loader.getAll()) {
-      rule.enabled = false;
+      if (!rule.mandatory) loader.disable(rule.id);
     }
     for (const id of activeRuleIds) {
       loader.enable(id);
@@ -1522,7 +1566,7 @@ Investigate the error, fix the underlying issue in the affected files, and verif
   async loadAndSyncRules(): Promise<void> {
     try {
       const discovered = await this.loadRules();
-      if (!this.disposed && discovered.length > 0) {
+      if (!this.disposed) {
         if (this.isolatedRuntime) {
           this.syncSharedAgentPreferences();
           this.debug(`Rules synced for isolated runtime: ${discovered.length} discovered`);

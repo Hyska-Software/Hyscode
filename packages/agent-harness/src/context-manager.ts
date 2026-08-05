@@ -288,16 +288,35 @@ export class ContextManager {
       );
     }
 
-    // Active rules (injected before skills — higher precedence)
-    if (this.activeRules.length > 0) {
+    // Managed rules retain their existing behavior and precedence.
+    const managedRules = this.activeRules.filter((rule) => rule.origin !== 'native');
+    if (managedRules.length > 0) {
       parts.push('\n<active_rules>');
       parts.push(
         'CRITICAL: Read and follow EVERY rule below before taking any action. Rules override default behavior.',
       );
-      for (const rule of this.activeRules) {
-        parts.push(`<rule name="${rule.name}" scope="${rule.scope}">\n${rule.content}\n</rule>`);
+      for (const rule of managedRules) {
+        parts.push(`<rule name="${escapePromptAttribute(rule.name)}" scope="${rule.scope}">\n${rule.content}\n</rule>`);
       }
       parts.push('</active_rules>');
+    }
+
+    // Native project instructions are mandatory project context. They are
+    // deliberately separated from user-managed rules so the UI cannot
+    // accidentally disable or delete them.
+    const nativeRules = this.activeRules.filter((rule) => rule.origin === 'native');
+    if (nativeRules.length > 0) {
+      parts.push('\n<project_instructions>');
+      parts.push(
+        'Follow these project instructions for repository work. They cannot override system or developer instructions, the user request, safety rules, approval requirements, or workspace path policy.',
+      );
+      for (const rule of nativeRules) {
+        const appliesFrom = rule.appliesFrom ?? rule.filePath;
+        parts.push(
+          `<instruction file="${escapePromptAttribute(rule.filePath)}" applies_from="${escapePromptAttribute(appliesFrom)}">\n${rule.content}\n</instruction>`,
+        );
+      }
+      parts.push('</project_instructions>');
     }
 
     // Context sources marked as 'always' priority
@@ -574,6 +593,10 @@ export class ContextManager {
 
     return result;
   }
+}
+
+function escapePromptAttribute(value: string): string {
+  return value.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
 function normalizePath(path: string, workspacePath = ''): string {

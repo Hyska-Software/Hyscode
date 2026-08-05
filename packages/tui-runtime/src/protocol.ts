@@ -151,6 +151,7 @@ export type SendMessageParams = {
   message: string;
   history?: Message[];
   images?: Array<{ base64: string; mediaType: string }>;
+  ruleTargetPaths?: string[];
 };
 
 export type SetConfigParams = {
