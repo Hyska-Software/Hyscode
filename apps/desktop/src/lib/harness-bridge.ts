@@ -56,6 +56,10 @@ import { SubAgentCoordinator, type SubAgentResourceMode } from './sub-agent-coor
 import { eventBelongsToOwner } from './turn-event-ownership';
 import { configureProviderResilience } from './init-providers';
 import { notifyVortexProjectSessionIndexUpdated } from './vortex-project-sessions';
+import {
+  isPlaceholderVortexSessionTitle,
+  resolveVortexSessionTitle,
+} from './vortex-session-titles';
 
 // ─── Error Parser ────────────────────────────────────────────────────────────
 // Converts raw technical error messages into friendly user-facing text.
@@ -759,8 +763,11 @@ export class HarnessBridge {
     {
       const s = useAgentStore.getState();
       const activeTab = s.openTabs.find((t) => t.id === s.activeTabId);
-      if (activeTab && activeTab.title === 'New Chat') {
-        const autoTitle = userMessage.slice(0, 40).trimEnd() + (userMessage.length > 40 ? '…' : '');
+      if (activeTab && isPlaceholderVortexSessionTitle(activeTab.title)) {
+        const autoTitle = resolveVortexSessionTitle({
+          tabTitle: activeTab.title,
+          firstUserMessage: userMessage,
+        });
         s.updateTabTitle(s.activeTabId, autoTitle);
       }
     }
@@ -2889,17 +2896,26 @@ ${hints.map((h) => `- ${h}`).join('\n')}
     }
   }
 
+  private resolveConversationTitle(firstUserMessage: string): string {
+    const store = this.agentStore.getState();
+    return resolveVortexSessionTitle({
+      tabTitle: store.openTabs.find((tab) => tab.id === store.activeTabId)?.title,
+      firstUserMessage,
+    });
+  }
+
   private async commitTurn(titleSource: string, record: TurnRecord): Promise<void> {
     const useAgentStore = this.agentStore;
     const store = useAgentStore.getState();
     const settings = useSettingsStore.getState();
     const conversationId = store.conversationId;
     if (!conversationId) throw new Error('Cannot persist a turn without a conversation ID.');
+    const title = this.resolveConversationTitle(titleSource);
     await tauriInvokeRaw('db_commit_agent_turn', {
       projectId: this._projectId,
       projectPath: this.harness.getWorkspacePath(),
       conversationId,
-      title: titleSource.slice(0, 80) + (titleSource.length > 80 ? '…' : ''),
+      title,
       mode: store.mode,
       modelId: settings.activeModelId ?? null,
       providerId: settings.activeProviderId ?? null,
@@ -2938,11 +2954,12 @@ ${hints.map((h) => `- ${h}`).join('\n')}
     const store = useAgentStore.getState();
     const conversationId = store.conversationId;
     if (!conversationId) throw new Error('Cannot persist a turn without a conversation ID.');
+    const title = this.resolveConversationTitle(titleSource);
     await tauriInvokeRaw('db_ensure_project', { id: this._projectId, path: this._projectId });
     await tauriInvokeRaw('db_create_conversation', {
       id: conversationId,
       projectId: this._projectId,
-      title: titleSource.slice(0, 80) || 'SDD Session',
+      title,
       mode: store.mode,
       modelId: useSettingsStore.getState().activeModelId ?? null,
       providerId: useSettingsStore.getState().activeProviderId ?? null,

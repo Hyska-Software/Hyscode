@@ -8,10 +8,33 @@ type PendingRun = {
   release: () => void;
 };
 
-const { createSessionMock, pendingRuns, createdBridges } = vi.hoisted(() => ({
+type DatabaseConversationFixture = {
+  id: string;
+  title: string;
+  mode: string;
+  model_id: string | null;
+  provider_id: string | null;
+  project_id: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+type DatabaseMessageFixture = {
+  id: string;
+  role: 'user' | 'assistant';
+  content: string;
+  tool_calls: string | null;
+  blocks: string | null;
+  turn_summary: string | null;
+  created_at: string;
+};
+
+const { createSessionMock, pendingRuns, createdBridges, databaseConversations, databaseMessages } = vi.hoisted(() => ({
   createSessionMock: vi.fn(),
   pendingRuns: new Map<string, PendingRun>(),
   createdBridges: [] as FakeHarnessBridge[],
+  databaseConversations: new Map<string, DatabaseConversationFixture>(),
+  databaseMessages: new Map<string, DatabaseMessageFixture[]>(),
 }));
 
 class FakeHarnessBridge {
@@ -76,9 +99,14 @@ vi.mock('@/lib/harness-bridge', () => ({
   },
 }));
 vi.mock('@/lib/tauri-invoke', () => ({
-  tauriInvoke: vi.fn(async (command: string) => {
-    if (command === 'db_get_conversation') return null;
-    if (command === 'db_list_messages') return [];
+  tauriInvoke: vi.fn(async (command: string, args?: Record<string, unknown>) => {
+    const conversationId = typeof args?.conversationId === 'string' ? args.conversationId : null;
+    if (command === 'db_get_conversation') {
+      return conversationId ? databaseConversations.get(conversationId) ?? null : null;
+    }
+    if (command === 'db_list_messages') {
+      return conversationId ? databaseMessages.get(conversationId) ?? [] : [];
+    }
     throw new Error(`Unexpected command: ${command}`);
   }),
 }));
@@ -100,6 +128,8 @@ describe('VortexSessionRuntimeManager', () => {
     });
     pendingRuns.clear();
     createdBridges.length = 0;
+    databaseConversations.clear();
+    databaseMessages.clear();
     useAgentStore.getState().resetProjectState();
     useProjectStore.setState({ rootPath: 'C:/project-a', isLoading: false });
     useVortexRuntimeStore.setState({ snapshots: {}, focusedKey: null });
@@ -128,6 +158,80 @@ describe('VortexSessionRuntimeManager', () => {
     expect(useVortexRuntimeStore.getState().snapshots[getVortexRuntimeKey('C:/project-a', 'session-b')].status).toBe('completed');
     expect(createdBridges[0].store.getState().messages.map((message) => message.content)).toEqual(['first']);
     expect(createdBridges[1].store.getState().messages.map((message) => message.content)).toEqual(['second']);
+  });
+
+  it('reopens a persisted session after creating a new empty session and keeps its title', async () => {
+    databaseConversations.set('session-old', {
+      id: 'session-old',
+      title: 'New Chat',
+      mode: 'chat',
+      model_id: null,
+      provider_id: null,
+      project_id: 'C:/project-a',
+      created_at: '2026-08-04 10:00:00',
+      updated_at: '2026-08-04 10:01:00',
+    });
+    databaseMessages.set('session-old', [
+      {
+        id: 'old-user',
+        role: 'user',
+        content: 'Investigate the existing VORTEX session',
+        tool_calls: null,
+        blocks: null,
+        turn_summary: null,
+        created_at: '2026-08-04 10:00:00',
+      },
+      {
+        id: 'old-assistant',
+        role: 'assistant',
+        content: 'The persisted session is available.',
+        tool_calls: null,
+        blocks: null,
+        turn_summary: null,
+        created_at: '2026-08-04 10:01:00',
+      },
+    ]);
+
+    const manager = new VortexSessionRuntimeManager();
+    await manager.focusSession('C:/project-a', 'session-old');
+    await manager.createAndFocus('C:/project-a');
+
+    expect(useAgentStore.getState().conversationId).not.toBe('session-old');
+    expect(useAgentStore.getState().messages).toHaveLength(0);
+    expect(manager.getFocusedSnapshot()?.title).toBe('New Chat');
+
+    await manager.focusSession('C:/project-a', 'session-old');
+
+    expect(useAgentStore.getState().conversationId).toBe('session-old');
+    expect(useAgentStore.getState().messages.map((message) => message.content)).toEqual([
+      'Investigate the existing VORTEX session',
+      'The persisted session is available.',
+    ]);
+    expect(manager.getFocusedSnapshot()?.title).toBe('Investigate the existing VORTEX session');
+  });
+
+  it('keeps the latest focus request when an older runtime hydrates later', async () => {
+    let releaseOldRuntime!: () => void;
+    const oldRuntimeReady = new Promise<void>((resolve) => {
+      releaseOldRuntime = resolve;
+    });
+    createSessionMock.mockImplementation(async (_path: string, _projectId: string, store: AgentStoreApi) => {
+      if (store.getState().conversationId === 'session-old') await oldRuntimeReady;
+      return new FakeHarnessBridge(store);
+    });
+
+    const manager = new VortexSessionRuntimeManager();
+    const oldFocus = manager.focusSession('C:/project-a', 'session-old', { allowMissing: true });
+    await vi.waitFor(() => expect(createSessionMock).toHaveBeenCalledTimes(1));
+
+    await manager.focusSession('C:/project-a', 'session-new', { allowMissing: true });
+    expect(useAgentStore.getState().conversationId).toBe('session-new');
+
+    releaseOldRuntime();
+    await oldFocus;
+
+    expect(useAgentStore.getState().conversationId).toBe('session-new');
+    expect(manager.getFocusedSnapshot()?.conversationId).toBe('session-new');
   });
 
   it('keeps sessions in different projects running while focus changes', async () => {

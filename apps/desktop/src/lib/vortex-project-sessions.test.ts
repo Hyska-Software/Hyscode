@@ -21,6 +21,22 @@ function conversation(
   };
 }
 
+function sessionSummary(id: string, title: string, updatedAt: string) {
+  return {
+    id,
+    title,
+    mode: 'chat' as const,
+    modelId: null,
+    providerId: null,
+    messageCount: 2,
+    createdAt: updatedAt,
+    updatedAt,
+    projectId: 'project-a',
+    projectName: 'Project A',
+    projectPath: 'C:/project-a',
+  };
+}
+
 describe('VORTEX project/session index', () => {
   it('normalizes Windows paths and merges an empty local project', () => {
     expect(areSameProjectPath('C:\\Work\\HysCode\\', 'c:/work/hyscode')).toBe(true);
@@ -211,5 +227,43 @@ describe('VORTEX project/session index', () => {
     expect(index.projects[0].sessions[0].id).toBe('session-b');
     expect(index.projects[1].sessions[0].id).toBe('session-a');
     expect(index.recentSessions.map((session) => session.id)).toEqual(['session-b', 'session-a']);
+  });
+
+  it('does not let a placeholder runtime title hide a persisted session title', () => {
+    const index = mergeVortexRuntimeSessions(
+      {
+        projects: [
+          {
+            id: 'project-a',
+            name: 'Project A',
+            path: 'C:/project-a',
+            lastActivityAt: '2026-08-04 10:01:00',
+            lastOpened: null,
+            sessions: [sessionSummary('session-a', 'Persisted session title', '2026-08-04 10:01:00')],
+          },
+        ],
+        recentSessions: [],
+      },
+      [
+        {
+          key: 'c:/project-a::session-a',
+          projectPath: 'C:/project-a',
+          projectName: 'Project A',
+          conversationId: 'session-a',
+          title: 'New Chat',
+          mode: 'chat',
+          status: 'idle',
+          messageCount: 2,
+          pendingApprovals: 0,
+          pendingUserQuestion: false,
+          startedAt: 20_000,
+          updatedAt: 20_000,
+          error: null,
+        },
+      ] satisfies VortexRuntimeSnapshot[],
+    );
+
+    expect(index.projects[0].sessions[0].title).toBe('Persisted session title');
+    expect(index.recentSessions[0].title).toBe('Persisted session title');
   });
 });

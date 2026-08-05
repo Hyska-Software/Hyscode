@@ -8,6 +8,7 @@ import { tauriInvoke } from './tauri-invoke';
 import type { RecentProject } from '@/stores/project-store';
 import { normalizeProjectPath, projectPathKey } from './project-path';
 import type { VortexRuntimeSnapshot } from './vortex-runtime-types';
+import { isPlaceholderVortexSessionTitle } from './vortex-session-titles';
 
 export interface VortexSessionSummary extends SessionSummary {
   projectId: string;
@@ -85,6 +86,13 @@ function latestTimestamp(left: string | null, right: string | null): string | nu
   if (Number.isNaN(leftTime)) return right;
   if (Number.isNaN(rightTime)) return left;
   return rightTime > leftTime ? right : left;
+}
+
+function mergeRuntimeTitle(currentTitle: string, runtimeTitle: string): string {
+  if (isPlaceholderVortexSessionTitle(runtimeTitle) && !isPlaceholderVortexSessionTitle(currentTitle)) {
+    return currentTitle;
+  }
+  return runtimeTitle || currentTitle;
 }
 
 function mergeSessions(
@@ -220,7 +228,7 @@ export function mergeVortexRuntimeSessions(
         const current = sessions[sessionIndex];
         sessions[sessionIndex] = {
           ...current,
-          title: runtime.title || current.title,
+          title: mergeRuntimeTitle(current.title, runtime.title),
           mode: runtime.mode,
           messageCount: Math.max(current.messageCount, runtime.messageCount),
           updatedAt: updatedAt > current.updatedAt ? updatedAt : current.updatedAt,
@@ -257,7 +265,7 @@ export function mergeVortexRuntimeSessions(
       if (runtime) {
         recentById.set(session.id, {
           ...session,
-          title: runtime.title || session.title,
+          title: mergeRuntimeTitle(session.title, runtime.title),
           mode: runtime.mode,
           messageCount: Math.max(session.messageCount, runtime.messageCount),
           updatedAt: new Date(runtime.updatedAt).toISOString(),

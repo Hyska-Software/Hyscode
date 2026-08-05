@@ -266,14 +266,21 @@ export function VortexProjectSessionNavigator() {
 
   const handleSessionClick = useCallback(
     async (session: VortexSessionSummary) => {
-      if (session.id === currentConversationId && areSameProjectPath(session.projectPath, activeProjectPath)) {
+      const liveProjectPath = useProjectStore.getState().rootPath;
+      const liveConversationId = useAgentStore.getState().conversationId;
+      const focusedSnapshot = vortexSessionRuntimeManager.getFocusedSnapshot();
+      if (
+        session.id === liveConversationId &&
+        areSameProjectPath(session.projectPath, liveProjectPath) &&
+        focusedSnapshot?.key === getVortexRuntimeKey(session.projectPath, session.id)
+      ) {
         return;
       }
       await runAction(`session:${session.id}`, async () => {
         await activateVortexSession(session.projectPath, session.id);
       });
     },
-    [activeProjectPath, currentConversationId, runAction],
+    [runAction],
   );
 
   const handleProjectNewSession = useCallback(

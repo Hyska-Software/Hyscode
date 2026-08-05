@@ -18,6 +18,10 @@ import {
   type VortexRuntimeSnapshot,
   type VortexRuntimeStatus,
 } from './vortex-runtime-types';
+import {
+  isPlaceholderVortexSessionTitle,
+  resolveVortexSessionTitle,
+} from './vortex-session-titles';
 
 interface VortexRuntimeRegistryState {
   snapshots: Record<string, VortexRuntimeSnapshot>;
@@ -125,6 +129,7 @@ export class VortexSessionRuntimeManager {
   private readonly records = new Map<string, RuntimeRecord>();
   private readonly initialization = new Map<string, Promise<RuntimeRecord>>();
   private focusedKey: string | null = null;
+  private focusGeneration = 0;
   private projectionSuspended = false;
   private projecting = false;
   private syncingFromUi = false;
@@ -164,6 +169,7 @@ export class VortexSessionRuntimeManager {
   }
 
   clearFocus(): void {
+    this.focusGeneration += 1;
     this.focusedKey = null;
     useVortexRuntimeStore.setState({ focusedKey: null });
   }
@@ -181,8 +187,13 @@ export class VortexSessionRuntimeManager {
     conversationId: string,
     options: EnsureRuntimeOptions = {},
   ): Promise<HarnessBridge> {
+    const focusGeneration = ++this.focusGeneration;
     const normalizedPath = normalizeProjectPath(projectPath);
     const record = await this.ensureRuntime(normalizedPath, conversationId, options);
+    if (focusGeneration !== this.focusGeneration) {
+      if (!record.bridge) throw new Error('The VORTEX session runtime is not ready.');
+      return record.bridge;
+    }
     this.projectionSuspended = false;
     this.focusedKey = record.key;
     useVortexRuntimeStore.setState({ focusedKey: record.key });
@@ -403,11 +414,12 @@ export class VortexSessionRuntimeManager {
     if (!agentStore.getState().conversationId) agentStore.getState().setConversationId(conversationId);
 
     const storeState = agentStore.getState();
-    const title =
-      options.title ??
-      storeState.openTabs.find((tab) => tab.id === storeState.activeTabId)?.title ??
-      databaseConversation?.title ??
-      'New Chat';
+    const title = resolveVortexSessionTitle({
+      explicitTitle: options.title,
+      persistedTitle: databaseConversation?.title,
+      tabTitle: storeState.openTabs.find((tab) => tab.id === storeState.activeTabId)?.title,
+      firstUserMessage: storeState.messages.find((message) => message.role === 'user')?.content,
+    });
     const mode = options.mode ?? storeState.mode ?? toAgentMode(databaseConversation?.mode);
     agentStore.getState().setMode(mode);
     agentStore.getState().updateTabTitle(agentStore.getState().activeTabId, title);
@@ -487,7 +499,10 @@ export class VortexSessionRuntimeManager {
     if (state.pendingApprovals.length > 0 || state.pendingUserQuestion) record.status = 'waiting';
     else if (state.isStreaming && record.status !== 'cancelling') record.status = 'running';
     record.mode = state.mode;
-    record.title = state.openTabs.find((tab) => tab.id === state.activeTabId)?.title ?? record.title;
+    const tabTitle = state.openTabs.find((tab) => tab.id === state.activeTabId)?.title;
+    if (tabTitle && (!isPlaceholderVortexSessionTitle(tabTitle) || isPlaceholderVortexSessionTitle(record.title))) {
+      record.title = tabTitle;
+    }
     record.updatedAt = Date.now();
     this.publish(record);
     if (this.focusedKey === record.key && !this.projectionSuspended && !this.syncingFromUi) {

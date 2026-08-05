@@ -174,6 +174,18 @@ describe('VortexProjectSessionNavigator', () => {
     });
   });
 
+  it('activates a session when the render identity matches but its runtime is not focused', async () => {
+    useAgentStore.setState({ conversationId: 'session-a' });
+    vi.mocked(vortexSessionRuntimeManager.getFocusedSnapshot).mockReturnValue(null);
+    render(<VortexProjectSessionNavigator />);
+
+    fireEvent.click((await screen.findAllByText('Target session'))[0]);
+
+    await waitFor(() => {
+      expect(activateSessionMock).toHaveBeenCalledWith('C:/project-a', 'session-a');
+    });
+  });
+
   it('refreshes the index and shows the working indicator for the active turn', async () => {
     render(<VortexProjectSessionNavigator />);
     await screen.findByText('Recent');
