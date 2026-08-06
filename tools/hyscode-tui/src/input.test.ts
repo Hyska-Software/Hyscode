@@ -17,4 +17,15 @@ describe('TUI terminal input decoder', () => {
     expect(parseKeys('\u001b[27;2;13~')).toEqual([{ type: 'shift_enter' }]);
     expect(parseKeys('\u001b[Z\u0014')).toEqual([{ type: 'shift_tab' }, { type: 'ctrl', value: 't' }]);
   });
+
+  it('decodes SGR and legacy mouse wheel events without leaking escape bytes into chat', () => {
+    expect(parseKeys('\u001b[<64;12;8M\u001b[<65;12;8M')).toEqual([
+      { type: 'mouse', action: 'scroll_up', x: 12, y: 8 },
+      { type: 'mouse', action: 'scroll_down', x: 12, y: 8 },
+    ]);
+
+    const legacyWheelUp = `\u001b[M${String.fromCharCode(32 + 64, 32 + 4, 32 + 5)}`;
+    expect(parseKeys(legacyWheelUp)).toEqual([{ type: 'mouse', action: 'scroll_up', x: 4, y: 5 }]);
+    expect(parseKeys('\u001bOB')).toEqual([{ type: 'down' }]);
+  });
 });

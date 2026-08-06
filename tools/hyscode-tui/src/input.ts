@@ -3,7 +3,7 @@ import type { Key } from './types';
 
 const PASTE_START = '\u001b[200~';
 const PASTE_END = '\u001b[201~';
-const ESCAPE_SEQUENCES = ['\u001b[A', '\u001b[B', '\u001b[C', '\u001b[D', '\u001b[H', '\u001b[F', '\u001b[Z', '\u001b[1~', '\u001b[3~', '\u001b[4~', '\u001b[5~', '\u001b[6~', '\u001bOP', '\u001b[11~', '\u001b[27;2;13~', '\u001b[13;2u'];
+const ESCAPE_SEQUENCES = ['\u001b[A', '\u001b[B', '\u001b[C', '\u001b[D', '\u001b[H', '\u001b[F', '\u001bOA', '\u001bOB', '\u001bOC', '\u001bOD', '\u001bOH', '\u001bOF', '\u001b[Z', '\u001b[1~', '\u001b[3~', '\u001b[4~', '\u001b[5~', '\u001b[6~', '\u001bOP', '\u001b[11~', '\u001b[27;2;13~', '\u001b[13;2u'];
 
 export function parseKeys(input: string): Key[] {
   return decodeKeys(input, false).keys;
@@ -22,6 +22,13 @@ function decodeKeys(input: string, preserveIncomplete: boolean): { keys: Key[]; 
       continue;
     }
     if (preserveIncomplete && remaining === '\u001b') return { keys, remainder: remaining };
+    const mouseSequence = parseMouseSequence(remaining);
+    if (mouseSequence) {
+      if (mouseSequence.key) keys.push(mouseSequence.key);
+      remaining = remaining.slice(mouseSequence.length);
+      continue;
+    }
+    if (preserveIncomplete && isPotentialMouseSequence(remaining)) return { keys, remainder: remaining };
     const sequence = parseEscapeSequence(remaining);
     if (!sequence && preserveIncomplete && ESCAPE_SEQUENCES.some((candidate) => candidate.startsWith(remaining))) return { keys, remainder: remaining };
     if (!sequence && preserveIncomplete && remaining.startsWith('\u001b')) {
@@ -64,6 +71,12 @@ function parseEscapeSequence(input: string): { key: Key; length: number } | null
     ['\u001b[D', { type: 'left' }],
     ['\u001b[H', { type: 'home' }],
     ['\u001b[F', { type: 'end' }],
+    ['\u001bOA', { type: 'up' }],
+    ['\u001bOB', { type: 'down' }],
+    ['\u001bOC', { type: 'right' }],
+    ['\u001bOD', { type: 'left' }],
+    ['\u001bOH', { type: 'home' }],
+    ['\u001bOF', { type: 'end' }],
     ['\u001b[Z', { type: 'shift_tab' }],
     ['\u001b[1~', { type: 'home' }],
     ['\u001b[3~', { type: 'delete' }],
@@ -77,6 +90,36 @@ function parseEscapeSequence(input: string): { key: Key; length: number } | null
   ];
   const match = sequences.find(([sequence]) => input.startsWith(sequence));
   return match ? { key: match[1], length: match[0].length } : null;
+}
+
+type ParsedMouseSequence = { key: Key | null; length: number };
+
+function parseMouseSequence(input: string): ParsedMouseSequence | null {
+  const sgrMatch = /^\u001b\[<(\d+);(\d+);(\d+)([mM])/.exec(input);
+  if (sgrMatch) {
+    const button = Number(sgrMatch[1]);
+    return {
+      key: mouseWheelKey(button, Number(sgrMatch[2]), Number(sgrMatch[3])),
+      length: sgrMatch[0].length,
+    };
+  }
+
+  if (!input.startsWith('\u001b[M') || input.length < 6) return null;
+  const button = input.charCodeAt(3) - 32;
+  return {
+    key: mouseWheelKey(button, input.charCodeAt(4) - 32, input.charCodeAt(5) - 32),
+    length: 6,
+  };
+}
+
+function isPotentialMouseSequence(input: string): boolean {
+  if (input.startsWith('\u001b[M')) return input.length < 6;
+  return /^\u001b\[<\d*(?:;\d*){0,2}$/.test(input);
+}
+
+function mouseWheelKey(button: number, x: number, y: number): Key | null {
+  if ((button & 64) === 0) return null;
+  return { type: 'mouse', action: (button & 1) === 0 ? 'scroll_up' : 'scroll_down', x, y };
 }
 
 export type TerminalInputOptions = {
@@ -140,9 +183,9 @@ export class TerminalInput {
 }
 
 export function enterAlternateScreen(stdout: NodeJS.WriteStream): void {
-  stdout.write('\u001b[?1049h\u001b[?25l\u001b[?2004h');
+  stdout.write('\u001b[?1049h\u001b[?25l\u001b[?2004h\u001b[?1000h\u001b[?1006h');
 }
 
 export function leaveAlternateScreen(stdout: NodeJS.WriteStream): void {
-  stdout.write('\u001b[?2004l\u001b[?25h\u001b[?1049l');
+  stdout.write('\u001b[?1006l\u001b[?1000l\u001b[?2004l\u001b[?25h\u001b[?1049l');
 }

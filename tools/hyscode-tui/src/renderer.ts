@@ -21,8 +21,8 @@ export class TerminalRenderer {
     const height = Math.max(16, state.height);
     const header = headerLines(state, width);
     const composer = composerLines(state, width);
-    const rawPanel = this.overlayLines(state, width);
     const panelBudget = Math.max(0, height - header.length - composer.length - 4);
+    const rawPanel = this.overlayLines(state, width, panelBudget);
     const panel = rawPanel.slice(0, panelBudget);
     const bodyHeight = Math.max(3, height - header.length - panel.length - composer.length);
     const sidebarWidth = width >= 100 ? SIDEBAR_WIDTH : 0;
@@ -36,32 +36,28 @@ export class TerminalRenderer {
     return `\u001b[2J\u001b[H${lines.slice(0, height).map((line) => fitAnsi(line, width)).join('\n')}${RESET}`;
   }
 
-  private overlayLines(state: UiState, width: number): string[] {
+  private overlayLines(state: UiState, width: number, maxHeight: number): string[] {
     if (state.interaction) return makePanel('ACTION REQUIRED', interactionLines(state.interaction, width), width);
-    if (state.commandFlow) return makePanel(commandPanelTitle(state.commandFlow), commandFlowLines(state, width), width);
+    if (state.commandFlow) return makePanel(commandPanelTitle(state.commandFlow), commandFlowLines(state, width, maxHeight), width);
     if (state.overlay === 'help') return makePanel('HELP · KEYBOARD FIRST', helpLines(), width);
     if (state.overlay === 'sessions') {
       const items = state.sessions.map((session) => `${session.title}  ·  ${session.messageCount} messages  ·  ${shorten(session.id, 12)}`);
-      return makePanel('SAVED SESSIONS', listLines(items, state.overlayIndex, width), width);
+      return makePanel('SAVED SESSIONS', listLines(items, state.overlayIndex, width, maxHeight), width);
     }
     if (state.overlay === 'projects') {
       const items = state.projects.map((project) => `${shorten(project.workspacePath, width - 20)}  ·  ${project.sessionCount} sessions`);
-      return makePanel('WORKSPACES', listLines(items, state.overlayIndex, width), width);
+      return makePanel('WORKSPACES', listLines(items, state.overlayIndex, width, maxHeight), width);
     }
     return [];
   }
 }
 
 function headerLines(state: UiState, width: number): string[] {
-  const model = state.model ? `${state.provider || 'provider'} / ${state.model}` : 'no model selected';
   const runtime = state.running ? `${WARNING}${BOLD}working${RESET}` : `${SUCCESS}${BOLD}ready${RESET}`;
-  const left = `${ACCENT}${BOLD}HysCode${RESET} ${MUTED}·${RESET} ${shorten(state.workspace, Math.max(20, width - 62))}`;
-  const right = `${runtime}  ${MUTED}${shorten(`${state.mode} · ${model}`, 42)}${RESET}`;
-  const session = `${DIM}session${RESET} ${BOLD}${shorten(state.sessionTitle, Math.max(20, width - 55))}${RESET} ${DIM}· ${state.sessionMessageCount} messages${RESET}`;
-  const context = `${DIM}thinking ${state.thinking.enabled ? state.thinking.level ?? 'on' : 'off'}${RESET}  ${DIM}approval ${state.approvalMode}${RESET}  ${DIM}${state.focus} focus${RESET}`;
   const connection = state.connectionState === 'connected' ? `${SUCCESS}● connected${RESET}` : `${WARNING}● ${state.connectionState}${RESET}`;
-  const usage = state.usage.totalTokens > 0 ? `${DIM}${state.usage.totalTokens.toLocaleString()} tokens${RESET}` : `${DIM}usage idle${RESET}`;
-  const lines = [alignColumns(left, right, width), alignColumns(session, context, width), alignColumns(`${connection}  ${usage}`, `${DIM}${state.context.attachments.length} context attachment(s)${RESET}`, width)];
+  const left = `${ACCENT}${BOLD}HysCode${RESET} ${MUTED}·${RESET} ${shorten(state.workspace, Math.max(20, width - 42))}`;
+  const right = `${runtime}  ${connection}`;
+  const lines = [alignColumns(left, right, width)];
   if (state.tabs.length > 1) {
     lines.push(state.tabs.map((tab) => `${tab.active ? `${ACCENT}${BOLD}` : MUTED}${tab.active ? '●' : '○'} ${shorten(tab.title, 22)}${RESET}`).join('  '));
   }
@@ -113,6 +109,7 @@ function sidebarLines(state: UiState, width: number, height: number): string[] {
     ` Ctrl-K  command palette`,
     ` Ctrl-T  thinking`,
     ` Tab     focus`,
+    ` Wheel   history scroll`,
     ` PgUp    scroll up`,
     ` Ctrl-C  cancel / quit`,
     ` !cmd    terminal command`,
@@ -141,7 +138,7 @@ function transcriptView(items: TranscriptItem[], width: number, state: UiState):
   if (state.mainPanel === 'terminal') lines.push(...terminalPanel(state, width));
   else if (state.mainPanel === 'sdd') lines.push(...sddPanel(state, width));
   else if (state.mainPanel === 'activity') lines.push(...activityPanel(state, width));
-  if (state.scroll > 0) lines.push(`${MUTED}↑ ${state.scroll} line(s) above · PgDn returns to live output${RESET}`);
+  if (state.scroll > 0) lines.push(`${MUTED}↑ ${state.scroll} line(s) above · Wheel/PgDn returns to live output${RESET}`);
   return lines;
 }
 
@@ -277,13 +274,17 @@ function composerLines(state: UiState, width: number): string[] {
     : state.interaction?.kind === 'approval' || state.interaction?.kind === 'mode_switch'
       ? 'Y allow · N deny · T trust · A approve all'
       : state.running
-        ? 'Ctrl-C cancel · PgUp/PgDn scroll'
-        : 'Enter send · / commands · ↑↓ history · Tab focus';
+        ? 'Ctrl-C cancel · Wheel/PgUp scroll'
+        : 'Enter send · / commands · ↑↓ history · Wheel scroll';
   const status = shorten(state.status, Math.max(20, width - label.length - hint.length - 16));
   const chips = state.context.attachments.map((attachment) => `${attachment.kind}:${attachment.label}`).join('  ');
+  const rawContextDetails = chips ? `context ${chips}` : 'context none · /attach path · @path · !command';
+  const meter = contextMeter(state, Math.min(24, Math.max(14, width - 4)));
+  const contextDetails = shorten(rawContextDetails, Math.max(12, width - visibleLength(meter) - 2));
+  const contextLine = `${chips ? MUTED : DIM}${contextDetails}${RESET}  ${meter}`;
   return [
     `${PANEL}${'─'.repeat(width)}${RESET}`,
-    chips ? `${MUTED}context ${shorten(chips, width - 10)}${RESET}` : `${DIM}context none · /attach path · @path · !command${RESET}`,
+    contextLine,
     `${ACCENT}╭─ ${label}${RESET} ${DIM}${status}${RESET}`,
     `${ACCENT}│${RESET} ${BOLD}${prompt}${RESET} ${fitAnsi(input, Math.max(12, width - 6))}`,
     `${ACCENT}╰─${RESET} ${DIM}${shorten(hint, width - 5)}${RESET}`,
@@ -305,31 +306,36 @@ function commandPanelTitle(flow: CommandFlow): string {
   return flowTitle(flow);
 }
 
-function commandFlowLines(state: UiState, width: number): string[] {
+function commandFlowLines(state: UiState, width: number, maxHeight: number): string[] {
   const flow = state.commandFlow;
   if (!flow) return [];
   if (flow.kind === 'root') {
     const commands = matchingCommands(flow.query);
     const lines = [`${DIM}Type a slash command · matching actions stay visible while you compose${RESET}`];
     if (commands.length === 0) return [...lines, `${WARNING}No command matches "${flow.query}". Press Esc to keep editing.${RESET}`];
-    for (const [index, command] of commands.slice(0, 7).entries()) {
+    const range = listRange(flow.selected, commands.length, maxHeight, 1);
+    for (let index = range.start; index < range.end; index += 1) {
+      const command = commands[index];
       const selected = index === flow.selected;
       const marker = selected ? `${ACCENT}${BOLD}›${RESET}` : ' ';
       const category = `${MUTED}[${command.category}]${RESET}`;
       lines.push(`${marker} ${selected ? BOLD : ''}${command.name}${selected ? RESET : ''}  ${SOFT}${shorten(command.description, Math.max(18, width - 32))}${RESET} ${category}`);
     }
-    if (commands.length > 7) lines.push(`${DIM}… ${commands.length - 7} more commands${RESET}`);
+    if (range.scrollable) lines.push(`${DIM}↑ ${range.start + 1}-${range.end}/${commands.length} · PgUp/PgDn scroll${RESET}`);
     return lines;
   }
 
-  const lines = [`${DIM}↑↓ select · Enter apply · Esc back${RESET}`];
+  const lines = [`${DIM}↑↓ select · PgUp/PgDn scroll · Enter apply · Esc back${RESET}`];
   const options = flowOptions(state, flow);
   if (options.length === 0) return [...lines, `${WARNING}No options available for the current runtime.${RESET}`];
-  for (const [index, option] of options.slice(0, 8).entries()) {
+  const range = listRange(flow.selected, options.length, maxHeight, 1);
+  for (let index = range.start; index < range.end; index += 1) {
+    const option = options[index];
     const selected = index === flow.selected;
     const marker = selected ? `${ACCENT}${BOLD}›${RESET}` : ' ';
     lines.push(`${marker} ${selected ? BOLD : ''}${shorten(option, width - 8)}${selected ? RESET : ''}`);
   }
+  if (range.scrollable) lines.push(`${DIM}↑ ${range.start + 1}-${range.end}/${options.length} · PgUp/PgDn scroll${RESET}`);
   return lines;
 }
 
@@ -390,15 +396,34 @@ function helpLines(): string[] {
   return lines;
 }
 
-function listLines(items: string[], selected: number, width: number): string[] {
+function listLines(items: string[], selected: number, width: number, maxHeight: number): string[] {
   if (items.length === 0) return [`${MUTED}No entries available.${RESET}`, `${DIM}Esc closes this view.${RESET}`];
-  return [
-    `${DIM}↑↓ select · Enter open · Esc close${RESET}`,
-    ...items.slice(0, 8).map((item, index) => {
+  const range = listRange(selected, items.length, maxHeight, 1);
+  const lines = [
+    `${DIM}↑↓ select · PgUp/PgDn scroll · Enter open · Esc close${RESET}`,
+    ...items.slice(range.start, range.end).map((item, offset) => {
+      const index = range.start + offset;
       const active = index === selected;
       return `${active ? `${ACCENT}${BOLD}›${RESET}` : ' '} ${active ? BOLD : ''}${shorten(item, width - 8)}${active ? RESET : ''}`;
     }),
   ];
+  if (range.scrollable) lines.push(`${DIM}↑ ${range.start + 1}-${range.end}/${items.length} · PgUp/PgDn scroll${RESET}`);
+  return lines;
+}
+
+type ListRange = { start: number; end: number; scrollable: boolean };
+
+function listRange(selected: number, total: number, maxHeight: number, fixedLines: number): ListRange {
+  const contentBudget = Math.max(0, maxHeight - 2);
+  const baseVisible = Math.max(1, contentBudget - fixedLines);
+  const canShowScrollHint = contentBudget >= fixedLines + 2;
+  const visible = canShowScrollHint && total > baseVisible ? Math.max(1, baseVisible - 1) : baseVisible;
+  const safeVisible = Math.min(Math.max(1, visible), Math.max(1, total));
+  const safeSelected = Math.min(Math.max(0, selected), Math.max(0, total - 1));
+  const maxStart = Math.max(0, total - safeVisible);
+  const start = Math.min(Math.max(0, safeSelected - safeVisible + 1), maxStart);
+  const end = Math.min(total, start + safeVisible);
+  return { start, end, scrollable: canShowScrollHint && total > safeVisible };
 }
 
 function makePanel(title: string, content: string[], width: number): string[] {
@@ -468,6 +493,27 @@ function formatValue(value: unknown): string {
   } catch {
     return '<unserializable>';
   }
+}
+
+function contextMeter(state: UiState, width: number): string {
+  const contextWindow = state.usage.contextWindow;
+  const contextTokens = Math.max(0, state.usage.inputTokens, state.context.gatheredTokens);
+  const barWidth = Math.max(6, Math.min(14, width - 12));
+  if (!Number.isFinite(contextWindow) || contextWindow <= 0) {
+    return `${MUTED}ctx${RESET} ${DIM}${'─'.repeat(barWidth)} —${RESET}`;
+  }
+
+  const percentage = Math.min(100, Math.max(0, contextTokens / contextWindow * 100));
+  const filledWidth = percentage === 0 ? 0 : Math.max(1, Math.round(barWidth * percentage / 100));
+  const color = percentage >= 85 ? ERROR : percentage >= 60 ? WARNING : ACCENT;
+  const bar = `${color}${'━'.repeat(filledWidth)}${RESET}${PANEL}${'─'.repeat(barWidth - filledWidth)}${RESET}`;
+  return `${MUTED}ctx${RESET} ${bar} ${DIM}${formatContextPercentage(percentage)}${RESET}`;
+}
+
+function formatContextPercentage(value: number): string {
+  if (value === 0) return '0%';
+  if (value >= 100) return '100%';
+  return `${value.toFixed(1)}%`;
 }
 
 function markdownAnsi(value: string, kind: TranscriptItem['kind']): string {

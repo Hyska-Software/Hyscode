@@ -16,6 +16,9 @@ import { MODE_OPTIONS, commandArgument, matchingCommands, parseSlashCommand, res
 import { AGENT_TYPES } from './types';
 import type { CliOptions, CommandFlow, ContextView, InteractionState, Key, MemoryView, RuleView, RuntimeNotice, SkillView, SubAgentView, ToolView, TranscriptItem, TranscriptKind, UiState } from './types';
 
+const SELECTION_PAGE_SIZE = 8;
+const MOUSE_SCROLL_LINES = 3;
+
 export type RuntimeClient = Pick<TuiBridge, 'handle'>;
 
 export class TuiController {
@@ -97,6 +100,10 @@ export class TuiController {
   }
 
   async handleKey(key: Key): Promise<void> {
+    if (key.type === 'mouse') {
+      await this.handleMouseWheel(key);
+      return;
+    }
     if (this.state.interaction) {
       await this.handleInteractionKey(key, this.state.interaction);
       return;
@@ -897,7 +904,7 @@ export class TuiController {
         else await this.setMode(commandArgument(args));
         break;
       case '/thinking':
-        this.openThinkingFlow();
+        if (!this.openThinkingFlow()) this.state.status = 'Thinking is not available for the selected model';
         break;
       case '/approval':
         await this.setApprovalMode(commandArgument(args));
@@ -1160,7 +1167,11 @@ export class TuiController {
 
   private async setModel(providerId: string, modelId: string): Promise<void> {
     await this.request('set_config', { providerId, modelId });
-    this.state.status = `Model set to ${providerId} / ${modelId}`;
+    const thinkingMenuOpened = this.openThinkingFlow();
+    this.state.status = thinkingMenuOpened
+      ? `Model set to ${providerId} / ${modelId} · choose thinking level`
+      : `Model set to ${providerId} / ${modelId}`;
+    if (!thinkingMenuOpened) this.closeCommandFlow();
   }
 
   private async cycleMode(): Promise<void> {
@@ -1233,6 +1244,24 @@ export class TuiController {
     else if (key.type === 'right') this.state.inputCursor = Math.min(Array.from(this.state.input).length, this.state.inputCursor + 1);
     else if (key.type === 'home') this.state.inputCursor = 0;
     else if (key.type === 'end') this.state.inputCursor = Array.from(this.state.input).length;
+  }
+
+  private async handleMouseWheel(key: Extract<Key, { type: 'mouse' }>): Promise<void> {
+    const navigationKey: Key = { type: key.action === 'scroll_up' ? 'up' : 'down' };
+    if (this.state.interaction) {
+      await this.handleInteractionKey(navigationKey, this.state.interaction);
+      return;
+    }
+    if (this.state.commandFlow) {
+      await this.handleCommandFlowKey(navigationKey);
+      return;
+    }
+    if (this.state.overlay !== 'none') {
+      await this.handleOverlayKey(navigationKey);
+      return;
+    }
+    const delta = key.action === 'scroll_up' ? MOUSE_SCROLL_LINES : -MOUSE_SCROLL_LINES;
+    this.state.scroll = Math.max(0, this.state.scroll + delta);
   }
 
   private async resolveInteraction(requestId: string, params: Record<string, unknown>): Promise<void> {
@@ -1309,6 +1338,20 @@ export class TuiController {
       }
       return;
     }
+    if (key.type === 'page_up' || key.type === 'page_down' || key.type === 'home' || key.type === 'end') {
+      const count = this.flowOptions(flow).length;
+      if (count > 0) {
+        if (key.type === 'home') flow.selected = 0;
+        else if (key.type === 'end') flow.selected = count - 1;
+        else {
+          const offset = Math.min(SELECTION_PAGE_SIZE, count);
+          flow.selected = key.type === 'page_up'
+            ? Math.max(0, flow.selected - offset)
+            : Math.min(count - 1, flow.selected + offset);
+        }
+      }
+      return;
+    }
     if (key.type === 'up' || key.type === 'down') {
       const count = this.flowOptions(flow).length;
       if (count > 0) flow.selected = key.type === 'up' ? (flow.selected + count - 1) % count : (flow.selected + 1) % count;
@@ -1352,7 +1395,7 @@ export class TuiController {
       const provider = this.state.providers[flow.providerIndex];
       const model = provider?.models[flow.selected];
       if (provider && model) await this.setModel(provider.id, model.id);
-      this.closeCommandFlow();
+      else this.closeCommandFlow();
       return;
     }
     const thinking = this.thinkingForSelection(flow.selected);
@@ -1375,7 +1418,8 @@ export class TuiController {
 
   private thinkingOptions(): string[] {
     const model = this.state.models.find((candidate) => candidate.provider === this.state.provider && candidate.id === this.state.model);
-    return ['toggle', ...((model?.thinkingVariants?.levels ?? []) as string[])];
+    const toggleLabel = this.state.thinking.enabled ? 'Disable thinking' : 'Enable thinking';
+    return [toggleLabel, ...((model?.thinkingVariants?.levels ?? []) as string[])];
   }
 
   private thinkingForSelection(selected: number): ThinkingConfig | null {
@@ -1403,9 +1447,19 @@ export class TuiController {
     this.state.commandFlow = { kind: 'provider', selected: Math.max(0, this.state.providers.findIndex((provider) => provider.id === this.state.provider)) };
   }
 
-  private openThinkingFlow(): void {
+  private openThinkingFlow(): boolean {
+    const model = this.state.models.find((candidate) => candidate.provider === this.state.provider && candidate.id === this.state.model);
+    const variants = model?.thinkingVariants;
+    if (!variants || variants.kind === 'none') return false;
+
+    const levels = [...(variants.levels ?? [])];
+    const preferredLevel = this.state.thinking.enabled && this.state.thinking.level
+      ? this.state.thinking.level
+      : variants.defaultLevel ?? levels[0];
+    const levelIndex = preferredLevel ? levels.findIndex((level) => level === preferredLevel) : -1;
     this.state.overlay = 'commands';
-    this.state.commandFlow = { kind: 'thinking', selected: 0 };
+    this.state.commandFlow = { kind: 'thinking', selected: levelIndex >= 0 ? levelIndex + 1 : 0 };
+    return true;
   }
 
   private closeCommandFlow(): void {
@@ -1442,6 +1496,17 @@ export class TuiController {
       const count = this.state.overlay === 'sessions' ? this.state.sessions.length : this.state.projects.length;
       if (key.type === 'up' || key.type === 'down') {
         if (count > 0) this.state.overlayIndex = key.type === 'up' ? (this.state.overlayIndex + count - 1) % count : (this.state.overlayIndex + 1) % count;
+      } else if (key.type === 'page_up' || key.type === 'page_down' || key.type === 'home' || key.type === 'end') {
+        if (count > 0) {
+          if (key.type === 'home') this.state.overlayIndex = 0;
+          else if (key.type === 'end') this.state.overlayIndex = count - 1;
+          else {
+            const offset = Math.min(SELECTION_PAGE_SIZE, count);
+            this.state.overlayIndex = key.type === 'page_up'
+              ? Math.max(0, this.state.overlayIndex - offset)
+              : Math.min(count - 1, this.state.overlayIndex + offset);
+          }
+        }
       } else if (key.type === 'enter') {
         if (this.state.overlay === 'sessions') await this.loadSelectedSession();
         else await this.switchSelectedProject();

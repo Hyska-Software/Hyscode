@@ -2,18 +2,29 @@ import { describe, expect, it } from 'vitest';
 import type { BridgeRequest, BridgeResponse, RuntimeReadyPayload } from '@hyscode/tui-runtime';
 import { TuiController, type RuntimeClient } from './controller';
 
-function readyPayload(workspacePath: string): RuntimeReadyPayload {
+function readyPayload(workspacePath: string, includeThinkingModel = false): RuntimeReadyPayload {
+  const thinkingModel = {
+    id: 'thinking-model',
+    name: 'Thinking Model',
+    provider: 'test-provider',
+    contextWindow: 128000,
+    maxOutputTokens: 4096,
+    supportsTools: true,
+    supportsStreaming: true,
+    supportsVision: false,
+    thinkingVariants: { kind: 'openai' as const, levels: ['low', 'medium', 'high'] as const, defaultLevel: 'medium' as const },
+  };
   return {
     protocolVersion: 1,
     workspacePath,
     projectId: workspacePath,
-    providers: [],
-    models: [],
+    providers: includeThinkingModel ? [{ id: 'test-provider', name: 'Test Provider', configured: true, models: [thinkingModel] }] : [],
+    models: includeThinkingModel ? [thinkingModel] : [],
     agentTypes: ['chat', 'build', 'review', 'debug', 'plan'],
     modes: ['manual', 'yolo', 'smart', 'notify', 'session-trust', 'custom'],
     activeAgentType: 'chat',
-    activeProviderId: '',
-    activeModelId: '',
+    activeProviderId: includeThinkingModel ? 'test-provider' : '',
+    activeModelId: includeThinkingModel ? 'thinking-model' : '',
     activeThinking: { enabled: false },
   };
 }
@@ -22,6 +33,8 @@ class FakeRuntime implements RuntimeClient {
   readonly requests: BridgeRequest[] = [];
   private onRequest: ((request: BridgeRequest) => void) | null = null;
 
+  constructor(private readonly createReadyPayload: (workspacePath: string) => RuntimeReadyPayload = readyPayload) {}
+
   setRequestObserver(observer: (request: BridgeRequest) => void): void {
     this.onRequest = observer;
   }
@@ -29,7 +42,7 @@ class FakeRuntime implements RuntimeClient {
   async handle(request: BridgeRequest): Promise<BridgeResponse> {
     this.requests.push(request);
     this.onRequest?.(request);
-    const result = request.method === 'initialize' ? readyPayload(String(request.params?.workspacePath)) : request.method === 'diagnostics' ? [] : request.method === 'shutdown' ? { shutdown: true } : request.method === 'resolve_interaction' ? { resolved: true } : { ok: true };
+    const result = request.method === 'initialize' || request.method === 'set_config' ? this.createReadyPayload(String(request.params?.workspacePath ?? 'C:/workspace')) : request.method === 'diagnostics' ? [] : request.method === 'shutdown' ? { shutdown: true } : request.method === 'resolve_interaction' ? { resolved: true } : { ok: true };
     return { type: 'response', id: request.id, ok: true, result };
   }
 }
@@ -94,5 +107,82 @@ describe('TUI controller', () => {
 
     expect(controller.state.shouldQuit).toBe(true);
     expect(runtime.requests.map((request) => request.method)).toEqual(['initialize']);
+  });
+
+  it('supports paging and boundary navigation in selection flows', async () => {
+    const runtime = new FakeRuntime();
+    const controller = new TuiController({ workspace: 'C:/workspace' }, runtime);
+    await controller.start();
+    await controller.handleKey({ type: 'character', value: '/mode' });
+    await controller.handleKey({ type: 'enter' });
+
+    expect(controller.state.commandFlow).toMatchObject({ kind: 'mode', selected: 0 });
+    await controller.handleKey({ type: 'page_down' });
+    expect(controller.state.commandFlow).toMatchObject({ kind: 'mode', selected: 4 });
+    await controller.handleKey({ type: 'home' });
+    expect(controller.state.commandFlow).toMatchObject({ kind: 'mode', selected: 0 });
+    await controller.handleKey({ type: 'end' });
+    expect(controller.state.commandFlow).toMatchObject({ kind: 'mode', selected: 4 });
+  });
+
+  it('scrolls the transcript with the mouse wheel regardless of composer focus', async () => {
+    const runtime = new FakeRuntime();
+    const controller = new TuiController({ workspace: 'C:/workspace' }, runtime);
+    await controller.start();
+
+    await controller.handleKey({ type: 'mouse', action: 'scroll_up', x: 42, y: 8 });
+    expect(controller.state.scroll).toBe(3);
+
+    await controller.handleKey({ type: 'mouse', action: 'scroll_down', x: 42, y: 8 });
+    expect(controller.state.scroll).toBe(0);
+  });
+
+  it('keeps context usage current as provider usage events arrive during a turn', async () => {
+    const runtime = new FakeRuntime((workspacePath) => readyPayload(workspacePath, true));
+    const controller = new TuiController({ workspace: 'C:/workspace' }, runtime);
+    await controller.start();
+
+    expect(controller.state.usage.contextWindow).toBe(128000);
+    controller.handleRuntimeMessage({
+      type: 'event',
+      event: 'harness_event',
+      payload: { type: 'stream_chunk', chunk: { type: 'usage', usage: { inputTokens: 32000, outputTokens: 1200, totalTokens: 33200 } } },
+    });
+
+    expect(controller.state.usage.inputTokens).toBe(32000);
+  });
+
+  it('uses the mouse wheel to navigate open selection lists', async () => {
+    const runtime = new FakeRuntime();
+    const controller = new TuiController({ workspace: 'C:/workspace' }, runtime);
+    await controller.start();
+    await controller.handleKey({ type: 'character', value: '/mode' });
+    await controller.handleKey({ type: 'enter' });
+
+    await controller.handleKey({ type: 'mouse', action: 'scroll_down', x: 42, y: 8 });
+    expect(controller.state.commandFlow).toMatchObject({ kind: 'mode', selected: 1 });
+  });
+
+  it('opens the thinking selector after choosing a model with thinking levels', async () => {
+    const runtime = new FakeRuntime((workspacePath) => readyPayload(workspacePath, true));
+    const controller = new TuiController({ workspace: 'C:/workspace' }, runtime);
+    await controller.start();
+
+    await controller.handleKey({ type: 'character', value: '/models' });
+    await controller.handleKey({ type: 'enter' });
+    await controller.handleKey({ type: 'enter' });
+    await controller.handleKey({ type: 'enter' });
+
+    expect(runtime.requests.map((request) => request.method)).toEqual(['initialize', 'set_config']);
+    expect(controller.state.commandFlow).toMatchObject({ kind: 'thinking', selected: 2 });
+    expect(controller.state.status).toContain('choose thinking level');
+
+    await controller.handleKey({ type: 'enter' });
+
+    expect(runtime.requests.at(-1)).toMatchObject({
+      method: 'set_config',
+      params: { providerId: 'test-provider', modelId: 'thinking-model', thinking: { enabled: true, level: 'medium' } },
+    });
+    expect(controller.state.commandFlow).toBeNull();
   });
 });

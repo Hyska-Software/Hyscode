@@ -168,6 +168,7 @@ export type Focus = 'composer' | 'transcript' | 'sidebar';
 export type Key =
   | { type: 'character'; value: string }
   | { type: 'enter' | 'shift_enter' | 'escape' | 'backspace' | 'delete' | 'tab' | 'shift_tab' | 'up' | 'down' | 'left' | 'right' | 'home' | 'end' | 'page_up' | 'page_down' | 'f1' }
+  | { type: 'mouse'; action: 'scroll_up' | 'scroll_down'; x: number; y: number }
   | { type: 'ctrl'; value: 'c' | 'k' | 't' | 'u' | 'w' };
 
 export type UiState = {

@@ -69,6 +69,15 @@ describe('TUI renderer', () => {
     expect(rendered).toContain('Enter send');
   });
 
+  it('keeps the header focused on global state while the sidebar owns session details', () => {
+    const firstLine = new TerminalRenderer().render(state()).split('\n')[0];
+
+    expect(firstLine).toContain('HysCode');
+    expect(firstLine).toContain('connected');
+    expect(firstLine).not.toContain('claude-sonnet');
+    expect(firstLine).not.toContain('messages');
+  });
+
   it('renders slash suggestions as a bottom command palette', () => {
     const rendered = new TerminalRenderer().render(state({
       input: '/mo',
@@ -88,5 +97,39 @@ describe('TUI renderer', () => {
 
     expect(rendered).toContain('Ready in');
     expect(rendered).not.toContain('SHORTCUTS');
+  });
+
+  it('renders a compact context meter from the active model window and current usage', () => {
+    const rendered = new TerminalRenderer().render(state({
+      usage: { current: null, session: null, requestCount: 1, estimatedCost: 0, contextWindow: 1000, inputTokens: 375, outputTokens: 20, totalTokens: 395 },
+    }));
+
+    expect(rendered).toContain('37.5%');
+    expect(rendered).toContain('ctx');
+    expect(rendered).toContain('━');
+    expect(rendered.lastIndexOf('ctx')).toBeGreaterThan(rendered.indexOf('!command'));
+  });
+
+  it('scrolls long model flows so the selected option stays visible', () => {
+    const models = Array.from({ length: 12 }, (_, index) => ({
+      id: `model-${index}`,
+      name: `Model ${index}`,
+      provider: 'openai',
+      contextWindow: 128000,
+      maxOutputTokens: 4096,
+      supportsTools: true,
+      supportsStreaming: true,
+      supportsVision: false,
+    }));
+    const rendered = new TerminalRenderer().render(state({
+      height: 18,
+      providers: [{ id: 'openai', name: 'OpenAI', configured: true, models }],
+      commandFlow: { kind: 'model', providerIndex: 0, selected: 10 },
+      overlay: 'commands',
+    }));
+
+    expect(rendered).toContain('Model 10');
+    expect(rendered).toContain('/12 · PgUp/PgDn scroll');
+    expect(rendered).not.toContain('Model 0');
   });
 });
