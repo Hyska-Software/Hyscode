@@ -137,11 +137,12 @@ From the repository root on Windows:
 
 ```powershell
 npm run build:tui
-tools/hyscode-tui/dist/hyscode-tui.exe .
+tools/hyscode-tui/dist/vortex.exe .
 ```
 
-`build:tui` creates one self-contained `hyscode-tui.exe`. The packaged launcher
-therefore does not require Bun at runtime. For source development, run
+`build:tui` creates one self-contained `vortex.exe`, and the public command is
+`vortex`. The packaged launcher therefore does not require Bun at runtime. For
+source development, run
 `npm run -w @hyscode/tui-client build` or execute the TypeScript entrypoint with
 Bun. Use `HYSCODE_REPO_ROOT` when launching the executable from another
 directory so the Codex sidecar can be discovered.
@@ -182,7 +183,7 @@ The default Windows files are:
 | Shared file-backed credentials | `%LOCALAPPDATA%\\hyscode\\keychain.json` | `HYSCODE_KEYCHAIN_PATH` |
 | Installed extension themes | `%USERPROFILE%\\.hyscode\\extensions` and `extension-state.json` | `HYSCODE_EXTENSIONS_PATH`, `HYSCODE_EXTENSION_STATE_PATH` |
 | TUI sessions, memory, SDD, traces | `%LOCALAPPDATA%\\hyscode\\tui-data.json` | `HYSCODE_TUI_DATA_PATH` |
-| TUI executable | `tools/hyscode-tui/dist/hyscode-tui.exe` | `HYSCODE_REPO_ROOT` |
+| TUI executable | `tools/hyscode-tui/dist/vortex.exe` | `HYSCODE_REPO_ROOT` |
 | Codex provider sidecar | packaged sibling or repository binary | `HYSCODE_CODEX_SIDECAR` |
 | Repository discovery | current directory | `HYSCODE_REPO_ROOT` |
 

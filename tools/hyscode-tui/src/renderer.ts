@@ -72,7 +72,7 @@ export class TerminalRenderer {
 function headerLines(state: UiState, width: number): string[] {
   const runtime = state.running ? `${WARNING}${BOLD}working${RESET}` : `${SUCCESS}${BOLD}ready${RESET}`;
   const connection = state.connectionState === 'connected' ? `${SUCCESS}● connected${RESET}` : `${WARNING}● ${state.connectionState}${RESET}`;
-  const left = `${ACCENT}${BOLD}HysCode${RESET} ${MUTED}·${RESET} ${shorten(state.workspace, Math.max(20, width - 42))}`;
+  const left = `${ACCENT}${BOLD}VORTEX${RESET} ${MUTED}·${RESET} ${shorten(state.workspace, Math.max(20, width - 42))}`;
   const model = state.provider && state.model ? `${state.provider}/${state.model}` : 'model not selected';
   const modelText = `${SOFT}${shorten(model, Math.max(12, Math.min(32, Math.floor(width * 0.28))))}${RESET}`;
   const gitText = gitSummaryLine(state.git, Math.max(14, Math.min(36, Math.floor(width * 0.32))));
@@ -283,7 +283,7 @@ function emptyTranscript(state: UiState, width: number): string[] {
 }
 
 function welcomeTopLine(state: UiState, width: number): string {
-  const title = ` ${shorten(`HysCode TUI · ${state.workspace}`, Math.max(16, width - 10))} `;
+  const title = ` ${shorten(`VORTEX · ${state.workspace}`, Math.max(16, width - 10))} `;
   const ruleWidth = Math.max(1, width - visibleLength(title) - 3);
   return `${PANEL}╭─${title}${'─'.repeat(ruleWidth)}╮${RESET}`;
 }
@@ -292,11 +292,11 @@ function welcomeIdentityLines(state: UiState, width: number): string[] {
   const logo = getCliLogo(width - 2).map((line) => ` ${ACCENT}${line}${RESET}`);
   const model = state.provider && state.model ? `${state.provider}/${state.model}` : 'No model selected';
   return [
-    `${ACCENT}${BOLD}Welcome to HysCode${RESET}`,
+    `${ACCENT}${BOLD}Welcome to VORTEX${RESET}`,
     '',
     ...logo,
     '',
-    `${SOFT}${BOLD}HysCode${RESET} ${DIM}TUI${RESET}`,
+    `${SOFT}${BOLD}VORTEX${RESET} ${DIM}CLI${RESET}`,
     `${MUTED}${state.mode} mode${RESET}`,
     `${DIM}${shorten(model, Math.max(12, width - 1))}${RESET}`,
   ];

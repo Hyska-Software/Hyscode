@@ -13,7 +13,7 @@ try {
 
     $artifactDirectory = Join-Path $repositoryRoot 'tools/hyscode-tui/dist'
     New-Item -ItemType Directory -Force -Path $artifactDirectory | Out-Null
-    $launcher = Join-Path $artifactDirectory 'hyscode-tui.exe'
+    $launcher = Join-Path $artifactDirectory 'vortex.exe'
     if (-not (Test-Path -LiteralPath $launcher -PathType Leaf)) {
         throw "TUI launcher was not produced at $launcher"
     }

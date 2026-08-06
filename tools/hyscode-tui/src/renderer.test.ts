@@ -68,7 +68,7 @@ describe('TUI renderer', () => {
   it('renders the contextual shell with an adaptive sidebar and persistent composer', () => {
     const rendered = new TerminalRenderer().render(state());
 
-    expect(rendered).toContain('HysCode');
+    expect(rendered).toContain('VORTEX');
     expect(rendered).toContain('SESSION');
     expect(rendered).toContain('SHORTCUTS');
     expect(rendered).toContain('MESSAGE');
@@ -88,7 +88,7 @@ describe('TUI renderer', () => {
   it('keeps the header focused on global state while the sidebar owns session details', () => {
     const firstLine = new TerminalRenderer().render(state()).split('\n')[0];
 
-    expect(firstLine).toContain('HysCode');
+    expect(firstLine).toContain('VORTEX');
     expect(firstLine).toContain('connected');
     expect(firstLine).toContain('anthropic/claude-sonnet');
     expect(firstLine).not.toContain('messages');
@@ -139,7 +139,7 @@ describe('TUI renderer', () => {
       }],
     }));
 
-    expect(rendered).toContain('Welcome to HysCode');
+    expect(rendered).toContain('Welcome to VORTEX');
     expect(rendered).toContain('QUICK START');
     expect(rendered).toContain('RECENT SESSIONS');
     expect(rendered).toContain(CLI_LOGO[2]);

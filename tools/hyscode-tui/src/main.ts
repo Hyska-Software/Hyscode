@@ -39,7 +39,7 @@ async function main(): Promise<void> {
   try {
     await controller.start();
     if (!interactive) {
-      process.stdout.write(`HysCode TUI runtime ready for ${controller.state.workspace}\n`);
+      process.stdout.write(`VORTEX runtime ready for ${controller.state.workspace}\n`);
       await controller.shutdown();
       return;
     }

@@ -243,7 +243,7 @@ export function parseCliArgs(args: readonly string[], cwd = process.cwd(), versi
         return { kind: 'help', text: helpText() };
       case '-V':
       case '--version':
-        return { kind: 'version', text: `hyscode-tui ${version}` };
+        return { kind: 'version', text: `vortex ${version}` };
       case '--workspace':
         workspace = nextValue(index, argument);
         index += 1;
@@ -289,9 +289,9 @@ export function parseCliArgs(args: readonly string[], cwd = process.cwd(), versi
 export function helpText(): string {
   const commandLines = COMMANDS.map((command) => `  ${command.usage.padEnd(30)} ${command.description}`);
   return [
-    'HysCode TUI',
+    'VORTEX',
     '',
-    'Usage: hyscode-tui [workspace] [options]',
+    'Usage: vortex [workspace] [options]',
     '',
     'Options:',
     '  -h, --help                 Show this help',
@@ -305,8 +305,8 @@ export function helpText(): string {
     'Slash commands:',
     ...commandLines,
     '',
-    'The TUI uses the same TypeScript harness, providers, MCP servers, memory,',
-    'skills, rules, keychain, tools, sessions, and terminal runtime as HysCode Desktop.',
+    'The VORTEX CLI uses the same TypeScript harness, providers, MCP servers, memory,',
+    'skills, rules, keychain, tools, sessions, and terminal runtime as the desktop app.',
   ].join('\n');
 }
 

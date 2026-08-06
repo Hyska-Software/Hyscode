@@ -4,11 +4,11 @@
   "private": true,
   "type": "module",
   "bin": {
-    "hyscode-tui": "dist/hyscode-tui"
+    "vortex": "dist/vortex"
   },
   "scripts": {
-    "build": "bun build --compile src/main.ts --outfile dist/hyscode-tui",
-    "build:release": "bun build --compile --minify src/main.ts --outfile dist/hyscode-tui",
+    "build": "bun build --compile src/main.ts --outfile dist/vortex",
+    "build:release": "bun build --compile --minify src/main.ts --outfile dist/vortex",
     "lint": "eslint src/",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"

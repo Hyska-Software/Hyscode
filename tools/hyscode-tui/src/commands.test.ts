@@ -11,8 +11,8 @@ describe('TUI command and CLI parsing', () => {
 
   it('rejects invalid modes and supports help/version surfaces', () => {
     expect(() => parseCliArgs(['--mode', 'unknown'])).toThrow('Invalid mode');
-    expect(parseCliArgs(['--help']).kind).toBe('help');
-    expect(parseCliArgs(['--version'], process.cwd(), '9.9.9')).toEqual({ kind: 'version', text: 'hyscode-tui 9.9.9' });
+    expect(parseCliArgs(['--help'])).toMatchObject({ kind: 'help', text: expect.stringContaining('Usage: vortex') });
+    expect(parseCliArgs(['--version'], process.cwd(), '9.9.9')).toEqual({ kind: 'version', text: 'vortex 9.9.9' });
   });
 
   it('parses quoted slash command arguments and filters the visual palette', () => {
