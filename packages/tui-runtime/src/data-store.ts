@@ -196,6 +196,23 @@ export class CliDataStore {
     return conversation ? { ...this.toSummary(conversation), messages: [...conversation.messages] } : null;
   }
 
+  async deleteSession(id: string): Promise<boolean> {
+    const before = this.data.conversations.length;
+    this.data.conversations = this.data.conversations.filter((conversation) => conversation.id !== id);
+    if (this.data.conversations.length === before) return false;
+    await this.persist();
+    return true;
+  }
+
+  async renameSession(id: string, title: string): Promise<SessionRecord | null> {
+    const conversation = this.data.conversations.find((candidate) => candidate.id === id);
+    if (!conversation) return null;
+    conversation.title = title.trim().slice(0, 160) || 'Untitled session';
+    conversation.updatedAt = now();
+    await this.persist();
+    return { ...this.toSummary(conversation), messages: [...conversation.messages] };
+  }
+
   async saveSession(session: SessionRecord): Promise<void> {
     const existing = this.data.conversations.findIndex((conversation) => conversation.id === session.id);
     const record: PersistedConversation = {

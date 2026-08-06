@@ -11,7 +11,9 @@ import {
   getAgentTypes,
   type AgentQuestionAnswer,
   type AgentType,
+  type ContextSource,
   type HarnessEvent,
+  type RecoverableTurnError,
   type SddDatabase,
   type SddSession,
   type SddTask,
@@ -46,14 +48,19 @@ import {
   type BridgeEvent,
   type BridgeRequest,
   type BridgeResponse,
+  type ContextAttachment,
+  type ContextStatePayload,
   type DiagnosticPayload,
+  type FileChangeState,
   type InteractionRequest,
   type InteractionResolution,
   type ProjectSummary,
   type RuntimeReadyPayload,
+  type SddStatePayload,
   type SendMessageParams,
   type SessionRecord,
   type SetConfigParams,
+  type TerminalSummary,
 } from './protocol';
 
 type PendingInteraction = {
@@ -76,6 +83,11 @@ type TerminalEntry = {
 
 type BridgeOutput = (message: BridgeResponse | BridgeEvent) => void;
 
+const MAX_CONTEXT_ATTACHMENT_BYTES = 2_000_000;
+const MAX_IMAGE_ATTACHMENT_BYTES = 20_000_000;
+const MAX_DIRECTORY_CONTEXT_FILES = 80;
+const MAX_TERMINAL_CONTEXT_BYTES = 120_000;
+
 export class TuiBridge {
   private readonly dataStore: CliDataStore;
   private configStore: SharedConfigStore;
@@ -90,11 +102,16 @@ export class TuiBridge {
   private activeRun: Promise<unknown> | null = null;
   private activeTurnId: string | null = null;
   private activeTurnMessages: Message[] = [];
+  private lastRecovery: RecoverableTurnError | null = null;
+  private terminalRuntime: CliTerminalRuntime | null = null;
   private subAgentsInFlight = 0;
   private readonly subAgentWaiters: Array<() => void> = [];
   private readonly interactions = new Map<string, PendingInteraction>();
   private readonly hostRequests = new Map<string, PendingHostRequest>();
   private readonly terminals = new Map<string, TerminalEntry>();
+  private readonly attachments = new Map<string, ContextAttachment>();
+  private readonly pendingFileChanges = new Map<string, FileChangeState>();
+  private readonly childAgents = new Map<string, Harness>();
   private output: BridgeOutput | null = null;
 
   constructor(output?: BridgeOutput) {
@@ -115,6 +132,10 @@ export class TuiBridge {
           return this.ok(request.id, await this.initialize(request.params ?? {}));
         case 'send_message':
           return this.ok(request.id, await this.sendMessage(request.params ?? {}));
+        case 'retry_turn':
+          return this.ok(request.id, await this.retryTurn());
+        case 'continue_partial_turn':
+          return this.ok(request.id, await this.continuePartialTurn());
         case 'cancel':
           this.cancel();
           return this.ok(request.id, { cancelled: true });
@@ -136,6 +157,50 @@ export class TuiBridge {
           return this.ok(request.id, await this.switchProject(String(request.params?.workspacePath ?? '')));
         case 'diagnostics':
           return this.ok(request.id, await this.diagnostics(request.params ?? {}));
+        case 'context_attach':
+          return this.ok(request.id, await this.attachContext(request.params ?? {}));
+        case 'context_remove':
+          return this.ok(request.id, this.removeContext(String(request.params?.id ?? '')));
+        case 'context_clear':
+          return this.ok(request.id, this.clearContext());
+        case 'context_list':
+          return this.ok(request.id, this.contextState());
+        case 'rules_list':
+          return this.ok(request.id, this.listRules());
+        case 'skills_list':
+          return this.ok(request.id, this.listSkills());
+        case 'memory_list':
+          return this.ok(request.id, await this.listMemories());
+        case 'terminal_list':
+          return this.ok(request.id, await this.listTerminals());
+        case 'terminal_open':
+          return this.ok(request.id, await this.openTerminal(request.params ?? {}));
+        case 'terminal_snapshot':
+          return this.ok(request.id, await this.terminalSnapshot(request.params ?? {}));
+        case 'terminal_write':
+          return this.ok(request.id, await this.terminalWrite(request.params ?? {}));
+        case 'terminal_interrupt':
+          return this.ok(request.id, await this.terminalInterrupt(request.params ?? {}));
+        case 'terminal_kill':
+          return this.ok(request.id, await this.terminalKill(request.params ?? {}));
+        case 'file_change_resolve':
+          return this.ok(request.id, await this.resolveFileChange(request.params ?? {}));
+        case 'file_change_resolve_all':
+          return this.ok(request.id, await this.resolveAllFileChanges(request.params ?? {}));
+        case 'sdd_start':
+          return this.ok(request.id, await this.startSdd(String(request.params?.description ?? '')));
+        case 'sdd_action':
+          return this.ok(request.id, await this.sddAction(request.params ?? {}));
+        case 'subagent_cancel':
+          return this.ok(request.id, this.cancelSubAgent(String(request.params?.ownerId ?? '')));
+        case 'session_delete':
+          return this.ok(request.id, await this.deleteSession(String(request.params?.id ?? '')));
+        case 'session_rename':
+          return this.ok(request.id, await this.renameSession(String(request.params?.id ?? ''), String(request.params?.title ?? '')));
+        case 'session_export':
+          return this.ok(request.id, await this.exportSession(String(request.params?.id ?? this.session?.id ?? '')));
+        case 'trace_list':
+          return this.ok(request.id, await this.listTraces());
         case 'host_response':
           return this.ok(request.id, this.resolveHostResponse(request.params ?? {}));
         case 'host_event':
@@ -182,10 +247,18 @@ export class TuiBridge {
       maxDelayMs: this.settings.agentRetryMaxDelayMs,
     });
 
-    this.host = new CliHost(workspacePath, this.dataStore, this.keyStore, (command, args) => this.requestHost(command, args));
+    // The standalone TUI runs inside the same TypeScript process as the
+    // runtime. CliHost owns the native PTY lifecycle directly, so the
+    // production path does not need the former Rust host-request round trip.
+    // The host_response/host_event protocol remains available for older
+    // integrations and tests that provide an explicit remote host adapter.
+    this.host = new CliHost(workspacePath, this.dataStore, this.keyStore);
+    this.attachments.clear();
+    this.pendingFileChanges.clear();
     const skillLoader = this.createSkillLoader();
     const ruleLoader = this.createRuleLoader();
     const terminalRuntime = new CliTerminalRuntime(this.host, this.settings.terminalShell);
+    this.terminalRuntime = terminalRuntime;
     const sddDb = this.createSddDatabase();
     this.harness = new Harness({
       workspacePath,
@@ -252,6 +325,18 @@ export class TuiBridge {
     const params = normalizeSendParams(rawParams);
     if (!this.harness) throw new Error('Runtime is not initialized.');
     if (this.activeRun) throw new Error('A turn is already running.');
+    for (const attachment of params.contextAttachments ?? []) {
+      this.attachments.set(attachment.id, { ...attachment });
+      this.addAttachmentSource(attachment);
+    }
+    if ((params.contextAttachments?.length ?? 0) > 0) this.emitContextUpdated();
+    const attachedImages = Array.from(this.attachments.values())
+      .filter((attachment) => attachment.kind === 'image' && attachment.base64 && attachment.mediaType)
+      .map((attachment) => ({ base64: attachment.base64!, mediaType: attachment.mediaType! }));
+    const effectiveParams: SendMessageParams = {
+      ...params,
+      images: [...(params.images ?? []), ...attachedImages],
+    };
     // The harness owns and mutates its working history while it runs. Keep it
     // isolated from the persisted session array so persistTurn can append the
     // completed turn exactly once.
@@ -259,21 +344,38 @@ export class TuiBridge {
     this.activeTurnId = null;
     this.activeTurnMessages = [];
     const run = this.harness.run({
-      userMessage: params.message,
+      userMessage: effectiveParams.message,
       history,
-      images: params.images,
-      ruleTargetPaths: params.ruleTargetPaths,
+      images: effectiveParams.images,
+      ruleTargetPaths: effectiveParams.ruleTargetPaths,
     });
     this.activeRun = run;
     try {
       const outcome = await run;
-      await this.persistTurn(params, outcome.response, outcome.turnRecord.tokenUsage);
+      await this.persistTurn(effectiveParams, outcome.response, outcome.turnRecord.tokenUsage);
       return outcome;
     } finally {
       this.activeRun = null;
       this.activeTurnId = null;
       this.activeTurnMessages = [];
     }
+  }
+
+  private async retryTurn(): Promise<unknown> {
+    if (!this.session) throw new Error('No active session to retry.');
+    const lastUser = [...this.session.messages].reverse().find((message) => message.role === 'user');
+    if (!lastUser) throw new Error('There is no previous user message to retry.');
+    this.lastRecovery = null;
+    const message = lastUser.content.filter((block) => block.type === 'text').map((block) => block.text).join('\n');
+    return this.sendMessage({ message, history: this.session.messages.slice(0, -1) });
+  }
+
+  private async continuePartialTurn(): Promise<unknown> {
+    const recovery = this.lastRecovery;
+    if (!recovery) throw new Error('There is no recoverable partial turn.');
+    this.lastRecovery = null;
+    const message = `Continue the interrupted response from exactly where it stopped. Do not repeat completed content. The preserved partial response was:\n\n${recovery.partialText}`;
+    return this.sendMessage({ message, history: this.session?.messages ?? [] });
   }
 
   private cancel(): void {
@@ -364,9 +466,303 @@ export class TuiBridge {
     });
   }
 
+  private async attachContext(rawParams: Record<string, unknown>): Promise<ContextStatePayload> {
+    const rawKind = rawParams.kind;
+    let kind = normalizeContextKind(rawKind);
+    if (rawKind === 'auto') {
+      const candidatePath = this.resolveWorkspacePath(String(rawParams.path ?? ''));
+      const info = await this.requireHost().invoke<Record<string, unknown>>('stat_path', { path: candidatePath });
+      if (info.is_dir === true) kind = 'directory';
+      else if (isImagePath(candidatePath)) kind = 'image';
+      else kind = 'file';
+    }
+    const id = String(rawParams.id ?? `${kind}-${crypto.randomUUID()}`);
+    const label = String(rawParams.label ?? rawParams.path ?? rawParams.terminalId ?? kind);
+    const attachment: ContextAttachment = { id, kind, label };
+    if (kind === 'image') {
+      const imagePath = typeof rawParams.path === 'string' ? this.resolveWorkspacePath(rawParams.path) : '';
+      const imageBuffer = imagePath ? await readFile(imagePath) : null;
+      if (imageBuffer && imageBuffer.byteLength > MAX_IMAGE_ATTACHMENT_BYTES) {
+        throw new Error(`Image attachment is larger than ${MAX_IMAGE_ATTACHMENT_BYTES} bytes.`);
+      }
+      const base64 = String(rawParams.base64 ?? (imageBuffer ? imageBuffer.toString('base64') : ''));
+      const mediaType = String(rawParams.mediaType ?? 'image/png');
+      if (!base64) throw new Error('Image attachment requires base64 data.');
+      attachment.base64 = base64;
+      attachment.mediaType = mediaType;
+      if (imagePath) attachment.path = imagePath;
+      attachment.tokenEstimate = Math.ceil(base64.length / 6);
+    } else if (kind === 'terminal') {
+      const terminalId = String(rawParams.terminalId ?? '');
+      if (!terminalId) throw new Error('Terminal attachment requires terminalId.');
+      const snapshot = await this.requireTerminalRuntime().snapshot(terminalId, 0);
+      const content = snapshot.data.slice(-MAX_TERMINAL_CONTEXT_BYTES);
+      attachment.terminalId = terminalId;
+      attachment.content = content;
+      attachment.tokenEstimate = Math.ceil(content.length / 4);
+    } else if (kind === 'file') {
+      const filePath = this.resolveWorkspacePath(String(rawParams.path ?? ''));
+      const content = await this.requireHost().invoke<string>('read_file', { path: filePath });
+      if (Buffer.byteLength(content, 'utf8') > MAX_CONTEXT_ATTACHMENT_BYTES) {
+        throw new Error(`Context file is larger than ${MAX_CONTEXT_ATTACHMENT_BYTES} bytes.`);
+      }
+      attachment.path = filePath;
+      attachment.content = content;
+      attachment.tokenEstimate = Math.ceil(content.length / 4);
+    } else if (kind === 'directory') {
+      const directoryPath = this.resolveWorkspacePath(String(rawParams.path ?? ''));
+      const files = await this.requireHost().invoke<string[]>('find_files', { basePath: directoryPath, pattern: '*', maxResults: MAX_DIRECTORY_CONTEXT_FILES });
+      const listing = files.map((file) => path.isAbsolute(file) ? file : path.resolve(directoryPath, file)).join('\n');
+      attachment.path = directoryPath;
+      attachment.content = listing;
+      attachment.tokenEstimate = Math.ceil(listing.length / 4);
+    } else {
+      const content = String(rawParams.content ?? '');
+      if (!content.trim()) throw new Error('Text attachment requires content.');
+      attachment.content = content;
+      attachment.tokenEstimate = Math.ceil(content.length / 4);
+    }
+
+    this.attachments.set(id, attachment);
+    this.addAttachmentSource(attachment);
+    this.emitContextUpdated();
+    return this.contextState();
+  }
+
+  private removeContext(id: string): ContextStatePayload {
+    const attachment = this.attachments.get(id);
+    if (!attachment) return this.contextState();
+    this.attachments.delete(id);
+    this.requireHarness().removeContextSource(id);
+    this.emitContextUpdated();
+    return this.contextState();
+  }
+
+  private clearContext(): ContextStatePayload {
+    this.requireHarness().getContextManager().clearAll();
+    this.attachments.clear();
+    this.emitContextUpdated();
+    return this.contextState();
+  }
+
+  private contextState(): ContextStatePayload {
+    const harness = this.requireHarness();
+    const context = harness.getContextManager();
+    return {
+      attachments: Array.from(this.attachments.values()).map((attachment) => ({ ...attachment })),
+      gathered: context.getGatheredFiles(),
+      gatheredTokens: context.getGatheredTokens(),
+      activeRulePaths: harness.getActiveRules().map((rule) => rule.filePath),
+      activeSkillNames: harness.getActiveSkills().map((skill) => skill.frontmatter.name),
+    };
+  }
+
+  private listRules(): unknown {
+    const loader = this.requireHarness().getRuleLoader();
+    return {
+      rules: loader?.getAll().map((rule) => ({ id: rule.id, name: rule.name, filePath: rule.filePath, scope: rule.scope, origin: rule.origin, mandatory: rule.mandatory, enabled: rule.enabled })) ?? [],
+      diagnostics: loader?.getDiagnostics() ?? [],
+    };
+  }
+
+  private listSkills(): unknown {
+    const loader = this.requireHarness().getSkillLoader();
+    return loader?.getAll().map((skill) => ({ id: skill.id, name: skill.frontmatter.name, description: skill.frontmatter.description, scope: skill.frontmatter.scope, activation: skill.frontmatter.activation, active: skill.active, status: skill.status })) ?? [];
+  }
+
+  private async listMemories(): Promise<unknown> {
+    return this.dataStore.invoke('db_list_memories', { projectId: this.projectId, status: 'active', limit: 100 });
+  }
+
+  private addAttachmentSource(attachment: ContextAttachment): void {
+    const content = attachment.kind === 'image'
+      ? `[image attachment: ${attachment.label}]`
+      : attachment.content ?? attachment.path ?? attachment.label;
+    const source: ContextSource = {
+      id: attachment.id,
+      type: attachment.kind === 'terminal' ? 'terminal' : 'context_chip',
+      priority: 'high',
+      origin: 'explicit',
+      content: `<attachment kind="${attachment.kind}" label="${attachment.label}">\n${content}\n</attachment>`,
+      tokenEstimate: attachment.tokenEstimate ?? Math.ceil(content.length / 4),
+      identity: attachment.path ?? attachment.terminalId ?? attachment.id,
+    };
+    this.requireHarness().addContextSource(source);
+  }
+
+  private emitContextUpdated(): void {
+    this.emit({ type: 'event', event: 'context_updated', payload: this.contextState() });
+  }
+
+  private async listTerminals(): Promise<TerminalSummary[]> {
+    return this.requireTerminalRuntime().list();
+  }
+
+  private async openTerminal(rawParams: Record<string, unknown>): Promise<TerminalSummary> {
+    const runtime = this.requireTerminalRuntime();
+    const binding = await runtime.acquire({
+      conversationId: this.session?.id ?? this.projectId,
+      toolCallId: `tui-${crypto.randomUUID()}`,
+      cwd: this.resolveWorkspacePath(String(rawParams.cwd ?? this.workspacePath)),
+      forceNew: rawParams.forceNew !== false,
+      background: true,
+      ...(typeof rawParams.name === 'string' && rawParams.name ? { sessionName: rawParams.name } : {}),
+    });
+    return runtime.summary(binding.terminalId);
+  }
+
+  private async terminalSnapshot(rawParams: Record<string, unknown>): Promise<unknown> {
+    return this.requireTerminalRuntime().snapshot(String(rawParams.terminalId ?? ''), numberValue(rawParams.afterSequence, 0));
+  }
+
+  private async terminalWrite(rawParams: Record<string, unknown>): Promise<{ written: boolean }> {
+    await this.requireTerminalRuntime().write(String(rawParams.terminalId ?? ''), String(rawParams.data ?? ''));
+    return { written: true };
+  }
+
+  private async terminalInterrupt(rawParams: Record<string, unknown>): Promise<{ interrupted: boolean }> {
+    await this.requireTerminalRuntime().interrupt(String(rawParams.terminalId ?? ''));
+    return { interrupted: true };
+  }
+
+  private async terminalKill(rawParams: Record<string, unknown>): Promise<{ killed: boolean }> {
+    await this.requireTerminalRuntime().kill(String(rawParams.terminalId ?? ''));
+    return { killed: true };
+  }
+
+  private async resolveFileChange(rawParams: Record<string, unknown>): Promise<{ resolved: boolean }> {
+    const change = this.pendingFileChanges.get(String(rawParams.toolCallId ?? rawParams.id ?? ''));
+    if (!change) return { resolved: false };
+    const action = rawParams.action === 'accept' ? 'accept' : 'reject';
+    if (action === 'reject') {
+      await this.restoreFile(change);
+      change.status = 'rejected';
+    } else {
+      change.status = 'accepted';
+    }
+    this.pendingFileChanges.set(change.toolCallId, change);
+    this.emit({ type: 'event', event: 'file_change_updated', payload: change });
+    return { resolved: true };
+  }
+
+  private async resolveAllFileChanges(rawParams: Record<string, unknown>): Promise<{ resolved: number }> {
+    const action = rawParams.action === 'accept' ? 'accept' : 'reject';
+    let resolved = 0;
+    for (const change of this.pendingFileChanges.values()) {
+      if (change.status !== 'pending') continue;
+      if (action === 'reject') await this.restoreFile(change);
+      change.status = action === 'accept' ? 'accepted' : 'rejected';
+      resolved += 1;
+    }
+    for (const change of this.pendingFileChanges.values()) {
+      if (change.status !== 'pending') this.emit({ type: 'event', event: 'file_change_updated', payload: change });
+    }
+    return { resolved };
+  }
+
+  private async restoreFile(change: FileChangeState): Promise<void> {
+    if (change.originalContent === null) {
+      await this.requireHost().invoke('delete_path', { path: change.filePath });
+      return;
+    }
+    await this.requireHost().invoke('write_file', { path: change.filePath, content: change.originalContent });
+  }
+
+  private async startSdd(description: string): Promise<SddStatePayload> {
+    if (!description.trim()) throw new Error('SDD description cannot be empty.');
+    const result = await this.requireHarness().startSdd(description.trim());
+    const state = await this.readSddState(result.spec);
+    this.emit({ type: 'event', event: 'sdd_updated', payload: state });
+    return state;
+  }
+
+  private async sddAction(rawParams: Record<string, unknown>): Promise<SddStatePayload> {
+    const action = String(rawParams.action ?? '');
+    const harness = this.requireHarness();
+    let review: string | null = null;
+    let spec: string | null = null;
+    if (action === 'approve_spec') await harness.approveSddSpec();
+    else if (action === 'reject_spec') spec = await harness.rejectSddSpec(String(rawParams.feedback ?? ''));
+    else if (action === 'approve_plan') review = await harness.approveSddPlan();
+    else if (action === 'resume') review = await harness.resumeSddPlan();
+    else throw new Error(`Unknown SDD action "${action}".`);
+    const state = await this.readSddState(spec, review);
+    this.emit({ type: 'event', event: 'sdd_updated', payload: state });
+    return state;
+  }
+
+  private async readSddState(spec: string | null = null, review: string | null = null): Promise<SddStatePayload> {
+    const harness = this.requireHarness();
+    const sessionId = harness.getSddSessionId();
+    const rawSession = sessionId
+      ? await this.dataStore.invoke<string | null>('db_sdd_get_session', { id: sessionId })
+      : null;
+    const session = rawSession ? ({ ...JSON.parse(rawSession), tasks: [] } as SddSession) : null;
+    const rawTasks = sessionId
+      ? await this.dataStore.invoke<string[]>('db_sdd_get_tasks', { sessionId })
+      : [];
+    const tasks = rawTasks.map((raw) => JSON.parse(raw) as SddTask);
+    return {
+      sessionId,
+      session,
+      tasks,
+      phase: session?.status ?? null,
+      spec: spec ?? session?.spec ?? null,
+      review,
+      failedTask: harness.getSddFailedTask(),
+    };
+  }
+
+  private cancelSubAgent(ownerId: string): { cancelled: boolean } {
+    const child = this.childAgents.get(ownerId);
+    if (!child) return { cancelled: false };
+    child.cancel();
+    return { cancelled: true };
+  }
+
+  private async deleteSession(id: string): Promise<{ deleted: boolean }> {
+    const deleted = await this.dataStore.deleteSession(id);
+    if (deleted && this.session?.id === id) this.session = await this.newSession();
+    return { deleted };
+  }
+
+  private async renameSession(id: string, title: string): Promise<SessionRecord | null> {
+    const session = await this.dataStore.renameSession(id, title);
+    if (session && this.session?.id === id) {
+      this.session = session;
+      this.emit({ type: 'event', event: 'session_updated', payload: session });
+    }
+    return session;
+  }
+
+  private async exportSession(id: string): Promise<{ path: string; content: string }> {
+    const session = this.dataStore.loadSession(id);
+    if (!session) throw new Error(`Session "${id}" not found.`);
+    const lines = [`# ${session.title}`, '', `- Workspace: ${session.workspacePath}`, `- Mode: ${session.agentType}`, `- Updated: ${session.updatedAt}`, ''];
+    for (const message of session.messages) {
+      lines.push(`## ${message.role}`, '');
+      for (const block of message.content) {
+        if (block.type === 'text') lines.push(block.text);
+        else if (block.type === 'thinking') lines.push(`> Thinking: ${block.thinking}`);
+        else if (block.type === 'tool_call') lines.push(`> Tool: ${block.name}\n> Input: ${formatJson(block.input)}`);
+        else if (block.type === 'tool_result') lines.push(`> Result:\n\n${block.output}`);
+      }
+      lines.push('');
+    }
+    const exportPath = path.join(this.workspacePath, '.hyscode', 'exports', `${session.id}.md`);
+    await this.requireHost().invoke('create_directory', { path: path.dirname(exportPath) });
+    await this.requireHost().invoke('write_file', { path: exportPath, content: `${lines.join('\n')}\n` });
+    return { path: exportPath, content: lines.join('\n') };
+  }
+
+  private async listTraces(): Promise<unknown> {
+    return this.dataStore.invoke('db_list_traces', { conversationId: this.session?.id ?? '' });
+  }
+
   private loadSession(id: string): SessionRecord | null {
     const session = this.dataStore.loadSession(id);
     if (session && this.harness) {
+      this.resetConversationContext();
       this.session = session;
       this.harness.setConversationId(session.id);
       this.harness.setAgentType(session.agentType);
@@ -377,6 +773,7 @@ export class TuiBridge {
 
   private async newSession(): Promise<SessionRecord> {
     const harness = this.requireHarness();
+    this.resetConversationContext();
     this.session = await this.dataStore.createSession(this.workspacePath, harness.getAgentType(), this.currentProviderId(), this.currentModelId());
     harness.setConversationId(this.session.id);
     this.emit({ type: 'event', event: 'session_updated', payload: this.session });
@@ -389,21 +786,19 @@ export class TuiBridge {
     this.hostRequests.clear();
     for (const terminal of this.terminals.values()) terminal.unsubscribe?.();
     this.terminals.clear();
+    this.terminalRuntime = null;
+    this.attachments.clear();
+    this.pendingFileChanges.clear();
+    this.childAgents.clear();
     if (this.mcp) await Promise.all(this.mcp.listServers().map((server) => this.mcp?.disconnect(server.config.id)));
     await this.host?.shutdown();
   }
 
-  private requestHost(command: string, params: Record<string, unknown>): Promise<unknown> {
-    const requestId = `host-${crypto.randomUUID()}`;
-    const promise = new Promise<unknown>((resolve, reject) => {
-      this.hostRequests.set(requestId, { resolve, reject });
-    });
-    this.emit({
-      type: 'event',
-      event: 'host_request',
-      payload: { requestId, method: command, params },
-    });
-    return promise;
+  private resetConversationContext(): void {
+    if (!this.harness) return;
+    this.harness.getContextManager().clearConversationContext();
+    this.attachments.clear();
+    this.emitContextUpdated();
   }
 
   private resolveHostResponse(rawParams: Record<string, unknown>): { resolved: boolean } {
@@ -507,15 +902,17 @@ export class TuiBridge {
         const child = harness.createChild({
           agentType: mode,
           config: { maxIterations: settings.subAgentMaxIterations, approval: settings.subAgentAutoApprove ? { mode: 'yolo' } : buildApprovalConfig(settings) },
-          onEvent: (event) => this.emitHarnessEvent(event),
+          onEvent: (event) => this.emitScopedHarnessEvent(context.toolCallId, event),
           externalTools: manager ? this.externalMcpTools(manager) : [],
         });
         child.setOwnerId(context.toolCallId);
+        this.childAgents.set(context.toolCallId, child);
         const release = await this.acquireSubAgentSlot(settings.subAgentMaxConcurrent);
         try {
           const result = await child.run({ userMessage: task, history: [] });
           return { success: result.status === 'complete', output: result.response, error: result.status === 'complete' ? undefined : result.status };
         } finally {
+          this.childAgents.delete(context.toolCallId);
           release();
         }
       },
@@ -649,6 +1046,7 @@ export class TuiBridge {
   }
 
   private emitHarnessEvent(event: HarnessEvent): void {
+    if (event.type === 'turn_recoverable_error') this.lastRecovery = event.recovery;
     if (event.type === 'turn_start' && !this.activeTurnId) this.activeTurnId = event.turnId ?? null;
     if (event.type === 'transcript_message' && this.belongsToActiveTurn(event)) {
       this.activeTurnMessages.push({ role: event.role, content: event.blocks });
@@ -658,7 +1056,17 @@ export class TuiBridge {
       this.emit({ type: 'event', event: 'harness_event', payload: { ...event, pending: { id: pending.id, toolName: pending.toolName, input: pending.input, description: pending.description, riskLevel: pending.riskLevel } } as HarnessEvent });
       return;
     }
+    if (event.type === 'file_change_pending') {
+      this.pendingFileChanges.set(event.change.toolCallId, {
+        ...event.change,
+        status: this.pendingFileChanges.get(event.change.toolCallId)?.status ?? 'pending',
+      });
+    }
     this.emit({ type: 'event', event: 'harness_event', payload: event });
+  }
+
+  private emitScopedHarnessEvent(ownerId: string, event: HarnessEvent): void {
+    this.emit({ type: 'event', event: 'scoped_harness_event', payload: { ownerId, event } });
   }
 
   private belongsToActiveTurn(event: HarnessEvent): boolean {
@@ -680,12 +1088,14 @@ export class TuiBridge {
     const models = providers.flatMap((provider) => provider.configured ? provider.models : []);
     return {
       protocolVersion: 1,
+      capabilitiesVersion: 2,
       workspacePath: this.workspacePath,
       projectId: this.projectId,
       providers,
       models,
       agentTypes: getAgentTypes(),
       modes: ['manual', 'yolo', 'smart', 'notify', 'session-trust', 'custom'],
+      approvalMode: this.requireSettings().approvalMode,
       activeAgentType: harness.getAgentType(),
       activeProviderId: this.currentProviderId(),
       activeModelId: this.currentModelId(),
@@ -694,6 +1104,31 @@ export class TuiBridge {
         this.currentProviderId(),
         this.currentModelId(),
       ),
+      capabilities: {
+        slashCommands: true,
+        contextMentions: true,
+        fileAttachments: true,
+        directoryAttachments: true,
+        terminalAttachments: true,
+        imageAttachments: true,
+        interactiveTerminal: true,
+        approvals: true,
+        fileReview: true,
+        sdd: harness.getSddEngine() !== null,
+        subAgents: this.requireSettings().subAgentEnabled,
+        sessionManagement: true,
+      },
+      context: this.contextState(),
+      sdd: {
+        sessionId: harness.getSddSessionId(),
+        session: null,
+        tasks: [],
+        phase: null,
+        spec: null,
+        review: null,
+        failedTask: harness.getSddFailedTask(),
+      },
+      terminals: [],
       ...(this.session ? { session: this.session } : {}),
     };
   }
@@ -786,6 +1221,15 @@ export class TuiBridge {
     return this.host;
   }
 
+  private requireTerminalRuntime(): CliTerminalRuntime {
+    if (!this.terminalRuntime) throw new Error('Terminal runtime is not initialized.');
+    return this.terminalRuntime;
+  }
+
+  private resolveWorkspacePath(value: string): string {
+    return path.isAbsolute(value) ? path.normalize(value) : path.resolve(this.workspacePath, value);
+  }
+
   private requireHarness(): Harness {
     if (!this.harness) throw new Error('Harness is not initialized.');
     return this.harness;
@@ -846,6 +1290,29 @@ class CliTerminalRuntime implements TerminalRuntimeAdapter {
     if (!entry) throw new Error(`Terminal "${terminalId}" not found.`);
     const snapshot = await this.host.invoke<{ data: string; from_sequence: number; to_sequence: number; truncated: boolean; alive: boolean; exit_code: number | null }>('pty_snapshot', { ptyId: entry.binding.ptyId, afterSequence });
     return { data: snapshot.data, fromSequence: snapshot.from_sequence, toSequence: snapshot.to_sequence, truncated: snapshot.truncated, alive: snapshot.alive, exitCode: snapshot.exit_code };
+  }
+
+  async list(): Promise<TerminalSummary[]> {
+    const summaries: TerminalSummary[] = [];
+    for (const terminalId of this.entries.keys()) {
+      summaries.push(await this.summary(terminalId));
+    }
+    return summaries;
+  }
+
+  async summary(terminalId: string): Promise<TerminalSummary> {
+    const entry = this.entries.get(terminalId);
+    if (!entry) throw new Error(`Terminal "${terminalId}" not found.`);
+    const snapshot = await this.snapshot(terminalId, 0);
+    return {
+      terminalId,
+      ptyId: entry.binding.ptyId,
+      name: entry.sessionName ?? terminalId,
+      alive: snapshot.alive,
+      sequence: snapshot.toSequence,
+      outputPreview: snapshot.data.slice(-4000),
+      frameLanguage: entry.binding.frameLanguage,
+    };
   }
 
   async write(terminalId: string, data: string): Promise<void> {
@@ -962,6 +1429,10 @@ function numberOrDefault(value: unknown, fallback: number): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
 }
 
+function numberValue(value: unknown, fallback: number): number {
+  return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
+}
+
 type SidecarCommand = {
   program: string;
   args: string[];
@@ -994,10 +1465,30 @@ function normalizeSendParams(raw: Record<string, unknown>): SendMessageParams {
   const ruleTargetPaths = Array.isArray(raw.ruleTargetPaths)
     ? raw.ruleTargetPaths.filter((target): target is string => typeof target === 'string' && target.trim().length > 0)
     : undefined;
+  const contextAttachments = Array.isArray(raw.contextAttachments)
+    ? raw.contextAttachments.filter((attachment): attachment is ContextAttachment => typeof attachment === 'object' && attachment !== null && typeof (attachment as Record<string, unknown>).id === 'string' && typeof (attachment as Record<string, unknown>).kind === 'string')
+    : undefined;
   return {
     message: String(raw.message ?? ''),
     history: Array.isArray(raw.history) ? raw.history as Message[] : undefined,
     images,
     ruleTargetPaths,
+    contextAttachments,
   };
+}
+
+function normalizeContextKind(value: unknown): ContextAttachment['kind'] {
+  return value === 'directory' || value === 'terminal' || value === 'image' || value === 'text' ? value : 'file';
+}
+
+function isImagePath(filePath: string): boolean {
+  return ['.png', '.jpg', '.jpeg', '.gif', '.webp'].includes(path.extname(filePath).toLowerCase());
+}
+
+function formatJson(value: unknown): string {
+  try {
+    return JSON.stringify(value, null, 2) ?? 'null';
+  } catch {
+    return '<unserializable>';
+  }
 }

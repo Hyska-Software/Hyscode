@@ -2,6 +2,9 @@ import { createInterface } from 'node:readline';
 import { TuiBridge } from './bridge';
 import type { BridgeRequest } from './protocol';
 
+// Compatibility entrypoint for integrations that still speak the typed
+// NDJSON protocol. The production TypeScript TUI imports TuiBridge directly
+// and does not launch this process.
 const bridge = new TuiBridge((message) => {
   process.stdout.write(`${JSON.stringify(message)}\n`);
 });

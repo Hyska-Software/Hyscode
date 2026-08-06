@@ -44,7 +44,7 @@ describe('CLI persistence adapter', () => {
       projectId: 'project',
       memoryType: 'decision',
       title: 'TUI runtime',
-      content: 'The Rust client uses the shared TypeScript harness bridge.',
+      content: 'The TypeScript TUI uses the shared TypeScript harness runtime.',
       summary: 'Shared runtime bridge',
       tags: JSON.stringify(['architecture']),
       createdBy: 'system',
@@ -79,5 +79,17 @@ describe('CLI persistence adapter', () => {
       sessionCount: 1,
     });
     expect(store.loadSession(first.id)?.workspacePath).toBe(directory);
+  });
+
+  it('renames and deletes sessions without affecting other projects', async () => {
+    const { store, directory } = await dataStore();
+    const first = await store.createSession(directory, 'chat', null, null);
+    const second = await store.createSession(directory, 'build', null, null);
+    const renamed = await store.renameSession(first.id, 'Focused TUI session');
+    expect(renamed?.title).toBe('Focused TUI session');
+    expect(await store.deleteSession(first.id)).toBe(true);
+    expect(store.loadSession(first.id)).toBeNull();
+    expect(store.loadSession(second.id)?.id).toBe(second.id);
+    expect(await store.deleteSession(first.id)).toBe(false);
   });
 });

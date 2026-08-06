@@ -1,23 +1,20 @@
 {
-  "name": "@hyscode/tui-runtime",
+  "name": "@hyscode/tui-client",
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "exports": {
-    ".": "./src/index.ts"
+  "bin": {
+    "hyscode-tui": "dist/hyscode-tui"
   },
   "scripts": {
-    "build": "tsc -b",
+    "build": "bun build --compile src/main.ts --outfile dist/hyscode-tui",
+    "build:release": "bun build --compile --minify src/main.ts --outfile dist/hyscode-tui",
     "lint": "eslint src/",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },
   "dependencies": {
-    "@hyscode/agent-harness": "*",
-    "@hyscode/ai-providers": "*",
-    "@hyscode/mcp-client": "*",
-    "@hyscode/skills": "*",
-    "node-pty": "^1.1.0"
+    "@hyscode/tui-runtime": "*"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

@@ -2,9 +2,13 @@ import type {
   AgentQuestion,
   AgentQuestionAnswer,
   AgentType,
+  FileChangePending,
+  GatheredContextEntry,
   ApprovalMode,
   HarnessEvent,
   PendingToolCall,
+  SddSession,
+  SddTask,
   ToolRiskLevel,
 } from '@hyscode/agent-harness';
 import type { AIModel, AIProvider, Message, ThinkingConfig, TokenUsage } from '@hyscode/ai-providers';
@@ -14,6 +18,8 @@ export type BridgeRequest = {
   method:
     | 'initialize'
     | 'send_message'
+    | 'retry_turn'
+    | 'continue_partial_turn'
     | 'cancel'
     | 'set_mode'
     | 'set_config'
@@ -24,6 +30,28 @@ export type BridgeRequest = {
     | 'project_list'
     | 'project_switch'
     | 'diagnostics'
+    | 'context_attach'
+    | 'context_remove'
+    | 'context_clear'
+    | 'context_list'
+    | 'rules_list'
+    | 'skills_list'
+    | 'memory_list'
+    | 'terminal_list'
+    | 'terminal_open'
+    | 'terminal_snapshot'
+    | 'terminal_write'
+    | 'terminal_interrupt'
+    | 'terminal_kill'
+    | 'file_change_resolve'
+    | 'file_change_resolve_all'
+    | 'sdd_start'
+    | 'sdd_action'
+    | 'subagent_cancel'
+    | 'session_delete'
+    | 'session_rename'
+    | 'session_export'
+    | 'trace_list'
     | 'host_response'
     | 'host_event'
     | 'shutdown';
@@ -41,12 +69,18 @@ export type BridgeEvent =
   | { type: 'event'; event: 'diagnostic'; payload: DiagnosticPayload }
   | { type: 'event'; event: 'host_request'; payload: HostRequestPayload }
   | { type: 'event'; event: 'session_updated'; payload: SessionRecord }
+  | { type: 'event'; event: 'context_updated'; payload: ContextStatePayload }
+  | { type: 'event'; event: 'file_change_updated'; payload: FileChangeState }
+  | { type: 'event'; event: 'sdd_updated'; payload: SddStatePayload }
+  | { type: 'event'; event: 'scoped_harness_event'; payload: ScopedHarnessEventPayload }
   | { type: 'event'; event: 'fatal'; payload: { message: string } };
 
 export type BridgeMessage = BridgeResponse | BridgeEvent;
 
 export type RuntimeReadyPayload = {
   protocolVersion: 1;
+  /** Additive capability version. protocolVersion remains 1 for old clients. */
+  capabilitiesVersion?: 2;
   workspacePath: string;
   projectId: string;
   providers: ProviderSummary[];
@@ -57,7 +91,76 @@ export type RuntimeReadyPayload = {
   activeProviderId: string;
   activeModelId: string;
   activeThinking: ThinkingConfig;
+  approvalMode?: ApprovalMode;
+  capabilities?: RuntimeCapabilities;
+  context?: ContextStatePayload;
+  sdd?: SddStatePayload;
+  terminals?: TerminalSummary[];
   session?: SessionRecord;
+};
+
+export type RuntimeCapabilities = {
+  slashCommands: boolean;
+  contextMentions: boolean;
+  fileAttachments: boolean;
+  directoryAttachments: boolean;
+  terminalAttachments: boolean;
+  imageAttachments: boolean;
+  interactiveTerminal: boolean;
+  approvals: boolean;
+  fileReview: boolean;
+  sdd: boolean;
+  subAgents: boolean;
+  sessionManagement: boolean;
+};
+
+export type ContextAttachment = {
+  id: string;
+  kind: 'file' | 'directory' | 'terminal' | 'image' | 'text';
+  label: string;
+  path?: string;
+  terminalId?: string;
+  content?: string;
+  base64?: string;
+  mediaType?: string;
+  tokenEstimate?: number;
+};
+
+export type ContextStatePayload = {
+  attachments: ContextAttachment[];
+  gathered: GatheredContextEntry[];
+  gatheredTokens: number;
+  activeRulePaths: string[];
+  activeSkillNames: string[];
+};
+
+export type TerminalSummary = {
+  terminalId: string;
+  ptyId: string;
+  name: string;
+  alive: boolean;
+  sequence: number;
+  outputPreview: string;
+  frameLanguage: 'bash' | 'powershell';
+};
+
+export type FileChangeState = FileChangePending & {
+  status: 'pending' | 'accepted' | 'rejected';
+};
+
+export type SddStatePayload = {
+  sessionId: string | null;
+  session: SddSession | null;
+  tasks: SddTask[];
+  phase: SddSession['status'] | null;
+  spec: string | null;
+  review: string | null;
+  failedTask: SddTask | null;
+};
+
+export type ScopedHarnessEventPayload = {
+  ownerId: string;
+  event: HarnessEvent;
 };
 
 export type ProviderSummary = Pick<AIProvider, 'id' | 'name'> & {
@@ -152,6 +255,7 @@ export type SendMessageParams = {
   history?: Message[];
   images?: Array<{ base64: string; mediaType: string }>;
   ruleTargetPaths?: string[];
+  contextAttachments?: ContextAttachment[];
 };
 
 export type SetConfigParams = {

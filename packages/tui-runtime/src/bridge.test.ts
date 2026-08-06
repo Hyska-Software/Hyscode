@@ -285,6 +285,46 @@ describe('shared harness bridge protocol', () => {
     await bridge.handle({ id: 'shutdown', method: 'shutdown', params: {} });
     const persistedSettings = JSON.parse(await readFile(path.join(directory, 'settings.json'), 'utf8')) as { agentType: string };
     expect(persistedSettings.agentType).toBe('review');
+  }, 15_000);
+
+  it('exposes context attachments and session management through the standalone protocol', async () => {
+    const directory = await mkdtemp(path.join(os.tmpdir(), 'hyscode-tui-context-'));
+    temporaryDirectories.push(directory);
+    const filePath = path.join(directory, 'context.txt');
+    await writeFile(filePath, 'context fixture', 'utf8');
+    vi.stubEnv('HYSCODE_CONFIG_PATH', path.join(directory, 'settings.json'));
+    vi.stubEnv('HYSCODE_KEYCHAIN_PATH', path.join(directory, 'keychain.json'));
+    vi.stubEnv('HYSCODE_TUI_DATA_PATH', path.join(directory, 'tui-data.json'));
+    const events: BridgeEvent[] = [];
+    const bridge = new TuiBridge((message) => { if (message.type === 'event') events.push(message); });
+    const initialized = successfulResult<RuntimeReadyPayload>(await bridge.handle({
+      id: 'initialize',
+      method: 'initialize',
+      params: { workspacePath: directory, projectId: 'context-fixture' },
+    }));
+    const context = successfulResult<{ attachments: Array<{ id: string; kind: string; path?: string }> }>(await bridge.handle({
+      id: 'attach',
+      method: 'context_attach',
+      params: { kind: 'auto', path: filePath },
+    }));
+    expect(context.attachments).toEqual(expect.arrayContaining([expect.objectContaining({ kind: 'file', path: filePath })]));
+    expect(events.some((event) => event.event === 'context_updated')).toBe(true);
+
+    const renamed = successfulResult<SessionRecord>(await bridge.handle({
+      id: 'rename',
+      method: 'session_rename',
+      params: { id: initialized.session?.id, title: 'Context fixture session' },
+    }));
+    expect(renamed.title).toBe('Context fixture session');
+    const exported = successfulResult<{ path: string; content: string }>(await bridge.handle({
+      id: 'export',
+      method: 'session_export',
+      params: { id: renamed.id },
+    }));
+    expect(exported.content).toContain('# Context fixture session');
+    expect(await readFile(exported.path, 'utf8')).toContain('# Context fixture session');
+    expect(successfulResult<{ attachments: unknown[] }>(await bridge.handle({ id: 'remove', method: 'context_remove', params: { id: context.attachments[0]?.id } })).attachments).toHaveLength(0);
+    await bridge.handle({ id: 'shutdown', method: 'shutdown', params: {} });
   });
 
   it('streams through the real provider adapter, pauses for approval, executes a tool, and persists completion', async () => {

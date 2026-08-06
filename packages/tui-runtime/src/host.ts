@@ -2,7 +2,8 @@ import { existsSync } from 'node:fs';
 import { mkdir, readFile, readdir, rename, rm, stat, writeFile, copyFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { spawn } from 'node:child_process';
+import { spawn as spawnPtyProcess, type IDisposable, type IPty } from 'node-pty';
 import type { CliDataStore } from './data-store';
 import type { SharedKeyStore } from './config';
 
@@ -15,7 +16,9 @@ type PtyChunk = {
 
 type PtySession = {
   id: string;
-  process: ChildProcessWithoutNullStreams;
+  terminal: IPty;
+  dataSubscription: IDisposable;
+  exitSubscription: IDisposable;
   chunks: PtyChunk[];
   sequence: number;
   outputSize: number;
@@ -145,6 +148,11 @@ export class CliHost {
           await this.requestPty('pty_resize', args);
           return undefined as T;
         }
+        this.resizePty(
+          String(args.ptyId ?? args.id ?? ''),
+          numberValue(args.cols, 120),
+          numberValue(args.rows, 32),
+        );
         return undefined as T;
       case 'pty_kill':
         if (this.requestPty) {
@@ -415,23 +423,35 @@ export class CliHost {
     const id = String(args.id ?? args.ptyId ?? crypto.randomUUID());
     const shell = String(args.shell ?? defaultShell());
     const commandArgs = Array.isArray(args.args) ? args.args.map(String) : [];
-    const child = spawn(shell, commandArgs, {
+    const terminal = spawnPtyProcess(shell, commandArgs, {
       cwd: typeof args.cwd === 'string' ? args.cwd : this.workspacePath,
       env: { ...process.env, ...(isStringRecord(args.env) ? args.env : {}) },
-      windowsHide: true,
-      stdio: ['pipe', 'pipe', 'pipe'],
+      cols: numberValue(args.cols, 120),
+      rows: numberValue(args.rows, 32),
+      name: process.platform === 'win32' ? 'xterm-256color' : 'xterm-256color',
+      // Winpty is the stable default for the standalone client on Windows.
+      // ConPTY can be opted into for terminals that need its newer behavior;
+      // keeping it opt-in avoids AttachConsole failures in service/CI hosts.
+      ...(process.platform === 'win32' ? { useConpty: process.env.HYSCODE_TUI_USE_CONPTY === '1' } : {}),
     });
-    const session: PtySession = { id, process: child, chunks: [], sequence: 0, outputSize: 0, alive: true, exitCode: null };
+    const session: PtySession = {
+      id,
+      terminal,
+      dataSubscription: null as unknown as IDisposable,
+      exitSubscription: null as unknown as IDisposable,
+      chunks: [],
+      sequence: 0,
+      outputSize: 0,
+      alive: true,
+      exitCode: null,
+    };
     this.ptys.set(id, session);
-    const onData = (data: Buffer | string) => this.emitPtyData(session, String(data));
-    child.stdout.on('data', onData);
-    child.stderr.on('data', onData);
-    child.on('close', (code) => {
+    session.dataSubscription = terminal.onData((data) => this.emitPtyData(session, data));
+    session.exitSubscription = terminal.onExit(({ exitCode }) => {
       session.alive = false;
-      session.exitCode = code;
-      this.emit('pty:exit', { pty_id: id, code, sequence: session.sequence });
+      session.exitCode = exitCode;
+      this.emit('pty:exit', { pty_id: id, code: exitCode, sequence: session.sequence });
     });
-    child.on('error', (error) => this.emitPtyData(session, `\n[process error] ${error.message}\n`));
     return id;
   }
 
@@ -449,8 +469,14 @@ export class CliHost {
 
   private writePty(id: string, data: string): void {
     const session = this.ptys.get(id);
-    if (!session?.alive || !session.process.stdin.writable) throw new Error(`PTY "${id}" is not writable.`);
-    session.process.stdin.write(data);
+    if (!session?.alive) throw new Error(`PTY "${id}" is not writable.`);
+    session.terminal.write(data);
+  }
+
+  private resizePty(id: string, cols: number, rows: number): void {
+    const session = this.ptys.get(id);
+    if (!session?.alive) return;
+    session.terminal.resize(Math.max(1, Math.floor(cols)), Math.max(1, Math.floor(rows)));
   }
 
   private async killPty(id: string): Promise<void> {
@@ -464,8 +490,13 @@ export class CliHost {
         settled = true;
         resolve();
       };
-      session.process.once('close', finish);
-      session.process.kill();
+      const exitSubscription = session.terminal.onExit(finish);
+      try {
+        session.terminal.kill();
+      } catch {
+        finish();
+      }
+      setTimeout(() => exitSubscription.dispose(), 2000);
       setTimeout(finish, 2000);
     });
   }
@@ -473,7 +504,7 @@ export class CliHost {
   private interruptPty(id: string): void {
     const session = this.ptys.get(id);
     if (!session?.alive) return;
-    session.process.kill('SIGINT');
+    session.terminal.write('\u0003');
   }
 
   private snapshotPty(id: string, afterSequence: number): Record<string, unknown> {

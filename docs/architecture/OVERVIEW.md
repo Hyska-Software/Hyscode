@@ -57,25 +57,33 @@ from every owner, keeps per-file details and open-model state, decodes file URIs
 records are normalized, filtered case-insensitively on Windows, deduplicated,
 and sorted before reaching the agent.
 
-## Standalone Rust TUI Client
+## Standalone TypeScript TUI Client
 
-The repository also ships a standalone Ratatui client in `tools/hyscode-tui`.
-The Rust process owns terminal rendering, keyboard input, transcript projection,
-session commands, cancellation, terminal resize, and interactive
-approval/question prompts. It launches `packages/tui-runtime` as a versioned
-NDJSON bridge so the desktop and CLI use the same
+The repository ships a standalone TypeScript client in `tools/hyscode-tui`.
+The client owns terminal rendering, keyboard input, structured transcript
+projection, session/project/tab commands, context attachments, persistent
+terminal interaction, cancellation, resize, recovery, and approval/question
+prompts.
+The interactive shell uses a fullscreen, keyboard-first layout: a contextual
+header and adaptive session sidebar frame the transcript, while the composer
+and action panels stay anchored at the bottom. Typing `/` opens a filtered
+command palette in place; `Tab` completes the selected command and `Enter`
+executes it. `Ctrl-K` opens the same palette without discarding a normal draft.
+It instantiates `TuiBridge` in-process instead of launching a second NDJSON
+bridge process. This keeps the CLI on the same
 `@hyscode/agent-harness`, `@hyscode/ai-providers`, `@hyscode/mcp-client`, built-in
 skills, rules, agent modes, sub-agent flow, SDD services, and provider streaming
-protocol.
+protocol as HysCode Desktop. Additive protocol capability version 2 exposes
+structured tool cards, terminal progress, file-review state, gathered context,
+SDD phases/tasks, scoped child-agent events, usage telemetry, and connection
+recovery while retaining protocol version 1 for older NDJSON clients.
 
-The production bridge keeps the desktop host contract and forwards terminal
-operations to the Rust `portable-pty` manager. That manager owns native PTY
-creation, input, resize, snapshots, replay buffers, interrupts, exit events,
-and shutdown. The TypeScript layer remains the source of truth for agent
-behavior and projects the Rust-host events into the same terminal runtime used
-by the harness. Filesystem, Git, Docker, web, keychain, memory, SDD, and
-diagnostic commands are exposed through the host adapter; no production tool
-uses fake data or an empty exporter.
+`@hyscode/tui-runtime` owns the TypeScript host adapter and creates native PTYs
+through `node-pty`. PTY output is sequenced and bounded, supports snapshot/replay
+from a sequence, resize, interrupt, kill, exit events, and shutdown. The same
+host also exposes filesystem, Git, Docker, web, keychain, memory, SDD, and
+diagnostic commands to the harness. There is no Rust UI, Rust agent runtime, or
+production host round trip in the TUI path.
 
 Desktop settings are mirrored from the existing Zustand/local-storage store to
 the platform shared settings file (`%LOCALAPPDATA%/hyscode/settings.json` on
@@ -85,7 +93,11 @@ and traces use an isolated JSON data store so a terminal session cannot mutate
 the desktop SQLite database unexpectedly. The bridge protocol is explicit about
 streaming events, interaction requests, cancellation, host requests, and
 structured errors, leaving room for a future shared SQLite adapter without
-changing the Rust UI.
+changing the TUI presentation layer.
+
+The runtime still exports a small NDJSON compatibility entrypoint for external
+protocol clients and tests. The packaged TUI does not launch it; direct in-process
+construction is the only production client path.
 
 ### Build and launch
 
@@ -96,21 +108,37 @@ npm run build:tui
 tools/hyscode-tui/dist/hyscode-tui.exe .
 ```
 
-`build:tui` creates `hyscode-tui.exe` and `hyscode-tui-bridge.exe` in the same
-directory. The packaged launcher therefore does not require Bun at runtime.
-For source development, `cargo run --manifest-path tools/hyscode-tui/Cargo.toml
--- .` discovers `packages/tui-runtime/src/main.ts` through Bun. Use
-`HYSCODE_REPO_ROOT` when launching the executable from another directory.
+`build:tui` creates one self-contained `hyscode-tui.exe`. The packaged launcher
+therefore does not require Bun at runtime. For source development, run
+`npm run -w @hyscode/tui-client build` or execute the TypeScript entrypoint with
+Bun. Use `HYSCODE_REPO_ROOT` when launching the executable from another
+directory so the Codex sidecar can be discovered.
 
 The launcher accepts `--provider`, `--model`, `--mode`, `--config`, and
 `--workspace`. Inside the TUI, the supported commands are:
 
-`/help`, `/mode`, `/model`, `/projects`, `/project`, `/new`, `/sessions`,
-`/load`, `/diagnostics`, `/retry`, `/cancel`, `/quit`.
+`/help`, `/mode`, `/thinking`, `/approval`, `/model`, `/models`, `/projects`,
+`/project`, `/new`, `/sessions`, `/load`, `/tab`, `/rename`, `/export`,
+`/attach`, `/context`, `/rules`, `/skills`, `/memory`, `/terminal`, `/diffs`,
+`/sdd`, `/subagents`, `/usage`, `/diagnostics`, `/retry`, `/continue`,
+`/cancel`, `/clear`, and `/quit` (with aliases such as `/resume`, `/diag`,
+`/q`, and `/exit`). The palette groups commands by session, context,
+workspace, model, and runtime scope and also exposes command usage inline.
 
-`Ctrl-C` cancels an active turn and quits when the input is empty; `Esc` cancels
-or clears input. Approval prompts support `y` (allow), `n` (deny), and `t`
-(allow and trust the tool). Question prompts accept text followed by Enter.
+OpenCode-style composer shortcuts are supported for the terminal workflow:
+`@path message` attaches a file/directory and sends the remaining message,
+`!command` writes to a persistent PTY, `/attach image:path` sends a supported
+image on the next model request, `Shift+Enter` inserts a multiline break, and
+bracketed paste preserves newlines. `/diffs` shows bounded textual diffs and
+accept/reject actions for file changes emitted by the shared harness.
+
+`Ctrl-C` cancels an active turn and quits when the input is empty; `Shift-Tab`
+cycles agent modes; `Ctrl-T` cycles supported thinking levels; `Tab` changes
+focus outside the command palette; `Esc` closes a palette or clears the draft;
+`F1` opens help. Approval prompts support `y` (allow), `n` (deny), `t`
+(allow and trust the tool), and `a` (approve and switch to session yolo mode).
+Question prompts support multiple questions, option selection, free-form text,
+and multiline answers.
 
 ### Configuration and credentials
 
@@ -121,7 +149,7 @@ The default Windows files are:
 | Shared desktop/TUI settings | `%LOCALAPPDATA%\\hyscode\\settings.json` | `HYSCODE_CONFIG_PATH` or `--config` |
 | Shared file-backed credentials | `%LOCALAPPDATA%\\hyscode\\keychain.json` | `HYSCODE_KEYCHAIN_PATH` |
 | TUI sessions, memory, SDD, traces | `%LOCALAPPDATA%\\hyscode\\tui-data.json` | `HYSCODE_TUI_DATA_PATH` |
-| Rust-to-runtime bridge | packaged sibling or source Bun entrypoint | `HYSCODE_TUI_BRIDGE` |
+| TUI executable | `tools/hyscode-tui/dist/hyscode-tui.exe` | `HYSCODE_REPO_ROOT` |
 | Codex provider sidecar | packaged sibling or repository binary | `HYSCODE_CODEX_SIDECAR` |
 | Repository discovery | current directory | `HYSCODE_REPO_ROOT` |
 
@@ -141,11 +169,10 @@ for a requested Python file. The result is projected into the transcript with
 file, line, column, severity, and source. Agents can also run project-specific
 linters and tests through the shared persistent terminal tools.
 
-If a provider request fails, the bridge emits a structured error and the TUI
-keeps the session available for `/retry` or a follow-up message. If the bridge
-cannot start, verify that the packaged bridge is beside the launcher, or set
-`HYSCODE_TUI_BRIDGE` to an executable path. If a provider is missing, select a
-configured provider with `/model` or fix the shared settings/keychain files.
+If a provider request fails, the shared runtime emits a structured error and the
+TUI keeps the session available for `/retry` or a follow-up message. If a
+provider is missing, select a configured provider with `/model` or fix the
+shared settings/keychain files.
 MCP connection failures are reported as diagnostics and do not prevent the
 rest of the runtime from starting. The standalone client intentionally does not
 provide Monaco buffers, editor decorations, desktop SQLite sharing, or a GUI

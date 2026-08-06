@@ -49,6 +49,7 @@ describe('CLI host adapter', () => {
         snapshot = await host.invoke<{ data: string; alive: boolean }>('pty_snapshot', { ptyId, afterSequence: 0 });
       }
       expect(snapshot.data).toContain('HYS_TUI_PROCESS');
+      await host.invoke('pty_resize', { ptyId, cols: 100, rows: 36 });
     } finally {
       await host.invoke('pty_kill', { ptyId });
     }
@@ -70,7 +71,7 @@ describe('CLI host adapter', () => {
     ]));
   });
 
-  it('forwards production PTY operations and events through the Rust host contract', async () => {
+  it('forwards PTY operations and events through an explicit remote host adapter', async () => {
     const directory = await mkdtemp(path.join(os.tmpdir(), 'hyscode-tui-remote-host-'));
     temporaryDirectories.push(directory);
     const calls: Array<{ command: string; args: Record<string, unknown> }> = [];
