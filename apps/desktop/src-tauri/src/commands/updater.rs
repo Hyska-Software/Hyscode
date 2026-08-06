@@ -97,11 +97,18 @@ fn select_platform_asset(assets: &[GitHubAsset]) -> Option<&GitHubAsset> {
     };
 
     for ext in target_extensions {
-        if let Some(asset) = assets.iter().find(|a| a.name.ends_with(ext)) {
+        if let Some(asset) = assets
+            .iter()
+            .find(|asset| asset.name.ends_with(ext) && !is_vortex_cli_only_asset(&asset.name))
+        {
             return Some(asset);
         }
     }
     None
+}
+
+fn is_vortex_cli_only_asset(name: &str) -> bool {
+    name.to_ascii_lowercase().starts_with("vortex-cli-")
 }
 
 /// Parse a version string, stripping an optional leading 'v'.
@@ -435,4 +442,19 @@ pub async fn updater_install(app: AppHandle, installer_path: String) -> Result<(
     // Exit the application so the installer can replace the binary
     app.exit(0);
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_vortex_cli_only_asset;
+
+    #[test]
+    fn ignores_standalone_vortex_assets_for_desktop_updates() {
+        assert!(is_vortex_cli_only_asset("Vortex-CLI-Setup-0.8.2-x64.exe"));
+        assert!(is_vortex_cli_only_asset("vortex-cli-0.8.2-linux-x64.deb"));
+        assert!(!is_vortex_cli_only_asset("HysCode-Setup-0.8.2-x64.exe"));
+        assert!(!is_vortex_cli_only_asset(
+            "HysCode-Setup-0.8.2-linux-x64-with-vortex-cli.deb"
+        ));
+    }
 }

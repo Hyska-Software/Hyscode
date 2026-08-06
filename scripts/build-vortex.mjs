@@ -31,7 +31,13 @@ const SUPPORTED_ARCHITECTURES = new Set(['x64', 'arm64']);
 const WINDOWS_PATH_ENTRY_ENV = 'VORTEX_PATH_ENTRY_INTERNAL';
 
 function parseArguments(args) {
-  const options = { install: false, skipSidecarBuild: false, prepareNative: false, outputDirectory: null };
+  const options = {
+    install: false,
+    skipSidecarBuild: false,
+    prepareNative: false,
+    outputDirectory: null,
+    version: process.env.VORTEX_VERSION ?? '0.1.0',
+  };
   for (let index = 0; index < args.length; index += 1) {
     const argument = args[index];
     if (argument === '--install') {
@@ -44,6 +50,19 @@ function parseArguments(args) {
     }
     if (argument === '--prepare-native') {
       options.prepareNative = true;
+      continue;
+    }
+    if (argument === '--version') {
+      const value = args[index + 1];
+      if (!value || value.startsWith('-')) throw new Error('--version requires a release version.');
+      options.version = value;
+      index += 1;
+      continue;
+    }
+    if (argument.startsWith('--version=')) {
+      const value = argument.slice('--version='.length);
+      if (!value) throw new Error('--version requires a release version.');
+      options.version = value;
       continue;
     }
     if (argument === '--output') {
@@ -78,6 +97,7 @@ function printHelp() {
     '  --install              Copy the bundle to the user-local bin directory and configure PATH',
     '  --skip-sidecar-build   Reuse the existing Codex sidecar binary',
     '  --output <directory>   Write the production bundle to a custom directory',
+    '  --version <version>    Embed the release version in the VORTEX executable',
     '  --prepare-native       Prepare the current node-pty native assets for a source build',
     '  -h, --help             Show this help',
     '',
@@ -239,7 +259,16 @@ function buildProductionBundle(options) {
     run(npmCommand, ['run', '-w', '@hyscode/codex-sidecar', 'build'], environment);
   }
   process.stdout.write('Building the minified standalone executable...\n');
-  run(npmCommand, ['run', '-w', '@hyscode/tui-client', 'build:release'], environment);
+  run(bun.command, [
+    'build',
+    '--compile',
+    '--minify',
+    '--define',
+    '__HYSCODE_TUI_VERSION__=' + JSON.stringify(options.version),
+    'tools/hyscode-tui/src/main.ts',
+    '--outfile',
+    'tools/hyscode-tui/dist/vortex',
+  ], environment);
 
   const outputDirectory = resolveOutputDirectory(options.outputDirectory);
   mkdirSync(outputDirectory, { recursive: true });

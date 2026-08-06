@@ -193,6 +193,26 @@ focus outside the command palette; `Esc` closes a palette or clears the draft;
 Question prompts support multiple questions, option selection, free-form text,
 and multiline answers.
 
+### Release assets and desktop installation
+
+The release workflow builds the VORTEX bundle on the native runner for each
+supported desktop platform and embeds the release version in the executable.
+It publishes both a complete standalone CLI asset and a desktop installer
+variant:
+
+| Platform | Standalone CLI | Desktop + optional CLI |
+|---|---|---|
+| Windows x64 | `Vortex-CLI-Setup-<version>-x64.exe` and `vortex-cli-<version>-windows-x64.zip` | `HysCode-Setup-<version>-x64.exe`; select **Install the VORTEX CLI** in the wizard |
+| Linux x64 | `vortex-cli-<version>-linux-x64.deb` and `vortex-cli-<version>-linux-x64.tar.gz` | `HysCode-Setup-<version>-linux-x64-with-vortex-cli.deb`; the package asks through debconf |
+| macOS native runner | `Vortex-CLI-Setup-<version>-macos-<arch>.pkg` and `vortex-cli-<version>-macos-<arch>.tar.gz` | `HysCode-Setup-<version>-macos-<arch>-with-vortex-cli.pkg`; choose VORTEX CLI in the installer choices |
+
+The normal Linux AppImage, RPM, macOS DMG, and desktop Windows installer
+remain available as desktop-only assets. The optional component is intentionally
+not injected into the AppImage or DMG because those formats do not expose a
+portable component-selection phase. The standalone CLI packages and archives
+contain the compiled launcher, Codex sidecar, and platform-specific `node-pty`
+assets, so they do not require Bun or Node.js on the target machine.
+
 ### Configuration and credentials
 
 The runtime uses native per-user data locations:

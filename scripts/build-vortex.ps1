@@ -2,7 +2,8 @@
 param(
     [switch]$Install,
     [switch]$SkipSidecarBuild,
-    [string]$OutputDirectory
+    [string]$OutputDirectory,
+    [string]$Version
 )
 
 $ErrorActionPreference = 'Stop'
@@ -13,6 +14,10 @@ if ($SkipSidecarBuild) { $arguments += '--skip-sidecar-build' }
 if (-not [string]::IsNullOrWhiteSpace($OutputDirectory)) {
     $arguments += '--output'
     $arguments += $OutputDirectory
+}
+if (-not [string]::IsNullOrWhiteSpace($Version)) {
+    $arguments += '--version'
+    $arguments += $Version
 }
 
 & node @arguments

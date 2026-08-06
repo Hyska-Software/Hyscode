@@ -243,10 +243,15 @@ jobs:
               ``,
               `| Platform | File | Notes |`,
               `|----------|------|-------|`,
-              `| Windows  | \`HysCode-Setup-*.exe\` (NSIS) | Recommended installer |`,
-              `| Windows  | \`HysCode_*.msi\` | MSI installer |`,
-              `| Linux    | \`hyscode_*.AppImage\` | Universal Linux |`,
-              `| Linux    | \`hyscode_*.deb\` | Debian/Ubuntu |`,
+              `| Windows  | \`HysCode-Setup-*.exe\` | Desktop installer; the wizard can also install VORTEX CLI |`,
+              `| Windows  | \`Vortex-CLI-Setup-*.exe\` / \`vortex-cli-*.zip\` | Standalone VORTEX CLI |`,
+              `| Linux    | \`hyscode_*.AppImage\` / \`hyscode_*.rpm\` | Desktop application |`,
+              `| Linux    | \`hyscode_*.deb\` | Desktop application for Debian/Ubuntu |`,
+              `| Linux    | \`HysCode-Setup-*-with-vortex-cli.deb\` | Desktop installer with an optional debconf CLI choice |`,
+              `| Linux    | \`vortex-cli-*.deb\` / \`vortex-cli-*.tar.gz\` | Standalone VORTEX CLI |`,
+              `| macOS    | Tauri \`.dmg\` / \`.app.tar.gz\` | Desktop application |`,
+              `| macOS    | \`HysCode-Setup-*-with-vortex-cli.pkg\` | Desktop installer with an optional VORTEX CLI choice |`,
+              `| macOS    | \`Vortex-CLI-Setup-*.pkg\` / \`vortex-cli-*.tar.gz\` | Standalone VORTEX CLI |`,
               ``,
               prerelease
                 ? `> ⚠️ **Pre-release** — available via the _Pre-release_ update channel in HysCode Settings → General → Updates.`
@@ -337,6 +342,25 @@ jobs:
           node scripts/copy-sidecars.mjs --target "apps/desktop/src-tauri/target/x86_64-pc-windows-msvc/release"
           Get-ChildItem "apps/desktop/src-tauri/target/x86_64-pc-windows-msvc/release" -Name | Select-String "codex|claude"
 
+      - name: Build and stage VORTEX CLI bundle
+        shell: pwsh
+        env:
+          VERSION: ${{ needs.create-release.outputs.version }}
+        run: |
+          npm run build:vortex -- --skip-sidecar-build --version $env:VERSION
+          $cliBundle = (Resolve-Path "tools/hyscode-tui/dist/vortex-production").Path
+          $cliVersion = & (Join-Path $cliBundle "vortex.exe") --version
+          if ($LASTEXITCODE -ne 0 -or $cliVersion -notmatch [regex]::Escape("vortex $env:VERSION")) { throw "VORTEX version smoke test failed: $cliVersion" }
+          $desktopReleaseDir = (Resolve-Path "apps/desktop/src-tauri/target/x86_64-pc-windows-msvc/release").Path
+          $desktopCliDir = Join-Path $desktopReleaseDir "vortex-cli"
+          if (Test-Path $desktopCliDir) { Remove-Item -LiteralPath $desktopCliDir -Recurse -Force }
+          New-Item -ItemType Directory -Path $desktopCliDir -Force | Out-Null
+          Copy-Item -Path (Join-Path $cliBundle "*") -Destination $desktopCliDir -Recurse -Force
+          Write-Host "Staged VORTEX CLI bundle for the desktop installer: $desktopCliDir"
+          $cliArtifacts = Join-Path $env:GITHUB_WORKSPACE "artifacts\vortex-cli"
+          New-Item -ItemType Directory -Path $cliArtifacts -Force | Out-Null
+          node scripts/package-vortex-cli.mjs --bundle $cliBundle --output-dir $cliArtifacts --version $env:VERSION --platform win32 --arch x64
+
       - name: Build Inno Setup installer
         shell: pwsh
         env:
@@ -364,13 +388,35 @@ jobs:
           Write-Host "Inno installer: $out"
           "INNO_INSTALLER=$out" | Out-File -FilePath $env:GITHUB_ENV -Append
 
+      - name: Build standalone VORTEX CLI installer
+        shell: pwsh
+        env:
+          VERSION: ${{ needs.create-release.outputs.version }}
+        run: |
+          $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+          $cliBundle = (Resolve-Path "tools/hyscode-tui/dist/vortex-production").Path
+          $cliOutDir = Join-Path $env:GITHUB_WORKSPACE "artifacts\vortex-cli"
+          New-Item -ItemType Directory -Path $cliOutDir -Force | Out-Null
+          & $iscc "/DMyAppVersion=$env:VERSION" "/FVortex-CLI-Setup-$env:VERSION-x64" "/O$cliOutDir" "scripts/installer/vortex-cli.iss"
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          $out = Join-Path $cliOutDir "Vortex-CLI-Setup-$env:VERSION-x64.exe"
+          if (-not (Test-Path $out)) {
+            $out = Get-ChildItem $cliOutDir -Filter "Vortex-CLI-Setup-*.exe" | Sort-Object LastWriteTime -Descending | Select-Object -First 1 -ExpandProperty FullName
+          }
+          if (-not $out -or -not (Test-Path $out)) { Write-Error "Standalone VORTEX installer not found in $cliOutDir"; exit 1 }
+          Write-Host "Standalone VORTEX installer: $out"
+          "VORTEX_CLI_INSTALLER=$out" | Out-File -FilePath $env:GITHUB_ENV -Append
+          $archive = Join-Path $cliOutDir "vortex-cli-$env:VERSION-windows-x64.zip"
+          if (-not (Test-Path $archive)) { Write-Error "Standalone VORTEX archive not found: $archive"; exit 1 }
+          "VORTEX_CLI_ARCHIVE=$archive" | Out-File -FilePath $env:GITHUB_ENV -Append
+
       - name: Upload Inno Setup installer to release
         shell: pwsh
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ needs.create-release.outputs.tag_name }}
         run: |
-          gh release upload $env:TAG "$env:INNO_INSTALLER" --clobber
+          gh release upload $env:TAG "$env:INNO_INSTALLER" "$env:VORTEX_CLI_INSTALLER" "$env:VORTEX_CLI_ARCHIVE" --clobber
 
 # ─────────────────────────────────────────────────────────────────────────────
 # JOB 3 — Build Linux
@@ -485,17 +531,55 @@ jobs:
             exit 1
           fi
 
+      - name: Build and package VORTEX CLI
+        shell: bash
+        env:
+          VERSION: ${{ needs.create-release.outputs.version }}
+        run: |
+          npm run build:vortex -- --skip-sidecar-build --version "$VERSION"
+          CLI_VERSION=$(tools/hyscode-tui/dist/vortex-production/vortex --version)
+          if [ "$CLI_VERSION" != "vortex $VERSION" ]; then
+            echo "::error::VORTEX version smoke test failed: $CLI_VERSION"
+            exit 1
+          fi
+          mkdir -p artifacts/vortex-cli
+          node scripts/package-vortex-cli.mjs \
+            --bundle tools/hyscode-tui/dist/vortex-production \
+            --output-dir artifacts/vortex-cli \
+            --version "$VERSION" \
+            --platform linux \
+            --arch x64
+          node scripts/package-vortex-deb.mjs \
+            --mode standalone \
+            --bundle tools/hyscode-tui/dist/vortex-production \
+            --output-dir artifacts/vortex-cli \
+            --version "$VERSION" \
+            --arch x64
+          DESKTOP_DEB=$(find apps/desktop/src-tauri/target/release/bundle/deb -maxdepth 1 -type f -name '*.deb' -print -quit)
+          if [ -z "$DESKTOP_DEB" ]; then
+            echo "::error::Desktop Debian package was not produced"
+            exit 1
+          fi
+          node scripts/package-vortex-deb.mjs \
+            --mode desktop-with-cli \
+            --bundle tools/hyscode-tui/dist/vortex-production \
+            --desktop-deb "$DESKTOP_DEB" \
+            --output-dir artifacts/vortex-cli \
+            --version "$VERSION" \
+            --arch x64
+
       - name: Upload Linux bundles to release
         shell: bash
-        working-directory: apps/desktop
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ needs.create-release.outputs.tag_name }}
         run: |
           gh release upload "$TAG" \
-            src-tauri/target/release/bundle/deb/*.deb \
-            src-tauri/target/release/bundle/rpm/*.rpm \
-            src-tauri/target/release/bundle/appimage/*.AppImage \
+            apps/desktop/src-tauri/target/release/bundle/deb/*.deb \
+            apps/desktop/src-tauri/target/release/bundle/rpm/*.rpm \
+            apps/desktop/src-tauri/target/release/bundle/appimage/*.AppImage \
+            artifacts/vortex-cli/*.deb \
+            artifacts/vortex-cli/*.tar.gz \
             --clobber
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -539,6 +623,55 @@ jobs:
         with:
           projectPath: apps/desktop
           releaseId: ${{ needs.create-release.outputs.release_id }}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Additional macOS VORTEX assets (part of build-macos)
+# ─────────────────────────────────────────────────────────────────────────────
+      - name: Build and package VORTEX CLI
+        shell: bash
+        env:
+          VERSION: ${{ needs.create-release.outputs.version }}
+        run: |
+          case "$(uname -m)" in
+            x86_64) ARCH=x64 ;;
+            arm64|aarch64) ARCH=arm64 ;;
+            *) echo "::error::Unsupported macOS architecture: $(uname -m)"; exit 1 ;;
+          esac
+          APP_PATH=$(find apps/desktop/src-tauri/target -type d -name 'HysCode.app' -print -quit)
+          if [ -z "$APP_PATH" ]; then
+            echo "::error::HysCode.app was not produced"
+            exit 1
+          fi
+          npm run build:vortex -- --skip-sidecar-build --version "$VERSION"
+          CLI_VERSION=$(tools/hyscode-tui/dist/vortex-production/vortex --version)
+          if [ "$CLI_VERSION" != "vortex $VERSION" ]; then
+            echo "::error::VORTEX version smoke test failed: $CLI_VERSION"
+            exit 1
+          fi
+          mkdir -p artifacts/vortex-cli artifacts/vortex-macos
+          node scripts/package-vortex-cli.mjs \
+            --bundle tools/hyscode-tui/dist/vortex-production \
+            --output-dir artifacts/vortex-cli \
+            --version "$VERSION" \
+            --platform darwin \
+            --arch "$ARCH"
+          node scripts/package-vortex-macos.mjs \
+            --bundle tools/hyscode-tui/dist/vortex-production \
+            --app "$APP_PATH" \
+            --output-dir artifacts/vortex-macos \
+            --version "$VERSION" \
+            --arch "$ARCH"
+
+      - name: Upload macOS VORTEX assets to release
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.create-release.outputs.tag_name }}
+        run: |
+          gh release upload "$TAG" \
+            artifacts/vortex-cli/*.tar.gz \
+            artifacts/vortex-macos/*.pkg \
+            --clobber
 
 # ─────────────────────────────────────────────────────────────────────────────
 # JOB 5 — Publish release (after all platform builds succeed)
