@@ -12,7 +12,7 @@ import type {
   TerminalSummary,
   TuiBridge,
 } from '@hyscode/tui-runtime';
-import { MODE_OPTIONS, commandArgument, matchingCommands, parseSlashCommand, resolveCommandName } from './commands';
+import { MODE_OPTIONS, commandArgument, matchingCommands, parseSlashCommand, resolveCommandName, selectionOptions } from './commands';
 import { AGENT_TYPES } from './types';
 import type { CliOptions, CommandFlow, ContextView, InteractionState, Key, MemoryView, RuleView, RuntimeNotice, SkillView, SubAgentView, ToolView, TranscriptItem, TranscriptKind, UiState } from './types';
 
@@ -907,7 +907,8 @@ export class TuiController {
         if (!this.openThinkingFlow()) this.state.status = 'Thinking is not available for the selected model';
         break;
       case '/approval':
-        await this.setApprovalMode(commandArgument(args));
+        if (!args) this.openActionFlow('approval');
+        else await this.setApprovalMode(commandArgument(args));
         break;
       case '/model':
       case '/models': {
@@ -939,7 +940,8 @@ export class TuiController {
       }
       case '/rename': {
         const title = commandArgument(args);
-        if (!title || !this.state.currentSessionId) this.append('system', 'Usage: /rename <title>');
+        if (!title && this.state.currentSessionId) this.prepareCommandInput('/rename ', 'Type the new session title and press Enter');
+        else if (!title) this.append('system', 'There is no active session to rename');
         else await this.request('session_rename', { id: this.state.currentSessionId, title });
         break;
       }
@@ -947,12 +949,14 @@ export class TuiController {
         await this.request('session_export', { id: this.state.currentSessionId ?? undefined });
         break;
       case '/delete-session': {
-        const id = commandArgument(args) || this.state.currentSessionId;
+        const id = commandArgument(args);
         if (id) await this.request('session_delete', { id });
+        else await this.openSessionDeleteFlow();
         break;
       }
       case '/tab':
-        await this.runTabCommand(args);
+        if (!args) this.openActionFlow('tab');
+        else await this.runTabCommand(args);
         break;
       case '/subagents':
         this.state.mainPanel = 'activity';
@@ -984,10 +988,12 @@ export class TuiController {
         this.state.status = 'Diagnostics requested';
         break;
       case '/attach':
-        await this.attachContext(commandArgument(args));
+        if (!args) this.prepareCommandInput('/attach ', 'Type a path or terminal:<id> to attach and press Enter');
+        else await this.attachContext(commandArgument(args));
         break;
       case '/context':
-        await this.runContextCommand(args);
+        if (!args) this.openActionFlow('context');
+        else await this.runContextCommand(args);
         break;
       case '/rules':
         await this.request('rules_list', {});
@@ -999,13 +1005,16 @@ export class TuiController {
         await this.request('memory_list', {});
         break;
       case '/terminal':
-        await this.runTerminalCommandAction(args);
+        if (!args) this.openActionFlow('terminal');
+        else await this.runTerminalCommandAction(args);
         break;
       case '/diffs':
-        await this.runDiffCommand(args);
+        if (!args) this.openActionFlow('diffs');
+        else await this.runDiffCommand(args);
         break;
       case '/sdd':
-        await this.runSddCommand(args);
+        if (!args) this.openActionFlow('sdd');
+        else await this.runSddCommand(args);
         break;
       case '/retry':
         this.state.running = true;
@@ -1032,6 +1041,31 @@ export class TuiController {
         this.append('system', `Unknown command: ${name}`);
         break;
     }
+  }
+
+  private openActionFlow(action: 'approval' | 'context' | 'terminal' | 'diffs' | 'sdd' | 'tab'): void {
+    this.state.overlay = 'commands';
+    const flow = { kind: 'action' as const, action, selected: 0 };
+    if (action === 'approval') {
+      const current = selectionOptions(this.state, flow).findIndex((option) => option.id === this.state.approvalMode);
+      flow.selected = Math.max(0, current);
+    }
+    this.state.commandFlow = flow;
+  }
+
+  private async openSessionDeleteFlow(): Promise<void> {
+    this.state.overlay = 'commands';
+    this.state.commandFlow = { kind: 'session_delete', selected: 0 };
+    await this.request('session_list', {});
+  }
+
+  private prepareCommandInput(input: string, status: string): void {
+    this.state.input = input;
+    this.state.inputCursor = Array.from(input).length;
+    this.state.historyIndex = null;
+    this.state.commandFlow = null;
+    this.state.overlay = 'none';
+    this.state.status = status;
   }
 
   private async setApprovalMode(value: string): Promise<void> {
@@ -1120,7 +1154,7 @@ export class TuiController {
     const trimmed = args.trim();
     if (!trimmed) {
       this.state.mainPanel = 'sdd';
-      this.state.status = this.state.sdd.sessionId ? `SDD · ${this.state.sdd.phase ?? 'active'}` : 'Usage: /sdd <description|approve-spec|reject-spec|approve-plan|resume>';
+      this.state.status = this.state.sdd.sessionId ? `SDD · ${this.state.sdd.phase ?? 'active'}` : 'Use /sdd and choose Start to describe a session';
       return;
     }
     if (trimmed === 'approve-spec') await this.request('sdd_action', { action: 'approve_spec' });
@@ -1371,6 +1405,64 @@ export class TuiController {
       if (!this.state.commandFlow && !this.state.shouldQuit && this.state.overlay === 'commands') this.state.overlay = 'none';
       return;
     }
+    if (flow.kind === 'action') {
+      await this.acceptActionFlow(flow);
+      return;
+    }
+    if (flow.kind === 'context_remove') {
+      const option = selectionOptions(this.state, flow)[flow.selected];
+      if (option) {
+        await this.request('context_remove', { id: option.id });
+        this.state.status = `Removed context · ${option.label}`;
+      }
+      this.closeCommandFlow();
+      return;
+    }
+    if (flow.kind === 'terminal_attach') {
+      const option = selectionOptions(this.state, flow)[flow.selected];
+      if (option) {
+        await this.request('context_attach', { kind: 'terminal', terminalId: option.id, label: option.label });
+        this.state.status = `Attached terminal · ${option.label}`;
+      }
+      this.closeCommandFlow();
+      return;
+    }
+    if (flow.kind === 'terminal_select') {
+      const option = selectionOptions(this.state, flow)[flow.selected];
+      if (option) {
+        this.state.activeTerminalId = option.id;
+        await this.request('terminal_snapshot', { terminalId: option.id });
+        this.state.mainPanel = 'terminal';
+        this.state.status = `Focused terminal · ${option.label}`;
+      }
+      this.closeCommandFlow();
+      return;
+    }
+    if (flow.kind === 'diff_file') {
+      const option = selectionOptions(this.state, flow)[flow.selected];
+      if (option) {
+        await this.request('file_change_resolve', { toolCallId: option.id, action: flow.action });
+        this.state.mainPanel = 'activity';
+        this.state.status = `${flow.action === 'accept' ? 'Accepted' : 'Rejected'} · ${option.label}`;
+      }
+      this.closeCommandFlow();
+      return;
+    }
+    if (flow.kind === 'tab_select') {
+      const option = selectionOptions(this.state, flow)[flow.selected];
+      if (option) await this.request('session_load', { id: option.id });
+      this.closeCommandFlow();
+      return;
+    }
+    if (flow.kind === 'session_delete') {
+      const option = selectionOptions(this.state, flow)[flow.selected];
+      if (option) {
+        await this.request('session_delete', { id: option.id });
+        this.state.status = `Deleting session · ${option.label}`;
+      }
+      this.closeCommandFlow();
+      return;
+    }
     if (flow.kind === 'mode') {
       const option = MODE_OPTIONS[flow.selected];
       if (option) await this.setMode(option.value);
@@ -1408,18 +1500,78 @@ export class TuiController {
     this.closeCommandFlow();
   }
 
-  private flowOptions(flow: CommandFlow): readonly unknown[] {
-    if (flow.kind === 'root') return matchingCommands(flow.query);
-    if (flow.kind === 'mode') return MODE_OPTIONS;
-    if (flow.kind === 'provider') return this.state.providers;
-    if (flow.kind === 'model') return this.state.providers[flow.providerIndex]?.models ?? [];
-    return this.thinkingOptions();
+  private async acceptActionFlow(flow: Extract<CommandFlow, { kind: 'action' }>): Promise<void> {
+    const option = selectionOptions(this.state, flow)[flow.selected];
+    if (!option) {
+      this.closeCommandFlow();
+      return;
+    }
+
+    if (flow.action === 'approval') {
+      await this.setApprovalMode(option.id);
+      this.closeCommandFlow();
+      return;
+    }
+    if (flow.action === 'context') {
+      if (option.id === 'list') await this.runContextCommand('list');
+      else if (option.id === 'attach') {
+        this.prepareCommandInput('/attach ', 'Type a path or terminal:<id> to attach and press Enter');
+        return;
+      } else if (option.id === 'attach-terminal') {
+        this.state.commandFlow = { kind: 'terminal_attach', selected: 0 };
+        return;
+      } else if (option.id === 'remove') {
+        this.state.commandFlow = { kind: 'context_remove', selected: 0 };
+        return;
+      } else {
+        await this.request('context_clear', {});
+        this.state.status = 'Context cleared';
+      }
+      this.closeCommandFlow();
+      return;
+    }
+    if (flow.action === 'terminal') {
+      if (option.id === 'focus') {
+        this.state.commandFlow = { kind: 'terminal_select', selected: 0 };
+        return;
+      }
+      await this.runTerminalCommandAction(option.id);
+      this.closeCommandFlow();
+      return;
+    }
+    if (flow.action === 'diffs') {
+      if (option.id === 'accept' || option.id === 'reject') {
+        this.state.commandFlow = { kind: 'diff_file', action: option.id, selected: 0 };
+        return;
+      }
+      await this.runDiffCommand(option.id);
+      this.closeCommandFlow();
+      return;
+    }
+    if (flow.action === 'sdd') {
+      if (option.id === 'start') {
+        this.prepareCommandInput('/sdd ', 'Describe the SDD request and press Enter');
+        return;
+      }
+      if (option.id === 'reject-spec') {
+        this.prepareCommandInput('/sdd reject-spec ', 'Add optional feedback and press Enter');
+        return;
+      }
+      await this.runSddCommand(option.id);
+      this.closeCommandFlow();
+      return;
+    }
+    if (option.id === 'select') {
+      this.state.commandFlow = { kind: 'tab_select', selected: 0 };
+      return;
+    }
+    await this.runTabCommand(option.id);
+    this.closeCommandFlow();
   }
 
-  private thinkingOptions(): string[] {
-    const model = this.state.models.find((candidate) => candidate.provider === this.state.provider && candidate.id === this.state.model);
-    const toggleLabel = this.state.thinking.enabled ? 'Disable thinking' : 'Enable thinking';
-    return [toggleLabel, ...((model?.thinkingVariants?.levels ?? []) as string[])];
+  private flowOptions(flow: CommandFlow): readonly unknown[] {
+    if (flow.kind === 'root') return matchingCommands(flow.query);
+    return selectionOptions(this.state, flow);
   }
 
   private thinkingForSelection(selected: number): ThinkingConfig | null {

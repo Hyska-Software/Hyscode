@@ -185,4 +185,78 @@ describe('TUI controller', () => {
     });
     expect(controller.state.commandFlow).toBeNull();
   });
+
+  it('opens the approval selector so the policy can be changed with the keyboard', async () => {
+    const runtime = new FakeRuntime();
+    const controller = new TuiController({ workspace: 'C:/workspace' }, runtime);
+    await controller.start();
+
+    await controller.handleKey({ type: 'character', value: '/approval' });
+    await controller.handleKey({ type: 'enter' });
+
+    expect(controller.state.commandFlow).toMatchObject({ kind: 'action', action: 'approval', selected: 0 });
+    await controller.handleKey({ type: 'down' });
+    await controller.handleKey({ type: 'enter' });
+
+    expect(runtime.requests.at(-1)).toMatchObject({ method: 'set_config', params: { approvalMode: 'smart' } });
+    expect(controller.state.approvalMode).toBe('smart');
+    expect(controller.state.commandFlow).toBeNull();
+  });
+
+  it('turns SDD start into a guided description input instead of requiring inline arguments', async () => {
+    const runtime = new FakeRuntime();
+    const controller = new TuiController({ workspace: 'C:/workspace' }, runtime);
+    await controller.start();
+
+    await controller.handleKey({ type: 'character', value: '/sdd' });
+    await controller.handleKey({ type: 'enter' });
+    expect(controller.state.commandFlow).toMatchObject({ kind: 'action', action: 'sdd', selected: 0 });
+
+    await controller.handleKey({ type: 'enter' });
+
+    expect(controller.state.input).toBe('/sdd ');
+    expect(controller.state.status).toContain('Describe the SDD request');
+    expect(controller.state.commandFlow).toBeNull();
+  });
+
+  it('lets the user choose which pending file change to accept', async () => {
+    const runtime = new FakeRuntime();
+    const controller = new TuiController({ workspace: 'C:/workspace' }, runtime);
+    await controller.start();
+    controller.state.fileChanges = [
+      { toolCallId: 'change-1', toolName: 'write_file', filePath: 'src/first.ts', originalContent: '', newContent: 'one', status: 'pending', expanded: false },
+      { toolCallId: 'change-2', toolName: 'write_file', filePath: 'src/second.ts', originalContent: '', newContent: 'two', status: 'pending', expanded: false },
+    ];
+
+    await controller.handleKey({ type: 'character', value: '/diffs' });
+    await controller.handleKey({ type: 'enter' });
+    await controller.handleKey({ type: 'down' });
+    await controller.handleKey({ type: 'enter' });
+
+    expect(controller.state.commandFlow).toMatchObject({ kind: 'diff_file', action: 'accept', selected: 0 });
+    await controller.handleKey({ type: 'down' });
+    await controller.handleKey({ type: 'enter' });
+
+    expect(runtime.requests.at(-1)).toMatchObject({ method: 'file_change_resolve', params: { toolCallId: 'change-2', action: 'accept' } });
+    expect(controller.state.commandFlow).toBeNull();
+  });
+
+  it('lets the context menu attach an existing terminal without typing its id', async () => {
+    const runtime = new FakeRuntime();
+    const controller = new TuiController({ workspace: 'C:/workspace' }, runtime);
+    await controller.start();
+    controller.state.terminals = [{ terminalId: 'term-1', ptyId: 'pty-1', name: 'PowerShell', alive: true, sequence: 0, outputPreview: '', frameLanguage: 'powershell' }];
+
+    await controller.handleKey({ type: 'character', value: '/context' });
+    await controller.handleKey({ type: 'enter' });
+    await controller.handleKey({ type: 'down' });
+    await controller.handleKey({ type: 'down' });
+    await controller.handleKey({ type: 'enter' });
+    expect(controller.state.commandFlow).toMatchObject({ kind: 'terminal_attach', selected: 0 });
+
+    await controller.handleKey({ type: 'enter' });
+
+    expect(runtime.requests.at(-1)).toMatchObject({ method: 'context_attach', params: { kind: 'terminal', terminalId: 'term-1' } });
+    expect(controller.state.commandFlow).toBeNull();
+  });
 });

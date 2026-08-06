@@ -156,12 +156,21 @@ export type MainPanel = 'chat' | 'terminal' | 'sdd' | 'activity';
 
 export type RecoveryView = { action: 'continue' | 'retry'; partialText: string; retryCount: number; possibleDuplicateCharge: boolean };
 
+export type SelectionFlowAction = 'approval' | 'context' | 'terminal' | 'diffs' | 'sdd' | 'tab';
+
 export type CommandFlow =
   | { kind: 'root'; query: string; selected: number; inputDriven: boolean }
   | { kind: 'mode'; selected: number }
   | { kind: 'provider'; selected: number }
   | { kind: 'model'; providerIndex: number; selected: number }
-  | { kind: 'thinking'; selected: number };
+  | { kind: 'thinking'; selected: number }
+  | { kind: 'action'; action: SelectionFlowAction; selected: number }
+  | { kind: 'context_remove'; selected: number }
+  | { kind: 'terminal_attach'; selected: number }
+  | { kind: 'terminal_select'; selected: number }
+  | { kind: 'diff_file'; action: 'accept' | 'reject'; selected: number }
+  | { kind: 'tab_select'; selected: number }
+  | { kind: 'session_delete'; selected: number };
 
 export type Focus = 'composer' | 'transcript' | 'sidebar';
 

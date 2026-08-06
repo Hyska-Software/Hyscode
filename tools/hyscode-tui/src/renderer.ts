@@ -1,4 +1,4 @@
-import { COMMANDS, flowTitle, matchingCommands, MODE_OPTIONS } from './commands';
+import { COMMANDS, flowTitle, matchingCommands, selectionOptions } from './commands';
 import type { CommandFlow, InteractionState, TranscriptItem, UiState } from './types';
 
 const RESET = '\u001b[0m';
@@ -159,18 +159,18 @@ function toolCards(state: UiState, width: number): string[] {
 
 function terminalPanel(state: UiState, width: number): string[] {
   const terminal = state.terminals.find((candidate) => candidate.terminalId === state.activeTerminalId) ?? state.terminals[0];
-  if (!terminal) return [`${MUTED}No terminal open. Use /terminal open or !command.${RESET}`, ''];
+  if (!terminal) return [`${MUTED}No terminal open. Use /terminal to choose an action or !command.${RESET}`, ''];
   return [
     `${ACCENT}${BOLD}TERMINAL · ${shorten(terminal.name, width - 24)}${RESET} ${DIM}${terminal.frameLanguage} · ${terminal.alive ? 'alive' : 'exited'} · seq ${terminal.sequence}${RESET}`,
     ...wrapText(terminal.outputPreview || 'Terminal is ready for input.', Math.max(12, width - 4)).slice(-10).map((line) => `${SOFT}${line}${RESET}`),
-    `${DIM}Type !command to send input · /terminal focus <id> · /attach terminal:${terminal.terminalId}${RESET}`,
+    `${DIM}Type !command to send input · /terminal to focus · /attach terminal:${terminal.terminalId}${RESET}`,
     '',
   ];
 }
 
 function sddPanel(state: UiState, width: number): string[] {
   const sdd = state.sdd;
-  if (!sdd.sessionId) return [`${MUTED}No SDD session. Use /sdd <description> to start one.${RESET}`, ''];
+  if (!sdd.sessionId) return [`${MUTED}No SDD session. Use /sdd and choose Start.${RESET}`, ''];
   const lines = [`${ACCENT}${BOLD}SDD · ${sdd.phase ?? 'active'}${RESET} ${DIM}${shorten(sdd.sessionId, 18)}${RESET}`];
   if (sdd.spec) lines.push(...wrapText(sdd.spec, Math.max(12, width - 4)).slice(0, 6).map((line) => `${SOFT}${line}${RESET}`));
   if (sdd.tasks.length) {
@@ -195,7 +195,7 @@ function activityPanel(state: UiState, width: number): string[] {
       lines.push(`  ${WARNING}·${RESET} ${shorten(change.filePath, width - 8)}`);
       lines.push(...changeDiff(change.originalContent, change.newContent, width).slice(0, 5));
     }
-    lines.push(`${DIM}/diffs accept · /diffs reject · /diffs accept-all${RESET}`);
+    lines.push(`${DIM}Use /diffs to choose accept, reject, or bulk review actions.${RESET}`);
   }
   if (state.subagents.length) {
     lines.push(`${ACCENT}SUB-AGENTS · ${state.subagents.length}${RESET}`);
@@ -341,12 +341,7 @@ function commandFlowLines(state: UiState, width: number, maxHeight: number): str
 
 function flowOptions(state: UiState, flow: CommandFlow): string[] {
   if (flow.kind === 'root') return matchingCommands(flow.query).map((command) => `${command.name}  ${command.description}`);
-  if (flow.kind === 'mode') return MODE_OPTIONS.map((option) => option.label);
-  if (flow.kind === 'provider') return state.providers.map((provider) => `${provider.name} (${provider.id})${provider.configured ? '' : ' · not configured'}`);
-  if (flow.kind === 'model') return state.providers[flow.providerIndex]?.models.map((model) => `${model.name} (${model.id})`) ?? [];
-  const model = state.models.find((candidate) => candidate.provider === state.provider && candidate.id === state.model);
-  const levels = model?.thinkingVariants?.levels ?? [];
-  return [`${state.thinking.enabled ? 'Disable' : 'Enable'} thinking`, ...levels.map((level) => `Use ${level} thinking`)];
+  return selectionOptions(state, flow).map((option) => option.label);
 }
 
 function interactionLines(interaction: InteractionState, width: number): string[] {

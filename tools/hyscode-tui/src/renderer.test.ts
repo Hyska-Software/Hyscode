@@ -132,4 +132,15 @@ describe('TUI renderer', () => {
     expect(rendered).toContain('/12 · PgUp/PgDn scroll');
     expect(rendered).not.toContain('Model 0');
   });
+
+  it('renders keyboard-first action flows with contextual choices', () => {
+    const rendered = new TerminalRenderer().render(state({
+      commandFlow: { kind: 'action', action: 'approval', selected: 0 },
+      overlay: 'commands',
+    }));
+
+    expect(rendered).toContain('APPROVAL');
+    expect(rendered).toContain('Manual · ask before every protected tool');
+    expect(rendered).toContain('Smart · ask only when risk requires it');
+  });
 });

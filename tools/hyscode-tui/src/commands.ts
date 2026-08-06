@@ -1,6 +1,6 @@
 import path from 'node:path';
 import type { AgentType } from '@hyscode/agent-harness';
-import { AGENT_TYPES, type CliParseResult, type CommandFlow } from './types';
+import { AGENT_TYPES, type CliParseResult, type CommandFlow, type SelectionFlowAction, type UiState } from './types';
 
 export type CommandSpec = {
   name: string;
@@ -12,31 +12,31 @@ export type CommandSpec = {
 
 export const COMMANDS: readonly CommandSpec[] = [
   { name: '/help', aliases: ['/?'], category: 'runtime', description: 'Show keyboard and command help', usage: '/help' },
-  { name: '/mode', aliases: [], category: 'runtime', description: 'Switch chat, build, review, debug, or plan mode', usage: '/mode <mode>' },
+  { name: '/mode', aliases: [], category: 'runtime', description: 'Choose chat, build, review, debug, or plan mode', usage: '/mode' },
   { name: '/thinking', aliases: ['/think'], category: 'model', description: 'Configure model thinking/reasoning', usage: '/thinking' },
-  { name: '/approval', aliases: ['/approve'], category: 'runtime', description: 'Choose manual, smart, trust, notify, or yolo approvals', usage: '/approval <mode>' },
-  { name: '/model', aliases: ['/m'], category: 'model', description: 'Select a configured provider and model', usage: '/model <provider> <model>' },
+  { name: '/approval', aliases: ['/approve'], category: 'runtime', description: 'Choose how tool approvals are handled', usage: '/approval' },
+  { name: '/model', aliases: ['/m'], category: 'model', description: 'Open the provider and model selector', usage: '/model' },
   { name: '/models', aliases: [], category: 'model', description: 'Open the model selector', usage: '/models' },
   { name: '/new', aliases: ['/fresh'], category: 'session', description: 'Start a new saved session', usage: '/new' },
   { name: '/sessions', aliases: ['/resume'], category: 'session', description: 'List saved sessions for this workspace', usage: '/sessions' },
-  { name: '/load', aliases: [], category: 'session', description: 'Load a saved session', usage: '/load <session-id>' },
-  { name: '/rename', aliases: ['/title'], category: 'session', description: 'Rename the current session', usage: '/rename <title>' },
+  { name: '/load', aliases: [], category: 'session', description: 'Choose a saved session to load', usage: '/load' },
+  { name: '/rename', aliases: ['/title'], category: 'session', description: 'Edit the current session title', usage: '/rename' },
   { name: '/export', aliases: [], category: 'session', description: 'Export the current session as Markdown', usage: '/export' },
-  { name: '/delete-session', aliases: ['/delete'], category: 'session', description: 'Delete a saved session', usage: '/delete-session [session-id]' },
-  { name: '/tab', aliases: ['/tabs'], category: 'session', description: 'Create, switch, or close conversation tabs', usage: '/tab <new|next|close|id>' },
+  { name: '/delete-session', aliases: ['/delete'], category: 'session', description: 'Choose a saved session to delete', usage: '/delete-session' },
+  { name: '/tab', aliases: ['/tabs'], category: 'session', description: 'Choose a conversation tab action', usage: '/tab' },
   { name: '/subagents', aliases: ['/delegations'], category: 'session', description: 'Inspect delegated child agents', usage: '/subagents' },
   { name: '/usage', aliases: ['/tokens'], category: 'runtime', description: 'Show token usage and request telemetry', usage: '/usage' },
   { name: '/projects', aliases: ['/workspaces'], category: 'workspace', description: 'List workspaces with saved sessions', usage: '/projects' },
-  { name: '/project', aliases: ['/cd'], category: 'workspace', description: 'Switch to another workspace', usage: '/project <workspace-path>' },
+  { name: '/project', aliases: ['/cd'], category: 'workspace', description: 'Choose another workspace', usage: '/project' },
   { name: '/diagnostics', aliases: ['/diag'], category: 'workspace', description: 'Run workspace diagnostics', usage: '/diagnostics [file]' },
-  { name: '/attach', aliases: ['/@'], category: 'context', description: 'Attach a file, directory, terminal, or image', usage: '/attach <path|terminal-id>' },
-  { name: '/context', aliases: ['/ctx'], category: 'context', description: 'Inspect, remove, or clear attached context', usage: '/context [list|clear|remove <id>]' },
+  { name: '/attach', aliases: ['/@'], category: 'context', description: 'Prepare a file, directory, terminal, or image attachment', usage: '/attach' },
+  { name: '/context', aliases: ['/ctx'], category: 'context', description: 'Choose an attached-context action', usage: '/context' },
   { name: '/rules', aliases: [], category: 'context', description: 'Inspect active project and global rules', usage: '/rules' },
   { name: '/skills', aliases: [], category: 'context', description: 'Inspect loaded and active skills', usage: '/skills' },
   { name: '/memory', aliases: ['/memories'], category: 'context', description: 'Inspect persistent project memories', usage: '/memory' },
-  { name: '/terminal', aliases: ['/term', '/!'], category: 'context', description: 'Open and interact with a persistent terminal', usage: '/terminal [open|list|focus]' },
-  { name: '/diffs', aliases: ['/changes'], category: 'context', description: 'Review, accept, or revert file changes', usage: '/diffs [accept|reject|accept-all|reject-all]' },
-  { name: '/sdd', aliases: ['/spec'], category: 'runtime', description: 'Start or advance a spec-driven development session', usage: '/sdd <description|action>' },
+  { name: '/terminal', aliases: ['/term', '/!'], category: 'context', description: 'Choose a persistent-terminal action', usage: '/terminal' },
+  { name: '/diffs', aliases: ['/changes'], category: 'context', description: 'Choose a file-change review action', usage: '/diffs' },
+  { name: '/sdd', aliases: ['/spec'], category: 'runtime', description: 'Choose an SDD action or enter a description', usage: '/sdd' },
   { name: '/retry', aliases: ['/again'], category: 'session', description: 'Retry the last user message', usage: '/retry' },
   { name: '/continue', aliases: ['/resume-partial'], category: 'session', description: 'Continue a recoverable partial response', usage: '/continue' },
   { name: '/cancel', aliases: ['/stop'], category: 'runtime', description: 'Cancel the active turn', usage: '/cancel' },
@@ -51,6 +51,124 @@ export const MODE_OPTIONS: readonly { value: AgentType; label: string }[] = [
   { value: 'debug', label: 'Debug — diagnose failures' },
   { value: 'plan', label: 'Plan — produce an implementation plan' },
 ];
+
+export type SelectionOption = { id: string; label: string };
+
+export const APPROVAL_OPTIONS: readonly SelectionOption[] = [
+  { id: 'manual', label: 'Manual · ask before every protected tool' },
+  { id: 'smart', label: 'Smart · ask only when risk requires it' },
+  { id: 'session-trust', label: 'Session trust · remember approved tools' },
+  { id: 'notify', label: 'Notify · continue and show the decision' },
+  { id: 'yolo', label: 'Yolo · allow tools automatically' },
+  { id: 'custom', label: 'Custom · use the configured policy' },
+];
+
+const CONTEXT_ACTIONS: readonly SelectionOption[] = [
+  { id: 'list', label: 'List attached context' },
+  { id: 'attach', label: 'Attach a file or directory from the composer' },
+  { id: 'attach-terminal', label: 'Attach a terminal' },
+  { id: 'remove', label: 'Remove one attachment' },
+  { id: 'clear', label: 'Clear all attachments' },
+];
+
+const TERMINAL_ACTIONS: readonly SelectionOption[] = [
+  { id: 'list', label: 'List terminals' },
+  { id: 'open', label: 'Open a new terminal' },
+  { id: 'focus', label: 'Choose a terminal to focus' },
+];
+
+const DIFF_ACTIONS: readonly SelectionOption[] = [
+  { id: 'list', label: 'Review pending file changes' },
+  { id: 'accept', label: 'Accept one change' },
+  { id: 'reject', label: 'Reject one change' },
+  { id: 'accept-all', label: 'Accept all pending changes' },
+  { id: 'reject-all', label: 'Reject all pending changes' },
+];
+
+const SDD_ACTIONS: readonly SelectionOption[] = [
+  { id: 'approve-spec', label: 'Approve the specification' },
+  { id: 'reject-spec', label: 'Reject the specification and add feedback' },
+  { id: 'approve-plan', label: 'Approve the implementation plan' },
+  { id: 'resume', label: 'Resume the SDD session' },
+];
+
+const TAB_ACTIONS: readonly SelectionOption[] = [
+  { id: 'new', label: 'Open a new conversation tab' },
+  { id: 'next', label: 'Switch to the next tab' },
+  { id: 'close', label: 'Close the current tab' },
+  { id: 'select', label: 'Choose a tab' },
+];
+
+const ACTION_FLOW_TITLES: Record<SelectionFlowAction, string> = {
+  approval: 'APPROVAL',
+  context: 'CONTEXT ACTION',
+  terminal: 'TERMINAL ACTION',
+  diffs: 'FILE CHANGES',
+  sdd: 'SDD ACTION',
+  tab: 'TAB ACTION',
+};
+
+export function selectionOptions(state: UiState, flow: CommandFlow): readonly SelectionOption[] {
+  switch (flow.kind) {
+    case 'mode':
+      return MODE_OPTIONS.map((option) => ({ id: option.value, label: option.label }));
+    case 'provider':
+      return state.providers.map((provider) => ({
+        id: provider.id,
+        label: `${provider.name} (${provider.id})${provider.configured ? '' : ' · not configured'}`,
+      }));
+    case 'model':
+      return state.providers[flow.providerIndex]?.models.map((model) => ({ id: model.id, label: `${model.name} (${model.id})` })) ?? [];
+    case 'thinking': {
+      const model = state.models.find((candidate) => candidate.provider === state.provider && candidate.id === state.model);
+      return [
+        { id: 'toggle', label: `${state.thinking.enabled ? 'Disable' : 'Enable'} thinking` },
+        ...((model?.thinkingVariants?.levels ?? []) as string[]).map((level) => ({ id: level, label: `Use ${level} thinking` })),
+      ];
+    }
+    case 'action':
+      return actionOptions(state, flow.action);
+    case 'context_remove':
+      return state.context.attachments.map((attachment) => ({ id: attachment.id, label: `${attachment.kind} · ${attachment.label}` }));
+    case 'terminal_attach':
+      return state.terminals.map((terminal) => ({ id: terminal.terminalId, label: `${terminal.name} · ${terminal.alive ? 'running' : 'exited'}` }));
+    case 'terminal_select':
+      return state.terminals.map((terminal) => ({ id: terminal.terminalId, label: `${terminal.name} · ${terminal.alive ? 'running' : 'exited'}` }));
+    case 'diff_file':
+      return state.fileChanges
+        .filter((change) => change.status === 'pending')
+        .map((change) => ({ id: change.toolCallId, label: `${change.filePath} · ${change.toolName}` }));
+    case 'tab_select':
+      return state.tabs.map((tab) => ({ id: tab.sessionId, label: `${tab.active ? 'Current' : 'Tab'} · ${tab.title}` }));
+    case 'session_delete':
+      return state.sessions.map((session) => ({ id: session.id, label: `${session.title} · ${session.messageCount} message(s)` }));
+    case 'root':
+      return [];
+  }
+}
+
+function actionOptions(state: UiState, action: SelectionFlowAction): readonly SelectionOption[] {
+  switch (action) {
+    case 'approval':
+      return APPROVAL_OPTIONS;
+    case 'context':
+      return CONTEXT_ACTIONS.filter((option) => {
+        if (option.id === 'remove' || option.id === 'clear') return state.context.attachments.length > 0;
+        if (option.id === 'attach-terminal') return state.terminals.length > 0;
+        return true;
+      });
+    case 'terminal':
+      return TERMINAL_ACTIONS.filter((option) => option.id !== 'focus' || state.terminals.length > 0);
+    case 'diffs': {
+      const hasPendingChanges = state.fileChanges.some((change) => change.status === 'pending');
+      return DIFF_ACTIONS.filter((option) => option.id === 'list' || hasPendingChanges);
+    }
+    case 'sdd':
+      return state.sdd.sessionId ? SDD_ACTIONS : [{ id: 'start', label: 'Start an SDD session · describe it next' }];
+    case 'tab':
+      return state.tabs.length > 0 ? TAB_ACTIONS : [TAB_ACTIONS[0]];
+  }
+}
 
 export function matchingCommands(query: string): CommandSpec[] {
   const normalized = query.trim().toLowerCase();
@@ -84,6 +202,13 @@ export function flowTitle(flow: CommandFlow | null): string {
     case 'provider': return 'PROVIDER';
     case 'model': return 'MODEL';
     case 'thinking': return 'THINKING';
+    case 'action': return ACTION_FLOW_TITLES[flow.action];
+    case 'context_remove': return 'REMOVE CONTEXT';
+    case 'terminal_select': return 'FOCUS TERMINAL';
+    case 'terminal_attach': return 'ATTACH TERMINAL';
+    case 'diff_file': return `${flow.action.toUpperCase()} FILE CHANGE`;
+    case 'tab_select': return 'SELECT TAB';
+    case 'session_delete': return 'DELETE SESSION';
     case 'root': return 'COMMANDS';
     default: return 'COMMANDS';
   }
