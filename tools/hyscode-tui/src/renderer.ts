@@ -19,6 +19,10 @@ const ERROR = dynamicAnsiToken(() => activeAnsiTheme.error);
 const PANEL = dynamicAnsiToken(() => activeAnsiTheme.panel);
 
 const SIDEBAR_WIDTH = 27;
+const COMPOSER_HORIZONTAL_PADDING = 2;
+const COMPOSER_SECTION_GAP = 1;
+const WORKING_FRAME_INTERVAL_MS = 160;
+const WORKING_FRAMES = ['·  ', '·· ', '···', ' ··', '  ·', ' ··'] as const;
 
 export class TerminalRenderer {
   render(state: UiState): string {
@@ -33,12 +37,14 @@ export class TerminalRenderer {
       const rawPanel = this.overlayLines(state, width, panelBudget);
       const panel = rawPanel.slice(0, panelBudget);
       const bodyHeight = Math.max(3, height - header.length - panel.length - composer.length);
+      const executionBanner = state.running ? [workingIndicator(), ''] : [];
+      const transcriptHeight = Math.max(1, bodyHeight - executionBanner.length);
       const sidebarWidth = state.sidebarVisible && width >= 100 ? SIDEBAR_WIDTH : 0;
       const mainWidth = sidebarWidth > 0 ? width - sidebarWidth - 1 : width;
       const transcript = transcriptView(state.transcript, Math.max(20, mainWidth - 2), state);
-      const start = Math.max(0, transcript.length - bodyHeight - state.scroll);
-      const visibleTranscript = transcript.slice(start, start + bodyHeight);
-      const body = layoutBody(visibleTranscript, state, width, bodyHeight, sidebarWidth);
+      const start = Math.max(0, transcript.length - transcriptHeight - state.scroll);
+      const visibleTranscript = transcript.slice(start, start + transcriptHeight);
+      const body = layoutBody([...executionBanner, ...visibleTranscript], state, width, bodyHeight, sidebarWidth);
       const lines = [...header, ...body, ...panel, ...composer];
       while (lines.length < height) lines.push('');
       return `${activeAnsiTheme.reset}\u001b[2J\u001b[H${lines.slice(0, height).map((line) => fitAnsi(line, width)).join('\n')}${RESET}`;
@@ -332,6 +338,7 @@ function transcriptStyle(kind: TranscriptItem['kind']): [string, string, AnsiTok
 }
 
 function composerLines(state: UiState, width: number): string[] {
+  const composerWidth = Math.max(12, width - COMPOSER_HORIZONTAL_PADDING * 2);
   const label = state.interaction?.kind === 'approval' || state.interaction?.kind === 'mode_switch'
     ? 'CONFIRM'
     : state.interaction?.kind === 'question'
@@ -342,22 +349,37 @@ function composerLines(state: UiState, width: number): string[] {
           ? 'WORKING'
           : 'MESSAGE';
   const prompt = state.interaction?.kind === 'question' ? '?' : state.input.startsWith('/') ? '/' : '>';
-  const status = shorten(composerStatus(state), Math.max(20, width - label.length - 10));
+  const status = shorten(composerStatus(state), Math.max(20, composerWidth - label.length - 10));
   const chips = state.context.attachments.map((attachment) => `${attachment.kind}:${attachment.label}`).join('  ');
   const rawContextDetails = chips ? `context ${chips}` : 'context none · /attach path · @path · !command';
-  const meter = contextMeter(state, Math.min(24, Math.max(14, width - 4)));
-  const contextDetails = shorten(rawContextDetails, Math.max(12, width - visibleLength(meter) - 2));
+  const meter = contextMeter(state, Math.min(24, Math.max(14, composerWidth - 4)));
+  const contextDetails = shorten(rawContextDetails, Math.max(12, composerWidth - visibleLength(meter) - 2));
   const contextLine = `${chips ? MUTED : DIM}${contextDetails}${RESET}  ${meter}`;
-  const inputRows = renderInputRows(state, Math.max(12, width - 6));
+  const inputWidth = Math.max(12, composerWidth - 6);
+  const inputRows = renderInputRows(state, inputWidth);
+  const composerHeader = `${ACCENT}╭─ ${label}${RESET} ${DIM}${status}${RESET}`;
+  const composerTop = `${composerHeader}${ACCENT}${'─'.repeat(Math.max(0, composerWidth - visibleLength(composerHeader) - 1))}╮${RESET}`;
+  const frame = (line: string): string => insetComposerLine(line, width, composerWidth);
   return [
     `${PANEL}${'─'.repeat(width)}${RESET}`,
-    contextLine,
-    `${ACCENT}╭─ ${label}${RESET} ${DIM}${status}${RESET}`,
+    frame(contextLine),
+    ...Array.from({ length: COMPOSER_SECTION_GAP }, () => ''),
+    frame(composerTop),
     ...inputRows.map((line, index) => index === 0
-      ? `${ACCENT}│${RESET} ${BOLD}${prompt}${RESET} ${fitAnsi(line, Math.max(12, width - 6))}`
-      : `${ACCENT}│${RESET}   ${fitAnsi(line, Math.max(12, width - 6))}`),
-    `${ACCENT}╰${'─'.repeat(Math.max(0, width - 2))}╯${RESET}`,
+      ? frame(`${ACCENT}│${RESET} ${BOLD}${prompt}${RESET} ${padAnsi(fitAnsi(line, inputWidth), inputWidth)} ${ACCENT}│${RESET}`)
+      : frame(`${ACCENT}│${RESET}   ${padAnsi(fitAnsi(line, inputWidth), inputWidth)} ${ACCENT}│${RESET}`)),
+    frame(`${ACCENT}╰${'─'.repeat(Math.max(0, composerWidth - 2))}╯${RESET}`),
   ];
+}
+
+function workingIndicator(): string {
+  const frame = WORKING_FRAMES[Math.floor(Date.now() / WORKING_FRAME_INTERVAL_MS) % WORKING_FRAMES.length];
+  return `${ACCENT}${frame}${RESET} ${SOFT}Working...${RESET}`;
+}
+
+function insetComposerLine(line: string, width: number, composerWidth: number): string {
+  const fitted = padAnsi(fitAnsi(line, composerWidth), composerWidth);
+  return `${' '.repeat(COMPOSER_HORIZONTAL_PADDING)}${fitted}${' '.repeat(Math.max(0, width - COMPOSER_HORIZONTAL_PADDING - visibleLength(fitted)))}`;
 }
 
 function composerStatus(state: UiState): string {

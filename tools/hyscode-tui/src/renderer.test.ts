@@ -76,6 +76,12 @@ describe('TUI renderer', () => {
     expect(composerHeader.indexOf('anthropic/claude-sonnet')).toBeLessThan(composerHeader.indexOf('thinking medium'));
     expect(rendered).toContain('╰');
     expect(rendered).not.toContain('Enter send');
+
+    const plainLines = rendered.replace(/\u001b\[[0-9;]*[A-Za-z]/g, '').split('\n');
+    const plainComposerIndex = plainLines.findIndex((line) => line.includes('MESSAGE'));
+    expect(plainLines[plainComposerIndex - 1]).toBe('');
+    expect(plainLines[plainComposerIndex]).toMatch(/^\s{2}╭─ MESSAGE/);
+    expect(plainLines[plainComposerIndex + 1]).toMatch(/^\s{2}│/);
   });
 
   it('keeps the header focused on global state while the sidebar owns session details', () => {
@@ -215,6 +221,30 @@ describe('TUI renderer', () => {
 
     expect(promptLines.length).toBeGreaterThan(1);
     expect(rendered).not.toContain('Enter send');
-    expect(rendered).toContain('╰──────────────────────────────────────────────────────────────────────────────╯');
+    const plainLines = rendered.replace(/\u001b\[[0-9;]*[A-Za-z]/g, '').split('\n');
+    const composerHeaderIndex = plainLines.findIndex((line) => line.includes('MESSAGE'));
+    const composerBottom = plainLines.slice(composerHeaderIndex).find((line) => line.includes('╰'));
+    expect(composerBottom?.startsWith('  ')).toBe(true);
+    expect(composerBottom?.trim()).toMatch(/^╰─+╯$/);
+  });
+
+  it('shows an animated working indicator at the top of the execution chat area', () => {
+    const rendered = new TerminalRenderer().render(state({
+      running: true,
+      status: 'Working…',
+      sidebarVisible: false,
+      transcript: [
+        { kind: 'user', text: 'Build the requested change.' },
+        { kind: 'assistant', text: 'I am executing the requested change.' },
+      ],
+    }));
+    const plainLines = rendered.replace(/\u001b\[[0-9;]*[A-Za-z]/g, '').split('\n');
+    const workingIndex = plainLines.findIndex((line) => line.includes('Working...'));
+    const chatIndex = plainLines.findIndex((line) => line.includes('› you'));
+
+    expect(workingIndex).toBeGreaterThan(-1);
+    expect(plainLines[workingIndex].trimEnd()).toMatch(/^\s{2}[· ]+Working\.\.\.$/);
+    expect(plainLines[workingIndex + 1].trim()).toBe('');
+    expect(workingIndex).toBeLessThan(chatIndex);
   });
 });
