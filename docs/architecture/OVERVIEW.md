@@ -133,19 +133,39 @@ construction is the only production client path.
 
 ### Build and launch
 
-From the repository root on Windows:
+From the repository root on Windows, Linux, or macOS:
 
-```powershell
-npm run build:tui
-tools/hyscode-tui/dist/vortex.exe .
+```shell
+npm run build:vortex
+npm run install:vortex
 ```
 
-`build:tui` creates one self-contained `vortex.exe`, and the public command is
-`vortex`. The packaged launcher therefore does not require Bun at runtime. For
-source development, run
+`build:vortex` builds for the current operating system and architecture. The
+production bundle is written to `tools/hyscode-tui/dist/vortex-production` and
+contains the standalone `vortex` launcher (`vortex.exe` on Windows), the
+matching `codex-sidecar`, and the native `node-pty` assets required for
+persistent terminals. Build the bundle on the target OS/architecture so these
+native assets match the machine where VORTEX will run.
+
+The packaged launcher does not require Bun or Node.js at runtime. `install:vortex`
+copies the complete bundle to `%LOCALAPPDATA%\\Vortex\\bin` on Windows, or to
+`$XDG_BIN_HOME` / `~/.local/bin` on Linux and macOS. It updates the user PATH;
+open a new terminal (or source the reported shell configuration file), then
+run `vortex` from any directory. When no workspace argument is supplied, the
+current directory is opened. An explicit workspace can still be passed with
+`vortex /path/to/workspace`.
+
+The installer updates `.zshrc` for zsh, `.bash_profile`/`.bashrc` for bash,
+`config.fish` for fish, and `.profile` for other POSIX shells. Set
+`VORTEX_BIN_DIR` when a different user-local installation directory is
+required. `--skip-sidecar-build` reuses an existing sidecar, and
+`--output <directory>` writes the bundle somewhere else.
+
+For source development, run
 `npm run -w @hyscode/tui-client build` or execute the TypeScript entrypoint with
-Bun. Use `HYSCODE_REPO_ROOT` when launching the executable from another
-directory so the Codex sidecar can be discovered.
+Bun. A repository-side executable can use `HYSCODE_REPO_ROOT` as a fallback
+when its sidecar is not next to the executable; production installations do
+not need that variable because the sidecar is bundled beside `vortex`.
 
 The launcher accepts `--provider`, `--model`, `--mode`, `--config`, and
 `--workspace`. Inside the TUI, the supported commands are:
@@ -175,15 +195,17 @@ and multiline answers.
 
 ### Configuration and credentials
 
-The default Windows files are:
+The runtime uses native per-user data locations:
 
 | Purpose | Default path | Override |
 |---|---|---|
-| Shared desktop/TUI settings | `%LOCALAPPDATA%\\hyscode\\settings.json` | `HYSCODE_CONFIG_PATH` or `--config` |
-| Shared file-backed credentials | `%LOCALAPPDATA%\\hyscode\\keychain.json` | `HYSCODE_KEYCHAIN_PATH` |
-| Installed extension themes | `%USERPROFILE%\\.hyscode\\extensions` and `extension-state.json` | `HYSCODE_EXTENSIONS_PATH`, `HYSCODE_EXTENSION_STATE_PATH` |
-| TUI sessions, memory, SDD, traces | `%LOCALAPPDATA%\\hyscode\\tui-data.json` | `HYSCODE_TUI_DATA_PATH` |
-| TUI executable | `tools/hyscode-tui/dist/vortex.exe` | `HYSCODE_REPO_ROOT` |
+| Shared desktop/TUI settings | Windows `%LOCALAPPDATA%\\hyscode\\settings.json`; macOS `~/Library/Application Support/hyscode/settings.json`; Linux `$XDG_DATA_HOME/hyscode/settings.json` or `~/.local/share/hyscode/settings.json` | `HYSCODE_CONFIG_PATH` or `--config` |
+| Shared file-backed credentials | Same platform data directory as settings, in `keychain.json` | `HYSCODE_KEYCHAIN_PATH` |
+| Installed extension themes | `~/.hyscode/extensions` and `extension-state.json` | `HYSCODE_EXTENSIONS_PATH`, `HYSCODE_EXTENSION_STATE_PATH` |
+| TUI sessions, memory, SDD, traces | Same platform data directory as settings, in `tui-data.json` | `HYSCODE_TUI_DATA_PATH` |
+| TUI development executable | `tools/hyscode-tui/dist/vortex[.exe]` | `HYSCODE_REPO_ROOT` |
+| TUI production bundle | `tools/hyscode-tui/dist/vortex-production/` | `npm run build:vortex` |
+| Installed VORTEX command | Windows `%LOCALAPPDATA%\\Vortex\\bin\\vortex.exe`; Linux/macOS `$XDG_BIN_HOME/vortex` or `~/.local/bin/vortex` | `npm run install:vortex` |
 | Codex provider sidecar | packaged sibling or repository binary | `HYSCODE_CODEX_SIDECAR` |
 | Repository discovery | current directory | `HYSCODE_REPO_ROOT` |
 

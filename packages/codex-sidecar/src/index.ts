@@ -139,14 +139,16 @@ async function main(): Promise<void> {
   // ChatGPT/Codex desktop app, or the VS Code extension bundled CLI.
   const cliPath = findCodexCli();
   if (!cliPath) {
+    const checkedLocations = process.platform === 'win32'
+      ? 'system PATH, ~/.codex/bin, %LOCALAPPDATA%\\OpenAI\\Codex\\bin, and the VS Code ChatGPT extension'
+      : 'system PATH and ~/.codex/bin';
     emit({
       type: 'error',
       error:
-        'Codex CLI not found. Checked: system PATH, ~/.codex/bin, ' +
-        '%LOCALAPPDATA%\\OpenAI\\Codex\\bin, VS Code ChatGPT extension. ' +
+        `Codex CLI not found. Checked: ${checkedLocations}. ` +
         'Install it with: npm install -g @openai/codex (or run the official ' +
         'installer — see https://developers.openai.com/codex/cli). ' +
-        'Then restart HysCode.',
+        'Then restart VORTEX.',
     });
     process.exit(1);
   }

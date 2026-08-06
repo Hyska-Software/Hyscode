@@ -55,6 +55,7 @@ const EMPTY_DATA: PersistedData = {
 function defaultDataPath(): string {
   if (process.platform === 'win32') return path.join(process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local'), 'hyscode', 'tui-data.json');
   if (process.env.XDG_DATA_HOME) return path.join(process.env.XDG_DATA_HOME, 'hyscode', 'tui-data.json');
+  if (process.platform === 'darwin') return path.join(os.homedir(), 'Library', 'Application Support', 'hyscode', 'tui-data.json');
   return path.join(os.homedir(), '.local', 'share', 'hyscode', 'tui-data.json');
 }
 

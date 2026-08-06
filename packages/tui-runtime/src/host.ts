@@ -3,7 +3,7 @@ import { mkdir, readFile, readdir, rename, rm, stat, writeFile, copyFile } from 
 import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
-import { spawn as spawnPtyProcess, type IDisposable, type IPty } from 'node-pty';
+import { spawn as spawnPtyProcess, type IDisposable, type IPty } from './pty';
 import type { CliDataStore } from './data-store';
 import type { SharedKeyStore } from './config';
 import type { GitSummary } from './protocol';

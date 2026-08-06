@@ -7,8 +7,8 @@
     "vortex": "dist/vortex"
   },
   "scripts": {
-    "build": "bun build --compile src/main.ts --outfile dist/vortex",
-    "build:release": "bun build --compile --minify src/main.ts --outfile dist/vortex",
+    "build": "node ../../scripts/build-vortex.mjs --prepare-native && bun build --compile src/main.ts --outfile dist/vortex",
+    "build:release": "node ../../scripts/build-vortex.mjs --prepare-native && bun build --compile --minify src/main.ts --outfile dist/vortex",
     "lint": "eslint src/",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
