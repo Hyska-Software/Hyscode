@@ -58,8 +58,10 @@ async function main(): Promise<void> {
     input.start();
     repaint();
     const repaintTimer = setInterval(repaint, 80);
+    const gitRefreshTimer = setInterval(() => { void controller.refreshGitSummary(); }, 2000);
     while (!controller.state.shouldQuit) await delay(80);
     clearInterval(repaintTimer);
+    clearInterval(gitRefreshTimer);
     input.stop();
     leaveAlternateScreen(process.stdout);
     await controller.shutdown();

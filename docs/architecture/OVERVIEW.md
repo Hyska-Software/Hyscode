@@ -117,6 +117,11 @@ The additive `recentSessions` field in `runtime_ready` carries a bounded list
 for the startup surface; the full `/sessions` command remains the source for
 the interactive session browser.
 
+The same payload carries a `GitSummary` snapshot for the top chat bar. It shows
+the active branch and aggregate `+insertions - deletions` for uncommitted
+tracked changes; the TUI refreshes it periodically through `git_summary` without
+running Git during each render.
+
 The TUI-only `sidebarVisible` preference is persisted in the same settings file
 and can be changed with `/sidebar`, `/sidebar on`, `/sidebar off`, or
 `/sidebar toggle`. Desktop synchronization preserves this field without exposing

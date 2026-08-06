@@ -54,6 +54,7 @@ import {
   type ContextStatePayload,
   type DiagnosticPayload,
   type FileChangeState,
+  type GitSummary,
   type InteractionRequest,
   type InteractionResolution,
   type ProjectSummary,
@@ -89,12 +90,14 @@ const MAX_CONTEXT_ATTACHMENT_BYTES = 2_000_000;
 const MAX_IMAGE_ATTACHMENT_BYTES = 20_000_000;
 const MAX_DIRECTORY_CONTEXT_FILES = 80;
 const MAX_TERMINAL_CONTEXT_BYTES = 120_000;
+const EMPTY_GIT_SUMMARY: GitSummary = { available: false, branch: '', insertions: 0, deletions: 0, changedFiles: 0 };
 
 export class TuiBridge {
   private readonly dataStore: CliDataStore;
   private configStore: SharedConfigStore;
   private readonly keyStore: SharedKeyStore;
   private host: CliHost | null = null;
+  private gitSummary: GitSummary = EMPTY_GIT_SUMMARY;
   private harness: Harness | null = null;
   private settings: SharedTuiSettings | null = null;
   private themes: ThemeSummary[] = [];
@@ -133,6 +136,8 @@ export class TuiBridge {
       switch (request.method) {
         case 'initialize':
           return this.ok(request.id, await this.initialize(request.params ?? {}));
+        case 'git_summary':
+          return this.ok(request.id, await this.refreshGitSummary());
         case 'send_message':
           return this.ok(request.id, await this.sendMessage(request.params ?? {}));
         case 'retry_turn':
@@ -222,6 +227,7 @@ export class TuiBridge {
     const configPath = typeof rawParams.configPath === 'string' ? rawParams.configPath : undefined;
     this.workspacePath = workspacePath;
     this.projectId = String(rawParams.projectId ?? workspacePath);
+    this.gitSummary = EMPTY_GIT_SUMMARY;
     if (configPath) {
       this.configStore = new SharedConfigStore(configPath);
     }
@@ -260,6 +266,7 @@ export class TuiBridge {
     // The host_response/host_event protocol remains available for older
     // integrations and tests that provide an explicit remote host adapter.
     this.host = new CliHost(workspacePath, this.dataStore, this.keyStore);
+    await this.refreshGitSummary();
     this.attachments.clear();
     this.pendingFileChanges.clear();
     const skillLoader = this.createSkillLoader();
@@ -813,6 +820,16 @@ export class TuiBridge {
     await this.host?.shutdown();
   }
 
+  private async refreshGitSummary(): Promise<GitSummary> {
+    if (!this.host) return this.gitSummary;
+    try {
+      this.gitSummary = await this.host.invoke<GitSummary>('git_summary', { repoPath: this.workspacePath });
+    } catch {
+      this.gitSummary = EMPTY_GIT_SUMMARY;
+    }
+    return this.gitSummary;
+  }
+
   private resetConversationContext(): void {
     if (!this.harness) return;
     this.harness.getContextManager().clearConversationContext();
@@ -1127,6 +1144,7 @@ export class TuiBridge {
       themes: this.themes,
       recentSessions: this.dataStore.listSessions(this.workspacePath).slice(0, 4),
       sidebarVisible: this.requireSettings().sidebarVisible,
+      git: this.gitSummary,
       capabilities: {
         slashCommands: true,
         contextMentions: true,

@@ -1,12 +1,19 @@
+import { execFile } from 'node:child_process';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { promisify } from 'node:util';
 import { afterEach, describe, expect, it } from 'vitest';
 import { SharedKeyStore } from './config';
 import { CliDataStore } from './data-store';
 import { CliHost } from './host';
 
 const temporaryDirectories: string[] = [];
+const execFileAsync = promisify(execFile);
+
+async function runGit(directory: string, args: string[]): Promise<void> {
+  await execFileAsync('git', args, { cwd: directory, windowsHide: true });
+}
 
 afterEach(async () => {
   while (temporaryDirectories.length > 0) {
@@ -69,6 +76,25 @@ describe('CLI host adapter', () => {
     expect(await host.invoke<Array<{ file: string }>>('get_diagnostics', { path: path.join(directory, 'src', 'lib.rs') })).toEqual(expect.arrayContaining([
       expect.objectContaining({ file: path.join(directory, 'src', 'lib.rs') }),
     ]));
+  });
+
+  it('summarizes the current branch and uncommitted line changes', async () => {
+    const directory = await mkdtemp(path.join(os.tmpdir(), 'hyscode-tui-git-summary-'));
+    temporaryDirectories.push(directory);
+    await runGit(directory, ['init']);
+    await runGit(directory, ['config', 'user.email', 'hyscode-tests@example.invalid']);
+    await runGit(directory, ['config', 'user.name', 'HysCode Tests']);
+    const filePath = path.join(directory, 'fixture.txt');
+    await writeFile(filePath, 'one\ntwo\nthree\n', 'utf8');
+    await runGit(directory, ['add', 'fixture.txt']);
+    await runGit(directory, ['commit', '-m', 'initial fixture']);
+    await runGit(directory, ['branch', '-M', 'feature/git-summary']);
+    await writeFile(filePath, 'one\ntwo changed\nthree\nfour\nfive\n', 'utf8');
+
+    const host = new CliHost(directory, new CliDataStore(path.join(directory, 'data.json')), new SharedKeyStore(path.join(directory, 'keychain.json')));
+    const summary = await host.invoke<{ available: boolean; branch: string; insertions: number; deletions: number; changedFiles: number }>('git_summary', { repoPath: directory });
+
+    expect(summary).toEqual({ available: true, branch: 'feature/git-summary', insertions: 3, deletions: 1, changedFiles: 1 });
   });
 
   it('forwards PTY operations and events through an explicit remote host adapter', async () => {

@@ -6,6 +6,7 @@ import { spawn } from 'node:child_process';
 import { spawn as spawnPtyProcess, type IDisposable, type IPty } from 'node-pty';
 import type { CliDataStore } from './data-store';
 import type { SharedKeyStore } from './config';
+import type { GitSummary } from './protocol';
 
 type Listener = (payload: unknown) => void;
 
@@ -178,6 +179,8 @@ export class CliHost {
         return this.snapshotPty(String(args.ptyId ?? args.id ?? ''), numberValue(args.afterSequence, 0)) as T;
       case 'git_is_repo':
         return this.isGitRepo(String(args.path ?? this.workspacePath)) as T;
+      case 'git_summary':
+        return this.gitSummary(String(args.repoPath ?? this.workspacePath)) as T;
       case 'git_status':
         return this.gitStatus(String(args.repoPath ?? this.workspacePath)) as T;
       case 'git_diff_file':
@@ -523,6 +526,27 @@ export class CliHost {
 
   private async isGitRepo(repoPath: string): Promise<boolean> {
     return (await runProcess('git', ['-C', repoPath, 'rev-parse', '--is-inside-work-tree'], { timeout: 10000 }).catch(() => null))?.stdout.trim() === 'true';
+  }
+
+  private async gitSummary(repoPath: string): Promise<GitSummary> {
+    const status = await runProcess('git', ['-C', repoPath, 'status', '--porcelain=v1', '--branch'], { cwd: repoPath, timeout: 10000 }).catch(() => null);
+    if (!status) return { available: false, branch: '', insertions: 0, deletions: 0, changedFiles: 0 };
+
+    const lines = status.stdout.split(/\r?\n/).filter(Boolean);
+    const branchHeader = lines.find((line) => line.startsWith('## '))?.slice(3).trim() ?? '';
+    const branch = branchHeader === 'HEAD (no branch)'
+      ? 'detached'
+      : branchHeader.replace(/^No commits yet on\s+/, '').split('...')[0].replace(/\s+\[.*$/, '').trim() || 'detached';
+    const changedFiles = lines.filter((line) => !line.startsWith('## ')).length;
+    const diff = await runProcess('git', ['-C', repoPath, 'diff', '--numstat', 'HEAD'], { cwd: repoPath, timeout: 10000 }).catch(() => null);
+    let insertions = 0;
+    let deletions = 0;
+    for (const line of diff?.stdout.split(/\r?\n/).filter(Boolean) ?? []) {
+      const [added, removed] = line.split('\t');
+      if (/^\d+$/.test(added ?? '')) insertions += Number(added);
+      if (/^\d+$/.test(removed ?? '')) deletions += Number(removed);
+    }
+    return { available: true, branch, insertions, deletions, changedFiles };
   }
 
   private async gitStatus(repoPath: string): Promise<Record<string, Array<{ path: string; status: string }>>> {

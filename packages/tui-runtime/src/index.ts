@@ -13,6 +13,7 @@ export type {
   ContextStatePayload,
   DiagnosticPayload,
   FileChangeState,
+  GitSummary,
   HostRequestPayload,
   InteractionRequest,
   InteractionResolution,

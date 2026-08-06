@@ -73,13 +73,24 @@ function headerLines(state: UiState, width: number): string[] {
   const runtime = state.running ? `${WARNING}${BOLD}working${RESET}` : `${SUCCESS}${BOLD}ready${RESET}`;
   const connection = state.connectionState === 'connected' ? `${SUCCESS}● connected${RESET}` : `${WARNING}● ${state.connectionState}${RESET}`;
   const left = `${ACCENT}${BOLD}HysCode${RESET} ${MUTED}·${RESET} ${shorten(state.workspace, Math.max(20, width - 42))}`;
-  const right = `${runtime}  ${connection}`;
+  const model = state.provider && state.model ? `${state.provider}/${state.model}` : 'model not selected';
+  const modelText = `${SOFT}${shorten(model, Math.max(12, Math.min(32, Math.floor(width * 0.28))))}${RESET}`;
+  const gitText = gitSummaryLine(state.git, Math.max(14, Math.min(36, Math.floor(width * 0.32))));
+  const right = `${modelText} ${MUTED}·${RESET} ${gitText}  ${runtime}  ${connection}`;
   const lines = [alignColumns(left, right, width)];
   if (state.tabs.length > 1) {
     lines.push(state.tabs.map((tab) => `${tab.active ? `${ACCENT}${BOLD}` : MUTED}${tab.active ? '●' : '○'} ${shorten(tab.title, 22)}${RESET}`).join('  '));
   }
   lines.push(`${PANEL}${'─'.repeat(width)}${RESET}`);
   return lines;
+}
+
+function gitSummaryLine(summary: UiState['git'], width: number): string {
+  if (!summary.available) return `${MUTED}git unavailable${RESET}`;
+  const branch = shorten(summary.branch || 'detached', Math.max(8, width - 16));
+  const insertions = Number.isFinite(summary.insertions) ? Math.max(0, Math.floor(summary.insertions)) : 0;
+  const deletions = Number.isFinite(summary.deletions) ? Math.max(0, Math.floor(summary.deletions)) : 0;
+  return `${ACCENT}${branch}${RESET} ${MUTED}-${RESET} ${SUCCESS}+${insertions}${RESET} ${MUTED}-${RESET} ${ERROR}${deletions}${RESET}`;
 }
 
 function layoutBody(lines: string[], state: UiState, width: number, height: number, sidebarWidth: number): string[] {

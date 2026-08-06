@@ -8,7 +8,7 @@ import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { OpenAIProvider, getProviderRegistry } from '@hyscode/ai-providers';
 import { TuiBridge } from './bridge';
-import type { BridgeEvent, BridgeResponse, ProjectSummary, RuntimeReadyPayload, SessionRecord } from './protocol';
+import type { BridgeEvent, BridgeResponse, GitSummary, ProjectSummary, RuntimeReadyPayload, SessionRecord } from './protocol';
 
 const temporaryDirectories: string[] = [];
 
@@ -260,8 +260,11 @@ describe('shared harness bridge protocol', () => {
     expect(initialized.recentSessions).toEqual(expect.arrayContaining([
       expect.objectContaining({ id: initialized.session?.id, title: 'New session' }),
     ]));
+    expect(initialized.git).toEqual({ available: false, branch: '', insertions: 0, deletions: 0, changedFiles: 0 });
     expect(initialized.session?.messageCount).toBe(0);
     expect(events.some((event) => event.event === 'runtime_ready')).toBe(true);
+
+    expect(successfulResult<GitSummary>(await bridge.handle({ id: 'git', method: 'git_summary', params: {} }))).toEqual(initialized.git);
 
     const themed = successfulResult<RuntimeReadyPayload>(await bridge.handle({
       id: 'theme',

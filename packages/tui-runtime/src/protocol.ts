@@ -18,6 +18,7 @@ export type BridgeRequest = {
   id: string;
   method:
     | 'initialize'
+    | 'git_summary'
     | 'send_message'
     | 'retry_turn'
     | 'continue_partial_turn'
@@ -99,6 +100,8 @@ export type RuntimeReadyPayload = {
   recentSessions?: SessionSummary[];
   /** Whether the TUI session sidebar is currently rendered. */
   sidebarVisible?: boolean;
+  /** Current Git branch and line counts for uncommitted tracked changes. */
+  git?: GitSummary;
   approvalMode?: ApprovalMode;
   capabilities?: RuntimeCapabilities;
   context?: ContextStatePayload;
@@ -120,6 +123,14 @@ export type RuntimeCapabilities = {
   sdd: boolean;
   subAgents: boolean;
   sessionManagement: boolean;
+};
+
+export type GitSummary = {
+  available: boolean;
+  branch: string;
+  insertions: number;
+  deletions: number;
+  changedFiles: number;
 };
 
 export type ContextAttachment = {

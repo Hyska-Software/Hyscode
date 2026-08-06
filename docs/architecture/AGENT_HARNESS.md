@@ -144,6 +144,12 @@ projection for the TUI startup surface. The renderer uses it for the welcome
 layout while the existing `session_list` request remains authoritative for the
 full session browser.
 
+The payload also exposes a `GitSummary` snapshot for the TUI header. It contains
+the current branch and aggregate insertion/deletion counts from uncommitted
+tracked changes. The standalone client refreshes this additive summary
+periodically through `git_summary`, keeping Git inspection out of the render
+loop while reflecting edits made during an active session.
+
 ### Theme Catalog and Client Synchronization
 
 The `@hyscode/theme` package owns the built-in theme ids and the normalized color

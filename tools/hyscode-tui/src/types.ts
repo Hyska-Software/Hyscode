@@ -3,6 +3,7 @@ import type { Message, TokenUsage } from '@hyscode/ai-providers';
 import type {
   BridgeMessage,
   ContextStatePayload,
+  GitSummary,
   InteractionRequest,
   ProjectSummary,
   RuntimeCapabilities,
@@ -191,6 +192,7 @@ export type UiState = {
   projectId: string;
   provider: string;
   model: string;
+  git: GitSummary;
   themeId: string;
   themes: ThemeSummary[];
   sidebarVisible: boolean;

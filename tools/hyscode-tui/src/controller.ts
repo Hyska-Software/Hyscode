@@ -4,6 +4,7 @@ import type {
   BridgeMessage,
   BridgeRequest,
   BridgeResponse,
+  GitSummary,
   InteractionRequest,
   ProjectSummary,
   RuntimeReadyPayload,
@@ -19,6 +20,7 @@ import type { CliOptions, CommandFlow, ContextView, InteractionState, Key, Memor
 
 const SELECTION_PAGE_SIZE = 8;
 const MOUSE_SCROLL_LINES = 3;
+const EMPTY_GIT_SUMMARY: GitSummary = { available: false, branch: '', insertions: 0, deletions: 0, changedFiles: 0 };
 
 export type RuntimeClient = Pick<TuiBridge, 'handle'>;
 
@@ -28,6 +30,7 @@ export class TuiController {
   private readonly pendingRequestParams = new Map<string, Record<string, unknown>>();
   private nextRequestId = 1;
   private liveStreamStart: number | null = null;
+  private gitRefreshInFlight = false;
 
   constructor(readonly options: CliOptions, private readonly runtime: RuntimeClient) {
     this.state = {
@@ -39,6 +42,7 @@ export class TuiController {
       projectId: options.workspace,
       provider: options.provider ?? '',
       model: options.model ?? '',
+      git: EMPTY_GIT_SUMMARY,
       themeId: DEFAULT_THEME_ID,
       themes: [...BUILTIN_THEMES],
       sidebarVisible: true,
@@ -101,6 +105,27 @@ export class TuiController {
   async shutdown(): Promise<void> {
     if (this.pendingRequests.size === 0 && this.state.shouldQuit) return;
     await this.request('shutdown', {});
+  }
+
+  async refreshGitSummary(): Promise<void> {
+    if (this.gitRefreshInFlight) return;
+    this.gitRefreshInFlight = true;
+    try {
+      const result = await this.request('git_summary', {});
+      const summary = result as Partial<GitSummary>;
+      if (typeof summary.available !== 'boolean' || typeof summary.branch !== 'string') return;
+      this.state.git = {
+        available: summary.available,
+        branch: summary.branch,
+        insertions: typeof summary.insertions === 'number' ? summary.insertions : 0,
+        deletions: typeof summary.deletions === 'number' ? summary.deletions : 0,
+        changedFiles: typeof summary.changedFiles === 'number' ? summary.changedFiles : 0,
+      };
+    } catch {
+      return;
+    } finally {
+      this.gitRefreshInFlight = false;
+    }
   }
 
   async handleKey(key: Key): Promise<void> {
@@ -376,6 +401,7 @@ export class TuiController {
     this.state.mode = payload.activeAgentType;
     this.state.provider = payload.activeProviderId;
     this.state.model = payload.activeModelId;
+    if (payload.git) this.state.git = payload.git;
     this.state.themeId = payload.activeThemeId ?? this.state.themeId;
     if (payload.themes && payload.themes.length > 0) this.state.themes = payload.themes;
     if (payload.recentSessions) this.state.sessions = payload.recentSessions;

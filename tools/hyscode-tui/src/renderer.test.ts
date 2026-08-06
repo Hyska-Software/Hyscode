@@ -14,6 +14,7 @@ function state(overrides: Partial<UiState> = {}): UiState {
     projectId: 'C:/workspace/hyscode',
     provider: 'anthropic',
     model: 'claude-sonnet',
+    git: { available: true, branch: 'main', insertions: 0, deletions: 0, changedFiles: 0 },
     themeId: 'hyscode-dark',
     themes: [...BUILTIN_THEMES],
     sidebarVisible: true,
@@ -89,8 +90,18 @@ describe('TUI renderer', () => {
 
     expect(firstLine).toContain('HysCode');
     expect(firstLine).toContain('connected');
-    expect(firstLine).not.toContain('claude-sonnet');
+    expect(firstLine).toContain('anthropic/claude-sonnet');
     expect(firstLine).not.toContain('messages');
+  });
+
+  it('renders the active model beside Git branch and uncommitted line counts', () => {
+    const rendered = new TerminalRenderer().render(state({
+      git: { available: true, branch: 'feature/git-summary', insertions: 1213, deletions: 554, changedFiles: 8 },
+    }));
+    const firstLine = rendered.split('\n')[0].replace(/\u001b\[[0-9;]*[A-Za-z]/g, '');
+
+    expect(firstLine).toContain('anthropic/claude-sonnet');
+    expect(firstLine).toContain('feature/git-summary - +1213 - 554');
   });
 
   it('renders slash suggestions as a bottom command palette', () => {
