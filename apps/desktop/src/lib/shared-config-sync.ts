@@ -1,7 +1,8 @@
 import { tauriInvokeRaw } from './tauri-invoke';
-import { useSettingsStore, type ModelThinkingConfig } from '@/stores/settings-store';
+import { useSettingsStore, type ModelThinkingConfig, type ThemeId } from '@/stores/settings-store';
 
 type SharedSettingsPayload = {
+  themeId: ThemeId;
   activeProviderId: string | null;
   activeModelId: string | null;
   agentType: string;
@@ -30,9 +31,14 @@ type SharedSettingsPayload = {
 };
 
 type SharedSettingsImport = {
+  themeId?: ThemeId;
   activeProviderId: string | null;
   activeModelId: string | null;
   thinkingSettings: Record<string, ModelThinkingConfig>;
+};
+
+type PreservedTuiSettings = {
+  sidebarVisible?: boolean;
 };
 
 let writeQueue: Promise<void> = Promise.resolve();
@@ -89,6 +95,7 @@ function parseSharedSettings(value: unknown): SharedSettingsImport | null {
     }
   }
   return {
+    ...(typeof value.themeId === 'string' && value.themeId.trim() ? { themeId: value.themeId as ThemeId } : {}),
     activeProviderId: value.activeProviderId,
     activeModelId: value.activeModelId,
     thinkingSettings,
@@ -98,6 +105,7 @@ function parseSharedSettings(value: unknown): SharedSettingsImport | null {
 function buildPayload(): SharedSettingsPayload {
   const settings = useSettingsStore.getState();
   return {
+    themeId: settings.themeId,
     activeProviderId: settings.activeProviderId,
     activeModelId: settings.activeModelId,
     agentType: settings.agentType,
@@ -128,10 +136,25 @@ function buildPayload(): SharedSettingsPayload {
 
 async function writeSharedSettings(): Promise<void> {
   const homePath = await tauriInvokeRaw<string>('get_home_dir', {});
+  const preservedTuiSettings = await readPreservedTuiSettings(homePath);
   await tauriInvokeRaw('write_file', {
     path: sharedSettingsPath(homePath),
-    content: `${JSON.stringify(buildPayload(), null, 2)}\n`,
+    content: `${JSON.stringify({ ...buildPayload(), ...preservedTuiSettings }, null, 2)}\n`,
   });
+}
+
+async function readPreservedTuiSettings(homePath: string): Promise<PreservedTuiSettings> {
+  try {
+    const content = await tauriInvokeRaw<string>('read_file', {
+      path: sharedSettingsPath(homePath),
+    });
+    const parsed = JSON.parse(content) as unknown;
+    return isRecord(parsed) && typeof parsed.sidebarVisible === 'boolean'
+      ? { sidebarVisible: parsed.sidebarVisible }
+      : {};
+  } catch {
+    return {};
+  }
 }
 
 export async function hydrateSharedSettings(): Promise<boolean> {
@@ -144,6 +167,7 @@ export async function hydrateSharedSettings(): Promise<boolean> {
     if (!imported) return false;
     const current = useSettingsStore.getState();
     useSettingsStore.setState({
+      ...(imported.themeId ? { themeId: imported.themeId } : {}),
       activeProviderId: imported.activeProviderId,
       activeModelId: imported.activeModelId,
       thinkingSettings: {

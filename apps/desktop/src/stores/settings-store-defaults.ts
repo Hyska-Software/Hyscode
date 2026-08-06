@@ -10,9 +10,11 @@
  * `./settings-store.ts`. The store spreads it into the immer initial state.
  */
 
+import { DEFAULT_THEME_ID } from '@hyscode/theme';
+
 export const SETTINGS_DEFAULTS = {
   // ─ Theme ─
-  themeId: 'hyscode-dark',
+  themeId: DEFAULT_THEME_ID,
   iconThemeId: 'default',
   disableRoundedBorders: false,
 

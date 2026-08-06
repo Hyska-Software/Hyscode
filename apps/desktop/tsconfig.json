@@ -13,7 +13,8 @@
       "@hyscode/skills": ["../../packages/skills/src"],
       "@hyscode/extension-host": ["../../packages/extension-host/src"],
       "@hyscode/extension-api": ["../../packages/extension-api/src"],
-      "@hyscode/lsp-client": ["../../packages/lsp-client/src"]
+      "@hyscode/lsp-client": ["../../packages/lsp-client/src"],
+      "@hyscode/theme": ["../../packages/theme/src"]
     }
   },
   "include": ["src"],
@@ -25,6 +26,7 @@
     { "path": "../../packages/skills" },
     { "path": "../../packages/extension-host" },
     { "path": "../../packages/extension-api" },
-    { "path": "../../packages/lsp-client" }
+    { "path": "../../packages/lsp-client" },
+    { "path": "../../packages/theme" }
   ]
 }

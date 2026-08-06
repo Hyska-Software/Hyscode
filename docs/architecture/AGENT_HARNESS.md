@@ -133,6 +133,24 @@ the initial export; active provider, active model, and thinking settings are
 imported while desktop-only settings remain local. Synchronization is launch-based,
 without a live file watcher, and a TUI `--config` path remains isolated.
 
+The TUI also persists its presentation-only `sidebarVisible` preference through
+the same runtime configuration contract. `/sidebar` sends the value through
+`set_config`, updates the renderer immediately, and desktop shared-settings
+writes preserve the field so a desktop settings update cannot reset the TUI
+layout preference.
+
+### Theme Catalog and Client Synchronization
+
+The `@hyscode/theme` package owns the built-in theme ids and the normalized color
+surface used by both clients. The runtime includes `activeThemeId` and the
+available `ThemeSummary` catalog in `runtime_ready`; `/theme` sends a validated
+`themeId` through `set_config`, updates the TUI renderer immediately, and writes
+the selection to the shared settings file. Desktop hydration imports the same
+field on startup. The TUI discovers enabled extension themes from the installed
+`extension.json` contributions and their JSON assets under `~/.hyscode/extensions`,
+using `extension-state.json` to exclude disabled extensions and rejecting assets
+outside each extension directory.
+
 ---
 
 ## SDD (Spec-Driven Development) Engine

@@ -9,6 +9,7 @@ import {
   getIconPreviewSamples,
 } from '../../../lib/icon-theme-registry';
 import type { ThemeId } from '../../../stores/settings-store';
+import { BUILTIN_THEMES } from '@hyscode/theme';
 
 interface ThemeOption {
   id: ThemeId;
@@ -24,99 +25,12 @@ interface ThemeOption {
   };
 }
 
-const THEMES: ThemeOption[] = [
-  {
-    id: 'hyscode-dark',
-    name: 'HysCode Dark',
-    description: 'Deep editor-matched surfaces with a teal accent',
-    colors: {
-      bg: '#18191d',
-      surface: '#202123',
-      sidebar: '#18191d',
-      accent: '#10a37f',
-      fg: '#ececf1',
-      muted: '#8e8ea0',
-    },
-  },
-  {
-    id: 'aura',
-    name: 'Aura',
-    description: 'Purple focus with mint controls and warm syntax accents',
-    colors: {
-      bg: '#110f18',
-      surface: '#15141b',
-      sidebar: '#110f18',
-      accent: '#a277ff',
-      fg: '#edecee',
-      muted: '#adacae',
-    },
-  },
-  {
-    id: 'hyscode-light',
-    name: 'HysCode Light',
-    description: 'Editor-matched light surfaces with a teal accent',
-    colors: {
-      bg: '#f1f2f4',
-      surface: '#ffffff',
-      sidebar: '#f1f2f4',
-      accent: '#0d8a6c',
-      fg: '#0d0d0f',
-      muted: '#6e6e80',
-    },
-  },
-  {
-    id: 'nord',
-    name: 'Nord',
-    description: 'Editor-matched arctic surfaces with a cyan accent',
-    colors: {
-      bg: '#292e39',
-      surface: '#2e3440',
-      sidebar: '#292e39',
-      accent: '#88c0d0',
-      fg: '#d8dee9',
-      muted: '#a0a8b7',
-    },
-  },
-  {
-    id: 'monokai',
-    name: 'Monokai',
-    description: 'Editor-matched warm surfaces with vibrant accents',
-    colors: {
-      bg: '#1e1f1c',
-      surface: '#272822',
-      sidebar: '#1a1b18',
-      accent: '#f92672',
-      fg: '#f8f8f2',
-      muted: '#8f908a',
-    },
-  },
-  {
-    id: 'dracula',
-    name: 'Dracula',
-    description: 'Editor-matched dark surfaces with purple-pink accents',
-    colors: {
-      bg: '#21222c',
-      surface: '#282a36',
-      sidebar: '#21222c',
-      accent: '#bd93f9',
-      fg: '#f8f8f2',
-      muted: '#a0a4b8',
-    },
-  },
-  {
-    id: 'github-dark',
-    name: 'GitHub Dark',
-    description: 'Editor-matched GitHub dark surfaces',
-    colors: {
-      bg: '#010409',
-      surface: '#0d1117',
-      sidebar: '#010409',
-      accent: '#58a6ff',
-      fg: '#c9d1d9',
-      muted: '#8b949e',
-    },
-  },
-];
+const THEMES: ThemeOption[] = BUILTIN_THEMES.map((theme) => ({
+  id: theme.id as ThemeId,
+  name: theme.name,
+  description: theme.description,
+  colors: theme.colors,
+}));
 
 function ThemeCard({
   id,

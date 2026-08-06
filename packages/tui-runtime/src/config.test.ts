@@ -26,6 +26,8 @@ describe('shared desktop configuration compatibility', () => {
     await writeFile(settingsPath, JSON.stringify({
       activeProviderId: 'openai',
       activeModelId: 'gpt-5',
+      themeId: 'dracula',
+      sidebarVisible: false,
       agentType: 'build',
       approvalMode: 'custom',
       customApprovalRules: { categoryRules: { filesystem: true }, toolRules: { shell: false } },
@@ -46,6 +48,8 @@ describe('shared desktop configuration compatibility', () => {
 
     expect(settings.activeProviderId).toBe('openai');
     expect(settings.activeModelId).toBe('gpt-5');
+    expect(settings.themeId).toBe('dracula');
+    expect(settings.sidebarVisible).toBe(false);
     expect(settings.agentType).toBe('build');
     expect(settings.mcpServers[0]).toMatchObject({
       id: 'docs',

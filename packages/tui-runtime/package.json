@@ -17,6 +17,7 @@
     "@hyscode/ai-providers": "*",
     "@hyscode/mcp-client": "*",
     "@hyscode/skills": "*",
+    "@hyscode/theme": "*",
     "node-pty": "^1.1.0"
   },
   "devDependencies": {

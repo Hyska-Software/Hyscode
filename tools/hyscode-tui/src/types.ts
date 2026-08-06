@@ -11,6 +11,7 @@ import type {
   SessionRecord,
   SessionSummary,
   SddStatePayload,
+  ThemeSummary,
   TerminalSummary,
 } from '@hyscode/tui-runtime';
 
@@ -164,6 +165,7 @@ export type CommandFlow =
   | { kind: 'provider'; selected: number }
   | { kind: 'model'; providerIndex: number; selected: number }
   | { kind: 'thinking'; selected: number }
+  | { kind: 'theme'; selected: number }
   | { kind: 'action'; action: SelectionFlowAction; selected: number }
   | { kind: 'context_remove'; selected: number }
   | { kind: 'terminal_attach'; selected: number }
@@ -189,6 +191,9 @@ export type UiState = {
   projectId: string;
   provider: string;
   model: string;
+  themeId: string;
+  themes: ThemeSummary[];
+  sidebarVisible: boolean;
   mode: AgentType;
   sessionTitle: string;
   sessionMessageCount: number;

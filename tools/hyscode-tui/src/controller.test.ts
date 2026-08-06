@@ -97,6 +97,45 @@ describe('TUI controller', () => {
     expect(controller.state.overlay).toBe('none');
   });
 
+  it('opens the interactive theme selector and persists the selected theme through the runtime', async () => {
+    const runtime = new FakeRuntime();
+    const controller = new TuiController({ workspace: 'C:/workspace' }, runtime);
+    await controller.start();
+
+    await controller.handleKey({ type: 'character', value: '/theme' });
+    await controller.handleKey({ type: 'enter' });
+    expect(controller.state.commandFlow).toMatchObject({ kind: 'theme', selected: 0 });
+
+    await controller.handleKey({ type: 'down' });
+    await controller.handleKey({ type: 'enter' });
+
+    expect(runtime.requests.at(-1)).toMatchObject({ method: 'set_config', params: { themeId: 'aura' } });
+    expect(controller.state.themeId).toBe('aura');
+    expect(controller.state.status).toBe('Theme set to Aura');
+    expect(controller.state.commandFlow).toBeNull();
+  });
+
+  it('toggles the persisted sidebar setting through the slash command', async () => {
+    const runtime = new FakeRuntime();
+    const controller = new TuiController({ workspace: 'C:/workspace' }, runtime);
+    await controller.start();
+    controller.state.focus = 'sidebar';
+
+    await controller.handleKey({ type: 'character', value: '/sidebar' });
+    await controller.handleKey({ type: 'enter' });
+
+    expect(runtime.requests.at(-1)).toMatchObject({ method: 'set_config', params: { sidebarVisible: false } });
+    expect(controller.state.sidebarVisible).toBe(false);
+    expect(controller.state.focus).toBe('composer');
+    expect(controller.state.status).toBe('Sidebar disabled');
+
+    await controller.handleKey({ type: 'character', value: '/sidebar on' });
+    await controller.handleKey({ type: 'enter' });
+
+    expect(runtime.requests.at(-1)).toMatchObject({ method: 'set_config', params: { sidebarVisible: true } });
+    expect(controller.state.sidebarVisible).toBe(true);
+  });
+
   it('executes aliases from the slash palette without a second runtime loop', async () => {
     const runtime = new FakeRuntime();
     const controller = new TuiController({ workspace: 'C:/workspace' }, runtime);

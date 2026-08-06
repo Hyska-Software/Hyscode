@@ -12,6 +12,7 @@ import type {
   TerminalSummary,
   TuiBridge,
 } from '@hyscode/tui-runtime';
+import { BUILTIN_THEMES, DEFAULT_THEME_ID } from '@hyscode/tui-runtime';
 import { MODE_OPTIONS, commandArgument, matchingCommands, parseSlashCommand, resolveCommandName, selectionOptions } from './commands';
 import { AGENT_TYPES } from './types';
 import type { CliOptions, CommandFlow, ContextView, InteractionState, Key, MemoryView, RuleView, RuntimeNotice, SkillView, SubAgentView, ToolView, TranscriptItem, TranscriptKind, UiState } from './types';
@@ -38,6 +39,9 @@ export class TuiController {
       projectId: options.workspace,
       provider: options.provider ?? '',
       model: options.model ?? '',
+      themeId: DEFAULT_THEME_ID,
+      themes: [...BUILTIN_THEMES],
+      sidebarVisible: true,
       mode: options.mode ?? 'chat',
       sessionTitle: 'New session',
       sessionMessageCount: 0,
@@ -182,7 +186,11 @@ export class TuiController {
         this.state.scroll = Math.max(0, this.state.scroll - 5);
         break;
       case 'tab':
-        this.state.focus = this.state.focus === 'composer' ? 'sidebar' : this.state.focus === 'sidebar' ? 'transcript' : 'composer';
+        if (!this.state.sidebarVisible) {
+          this.state.focus = this.state.focus === 'transcript' ? 'composer' : 'transcript';
+        } else {
+          this.state.focus = this.state.focus === 'composer' ? 'sidebar' : this.state.focus === 'sidebar' ? 'transcript' : 'composer';
+        }
         break;
       case 'shift_tab':
         await this.cycleMode();
@@ -368,6 +376,10 @@ export class TuiController {
     this.state.mode = payload.activeAgentType;
     this.state.provider = payload.activeProviderId;
     this.state.model = payload.activeModelId;
+    this.state.themeId = payload.activeThemeId ?? this.state.themeId;
+    if (payload.themes && payload.themes.length > 0) this.state.themes = payload.themes;
+    this.state.sidebarVisible = payload.sidebarVisible ?? this.state.sidebarVisible;
+    if (!this.state.sidebarVisible && this.state.focus === 'sidebar') this.state.focus = 'composer';
     this.state.approvalMode = payload.approvalMode ?? this.state.approvalMode;
     this.state.thinking = {
       enabled: payload.activeThinking.enabled === true,
@@ -906,6 +918,13 @@ export class TuiController {
       case '/thinking':
         if (!this.openThinkingFlow()) this.state.status = 'Thinking is not available for the selected model';
         break;
+      case '/theme':
+        if (!args) this.openThemeFlow();
+        else await this.setTheme(commandArgument(args));
+        break;
+      case '/sidebar':
+        await this.setSidebarVisibility(args);
+        break;
       case '/approval':
         if (!args) this.openActionFlow('approval');
         else await this.setApprovalMode(commandArgument(args));
@@ -1208,6 +1227,36 @@ export class TuiController {
     if (!thinkingMenuOpened) this.closeCommandFlow();
   }
 
+  private async setTheme(themeId: string): Promise<void> {
+    const theme = this.state.themes.find((candidate) => candidate.id === themeId);
+    if (!theme) {
+      this.append('system', `Unknown theme "${themeId}". Use /theme to choose an available theme.`);
+      return;
+    }
+    await this.request('set_config', { themeId });
+    this.state.themeId = themeId;
+    this.state.status = `Theme set to ${theme.name}`;
+  }
+
+  private async setSidebarVisibility(rawValue: string): Promise<void> {
+    const value = rawValue.trim().toLowerCase();
+    const nextValue = value === '' || value === 'toggle'
+      ? !this.state.sidebarVisible
+      : value === 'on' || value === 'show' || value === 'visible'
+        ? true
+        : value === 'off' || value === 'hide' || value === 'hidden'
+          ? false
+          : null;
+    if (nextValue === null) {
+      this.append('system', 'Usage: /sidebar [on|off|toggle]');
+      return;
+    }
+    await this.request('set_config', { sidebarVisible: nextValue });
+    this.state.sidebarVisible = nextValue;
+    if (!nextValue && this.state.focus === 'sidebar') this.state.focus = 'composer';
+    this.state.status = nextValue ? 'Sidebar enabled' : 'Sidebar disabled';
+  }
+
   private async cycleMode(): Promise<void> {
     const currentIndex = MODE_OPTIONS.findIndex((option) => option.value === this.state.mode);
     const next = MODE_OPTIONS[(currentIndex + 1) % MODE_OPTIONS.length];
@@ -1490,6 +1539,12 @@ export class TuiController {
       else this.closeCommandFlow();
       return;
     }
+    if (flow.kind === 'theme') {
+      const option = selectionOptions(this.state, flow)[flow.selected];
+      if (option) await this.setTheme(option.id);
+      this.closeCommandFlow();
+      return;
+    }
     const thinking = this.thinkingForSelection(flow.selected);
     if (!thinking) {
       this.state.status = 'Thinking is not available for the selected model';
@@ -1612,6 +1667,12 @@ export class TuiController {
     this.state.overlay = 'commands';
     this.state.commandFlow = { kind: 'thinking', selected: levelIndex >= 0 ? levelIndex + 1 : 0 };
     return true;
+  }
+
+  private openThemeFlow(): void {
+    this.state.overlay = 'commands';
+    const selected = this.state.themes.findIndex((theme) => theme.id === this.state.themeId);
+    this.state.commandFlow = { kind: 'theme', selected: Math.max(0, selected) };
   }
 
   private closeCommandFlow(): void {

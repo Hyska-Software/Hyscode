@@ -12,6 +12,7 @@ import type {
   ToolRiskLevel,
 } from '@hyscode/agent-harness';
 import type { AIModel, AIProvider, Message, ThinkingConfig, TokenUsage } from '@hyscode/ai-providers';
+import type { ThemeSummary } from '@hyscode/theme';
 
 export type BridgeRequest = {
   id: string;
@@ -91,6 +92,11 @@ export type RuntimeReadyPayload = {
   activeProviderId: string;
   activeModelId: string;
   activeThinking: ThinkingConfig;
+  /** Current shared UI theme and the themes available to the TUI selector. */
+  activeThemeId?: string;
+  themes?: ThemeSummary[];
+  /** Whether the TUI session sidebar is currently rendered. */
+  sidebarVisible?: boolean;
   approvalMode?: ApprovalMode;
   capabilities?: RuntimeCapabilities;
   context?: ContextStatePayload;
@@ -259,6 +265,8 @@ export type SendMessageParams = {
 };
 
 export type SetConfigParams = {
+  themeId?: string;
+  sidebarVisible?: boolean;
   providerId?: string;
   modelId?: string;
   approvalMode?: ApprovalMode;

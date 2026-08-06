@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { UiState } from './types';
 import { TerminalRenderer } from './renderer';
+import { BUILTIN_THEMES } from '@hyscode/tui-runtime';
 
 function state(overrides: Partial<UiState> = {}): UiState {
   return {
@@ -12,6 +13,9 @@ function state(overrides: Partial<UiState> = {}): UiState {
     projectId: 'C:/workspace/hyscode',
     provider: 'anthropic',
     model: 'claude-sonnet',
+    themeId: 'hyscode-dark',
+    themes: [...BUILTIN_THEMES],
+    sidebarVisible: true,
     mode: 'build',
     sessionTitle: 'Refine the terminal experience',
     sessionMessageCount: 4,
@@ -146,6 +150,23 @@ describe('TUI renderer', () => {
     expect(rendered).toContain('APPROVAL');
     expect(rendered).toContain('Manual · ask before every protected tool');
     expect(rendered).toContain('Smart · ask only when risk requires it');
+  });
+
+  it('changes the terminal palette and background with the selected theme', () => {
+    const renderer = new TerminalRenderer();
+    const dark = renderer.render(state({ themeId: 'hyscode-dark' }));
+    const light = renderer.render(state({ themeId: 'hyscode-light' }));
+
+    expect(dark).toContain('\u001b[48;2;24;25;29m');
+    expect(light).toContain('\u001b[48;2;241;242;244m');
+    expect(light).not.toBe(dark);
+  });
+
+  it('removes the session sidebar when the persisted setting is disabled', () => {
+    const rendered = new TerminalRenderer().render(state({ sidebarVisible: false }));
+
+    expect(rendered).not.toContain('SESSION');
+    expect(rendered).toContain('MESSAGE');
   });
 
   it('wraps long prompts across the chat composer instead of truncating them', () => {

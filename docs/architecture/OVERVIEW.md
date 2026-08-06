@@ -95,6 +95,21 @@ streaming events, interaction requests, cancellation, host requests, and
 structured errors, leaving room for a future shared SQLite adapter without
 changing the TUI presentation layer.
 
+Color themes use the shared `@hyscode/theme` catalog. The seven built-in themes
+are available in the desktop and TUI, and `/theme` opens the same keyboard-first
+selector pattern as the other runtime commands. The runtime returns the active
+theme and catalog in `runtime_ready`, accepts `themeId` through `set_config`,
+repaints the terminal with the selected palette, and persists the choice in the
+shared settings file. Enabled extension themes are read from the same installed
+extension manifests and JSON theme assets used by the desktop
+(`~/.hyscode/extensions`, filtered by `~/.hyscode/extension-state.json`), so an
+extension theme can be selected from either client.
+
+The TUI-only `sidebarVisible` preference is persisted in the same settings file
+and can be changed with `/sidebar`, `/sidebar on`, `/sidebar off`, or
+`/sidebar toggle`. Desktop synchronization preserves this field without exposing
+it as a desktop layout setting.
+
 The runtime still exports a small NDJSON compatibility entrypoint for external
 protocol clients and tests. The packaged TUI does not launch it; direct in-process
 construction is the only production client path.
@@ -117,7 +132,7 @@ directory so the Codex sidecar can be discovered.
 The launcher accepts `--provider`, `--model`, `--mode`, `--config`, and
 `--workspace`. Inside the TUI, the supported commands are:
 
-`/help`, `/mode`, `/thinking`, `/approval`, `/model`, `/models`, `/projects`,
+`/help`, `/mode`, `/thinking`, `/theme`, `/sidebar`, `/approval`, `/model`, `/models`, `/projects`,
 `/project`, `/new`, `/sessions`, `/load`, `/tab`, `/rename`, `/export`,
 `/attach`, `/context`, `/rules`, `/skills`, `/memory`, `/terminal`, `/diffs`,
 `/sdd`, `/subagents`, `/usage`, `/diagnostics`, `/retry`, `/continue`,
@@ -148,15 +163,17 @@ The default Windows files are:
 |---|---|---|
 | Shared desktop/TUI settings | `%LOCALAPPDATA%\\hyscode\\settings.json` | `HYSCODE_CONFIG_PATH` or `--config` |
 | Shared file-backed credentials | `%LOCALAPPDATA%\\hyscode\\keychain.json` | `HYSCODE_KEYCHAIN_PATH` |
+| Installed extension themes | `%USERPROFILE%\\.hyscode\\extensions` and `extension-state.json` | `HYSCODE_EXTENSIONS_PATH`, `HYSCODE_EXTENSION_STATE_PATH` |
 | TUI sessions, memory, SDD, traces | `%LOCALAPPDATA%\\hyscode\\tui-data.json` | `HYSCODE_TUI_DATA_PATH` |
 | TUI executable | `tools/hyscode-tui/dist/hyscode-tui.exe` | `HYSCODE_REPO_ROOT` |
 | Codex provider sidecar | packaged sibling or repository binary | `HYSCODE_CODEX_SIDECAR` |
 | Repository discovery | current directory | `HYSCODE_REPO_ROOT` |
 
-The desktop sync is one-way while the desktop is running: desktop settings are
-written to the shared JSON file whenever the settings store changes. If both
-clients are open, launch the TUI after the desired desktop settings are saved,
-or pass an explicit `--config` file for an isolated profile. Provider API keys
+The desktop sync is one-way while the desktop is running: desktop settings,
+including `themeId`, are written to the shared JSON file whenever the settings
+store changes. If both clients are open, launch the TUI after the desired desktop
+settings are saved, or pass an explicit `--config` file for an isolated profile.
+Provider API keys
 are resolved from environment variables first and then the shared keychain
 file; the TUI never writes API keys into session history.
 

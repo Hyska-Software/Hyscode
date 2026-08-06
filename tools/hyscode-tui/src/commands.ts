@@ -14,6 +14,8 @@ export const COMMANDS: readonly CommandSpec[] = [
   { name: '/help', aliases: ['/?'], category: 'runtime', description: 'Show keyboard and command help', usage: '/help' },
   { name: '/mode', aliases: [], category: 'runtime', description: 'Choose chat, build, review, debug, or plan mode', usage: '/mode' },
   { name: '/thinking', aliases: ['/think'], category: 'model', description: 'Configure model thinking/reasoning', usage: '/thinking' },
+  { name: '/theme', aliases: ['/themes', '/color-theme'], category: 'runtime', description: 'Choose the TUI and desktop color theme', usage: '/theme' },
+  { name: '/sidebar', aliases: ['/toggle-sidebar'], category: 'runtime', description: 'Show or hide the session sidebar', usage: '/sidebar [on|off|toggle]' },
   { name: '/approval', aliases: ['/approve'], category: 'runtime', description: 'Choose how tool approvals are handled', usage: '/approval' },
   { name: '/model', aliases: ['/m'], category: 'model', description: 'Open the provider and model selector', usage: '/model' },
   { name: '/models', aliases: [], category: 'model', description: 'Open the model selector', usage: '/models' },
@@ -126,6 +128,11 @@ export function selectionOptions(state: UiState, flow: CommandFlow): readonly Se
         ...((model?.thinkingVariants?.levels ?? []) as string[]).map((level) => ({ id: level, label: `Use ${level} thinking` })),
       ];
     }
+    case 'theme':
+      return state.themes.map((theme) => ({
+        id: theme.id,
+        label: `${theme.name} · ${theme.type}${theme.source === 'extension' ? ` · ${theme.extensionName ?? 'extension'}` : ''}`,
+      }));
     case 'action':
       return actionOptions(state, flow.action);
     case 'context_remove':
@@ -202,6 +209,7 @@ export function flowTitle(flow: CommandFlow | null): string {
     case 'provider': return 'PROVIDER';
     case 'model': return 'MODEL';
     case 'thinking': return 'THINKING';
+    case 'theme': return 'THEME';
     case 'action': return ACTION_FLOW_TITLES[flow.action];
     case 'context_remove': return 'REMOVE CONTEXT';
     case 'terminal_select': return 'FOCUS TERMINAL';

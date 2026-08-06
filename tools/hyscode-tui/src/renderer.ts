@@ -1,39 +1,49 @@
+import { DEFAULT_THEME_ID } from '@hyscode/tui-runtime';
 import { COMMANDS, flowTitle, matchingCommands, selectionOptions } from './commands';
+import { dynamicAnsiToken, resolveAnsiTheme, type AnsiToken, type AnsiTheme } from './theme';
 import type { CommandFlow, InteractionState, TranscriptItem, UiState } from './types';
 
-const RESET = '\u001b[0m';
+let activeAnsiTheme: AnsiTheme = resolveAnsiTheme(DEFAULT_THEME_ID, []);
+
+const RESET = dynamicAnsiToken(() => activeAnsiTheme.reset);
 const DIM = '\u001b[2m';
 const BOLD = '\u001b[1m';
 const INVERSE = '\u001b[7m';
-const ACCENT = '\u001b[38;5;81m';
-const MUTED = '\u001b[38;5;245m';
-const SOFT = '\u001b[38;5;250m';
-const WARNING = '\u001b[38;5;214m';
-const SUCCESS = '\u001b[38;5;114m';
-const ERROR = '\u001b[38;5;203m';
-const PANEL = '\u001b[38;5;239m';
+const ACCENT = dynamicAnsiToken(() => activeAnsiTheme.accent);
+const MUTED = dynamicAnsiToken(() => activeAnsiTheme.muted);
+const SOFT = dynamicAnsiToken(() => activeAnsiTheme.soft);
+const WARNING = dynamicAnsiToken(() => activeAnsiTheme.warning);
+const SUCCESS = dynamicAnsiToken(() => activeAnsiTheme.success);
+const ERROR = dynamicAnsiToken(() => activeAnsiTheme.error);
+const PANEL = dynamicAnsiToken(() => activeAnsiTheme.panel);
 
 const SIDEBAR_WIDTH = 27;
 
 export class TerminalRenderer {
   render(state: UiState): string {
-    const width = Math.max(60, state.width);
-    const height = Math.max(16, state.height);
-    const header = headerLines(state, width);
-    const composer = composerLines(state, width);
-    const panelBudget = Math.max(0, height - header.length - composer.length - 4);
-    const rawPanel = this.overlayLines(state, width, panelBudget);
-    const panel = rawPanel.slice(0, panelBudget);
-    const bodyHeight = Math.max(3, height - header.length - panel.length - composer.length);
-    const sidebarWidth = width >= 100 ? SIDEBAR_WIDTH : 0;
-    const mainWidth = sidebarWidth > 0 ? width - sidebarWidth - 1 : width;
-    const transcript = transcriptView(state.transcript, Math.max(20, mainWidth - 2), state);
-    const start = Math.max(0, transcript.length - bodyHeight - state.scroll);
-    const visibleTranscript = transcript.slice(start, start + bodyHeight);
-    const body = layoutBody(visibleTranscript, state, width, bodyHeight, sidebarWidth);
-    const lines = [...header, ...body, ...panel, ...composer];
-    while (lines.length < height) lines.push('');
-    return `\u001b[2J\u001b[H${lines.slice(0, height).map((line) => fitAnsi(line, width)).join('\n')}${RESET}`;
+    const previousTheme = activeAnsiTheme;
+    activeAnsiTheme = resolveAnsiTheme(state.themeId, state.themes);
+    try {
+      const width = Math.max(60, state.width);
+      const height = Math.max(16, state.height);
+      const header = headerLines(state, width);
+      const composer = composerLines(state, width);
+      const panelBudget = Math.max(0, height - header.length - composer.length - 4);
+      const rawPanel = this.overlayLines(state, width, panelBudget);
+      const panel = rawPanel.slice(0, panelBudget);
+      const bodyHeight = Math.max(3, height - header.length - panel.length - composer.length);
+      const sidebarWidth = state.sidebarVisible && width >= 100 ? SIDEBAR_WIDTH : 0;
+      const mainWidth = sidebarWidth > 0 ? width - sidebarWidth - 1 : width;
+      const transcript = transcriptView(state.transcript, Math.max(20, mainWidth - 2), state);
+      const start = Math.max(0, transcript.length - bodyHeight - state.scroll);
+      const visibleTranscript = transcript.slice(start, start + bodyHeight);
+      const body = layoutBody(visibleTranscript, state, width, bodyHeight, sidebarWidth);
+      const lines = [...header, ...body, ...panel, ...composer];
+      while (lines.length < height) lines.push('');
+      return `${activeAnsiTheme.reset}\u001b[2J\u001b[H${lines.slice(0, height).map((line) => fitAnsi(line, width)).join('\n')}${RESET}`;
+    } finally {
+      activeAnsiTheme = previousTheme;
+    }
   }
 
   private overlayLines(state: UiState, width: number, maxHeight: number): string[] {
@@ -245,7 +255,7 @@ function emptyTranscript(state: UiState, width: number): string[] {
   ];
 }
 
-function transcriptStyle(kind: TranscriptItem['kind']): [string, string, string] {
+function transcriptStyle(kind: TranscriptItem['kind']): [string, string, AnsiToken] {
   switch (kind) {
     case 'user': return [ 'you', '›', ACCENT ];
     case 'assistant': return [ 'agent', '◇', ACCENT ];

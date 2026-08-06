@@ -253,8 +253,26 @@ describe('shared harness bridge protocol', () => {
     expect(initialized.protocolVersion).toBe(1);
     expect(initialized.workspacePath).toBe(directory);
     expect(initialized.activeThinking).toEqual({ enabled: false });
+    expect(initialized.activeThemeId).toBe('hyscode-dark');
+    expect(initialized.themes).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'aura', source: 'builtin' }),
+    ]));
     expect(initialized.session?.messageCount).toBe(0);
     expect(events.some((event) => event.event === 'runtime_ready')).toBe(true);
+
+    const themed = successfulResult<RuntimeReadyPayload>(await bridge.handle({
+      id: 'theme',
+      method: 'set_config',
+      params: { themeId: 'nord' },
+    }));
+    expect(themed.activeThemeId).toBe('nord');
+
+    const sidebar = successfulResult<RuntimeReadyPayload>(await bridge.handle({
+      id: 'sidebar',
+      method: 'set_config',
+      params: { sidebarVisible: false },
+    }));
+    expect(sidebar.sidebarVisible).toBe(false);
 
     const mode = successfulResult<RuntimeReadyPayload>(await bridge.handle({
       id: 'mode',
@@ -283,8 +301,10 @@ describe('shared harness bridge protocol', () => {
     expect(successfulResult<ProjectSummary[]>(await bridge.handle({ id: 'other-projects', method: 'project_list', params: {} }))).toHaveLength(2);
 
     await bridge.handle({ id: 'shutdown', method: 'shutdown', params: {} });
-    const persistedSettings = JSON.parse(await readFile(path.join(directory, 'settings.json'), 'utf8')) as { agentType: string };
+    const persistedSettings = JSON.parse(await readFile(path.join(directory, 'settings.json'), 'utf8')) as { agentType: string; themeId: string; sidebarVisible: boolean };
     expect(persistedSettings.agentType).toBe('review');
+    expect(persistedSettings.themeId).toBe('nord');
+    expect(persistedSettings.sidebarVisible).toBe(false);
   }, 15_000);
 
   it('exposes context attachments and session management through the standalone protocol', async () => {

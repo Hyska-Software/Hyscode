@@ -3,6 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import type { AgentType, ApprovalMode, ToolCategory } from '@hyscode/agent-harness';
 import type { McpServerConfig } from '@hyscode/mcp-client';
+import { DEFAULT_THEME_ID } from '@hyscode/theme';
 
 export type CustomApprovalRules = {
   categoryRules: Partial<Record<ToolCategory, boolean>>;
@@ -10,6 +11,8 @@ export type CustomApprovalRules = {
 };
 
 export type SharedTuiSettings = {
+  themeId: string;
+  sidebarVisible: boolean;
   activeProviderId: string | null;
   activeModelId: string | null;
   agentType: AgentType;
@@ -38,6 +41,8 @@ export type SharedTuiSettings = {
 };
 
 const DEFAULT_SETTINGS: SharedTuiSettings = {
+  themeId: DEFAULT_THEME_ID,
+  sidebarVisible: true,
   activeProviderId: null,
   activeModelId: null,
   agentType: 'chat',
@@ -113,6 +118,8 @@ function normalizeSettings(raw: unknown): SharedTuiSettings {
   return {
     ...DEFAULT_SETTINGS,
     ...raw,
+    themeId: typeof raw.themeId === 'string' && raw.themeId.trim() ? raw.themeId : DEFAULT_SETTINGS.themeId,
+    sidebarVisible: raw.sidebarVisible !== false,
     activeProviderId: typeof raw.activeProviderId === 'string' ? raw.activeProviderId : null,
     activeModelId: typeof raw.activeModelId === 'string' ? raw.activeModelId : null,
     agentType,

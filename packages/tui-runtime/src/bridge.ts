@@ -32,6 +32,7 @@ import {
   type StreamChunk,
   type ThinkingConfig,
 } from '@hyscode/ai-providers';
+import type { ThemeSummary } from '@hyscode/theme';
 import { McpClientManager } from '@hyscode/mcp-client';
 import { BUILTIN_SKILLS } from '@hyscode/skills';
 import { CliDataStore, makeSessionMessage } from './data-store';
@@ -43,6 +44,7 @@ import {
   type SharedTuiSettings,
 } from './config';
 import { CliHost } from './host';
+import { findTheme, loadThemeCatalog, normalizeThemeId } from './themes';
 import {
   pendingToolToInteraction,
   type BridgeEvent,
@@ -95,6 +97,7 @@ export class TuiBridge {
   private host: CliHost | null = null;
   private harness: Harness | null = null;
   private settings: SharedTuiSettings | null = null;
+  private themes: ThemeSummary[] = [];
   private mcp: McpClientManager | null = null;
   private session: SessionRecord | null = null;
   private workspacePath = '';
@@ -225,6 +228,10 @@ export class TuiBridge {
     await this.dataStore.load();
     await this.keyStore.load();
     this.settings = await this.configStore.load();
+    this.themes = await loadThemeCatalog();
+    const persistedThemeId = this.settings.themeId;
+    this.settings.themeId = normalizeThemeId(this.themes, rawParams.themeId ?? persistedThemeId);
+    if (this.settings.themeId !== persistedThemeId) await this.configStore.save({ themeId: this.settings.themeId });
     const activeProviderId = typeof rawParams.providerId === 'string'
       ? rawParams.providerId
       : this.settings.activeProviderId ?? '';
@@ -401,6 +408,18 @@ export class TuiBridge {
     const params = rawParams as SetConfigParams;
     const harness = this.requireHarness();
     const settings = this.requireSettings();
+    if (params.themeId !== undefined) {
+      if (typeof params.themeId !== 'string' || !findTheme(this.themes, params.themeId)) {
+        throw new Error(`Unknown theme "${String(params.themeId)}".`);
+      }
+      settings.themeId = params.themeId;
+    }
+    if (params.sidebarVisible !== undefined) {
+      if (typeof params.sidebarVisible !== 'boolean') {
+        throw new Error('sidebarVisible must be a boolean.');
+      }
+      settings.sidebarVisible = params.sidebarVisible;
+    }
     const providerId = typeof params.providerId === 'string' ? params.providerId : this.currentProviderId();
     const modelId = typeof params.modelId === 'string' ? params.modelId : this.currentModelId();
     const approvalMode = normalizeApprovalMode(params.approvalMode ?? settings.approvalMode);
@@ -1104,6 +1123,9 @@ export class TuiBridge {
         this.currentProviderId(),
         this.currentModelId(),
       ),
+      activeThemeId: this.requireSettings().themeId,
+      themes: this.themes,
+      sidebarVisible: this.requireSettings().sidebarVisible,
       capabilities: {
         slashCommands: true,
         contextMentions: true,
