@@ -139,6 +139,11 @@ the same runtime configuration contract. `/sidebar` sends the value through
 writes preserve the field so a desktop settings update cannot reset the TUI
 layout preference.
 
+The same additive `runtime_ready` payload exposes a bounded `recentSessions`
+projection for the TUI startup surface. The renderer uses it for the welcome
+layout while the existing `session_list` request remains authoritative for the
+full session browser.
+
 ### Theme Catalog and Client Synchronization
 
 The `@hyscode/theme` package owns the built-in theme ids and the normalized color

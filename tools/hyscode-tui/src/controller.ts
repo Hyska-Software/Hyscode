@@ -378,6 +378,7 @@ export class TuiController {
     this.state.model = payload.activeModelId;
     this.state.themeId = payload.activeThemeId ?? this.state.themeId;
     if (payload.themes && payload.themes.length > 0) this.state.themes = payload.themes;
+    if (payload.recentSessions) this.state.sessions = payload.recentSessions;
     this.state.sidebarVisible = payload.sidebarVisible ?? this.state.sidebarVisible;
     if (!this.state.sidebarVisible && this.state.focus === 'sidebar') this.state.focus = 'composer';
     this.state.approvalMode = payload.approvalMode ?? this.state.approvalMode;

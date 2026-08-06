@@ -95,6 +95,8 @@ export type RuntimeReadyPayload = {
   /** Current shared UI theme and the themes available to the TUI selector. */
   activeThemeId?: string;
   themes?: ThemeSummary[];
+  /** Sessions available to render in the startup welcome surface. */
+  recentSessions?: SessionSummary[];
   /** Whether the TUI session sidebar is currently rendered. */
   sidebarVisible?: boolean;
   approvalMode?: ApprovalMode;

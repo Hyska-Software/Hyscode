@@ -1,5 +1,6 @@
 import { DEFAULT_THEME_ID } from '@hyscode/tui-runtime';
 import { COMMANDS, flowTitle, matchingCommands, selectionOptions } from './commands';
+import { getCliLogo } from './logo';
 import { dynamicAnsiToken, resolveAnsiTheme, type AnsiToken, type AnsiTheme } from './theme';
 import type { CommandFlow, InteractionState, TranscriptItem, UiState } from './types';
 
@@ -244,15 +245,78 @@ function changeDiff(original: string | null, next: string, width: number): strin
 }
 
 function emptyTranscript(state: UiState, width: number): string[] {
-  const providerMessage = state.provider ? 'Ask for an explanation, a change, or a review.' : 'Select a provider with /model before sending a request.';
+  const panelWidth = Math.max(48, width);
+  const innerWidth = Math.max(44, panelWidth - 2);
+  const leftWidth = Math.min(32, Math.max(24, Math.floor((innerWidth - 1) * 0.35)));
+  const rightWidth = Math.max(18, innerWidth - leftWidth - 1);
+  const left = welcomeIdentityLines(state, leftWidth);
+  const right = welcomeDetailsLines(state, rightWidth);
+  const lines = [welcomeTopLine(state, panelWidth)];
+  const rowCount = Math.max(left.length, right.length);
+  for (let index = 0; index < rowCount; index += 1) {
+    const leftLine = padAnsi(fitAnsi(left[index] ?? '', leftWidth), leftWidth);
+    const rightLine = padAnsi(fitAnsi(right[index] ?? '', rightWidth), rightWidth);
+    lines.push(`${PANEL}│${RESET}${leftLine}${PANEL}│${RESET}${rightLine}${PANEL}│${RESET}`);
+  }
+  lines.push(`${PANEL}╰${'─'.repeat(Math.max(0, panelWidth - 2))}╯${RESET}`);
+  lines.push('');
+  lines.push(`  ${fitAnsi(`${WARNING}${BOLD}Tip${RESET} ${DIM}Type / for commands · @path attaches context · !command opens a terminal${RESET}`, Math.max(20, panelWidth - 4))}`);
+  lines.push(`  ${fitAnsi(`${MUTED}Ready in ${shorten(state.workspace, Math.max(18, panelWidth - 18))} ${PANEL}·${RESET} ${MUTED}${state.status}${RESET}`, Math.max(20, panelWidth - 4))}`);
+  return lines;
+}
+
+function welcomeTopLine(state: UiState, width: number): string {
+  const title = ` ${shorten(`HysCode TUI · ${state.workspace}`, Math.max(16, width - 10))} `;
+  const ruleWidth = Math.max(1, width - visibleLength(title) - 3);
+  return `${PANEL}╭─${title}${'─'.repeat(ruleWidth)}╮${RESET}`;
+}
+
+function welcomeIdentityLines(state: UiState, width: number): string[] {
+  const logo = getCliLogo(width - 2).map((line) => ` ${ACCENT}${line}${RESET}`);
+  const model = state.provider && state.model ? `${state.provider}/${state.model}` : 'No model selected';
   return [
-    `${ACCENT}${BOLD}Ready in ${shorten(state.workspace, Math.max(20, width - 12))}${RESET}`,
+    `${ACCENT}${BOLD}Welcome to HysCode${RESET}`,
     '',
-    `${SOFT}The conversation will appear here as the agent works.${RESET}`,
-    `${MUTED}${providerMessage}${RESET}`,
+    ...logo,
     '',
-    `${DIM}Type / for commands · Ctrl-K for the full palette${RESET}`,
+    `${SOFT}${BOLD}HysCode${RESET} ${DIM}TUI${RESET}`,
+    `${MUTED}${state.mode} mode${RESET}`,
+    `${DIM}${shorten(model, Math.max(12, width - 1))}${RESET}`,
   ];
+}
+
+function welcomeDetailsLines(state: UiState, width: number): string[] {
+  const themeName = state.themes.find((theme) => theme.id === state.themeId)?.name ?? state.themeId;
+  const model = state.provider && state.model ? `${state.provider}/${state.model}` : 'not configured';
+  const lines = [
+    `${ACCENT}${BOLD}QUICK START${RESET}`,
+    `${MUTED}/${RESET}  command palette and actions`,
+    `${MUTED}!${RESET}  send a terminal command`,
+    `${MUTED}@${RESET}  attach workspace context`,
+    `${MUTED}Ctrl-K${RESET}  open every command`,
+    `${PANEL}${'─'.repeat(width)}${RESET}`,
+    `${ACCENT}${BOLD}RUNTIME${RESET}`,
+    startupDetail('status', state.connectionState, width),
+    startupDetail('mode', state.mode, width),
+    startupDetail('model', model, width),
+    startupDetail('theme', themeName, width),
+    `${PANEL}${'─'.repeat(width)}${RESET}`,
+    `${ACCENT}${BOLD}RECENT SESSIONS${RESET}`,
+  ];
+  if (state.sessions.length === 0) {
+    lines.push(`${MUTED}No previous sessions${RESET}`);
+  } else {
+    for (const session of state.sessions.slice(0, 3)) {
+      const marker = session.id === state.currentSessionId ? `${SUCCESS}●${RESET}` : `${MUTED}○${RESET}`;
+      lines.push(`${marker} ${shorten(`${session.title || 'Untitled session'} · ${session.messageCount} msg`, Math.max(12, width - 3))}`);
+    }
+  }
+  return lines;
+}
+
+function startupDetail(label: string, value: string, width: number): string {
+  const labelText = `${label.padEnd(8, ' ')}`;
+  return `${MUTED}${labelText}${RESET}${shorten(value, Math.max(8, width - 10))}`;
 }
 
 function transcriptStyle(kind: TranscriptItem['kind']): [string, string, AnsiToken] {

@@ -1125,6 +1125,7 @@ export class TuiBridge {
       ),
       activeThemeId: this.requireSettings().themeId,
       themes: this.themes,
+      recentSessions: this.dataStore.listSessions(this.workspacePath).slice(0, 4),
       sidebarVisible: this.requireSettings().sidebarVisible,
       capabilities: {
         slashCommands: true,

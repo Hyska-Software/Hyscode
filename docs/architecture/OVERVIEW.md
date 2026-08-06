@@ -78,6 +78,14 @@ structured tool cards, terminal progress, file-review state, gathered context,
 SDD phases/tasks, scoped child-agent events, usage telemetry, and connection
 recovery while retaining protocol version 1 for older NDJSON clients.
 
+When a workspace is ready, the empty transcript becomes a welcome surface with
+the CLI wordmark, workspace/runtime details, keyboard-first tips, and recent
+sessions from the same TUI data store. `tools/hyscode-tui/src/logo.ts` provides
+the half-block rasterization of `apps/desktop/public/hyscode-logo.svg` and a
+compact fallback for narrow terminals. The logo glyphs use the active theme
+accent at render time, so `/theme` repaints the mark together with the rest of
+the shell.
+
 `@hyscode/tui-runtime` owns the TypeScript host adapter and creates native PTYs
 through `node-pty`. PTY output is sequenced and bounded, supports snapshot/replay
 from a sequence, resize, interrupt, kill, exit events, and shutdown. The same
@@ -104,6 +112,10 @@ shared settings file. Enabled extension themes are read from the same installed
 extension manifests and JSON theme assets used by the desktop
 (`~/.hyscode/extensions`, filtered by `~/.hyscode/extension-state.json`), so an
 extension theme can be selected from either client.
+
+The additive `recentSessions` field in `runtime_ready` carries a bounded list
+for the startup surface; the full `/sessions` command remains the source for
+the interactive session browser.
 
 The TUI-only `sidebarVisible` preference is persisted in the same settings file
 and can be changed with `/sidebar`, `/sidebar on`, `/sidebar off`, or

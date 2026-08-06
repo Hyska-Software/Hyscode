@@ -257,6 +257,9 @@ describe('shared harness bridge protocol', () => {
     expect(initialized.themes).toEqual(expect.arrayContaining([
       expect.objectContaining({ id: 'aura', source: 'builtin' }),
     ]));
+    expect(initialized.recentSessions).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: initialized.session?.id, title: 'New session' }),
+    ]));
     expect(initialized.session?.messageCount).toBe(0);
     expect(events.some((event) => event.event === 'runtime_ready')).toBe(true);
 

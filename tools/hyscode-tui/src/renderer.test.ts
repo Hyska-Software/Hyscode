@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { UiState } from './types';
 import { TerminalRenderer } from './renderer';
+import { CLI_LOGO } from './logo';
 import { BUILTIN_THEMES } from '@hyscode/tui-runtime';
 
 function state(overrides: Partial<UiState> = {}): UiState {
@@ -107,6 +108,27 @@ describe('TUI renderer', () => {
     expect(rendered).not.toContain('SHORTCUTS');
   });
 
+  it('renders a structured startup welcome with the CLI logo and runtime details', () => {
+    const rendered = new TerminalRenderer().render(state({
+      sessions: [{
+        id: 'session-123456',
+        title: 'Refine the terminal experience',
+        workspacePath: 'C:/workspace/hyscode',
+        providerId: 'anthropic',
+        modelId: 'claude-sonnet',
+        agentType: 'build',
+        updatedAt: '2026-08-06T12:00:00.000Z',
+        messageCount: 4,
+      }],
+    }));
+
+    expect(rendered).toContain('Welcome to HysCode');
+    expect(rendered).toContain('QUICK START');
+    expect(rendered).toContain('RECENT SESSIONS');
+    expect(rendered).toContain(CLI_LOGO[2]);
+    expect(rendered).toContain('anthropic/claude-sonnet');
+  });
+
   it('renders a compact context meter from the active model window and current usage', () => {
     const rendered = new TerminalRenderer().render(state({
       usage: { current: null, session: null, requestCount: 1, estimatedCost: 0, contextWindow: 1000, inputTokens: 375, outputTokens: 20, totalTokens: 395 },
@@ -162,10 +184,24 @@ describe('TUI renderer', () => {
     expect(light).not.toBe(dark);
   });
 
+  it('colors the CLI logo with the active theme accent', () => {
+    const renderer = new TerminalRenderer();
+    const dark = renderer.render(state({ themeId: 'hyscode-dark' }));
+    const light = renderer.render(state({ themeId: 'hyscode-light' }));
+    const logoLine = CLI_LOGO[2];
+
+    expect(dark).toContain(`\u001b[38;2;16;163;127m${logoLine}\u001b[0m`);
+    expect(light).toContain(`\u001b[38;2;13;138;108m${logoLine}\u001b[0m`);
+    expect(dark).not.toContain('\u001b[38;2;65;250;21m');
+    expect(light).not.toContain('\u001b[38;2;65;250;21m');
+  });
+
   it('removes the session sidebar when the persisted setting is disabled', () => {
     const rendered = new TerminalRenderer().render(state({ sidebarVisible: false }));
+    const plain = rendered.replace(/\u001b\[[0-9;]*[A-Za-z]/g, '');
 
-    expect(rendered).not.toContain('SESSION');
+    expect(plain.split('\n').some((line) => line.trim() === 'SESSION')).toBe(false);
+    expect(plain).not.toContain('SHORTCUTS');
     expect(rendered).toContain('MESSAGE');
   });
 
