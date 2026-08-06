@@ -66,7 +66,11 @@ describe('TUI renderer', () => {
     expect(rendered).toContain('SESSION');
     expect(rendered).toContain('SHORTCUTS');
     expect(rendered).toContain('MESSAGE');
-    expect(rendered).toContain('Enter send');
+    const composerHeader = rendered.split('\n').find((line) => line.includes('MESSAGE')) ?? '';
+    expect(composerHeader).toContain('anthropic/claude-sonnet');
+    expect(composerHeader.indexOf('anthropic/claude-sonnet')).toBeLessThan(composerHeader.indexOf('thinking medium'));
+    expect(rendered).toContain('╰');
+    expect(rendered).not.toContain('Enter send');
   });
 
   it('keeps the header focused on global state while the sidebar owns session details', () => {
@@ -88,8 +92,8 @@ describe('TUI renderer', () => {
 
     expect(rendered).toContain('COMMAND PALETTE');
     expect(rendered).toContain('/mode');
-    expect(rendered).toContain('Tab complete');
-    expect(rendered).toContain('Enter run');
+    expect(rendered).not.toContain('Tab complete');
+    expect(rendered).not.toContain('Enter run');
   });
 
   it('keeps the narrow terminal readable without forcing the sidebar', () => {
@@ -142,5 +146,18 @@ describe('TUI renderer', () => {
     expect(rendered).toContain('APPROVAL');
     expect(rendered).toContain('Manual · ask before every protected tool');
     expect(rendered).toContain('Smart · ask only when risk requires it');
+  });
+
+  it('wraps long prompts across the chat composer instead of truncating them', () => {
+    const rendered = new TerminalRenderer().render(state({
+      width: 80,
+      input: 'Build a focused implementation plan for the TUI composer and preserve the existing runtime integration',
+      inputCursor: 106,
+    }));
+    const promptLines = rendered.split('\n').filter((line) => line.includes('Build') || line.includes('runtime'));
+
+    expect(promptLines.length).toBeGreaterThan(1);
+    expect(rendered).not.toContain('Enter send');
+    expect(rendered).toContain('╰──────────────────────────────────────────────────────────────────────────────╯');
   });
 });

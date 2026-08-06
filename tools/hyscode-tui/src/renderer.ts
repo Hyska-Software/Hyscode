@@ -268,37 +268,87 @@ function composerLines(state: UiState, width: number): string[] {
           ? 'WORKING'
           : 'MESSAGE';
   const prompt = state.interaction?.kind === 'question' ? '?' : state.input.startsWith('/') ? '/' : '>';
-  const input = renderInput(state);
-  const hint = state.commandFlow?.kind === 'root'
-    ? '↑↓ select · Tab complete · Enter run · Esc close'
-    : state.interaction?.kind === 'approval' || state.interaction?.kind === 'mode_switch'
-      ? 'Y allow · N deny · T trust · A approve all'
-      : state.running
-        ? 'Ctrl-C cancel · Wheel/PgUp scroll'
-        : 'Enter send · / commands · ↑↓ history · Wheel scroll';
-  const status = shorten(state.status, Math.max(20, width - label.length - hint.length - 16));
+  const status = shorten(composerStatus(state), Math.max(20, width - label.length - 10));
   const chips = state.context.attachments.map((attachment) => `${attachment.kind}:${attachment.label}`).join('  ');
   const rawContextDetails = chips ? `context ${chips}` : 'context none · /attach path · @path · !command';
   const meter = contextMeter(state, Math.min(24, Math.max(14, width - 4)));
   const contextDetails = shorten(rawContextDetails, Math.max(12, width - visibleLength(meter) - 2));
   const contextLine = `${chips ? MUTED : DIM}${contextDetails}${RESET}  ${meter}`;
+  const inputRows = renderInputRows(state, Math.max(12, width - 6));
   return [
     `${PANEL}${'─'.repeat(width)}${RESET}`,
     contextLine,
     `${ACCENT}╭─ ${label}${RESET} ${DIM}${status}${RESET}`,
-    `${ACCENT}│${RESET} ${BOLD}${prompt}${RESET} ${fitAnsi(input, Math.max(12, width - 6))}`,
-    `${ACCENT}╰─${RESET} ${DIM}${shorten(hint, width - 5)}${RESET}`,
+    ...inputRows.map((line, index) => index === 0
+      ? `${ACCENT}│${RESET} ${BOLD}${prompt}${RESET} ${fitAnsi(line, Math.max(12, width - 6))}`
+      : `${ACCENT}│${RESET}   ${fitAnsi(line, Math.max(12, width - 6))}`),
+    `${ACCENT}╰${'─'.repeat(Math.max(0, width - 2))}╯${RESET}`,
   ];
 }
 
-function renderInput(state: UiState): string {
+function composerStatus(state: UiState): string {
+  const currentStatus = state.status.replace(/\s*·\s*thinking(?:\s+\S+)?\s*$/i, '').trim();
+  const model = state.provider && state.model ? `${state.provider}/${state.model}` : 'model not selected';
+  const thinking = `thinking ${state.thinking.enabled ? state.thinking.level ?? 'on' : 'off'}`;
+  return [currentStatus, model, thinking].filter(Boolean).join(' · ');
+}
+
+type InputUnit = { value: string; index: number };
+type InputLine = { units: InputUnit[]; segmentStart: number; segmentEnd: number; lastInSegment: boolean };
+
+function renderInputRows(state: UiState, width: number): string[] {
   const characters = Array.from(state.input);
-  if (characters.length === 0) return `${MUTED}Describe what you want to build or investigate${RESET}`;
+  if (characters.length === 0) return [`${MUTED}Describe what you want to build or investigate${RESET}`];
   const cursor = Math.min(state.inputCursor, characters.length);
-  const before = characters.slice(0, cursor).join('');
-  const current = characters[cursor] ?? ' ';
-  const after = characters.slice(cursor + 1).join('');
-  return `${before.replace(/\n/g, '↵')}${INVERSE}${current === '\n' ? '↵' : current}${RESET}${after.replace(/\n/g, '↵')}`;
+  const lines: InputLine[] = [];
+  let segmentStart = 0;
+  for (let index = 0; index <= characters.length; index += 1) {
+    if (index === characters.length || characters[index] === '\n') {
+      appendInputSegment(lines, characters, segmentStart, index, width);
+      segmentStart = index + 1;
+    }
+  }
+
+  const rendered = lines.map((line) => {
+    const lineStart = line.units[0]?.index ?? line.segmentStart;
+    const lineEnd = line.units.at(-1)?.index !== undefined ? (line.units.at(-1)?.index ?? 0) + 1 : line.segmentStart;
+    const cursorBelongs = cursor >= lineStart && (cursor < lineEnd || (line.lastInSegment && cursor <= line.segmentEnd));
+    const content = line.units.map((unit) => unit.index === cursor ? `${INVERSE}${unit.value}${RESET}` : unit.value).join('');
+    if (!cursorBelongs || line.units.some((unit) => unit.index === cursor)) return content;
+    if (cursor === line.segmentEnd && line.segmentEnd < characters.length && characters[line.segmentEnd] === '\n') return `${content}${INVERSE}↵${RESET}`;
+    return `${INVERSE} ${RESET}${content}`;
+  });
+
+  return rendered.length > 0 ? rendered : [`${INVERSE} ${RESET}`];
+}
+
+function appendInputSegment(lines: InputLine[], characters: string[], start: number, end: number, width: number): void {
+  if (start === end) {
+    lines.push({ units: [], segmentStart: start, segmentEnd: end, lastInSegment: true });
+    return;
+  }
+
+  let offset = start;
+  while (offset < end) {
+    const remaining = characters.slice(offset, end);
+    let length = Math.min(width, remaining.length);
+    if (remaining.length > width) {
+      for (let index = length - 1; index >= Math.floor(width * 0.55); index -= 1) {
+        if (/\s/.test(remaining[index] ?? '')) {
+          length = index + 1;
+          break;
+        }
+      }
+    }
+    const lineEnd = offset + length;
+    lines.push({
+      units: characters.slice(offset, lineEnd).map((value, index) => ({ value, index: offset + index })),
+      segmentStart: offset,
+      segmentEnd: lineEnd,
+      lastInSegment: lineEnd >= end,
+    });
+    offset = lineEnd;
+  }
 }
 
 function commandPanelTitle(flow: CommandFlow): string {
