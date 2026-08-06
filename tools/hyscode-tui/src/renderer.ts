@@ -9,6 +9,9 @@ let activeAnsiTheme: AnsiTheme = resolveAnsiTheme(DEFAULT_THEME_ID, []);
 const RESET = dynamicAnsiToken(() => activeAnsiTheme.reset);
 const DIM = '\u001b[2m';
 const BOLD = '\u001b[1m';
+const ITALIC = '\u001b[3m';
+const UNDERLINE = '\u001b[4m';
+const STRIKETHROUGH = '\u001b[9m';
 const INVERSE = '\u001b[7m';
 const ACCENT = dynamicAnsiToken(() => activeAnsiTheme.accent);
 const MUTED = dynamicAnsiToken(() => activeAnsiTheme.muted);
@@ -152,10 +155,9 @@ function transcriptView(items: TranscriptItem[], width: number, state: UiState):
   for (const item of items) {
     const [label, marker, color] = transcriptStyle(item.kind);
     lines.push(`${color}${BOLD}${marker} ${label}${RESET}`);
-    const itemLines = wrapText(stripAnsi(item.text), Math.max(12, width - 4));
+    const itemLines = renderMarkdown(item.text, item.kind, Math.max(12, width - 4));
     for (const itemLine of itemLines) {
-      const formatted = markdownAnsi(itemLine, item.kind);
-      const prefix = item.kind === 'user' ? `${ACCENT}  ${formatted}${RESET}` : `  ${formatted}`;
+      const prefix = item.kind === 'user' ? `${ACCENT}  ${itemLine}${RESET}` : `  ${itemLine}`;
       lines.push(prefix);
     }
     lines.push('');
@@ -668,16 +670,399 @@ function formatContextPercentage(value: number): string {
   return `${value.toFixed(1)}%`;
 }
 
-function markdownAnsi(value: string, kind: TranscriptItem['kind']): string {
-  if (kind === 'thinking') return `${WARNING}${value}${RESET}`;
-  if (kind === 'tool') return `${WARNING}${value}${RESET}`;
-  if (kind === 'result') return `${SUCCESS}${value}${RESET}`;
-  const heading = /^(#{1,6})\s+(.+)$/.exec(value);
-  if (heading) return `${ACCENT}${BOLD}${heading[2]}${RESET}`;
-  if (/^\s*(```|~~~)/.test(value)) return `${MUTED}${value}${RESET}`;
-  const code = value.replace(/`([^`]+)`/g, `${MUTED}$1${RESET}`);
-  const bold = code.replace(/\*\*([^*]+)\*\*/g, `${BOLD}$1${RESET}`);
-  return bold.replace(/\*([^*]+)\*/g, `${BOLD}$1${RESET}`);
+type MarkdownFence = {
+  marker: '`' | '~';
+  language: string;
+  lines: string[];
+};
+
+type MarkdownListItem = {
+  indent: string;
+  marker: string;
+  content: string;
+  task: 'checked' | 'unchecked' | null;
+  ordered: boolean;
+};
+
+type MarkdownTable = {
+  end: number;
+  rows: string[][];
+};
+
+type MarkdownInlineSegment = {
+  plain: string;
+  render: (value: string) => string;
+};
+
+function renderMarkdown(value: string, kind: TranscriptItem['kind'], width: number): string[] {
+  const text = stripAnsi(value).replace(/\r\n/g, '\n');
+  if (!text) return [''];
+
+  const solidColor = kind === 'thinking' || kind === 'tool'
+    ? WARNING
+    : kind === 'result'
+      ? SUCCESS
+      : kind === 'error'
+        ? ERROR
+        : null;
+  if (solidColor) return wrapText(text, width).map((line) => `${solidColor}${line}${RESET}`);
+
+  const source = text.split('\n');
+  const lines: string[] = [];
+  const paragraph: string[] = [];
+  let fence: MarkdownFence | null = null;
+  let listActive = false;
+
+  const separate = (): void => {
+    if (lines.length > 0 && lines[lines.length - 1] !== '') lines.push('');
+  };
+
+  const flushParagraph = (): void => {
+    if (paragraph.length === 0) return;
+    const content = paragraph.join(' ').replace(/\s+/g, ' ').trim();
+    paragraph.length = 0;
+    if (!content) return;
+    lines.push(...renderMarkdownInlineLines(content, width));
+  };
+
+  for (let index = 0; index < source.length; index += 1) {
+    const line = source[index];
+
+    if (fence) {
+      if (isFenceClose(line, fence.marker)) {
+        lines.push(...renderCodeBlock(fence.lines, fence.language, width));
+        fence = null;
+        separate();
+      } else {
+        fence.lines.push(line);
+      }
+      continue;
+    }
+
+    const fenceStart = parseFenceStart(line);
+    if (fenceStart) {
+      flushParagraph();
+      listActive = false;
+      separate();
+      fence = { ...fenceStart, lines: [] };
+      continue;
+    }
+
+    if (!line.trim()) {
+      flushParagraph();
+      listActive = false;
+      separate();
+      continue;
+    }
+
+    const table = findMarkdownTable(source, index);
+    if (table) {
+      flushParagraph();
+      listActive = false;
+      separate();
+      lines.push(...renderMarkdownTable(table.rows, width));
+      separate();
+      index = table.end - 1;
+      continue;
+    }
+
+    const heading = /^(#{1,6})\s+(.+?)\s*$/.exec(line);
+    if (heading) {
+      flushParagraph();
+      listActive = false;
+      separate();
+      lines.push(renderMarkdownHeading(heading[1].length, heading[2].replace(/\s+#+\s*$/, '')));
+      separate();
+      continue;
+    }
+
+    if (isHorizontalRule(line)) {
+      flushParagraph();
+      listActive = false;
+      separate();
+      lines.push(`${PANEL}${'─'.repeat(Math.max(1, width))}${RESET}`);
+      separate();
+      continue;
+    }
+
+    if (/^\s*>/.test(line)) {
+      flushParagraph();
+      listActive = false;
+      const quoteLines: string[] = [];
+      let quoteIndex = index;
+      while (quoteIndex < source.length && /^\s*>/.test(source[quoteIndex])) {
+        quoteLines.push(/^\s*>\s?(.*)$/.exec(source[quoteIndex])?.[1] ?? '');
+        quoteIndex += 1;
+      }
+      separate();
+      lines.push(...renderBlockquote(quoteLines, width));
+      separate();
+      index = quoteIndex - 1;
+      continue;
+    }
+
+    const listItem = parseMarkdownListItem(line);
+    if (listItem) {
+      flushParagraph();
+      if (!listActive) separate();
+      lines.push(...renderMarkdownListItem(listItem, width));
+      listActive = true;
+      continue;
+    }
+
+    listActive = false;
+    paragraph.push(line.trim());
+  }
+
+  if (fence) {
+    lines.push(...renderCodeBlock(fence.lines, fence.language, width));
+    separate();
+  }
+  flushParagraph();
+
+  while (lines.length > 0 && lines[lines.length - 1] === '') lines.pop();
+  return lines.length > 0 ? lines : [''];
+}
+
+function parseFenceStart(value: string): Omit<MarkdownFence, 'lines'> | null {
+  const match = /^\s*(`{3,}|~{3,})\s*([A-Za-z0-9_+.#-]+)?\s*$/.exec(value);
+  if (!match) return null;
+  return { marker: match[1][0] as '`' | '~', language: match[2] ?? '' };
+}
+
+function isFenceClose(value: string, marker: MarkdownFence['marker']): boolean {
+  return marker === '`' ? /^\s*`{3,}\s*$/.test(value) : /^\s*~{3,}\s*$/.test(value);
+}
+
+function renderMarkdownHeading(level: number, value: string): string {
+  const marker = level === 1 ? '◆' : level === 2 ? '▌' : '·';
+  const color = level <= 2 ? ACCENT : SOFT;
+  return `${color}${BOLD}${marker} ${markdownInline(value)}${RESET}`;
+}
+
+function isHorizontalRule(value: string): boolean {
+  return /^\s*(?:-{3,}|\*{3,}|_{3,})\s*$/.test(value);
+}
+
+function parseMarkdownListItem(value: string): MarkdownListItem | null {
+  const unordered = /^(\s*)[-+*]\s+(.+)$/.exec(value);
+  const ordered = /^(\s*)(\d+)[.)]\s+(.+)$/.exec(value);
+  if (!unordered && !ordered) return null;
+
+  const indent = (unordered?.[1] ?? ordered?.[1] ?? '').slice(0, 8);
+  const rawContent = unordered?.[2] ?? ordered?.[3] ?? '';
+  const task = /^\[( |x|X)\]\s+(.+)$/.exec(rawContent);
+  return {
+    indent,
+    marker: ordered ? `${ordered[2]}.` : '•',
+    content: task?.[2] ?? rawContent,
+    task: task ? task[1].toLowerCase() === 'x' ? 'checked' : 'unchecked' : null,
+    ordered: ordered !== null,
+  };
+}
+
+function renderMarkdownListItem(item: MarkdownListItem, width: number): string[] {
+  const marker = item.task === 'checked'
+    ? `${SUCCESS}✓${RESET}`
+    : item.task === 'unchecked'
+      ? `${MUTED}○${RESET}`
+      : item.ordered
+        ? `${MUTED}${item.marker}${RESET}`
+        : `${ACCENT}${item.marker}${RESET}`;
+  const prefixWidth = item.indent.length + item.marker.length + 1;
+  const contentWidth = Math.max(8, width - prefixWidth);
+  const contentLines = renderMarkdownInlineLines(item.content, contentWidth);
+  return contentLines.map((line, index) => {
+    const prefix = index === 0 ? `${item.indent}${marker} ` : ' '.repeat(prefixWidth);
+    return `${prefix}${markdownInline(line)}`;
+  });
+}
+
+function renderBlockquote(values: string[], width: number): string[] {
+  const contentWidth = Math.max(8, width - 4);
+  const output: string[] = [];
+  for (const value of values) {
+    if (!value.trim()) {
+      output.push(`${PANEL}│${RESET}`);
+      continue;
+    }
+    for (const line of renderMarkdownInlineLines(value.trim(), contentWidth)) {
+      output.push(`${PANEL}│${RESET} ${SOFT}${markdownInline(line)}${RESET}`);
+    }
+  }
+  return output;
+}
+
+function renderCodeBlock(values: string[], language: string, width: number): string[] {
+  const codeWidth = Math.max(8, width - 4);
+  const label = shorten(language || 'code', Math.max(4, codeWidth - 4));
+  const title = ` ${label} `;
+  const top = `${PANEL}╭─${MUTED}${title}${RESET}${PANEL}${'─'.repeat(Math.max(1, width - visibleLength(title) - 3))}╮${RESET}`;
+  const output = [top];
+  const source = values.length > 0 ? values : [''];
+  for (const value of source) {
+    const codeLines = wrapText(value, codeWidth);
+    for (const line of codeLines) {
+      const styled = `${SOFT}${highlightCode(line)}${RESET}`;
+      output.push(`${PANEL}│${RESET} ${padAnsi(fitAnsi(styled, codeWidth), codeWidth)} ${PANEL}│${RESET}`);
+    }
+  }
+  output.push(`${PANEL}╰${'─'.repeat(Math.max(1, width - 2))}╯${RESET}`);
+  return output;
+}
+
+function highlightCode(value: string): string {
+  if (/^\s*(?:\/\/|#)/.test(value)) return `${MUTED}${value}${RESET}`;
+  return value.replace(
+    /\b(?:const|let|var|function|return|if|else|for|while|class|interface|type|import|from|export|async|await|def|fn|pub|struct|use|true|false|null|None)\b/g,
+    `${ACCENT}$&${RESET}`,
+  );
+}
+
+function findMarkdownTable(values: string[], start: number): MarkdownTable | null {
+  if (!values[start].includes('|') || start + 1 >= values.length || !isTableSeparator(values[start + 1])) return null;
+  const rows = [splitTableRow(values[start])];
+  if (rows[0].length < 2) return null;
+  let end = start + 2;
+  while (end < values.length && values[end].trim() && values[end].includes('|')) {
+    rows.push(splitTableRow(values[end]));
+    end += 1;
+  }
+  return { end, rows };
+}
+
+function isTableSeparator(value: string): boolean {
+  const cells = splitTableRow(value);
+  return cells.length >= 2 && cells.every((cell) => /^:?-{3,}:?$/.test(cell));
+}
+
+function splitTableRow(value: string): string[] {
+  const trimmed = value.trim();
+  const content = trimmed.startsWith('|') && trimmed.endsWith('|')
+    ? trimmed.slice(1, -1)
+    : trimmed.startsWith('|')
+      ? trimmed.slice(1)
+      : trimmed.endsWith('|')
+        ? trimmed.slice(0, -1)
+        : trimmed;
+  const cells: string[] = [];
+  let cell = '';
+  let escaped = false;
+  for (const character of content) {
+    if (escaped) {
+      cell += character;
+      escaped = false;
+    } else if (character === '\\') {
+      escaped = true;
+    } else if (character === '|') {
+      cells.push(cell.trim());
+      cell = '';
+    } else {
+      cell += character;
+    }
+  }
+  if (escaped) cell += '\\';
+  cells.push(cell.trim());
+  return cells;
+}
+
+function renderMarkdownTable(rows: string[][], width: number): string[] {
+  const columnCount = Math.max(...rows.map((row) => row.length));
+  const normalized = rows.map((row) => Array.from({ length: columnCount }, (_, index) => row[index] ?? ''));
+  const columnWidths = normalized[0].map((_, column) => Math.min(28, Math.max(3, ...normalized.map((row) => visibleLength(row[column])))));
+  const widthBudget = Math.max(columnCount * 3, width - columnCount * 3 - 1);
+  while (columnWidths.reduce((sum, value) => sum + value, 0) > widthBudget) {
+    const largest = columnWidths.reduce((candidate, value, index) => value > columnWidths[candidate] ? index : candidate, 0);
+    if (columnWidths[largest] <= 3) break;
+    columnWidths[largest] -= 1;
+  }
+
+  const border = (left: string, middle: string, right: string): string => `${PANEL}${left}${columnWidths.map((value) => '─'.repeat(value + 2)).join(middle)}${right}${RESET}`;
+  const output = [border('┌', '┬', '┐')];
+  normalized.forEach((row, rowIndex) => {
+    const cells = row.map((value, column) => {
+      const content = fitAnsi(markdownInline(shorten(value, columnWidths[column])), columnWidths[column]);
+      const styled = rowIndex === 0 ? `${ACCENT}${BOLD}${content}${RESET}` : `${SOFT}${content}${RESET}`;
+      return ` ${padAnsi(styled, columnWidths[column])} `;
+    });
+    output.push(`${PANEL}│${RESET}${cells.join(`${PANEL}│${RESET}`)}${PANEL}│${RESET}`);
+    if (rowIndex === 0) output.push(border('├', '┼', '┤'));
+  });
+  output.push(border('└', '┴', '┘'));
+  return output;
+}
+
+function renderMarkdownInlineLines(value: string, width: number): string[] {
+  const safeWidth = Math.max(1, width);
+  const lines: string[] = [];
+  let current = '';
+  let currentLength = 0;
+  const pushCurrent = (): void => {
+    if (currentLength > 0 || lines.length === 0) lines.push(current.trimEnd());
+    current = '';
+    currentLength = 0;
+  };
+
+  for (const segment of markdownInlineSegments(value)) {
+    for (const part of segment.plain.split(/(\s+)/)) {
+      if (!part) continue;
+      if (/^\s+$/.test(part)) {
+        if (currentLength > 0 && currentLength + part.length <= safeWidth) {
+          current += segment.render(part);
+          currentLength += part.length;
+        }
+        continue;
+      }
+
+      let remaining = part;
+      while (remaining.length > 0) {
+        if (currentLength > 0 && currentLength + remaining.length > safeWidth) pushCurrent();
+        const capacity = safeWidth - currentLength;
+        const chunk = remaining.slice(0, Math.max(1, capacity));
+        current += segment.render(chunk);
+        currentLength += chunk.length;
+        remaining = remaining.slice(chunk.length);
+        if (currentLength >= safeWidth && remaining.length > 0) pushCurrent();
+      }
+    }
+  }
+  if (currentLength > 0 || lines.length === 0) pushCurrent();
+  return lines;
+}
+
+function markdownInlineSegments(value: string): MarkdownInlineSegment[] {
+  const pattern = /`([^`\n]+)`|\[([^\]\n]+)\]\(([^)\s]+)\)|\*\*([^*\n]+)\*\*|__([^_\n]+)__|~~([^~\n]+)~~|\*([^*\n]+)\*|_([^_\n]+)_/g;
+  const segments: MarkdownInlineSegment[] = [];
+  const add = (plain: string, render: (value: string) => string = (part) => part): void => {
+    if (plain) segments.push({ plain, render });
+  };
+  let cursor = 0;
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(value)) !== null) {
+    add(value.slice(cursor, match.index));
+    const [, code, linkLabel, url, boldA, boldB, strike, italicA, italicB] = match;
+    if (code !== undefined) {
+      add(code, (part) => `${MUTED}${BOLD}${part}${RESET}`);
+    } else if (linkLabel !== undefined && url !== undefined) {
+      add(linkLabel, (part) => `${ACCENT}${UNDERLINE}${part}${RESET}`);
+      if (linkLabel !== url) add(` (${shorten(url, 24)})`, (part) => `${DIM}${part}${RESET}`);
+    } else if (boldA !== undefined || boldB !== undefined) {
+      add(boldA ?? boldB, (part) => `${BOLD}${part}${RESET}`);
+    } else if (strike !== undefined) {
+      add(strike, (part) => `${DIM}${STRIKETHROUGH}${part}${RESET}`);
+    } else if (italicA !== undefined || italicB !== undefined) {
+      add(italicA ?? italicB, (part) => `${ITALIC}${part}${RESET}`);
+    } else {
+      add(match[0]);
+    }
+    cursor = match.index + match[0].length;
+  }
+  add(value.slice(cursor));
+  return segments;
+}
+
+function markdownInline(value: string): string {
+  return markdownInlineSegments(value).map((segment) => segment.render(segment.plain)).join('');
 }
 
 function fitAnsi(value: string, width: number): string {

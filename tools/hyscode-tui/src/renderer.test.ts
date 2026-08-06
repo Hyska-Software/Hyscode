@@ -146,6 +146,64 @@ describe('TUI renderer', () => {
     expect(rendered).toContain('anthropic/claude-sonnet');
   });
 
+  it('renders Markdown with readable blocks for prose, lists, quotes, links, tables, and code', () => {
+    const rendered = new TerminalRenderer().render(state({
+      width: 100,
+      height: 70,
+      sidebarVisible: false,
+      transcript: [{
+        kind: 'assistant',
+        text: [
+          '# Release notes',
+          '',
+          'Use **strong text**, *quiet emphasis*, `src/index.ts`, and [the docs](https://example.com/docs).',
+          '',
+          '- [x] Renderer shipped',
+          '- [ ] Add more syntax coverage',
+          '1. Keep the output calm',
+          '2. Preserve the active theme',
+          '',
+          '> Markdown should feel like a document, not a raw stream.',
+          '',
+          '| Area | Status |',
+          '| --- | --- |',
+          '| renderer | ready |',
+          '',
+          '```ts',
+          'const enabled = true;',
+          '```',
+        ].join('\n'),
+      }],
+    }));
+    const plain = rendered.replace(/\u001b\[[0-9;]*[A-Za-z]/g, '');
+
+    expect(plain).toContain('◆ Release notes');
+    expect(plain).toContain('✓ Renderer shipped');
+    expect(plain).toContain('○ Add more syntax coverage');
+    expect(plain).toContain('1. Keep the output calm');
+    expect(plain).toContain('│ Markdown should feel like a document');
+    expect(plain).toContain('https://example.com/docs');
+    expect(plain).toContain('┌──');
+    expect(plain).toContain('renderer');
+    expect(plain).not.toContain('| --- | --- |');
+    expect(plain).toContain('╭─ ts');
+    expect(plain).toContain('│ const enabled = true;');
+    expect(plain).toContain('╰');
+  });
+
+  it('keeps inline code readable without reverse-video blocks', () => {
+    const rendered = new TerminalRenderer().render(state({
+      width: 100,
+      height: 32,
+      sidebarVisible: false,
+      transcript: [{ kind: 'assistant', text: 'Inspect `apps/desktop/src` before changing the renderer.' }],
+    }));
+    const codeLine = rendered.split('\n').find((line) => line.includes('apps/desktop/src')) ?? '';
+
+    expect(codeLine).toContain('apps/desktop/src');
+    expect(codeLine).not.toContain('\u001b[7m');
+  });
+
   it('renders a compact context meter from the active model window and current usage', () => {
     const rendered = new TerminalRenderer().render(state({
       usage: { current: null, session: null, requestCount: 1, estimatedCost: 0, contextWindow: 1000, inputTokens: 375, outputTokens: 20, totalTokens: 395 },
