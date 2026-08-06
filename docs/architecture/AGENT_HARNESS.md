@@ -150,6 +150,15 @@ tracked changes. The standalone client refreshes this additive summary
 periodically through `git_summary`, keeping Git inspection out of the render
 loop while reflecting edits made during an active session.
 
+The runtime also exposes the shared VORTEX update preferences in
+`runtime_ready`. The standalone client owns the update lifecycle: it queries
+the Stable or Pre-release GitHub channel, selects the exact native target from
+the release manifest, verifies size and SHA-256, validates the complete bundle,
+and uses a detached helper for a rollback-safe user-local installation swap.
+The TUI schedules startup checks after rendering becomes available, supports
+`/update`, and never applies an update while an agent turn is active. Protected
+installations use the platform installer and do not receive silent elevation.
+
 ### Theme Catalog and Client Synchronization
 
 The `@hyscode/theme` package owns the built-in theme ids and the normalized color

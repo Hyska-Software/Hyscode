@@ -79,6 +79,26 @@ describe('shared desktop configuration compatibility', () => {
     expect(await store.get('openai_api_key')).toBeNull();
   });
 
+  it('persists update channel and startup download preferences with the shared settings contract', async () => {
+    const directory = await temporaryDirectory();
+    const store = new SharedConfigStore(path.join(directory, 'settings.json'));
+    const initial = await store.load();
+
+    expect(initial.updateChannel).toBe('stable');
+    expect(initial.checkForUpdatesOnStartup).toBe(true);
+    expect(initial.autoDownload).toBe(false);
+
+    await store.save({ updateChannel: 'pre-release', checkForUpdatesOnStartup: false, autoDownload: true });
+    const reloaded = new SharedConfigStore(store.path);
+    await reloaded.load();
+
+    expect(reloaded.current).toMatchObject({
+      updateChannel: 'pre-release',
+      checkForUpdatesOnStartup: false,
+      autoDownload: true,
+    });
+  });
+
   it('normalizes the model thinking contract used by the provider registry', async () => {
     const directory = await temporaryDirectory();
     const store = new SharedConfigStore(path.join(directory, 'settings.json'));

@@ -1,6 +1,6 @@
 import path from 'node:path';
 import type { AgentType } from '@hyscode/agent-harness';
-import { AGENT_TYPES, type CliParseResult, type CommandFlow, type SelectionFlowAction, type UiState } from './types';
+import { AGENT_TYPES, type CliParseResult, type CliUpdateOptions, type CommandFlow, type SelectionFlowAction, type UiState } from './types';
 
 export type CommandSpec = {
   name: string;
@@ -16,6 +16,7 @@ export const COMMANDS: readonly CommandSpec[] = [
   { name: '/thinking', aliases: ['/think'], category: 'model', description: 'Configure model thinking/reasoning', usage: '/thinking' },
   { name: '/theme', aliases: ['/themes', '/color-theme'], category: 'runtime', description: 'Choose the TUI and desktop color theme', usage: '/theme' },
   { name: '/sidebar', aliases: ['/toggle-sidebar'], category: 'runtime', description: 'Show or hide the session sidebar', usage: '/sidebar [on|off|toggle]' },
+  { name: '/update', aliases: ['/updates'], category: 'runtime', description: 'Check and install VORTEX CLI updates', usage: '/update' },
   { name: '/approval', aliases: ['/approve'], category: 'runtime', description: 'Choose how tool approvals are handled', usage: '/approval' },
   { name: '/model', aliases: ['/m'], category: 'model', description: 'Open the provider and model selector', usage: '/model' },
   { name: '/models', aliases: [], category: 'model', description: 'Open the model selector', usage: '/models' },
@@ -45,6 +46,17 @@ export const COMMANDS: readonly CommandSpec[] = [
   { name: '/clear', aliases: ['/wipe'], category: 'session', description: 'Clear the visible transcript', usage: '/clear' },
   { name: '/quit', aliases: ['/exit', '/q'], category: 'runtime', description: 'Exit the TUI', usage: '/quit' },
 ];
+
+export const VORTEX_UPDATE_EXIT_CODES = {
+  upToDate: 0,
+  networkError: 3,
+  integrityFailure: 4,
+  unsupportedPlatform: 5,
+  confirmationRequired: 6,
+  manualInstallRequired: 7,
+  installed: 10,
+  available: 11,
+} as const;
 
 export const MODE_OPTIONS: readonly { value: AgentType; label: string }[] = [
   { value: 'chat', label: 'Chat — conversational assistance' },
@@ -133,6 +145,8 @@ export function selectionOptions(state: UiState, flow: CommandFlow): readonly Se
         id: theme.id,
         label: `${theme.name} · ${theme.type}${theme.source === 'extension' ? ` · ${theme.extensionName ?? 'extension'}` : ''}`,
       }));
+    case 'update':
+      return updateOptions(state);
     case 'action':
       return actionOptions(state, flow.action);
     case 'context_remove':
@@ -210,6 +224,7 @@ export function flowTitle(flow: CommandFlow | null): string {
     case 'model': return 'MODEL';
     case 'thinking': return 'THINKING';
     case 'theme': return 'THEME';
+    case 'update': return 'VORTEX UPDATE';
     case 'action': return ACTION_FLOW_TITLES[flow.action];
     case 'context_remove': return 'REMOVE CONTEXT';
     case 'terminal_select': return 'FOCUS TERMINAL';
@@ -223,6 +238,12 @@ export function flowTitle(flow: CommandFlow | null): string {
 }
 
 export function parseCliArgs(args: readonly string[], cwd = process.cwd(), version = '0.1.0'): CliParseResult {
+  if (args[0] === 'update') return parseUpdateArgs(args.slice(1), cwd);
+  if (args[0] === '--apply-update') {
+    const statePath = args[1];
+    if (!statePath || args.length !== 2) throw new Error('--apply-update requires exactly one state file path.');
+    return { kind: 'apply-update', statePath: path.resolve(cwd, statePath) };
+  }
   let workspace: string | undefined;
   let provider: string | undefined;
   let model: string | undefined;
@@ -292,6 +313,7 @@ export function helpText(): string {
     'VORTEX',
     '',
     'Usage: vortex [workspace] [options]',
+    '       vortex update [options]',
     '',
     'Options:',
     '  -h, --help                 Show this help',
@@ -302,12 +324,104 @@ export function helpText(): string {
     '      --mode <mode>          Start in chat, build, review, debug, or plan mode',
     '      --config <path>        Read shared settings JSON from this path',
     '',
+    'Update exit codes:',
+    `  ${VORTEX_UPDATE_EXIT_CODES.upToDate}                         No update available`,
+    `  ${VORTEX_UPDATE_EXIT_CODES.installed}                        Update installed or scheduled`,
+    `  ${VORTEX_UPDATE_EXIT_CODES.available}                        Update available in --check mode`,
+    `  ${VORTEX_UPDATE_EXIT_CODES.networkError}                         Network or unexpected updater error`,
+    `  ${VORTEX_UPDATE_EXIT_CODES.integrityFailure}                         Release integrity validation failed`,
+    `  ${VORTEX_UPDATE_EXIT_CODES.unsupportedPlatform}                         Platform or architecture unsupported`,
+    `  ${VORTEX_UPDATE_EXIT_CODES.confirmationRequired}                         Confirmation required; use --yes`,
+    `  ${VORTEX_UPDATE_EXIT_CODES.manualInstallRequired}                         Manual installation required`,
+    '',
+    'Update options:',
+    '      --check                Check for updates without downloading',
+    '      --yes                  Confirm installation in non-interactive mode',
+    '      --channel <channel>    stable or pre-release',
+    '      --config <path>        Read shared settings JSON from this path',
+    '',
     'Slash commands:',
     ...commandLines,
     '',
     'The VORTEX CLI uses the same TypeScript harness, providers, MCP servers, memory,',
     'skills, rules, keychain, tools, sessions, and terminal runtime as the desktop app.',
   ].join('\n');
+}
+
+function parseUpdateArgs(args: readonly string[], cwd: string): CliParseResult {
+  let channel: CliUpdateOptions['channel'];
+  let checkOnly = false;
+  let assumeYes = false;
+  let configPath: string | undefined;
+  for (let index = 0; index < args.length; index += 1) {
+    const argument = args[index];
+    if (argument === '--check') {
+      checkOnly = true;
+      continue;
+    }
+    if (argument === '--yes') {
+      assumeYes = true;
+      continue;
+    }
+    if (argument === '--channel') {
+      const value = args[index + 1];
+      if (!value || value.startsWith('-')) throw new Error('--channel requires stable or pre-release.');
+      channel = parseUpdateChannel(value);
+      index += 1;
+      continue;
+    }
+    if (argument.startsWith('--channel=')) {
+      channel = parseUpdateChannel(argument.slice('--channel='.length));
+      continue;
+    }
+    if (argument === '--config') {
+      const value = args[index + 1];
+      if (!value || value.startsWith('-')) throw new Error('--config requires a path.');
+      configPath = path.resolve(cwd, value);
+      index += 1;
+      continue;
+    }
+    if (argument.startsWith('--config=')) {
+      const value = argument.slice('--config='.length);
+      if (!value) throw new Error('--config requires a path.');
+      configPath = path.resolve(cwd, value);
+      continue;
+    }
+    if (argument === '--help' || argument === '-h') return { kind: 'help', text: helpText() };
+    throw new Error(`Unknown update option: ${argument}. Use "vortex update --help" for usage.`);
+  }
+  return { kind: 'update', options: { ...(channel ? { channel } : {}), checkOnly, assumeYes, ...(configPath ? { configPath } : {}) } };
+}
+
+function parseUpdateChannel(value: string): 'stable' | 'pre-release' {
+  if (value === 'stable' || value === 'pre-release') return value;
+  throw new Error(`Invalid update channel "${value}". Expected stable or pre-release.`);
+}
+
+function updateOptions(state: UiState): readonly SelectionOption[] {
+  const release = state.updates.release;
+  const options: SelectionOption[] = [
+    { id: 'check', label: state.updates.status === 'checking' ? 'Checking for updates…' : 'Check for updates' },
+  ];
+  if (state.updates.status === 'checking' || state.updates.status === 'downloading') options.push({ id: 'cancel', label: 'Cancel update operation' });
+  if (state.updates.status === 'error') options.push({ id: 'retry', label: 'Retry update operation' });
+  if (release?.asset && state.updates.status === 'available') options.push({ id: 'download', label: `Download ${release.version} · ${formatBytes(release.asset.size)}` });
+  if (release?.asset && state.updates.status === 'ready') options.push({ id: 'apply', label: `Restart and install ${release.version}` });
+  if (release && !release.asset && release.manualReason) options.push({ id: 'manual', label: 'Show manual installation instructions' });
+  options.push(
+    { id: 'channel:stable', label: `Use Stable channel${state.updates.channel === 'stable' ? ' · selected' : ''}` },
+    { id: 'channel:pre-release', label: `Use Pre-release channel${state.updates.channel === 'pre-release' ? ' · selected' : ''}` },
+    { id: `startup:${state.updates.checkForUpdatesOnStartup ? 'off' : 'on'}`, label: `${state.updates.checkForUpdatesOnStartup ? 'Disable' : 'Enable'} startup checks` },
+    { id: `auto-download:${state.updates.autoDownload ? 'off' : 'on'}`, label: `${state.updates.autoDownload ? 'Disable' : 'Enable'} automatic downloads` },
+  );
+  return options;
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
 }
 
 function commandMatchRank(command: CommandSpec, query: string): number {

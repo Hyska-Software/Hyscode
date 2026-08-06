@@ -1,5 +1,5 @@
 import { tauriInvokeRaw } from './tauri-invoke';
-import { useSettingsStore, type ModelThinkingConfig, type ThemeId } from '@/stores/settings-store';
+import { useSettingsStore, type ModelThinkingConfig, type ThemeId, type UpdateChannel } from '@/stores/settings-store';
 
 type SharedSettingsPayload = {
   themeId: ThemeId;
@@ -28,6 +28,9 @@ type SharedSettingsPayload = {
   subAgentMaxIterations: number;
   subAgentAutoApprove: boolean;
   subAgentMaxConcurrent: number;
+  updateChannel: UpdateChannel;
+  checkForUpdatesOnStartup: boolean;
+  autoDownload: boolean;
 };
 
 type SharedSettingsImport = {
@@ -35,6 +38,9 @@ type SharedSettingsImport = {
   activeProviderId: string | null;
   activeModelId: string | null;
   thinkingSettings: Record<string, ModelThinkingConfig>;
+  updateChannel?: UpdateChannel;
+  checkForUpdatesOnStartup?: boolean;
+  autoDownload?: boolean;
 };
 
 type PreservedTuiSettings = {
@@ -68,6 +74,10 @@ function isThinkingLevel(value: unknown): value is NonNullable<ModelThinkingConf
     || value === 'default';
 }
 
+function isUpdateChannel(value: unknown): value is UpdateChannel {
+  return value === 'stable' || value === 'pre-release';
+}
+
 function parseThinkingConfig(value: unknown): ModelThinkingConfig | null {
   if (!isRecord(value) || typeof value.enabled !== 'boolean') return null;
   const config: ModelThinkingConfig = { enabled: value.enabled };
@@ -99,6 +109,9 @@ function parseSharedSettings(value: unknown): SharedSettingsImport | null {
     activeProviderId: value.activeProviderId,
     activeModelId: value.activeModelId,
     thinkingSettings,
+    ...(isUpdateChannel(value.updateChannel) ? { updateChannel: value.updateChannel } : {}),
+    ...(typeof value.checkForUpdatesOnStartup === 'boolean' ? { checkForUpdatesOnStartup: value.checkForUpdatesOnStartup } : {}),
+    ...(typeof value.autoDownload === 'boolean' ? { autoDownload: value.autoDownload } : {}),
   };
 }
 
@@ -131,6 +144,9 @@ function buildPayload(): SharedSettingsPayload {
     subAgentMaxIterations: settings.subAgentMaxIterations,
     subAgentAutoApprove: settings.subAgentAutoApprove,
     subAgentMaxConcurrent: settings.subAgentMaxConcurrent,
+    updateChannel: settings.updateChannel,
+    checkForUpdatesOnStartup: settings.checkForUpdatesOnStartup,
+    autoDownload: settings.autoDownload,
   };
 }
 
@@ -174,6 +190,9 @@ export async function hydrateSharedSettings(): Promise<boolean> {
         ...current.thinkingSettings,
         ...imported.thinkingSettings,
       },
+      ...(imported.updateChannel ? { updateChannel: imported.updateChannel } : {}),
+      ...(imported.checkForUpdatesOnStartup !== undefined ? { checkForUpdatesOnStartup: imported.checkForUpdatesOnStartup } : {}),
+      ...(imported.autoDownload !== undefined ? { autoDownload: imported.autoDownload } : {}),
     });
     return true;
   } catch {

@@ -38,6 +38,7 @@ function state(overrides: Partial<UiState> = {}): UiState {
     subagents: [],
     usage: { current: null, session: null, requestCount: 0, estimatedCost: 0, contextWindow: 0, inputTokens: 0, outputTokens: 0, totalTokens: 0 },
     notices: [],
+    updates: { status: 'idle', channel: 'stable', checkForUpdatesOnStartup: true, autoDownload: false, release: null, progress: null, installation: null, error: null },
     connectionState: 'connected',
     recovery: null,
     mainPanel: 'chat',
@@ -204,6 +205,24 @@ describe('TUI renderer', () => {
     expect(codeLine).not.toContain('\u001b[7m');
   });
 
+  it('does not render the tool activity card in the transcript', () => {
+    const rendered = new TerminalRenderer().render(state({
+      tools: [{
+        id: 'tool-1',
+        name: 'list_directory',
+        input: {},
+        status: 'success',
+        liveOutput: '',
+        outputSequence: 1,
+        expanded: false,
+      }],
+    }));
+    const plain = rendered.replace(/\u001b\[[0-9;]*[A-Za-z]/g, '');
+
+    expect(plain).not.toContain('ACTIVITY');
+    expect(plain).not.toContain('list_directory');
+  });
+
   it('renders a compact context meter from the active model window and current usage', () => {
     const rendered = new TerminalRenderer().render(state({
       usage: { current: null, session: null, requestCount: 1, estimatedCost: 0, contextWindow: 1000, inputTokens: 375, outputTokens: 20, totalTokens: 395 },
@@ -315,5 +334,8 @@ describe('TUI renderer', () => {
     expect(plainLines[workingIndex].trimEnd()).toMatch(/^\s{2}[· ]+Working\.\.\.$/);
     expect(plainLines[workingIndex + 1].trim()).toBe('');
     expect(workingIndex).toBeLessThan(chatIndex);
+
+    const composerWorkingLine = plainLines.find((line) => line.includes('╭─ WORKING')) ?? '';
+    expect(composerWorkingLine).toMatch(/WORKING\s+[· ]+\s+Working/u);
   });
 });

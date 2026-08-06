@@ -7,6 +7,14 @@
 #define MyAppURL "https://github.com/Hyska-Software/Hyscode"
 #define MyAppExeName "vortex.exe"
 
+#ifndef VortexCliArchitecture
+#define VortexCliArchitecture "x64"
+#endif
+
+#ifndef VortexCliArm64
+#define VortexCliArm64 0
+#endif
+
 #ifndef VortexCliSourceDir
 #define VortexCliSourceDir "..\..\tools\hyscode-tui\dist\vortex-production"
 #endif
@@ -25,12 +33,17 @@ DisableDirPage=yes
 DefaultGroupName={#MyAppName}
 AllowNoIcons=yes
 OutputDir=..\..\tools\hyscode-tui\dist\vortex-installer
-OutputBaseFilename=Vortex-CLI-Setup-{#MyAppVersion}-x64
+OutputBaseFilename=Vortex-CLI-Setup-{#MyAppVersion}-{#VortexCliArchitecture}
 Compression=lzma2/ultra64
 SolidCompression=yes
 WizardStyle=modern
+#if VortexCliArm64
+ArchitecturesAllowed=arm64compatible
+ArchitecturesInstallIn64BitMode=arm64compatible
+#else
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
+#endif
 PrivilegesRequired=lowest
 ChangesEnvironment=yes
 MinVersion=10.0.17763

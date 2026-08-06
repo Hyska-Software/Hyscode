@@ -31,6 +31,9 @@ afterEach(() => {
     activeModelId: null,
     thinkingSettings: {},
     thinkingCollapsedByDefault: false,
+    updateChannel: 'stable',
+    checkForUpdatesOnStartup: true,
+    autoDownload: false,
   });
 });
 
@@ -49,6 +52,9 @@ describe('shared desktop configuration import', () => {
         activeProviderId: 'anthropic',
         activeModelId: 'claude-sonnet-4-6',
         themeId: 'dracula',
+        updateChannel: 'pre-release',
+        checkForUpdatesOnStartup: false,
+        autoDownload: true,
         thinkingSettings: {
           'anthropic::claude-sonnet-4-6': {
             enabled: true,
@@ -68,6 +74,9 @@ describe('shared desktop configuration import', () => {
     expect(state.activeProviderId).toBe('anthropic');
     expect(state.activeModelId).toBe('claude-sonnet-4-6');
     expect(state.themeId).toBe('dracula');
+    expect(state.updateChannel).toBe('pre-release');
+    expect(state.checkForUpdatesOnStartup).toBe(false);
+    expect(state.autoDownload).toBe(true);
     expect(state.thinkingSettings['anthropic::claude-sonnet-4-6']).toEqual({
       enabled: true,
       level: 'high',
@@ -118,6 +127,7 @@ describe('shared desktop configuration import', () => {
   });
 
   it('preserves the TUI-only sidebar preference when desktop settings are written', async () => {
+    useSettingsStore.setState({ updateChannel: 'pre-release', checkForUpdatesOnStartup: false, autoDownload: true });
     invokeMock.mockImplementation(async (command: string, args?: Record<string, unknown>) => {
       if (command === 'get_home_dir') return 'C:/Users/test';
       if (command === 'read_file') {
@@ -132,6 +142,11 @@ describe('shared desktop configuration import', () => {
         const content = args?.content;
         expect(typeof content).toBe('string');
         expect(JSON.parse(String(content)).sidebarVisible).toBe(false);
+        expect(JSON.parse(String(content))).toMatchObject({
+          updateChannel: 'pre-release',
+          checkForUpdatesOnStartup: false,
+          autoDownload: true,
+        });
       }
       return undefined;
     });

@@ -4,6 +4,8 @@ import type {
   BridgeMessage,
   BridgeRequest,
   BridgeResponse,
+  CliUpdater,
+  DownloadedUpdate,
   GitSummary,
   InteractionRequest,
   ProjectSummary,
@@ -13,7 +15,7 @@ import type {
   TerminalSummary,
   TuiBridge,
 } from '@hyscode/tui-runtime';
-import { BUILTIN_THEMES, DEFAULT_THEME_ID } from '@hyscode/tui-runtime';
+import { BUILTIN_THEMES, CliUpdaterError, DEFAULT_THEME_ID } from '@hyscode/tui-runtime';
 import { MODE_OPTIONS, commandArgument, matchingCommands, parseSlashCommand, resolveCommandName, selectionOptions } from './commands';
 import { AGENT_TYPES } from './types';
 import type { CliOptions, CommandFlow, ContextView, InteractionState, Key, MemoryView, RuleView, RuntimeNotice, SkillView, SubAgentView, ToolView, TranscriptItem, TranscriptKind, UiState } from './types';
@@ -24,6 +26,11 @@ const EMPTY_GIT_SUMMARY: GitSummary = { available: false, branch: '', insertions
 
 export type RuntimeClient = Pick<TuiBridge, 'handle'>;
 
+export type TuiControllerOptions = {
+  updater?: CliUpdater;
+  interactive?: boolean;
+};
+
 export class TuiController {
   readonly state: UiState;
   private readonly pendingRequests = new Map<string, BridgeRequest['method']>();
@@ -31,8 +38,16 @@ export class TuiController {
   private nextRequestId = 1;
   private liveStreamStart: number | null = null;
   private gitRefreshInFlight = false;
+  private readonly updater: CliUpdater | null;
+  private readonly interactive: boolean;
+  private startupUpdateTimer: ReturnType<typeof setTimeout> | null = null;
+  private downloadedUpdate: DownloadedUpdate | null = null;
+  private initialized = false;
+  private updateOperation = 0;
 
-  constructor(readonly options: CliOptions, private readonly runtime: RuntimeClient) {
+  constructor(readonly options: CliOptions, private readonly runtime: RuntimeClient, controllerOptions: TuiControllerOptions = {}) {
+    this.updater = controllerOptions.updater ?? null;
+    this.interactive = controllerOptions.interactive ?? true;
     this.state = {
       input: '',
       inputCursor: 0,
@@ -66,6 +81,7 @@ export class TuiController {
       subagents: [],
       usage: emptyUsage(),
       notices: [],
+      updates: emptyUpdates(),
       connectionState: 'connecting',
       recovery: null,
       mainPanel: 'chat',
@@ -89,6 +105,9 @@ export class TuiController {
       width: 120,
       height: 32,
     };
+    this.updater?.setProgressListener((progress) => {
+      this.state.updates.progress = progress;
+    });
   }
 
   async start(): Promise<void> {
@@ -100,10 +119,18 @@ export class TuiController {
       ...(this.options.mode ? { agentType: this.options.mode } : {}),
       ...(this.options.configPath ? { configPath: this.options.configPath } : {}),
     });
+    this.initialized = true;
+    if (this.interactive && this.updater && this.state.updates.checkForUpdatesOnStartup) {
+      this.startupUpdateTimer = setTimeout(() => { void this.checkForUpdates(true); }, 3000);
+    }
   }
 
   async shutdown(): Promise<void> {
-    if (this.pendingRequests.size === 0 && this.state.shouldQuit) return;
+    if (this.startupUpdateTimer) {
+      clearTimeout(this.startupUpdateTimer);
+      this.startupUpdateTimer = null;
+    }
+    if (!this.initialized) return;
     await this.request('shutdown', {});
   }
 
@@ -407,6 +434,11 @@ export class TuiController {
     if (payload.recentSessions) this.state.sessions = payload.recentSessions;
     this.state.sidebarVisible = payload.sidebarVisible ?? this.state.sidebarVisible;
     if (!this.state.sidebarVisible && this.state.focus === 'sidebar') this.state.focus = 'composer';
+    if (payload.updates) {
+      this.state.updates.channel = payload.updates.channel;
+      this.state.updates.checkForUpdatesOnStartup = payload.updates.checkForUpdatesOnStartup;
+      this.state.updates.autoDownload = payload.updates.autoDownload;
+    }
     this.state.approvalMode = payload.approvalMode ?? this.state.approvalMode;
     this.state.thinking = {
       enabled: payload.activeThinking.enabled === true,
@@ -952,6 +984,9 @@ export class TuiController {
       case '/sidebar':
         await this.setSidebarVisibility(args);
         break;
+      case '/update':
+        await this.runUpdateCommand(args);
+        break;
       case '/approval':
         if (!args) this.openActionFlow('approval');
         else await this.setApprovalMode(commandArgument(args));
@@ -1284,6 +1319,131 @@ export class TuiController {
     this.state.status = nextValue ? 'Sidebar enabled' : 'Sidebar disabled';
   }
 
+  private openUpdateFlow(): void {
+    this.state.overlay = 'commands';
+    this.state.commandFlow = { kind: 'update', selected: 0 };
+  }
+
+  private async runUpdateCommand(rawArgs: string): Promise<void> {
+    if (!this.updater) {
+      this.state.updates.status = 'unsupported';
+      this.state.updates.error = 'The VORTEX updater is not available in this runtime.';
+      this.state.status = this.state.updates.error;
+      return;
+    }
+    const args = rawArgs.trim();
+    if (!args) {
+      this.openUpdateFlow();
+      if (this.state.updates.status === 'idle' || this.state.updates.status === 'up-to-date') await this.checkForUpdates(false);
+      return;
+    }
+    const tokens = args.split(/\s+/u).filter(Boolean);
+    const action = tokens[0]?.toLowerCase();
+    if (action === 'check') {
+      await this.checkForUpdates(false);
+      return;
+    }
+    if (action === 'channel' && (tokens[1] === 'stable' || tokens[1] === 'pre-release')) {
+      await this.setUpdatePreference({ updateChannel: tokens[1] });
+      await this.checkForUpdates(false);
+      return;
+    }
+    if (action === 'startup' && (tokens[1] === 'on' || tokens[1] === 'off')) {
+      await this.setUpdatePreference({ checkForUpdatesOnStartup: tokens[1] === 'on' });
+      return;
+    }
+    if ((action === 'auto-download' || action === 'download') && (tokens[1] === 'on' || tokens[1] === 'off')) {
+      await this.setUpdatePreference({ autoDownload: tokens[1] === 'on' });
+      return;
+    }
+    this.append('system', 'Usage: /update [check|channel stable|channel pre-release|startup on|startup off|auto-download on|auto-download off]');
+  }
+
+  private async setUpdatePreference(params: { updateChannel?: 'stable' | 'pre-release'; checkForUpdatesOnStartup?: boolean; autoDownload?: boolean }): Promise<void> {
+    await this.request('set_config', params);
+    if (params.updateChannel) this.state.updates.channel = params.updateChannel;
+    if (params.checkForUpdatesOnStartup !== undefined) this.state.updates.checkForUpdatesOnStartup = params.checkForUpdatesOnStartup;
+    if (params.autoDownload !== undefined) this.state.updates.autoDownload = params.autoDownload;
+    this.state.status = 'VORTEX update preferences saved';
+  }
+
+  private async checkForUpdates(silent: boolean): Promise<void> {
+    if (!this.updater) return;
+    if (this.state.updates.status === 'checking' || this.state.updates.status === 'downloading' || this.state.updates.status === 'applying') return;
+    const operation = ++this.updateOperation;
+    this.downloadedUpdate = null;
+    this.state.updates.progress = null;
+    this.state.updates.status = 'checking';
+    this.state.updates.error = null;
+    try {
+      const release = await this.updater.check(this.state.updates.channel);
+      if (operation !== this.updateOperation) return;
+      this.state.updates.release = release;
+      this.state.updates.installation = release?.installation ?? null;
+      this.state.updates.status = release ? 'available' : 'up-to-date';
+      this.state.status = release
+        ? `VORTEX ${release.version} available`
+        : 'VORTEX is up to date';
+      if (release?.asset && this.state.updates.autoDownload) await this.downloadUpdate(true);
+      if (silent && release) this.addNotice('info', `VORTEX ${release.version} is available · use /update to review`);
+      if (silent && release && !release.asset && release.manualReason) this.addNotice('warning', release.manualReason);
+    } catch (error) {
+      if (operation !== this.updateOperation) return;
+      const message = error instanceof CliUpdaterError ? error.message : error instanceof Error ? error.message : String(error);
+      this.state.updates.status = error instanceof CliUpdaterError && error.code === 'unsupported' ? 'unsupported' : 'error';
+      this.state.updates.error = message;
+      if (!silent) this.append('error', message);
+      else this.addNotice('warning', `VORTEX update check failed · ${message}`);
+    }
+  }
+
+  private async downloadUpdate(silent: boolean): Promise<void> {
+    if (!this.updater || !this.state.updates.release?.asset) return;
+    if (this.state.running) {
+      const message = 'Finish or cancel the active agent turn before downloading a VORTEX update.';
+      this.state.updates.error = message;
+      this.state.status = message;
+      return;
+    }
+    const operation = ++this.updateOperation;
+    this.state.updates.status = 'downloading';
+    this.state.updates.progress = null;
+    try {
+      this.downloadedUpdate = await this.updater.download(this.state.updates.release);
+      if (operation !== this.updateOperation) return;
+      this.state.updates.status = 'ready';
+      this.state.status = `VORTEX ${this.state.updates.release.version} downloaded · ready to install`;
+    } catch (error) {
+      if (operation !== this.updateOperation) return;
+      const message = error instanceof Error ? error.message : String(error);
+      this.state.updates.status = 'error';
+      this.state.updates.error = message;
+      if (!silent) this.append('error', message);
+    }
+  }
+
+  private async applyUpdate(): Promise<void> {
+    if (!this.updater || !this.downloadedUpdate) {
+      this.state.status = 'Download the VORTEX update before installing it';
+      return;
+    }
+    if (this.state.running) {
+      this.state.status = 'Finish or cancel the active agent turn before installing a VORTEX update';
+      return;
+    }
+    this.state.updates.status = 'applying';
+    try {
+      await this.updater.apply(this.downloadedUpdate);
+      this.state.status = 'VORTEX update scheduled · exiting to complete installation';
+      this.state.shouldQuit = true;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.state.updates.status = 'error';
+      this.state.updates.error = message;
+      this.append('error', message);
+    }
+  }
+
   private async cycleMode(): Promise<void> {
     const currentIndex = MODE_OPTIONS.findIndex((option) => option.value === this.state.mode);
     const next = MODE_OPTIONS[(currentIndex + 1) % MODE_OPTIONS.length];
@@ -1485,6 +1645,10 @@ export class TuiController {
       await this.acceptActionFlow(flow);
       return;
     }
+    if (flow.kind === 'update') {
+      await this.acceptUpdateFlow(flow);
+      return;
+    }
     if (flow.kind === 'context_remove') {
       const option = selectionOptions(this.state, flow)[flow.selected];
       if (option) {
@@ -1579,6 +1743,59 @@ export class TuiController {
       return;
     }
     await this.request('set_config', { providerId: this.state.provider, modelId: this.state.model, thinking });
+    this.closeCommandFlow();
+  }
+
+  private async acceptUpdateFlow(flow: Extract<CommandFlow, { kind: 'update' }>): Promise<void> {
+    const option = selectionOptions(this.state, flow)[flow.selected];
+    if (!option) {
+      this.closeCommandFlow();
+      return;
+    }
+    if (option.id === 'check') {
+      await this.checkForUpdates(false);
+      return;
+    }
+    if (option.id === 'cancel') {
+      this.updateOperation += 1;
+      this.updater?.cancel();
+      this.downloadedUpdate = null;
+      this.state.updates.status = 'idle';
+      this.state.updates.progress = null;
+      this.state.updates.error = null;
+      this.state.status = 'VORTEX update cancelled';
+      return;
+    }
+    if (option.id === 'retry') {
+      await this.checkForUpdates(false);
+      return;
+    }
+    if (option.id === 'download') {
+      await this.downloadUpdate(false);
+      return;
+    }
+    if (option.id === 'apply') {
+      await this.applyUpdate();
+      return;
+    }
+    if (option.id === 'manual') {
+      const release = this.state.updates.release;
+      this.append('system', release?.manualReason ?? 'Use the VORTEX release page to install this update manually.');
+      return;
+    }
+    if (option.id.startsWith('channel:')) {
+      const channel = option.id.slice('channel:'.length);
+      if (channel === 'stable' || channel === 'pre-release') await this.setUpdatePreference({ updateChannel: channel });
+      return;
+    }
+    if (option.id.startsWith('startup:')) {
+      await this.setUpdatePreference({ checkForUpdatesOnStartup: option.id.endsWith(':on') });
+      return;
+    }
+    if (option.id.startsWith('auto-download:')) {
+      await this.setUpdatePreference({ autoDownload: option.id.endsWith(':on') });
+      return;
+    }
     this.closeCommandFlow();
   }
 
@@ -1913,6 +2130,19 @@ function emptyUsage(): UiState['usage'] {
     inputTokens: 0,
     outputTokens: 0,
     totalTokens: 0,
+  };
+}
+
+function emptyUpdates(): UiState['updates'] {
+  return {
+    status: 'idle',
+    channel: 'stable',
+    checkForUpdatesOnStartup: true,
+    autoDownload: false,
+    release: null,
+    progress: null,
+    installation: null,
+    error: null,
   };
 }
 

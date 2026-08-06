@@ -12,7 +12,22 @@ describe('TUI command and CLI parsing', () => {
   it('rejects invalid modes and supports help/version surfaces', () => {
     expect(() => parseCliArgs(['--mode', 'unknown'])).toThrow('Invalid mode');
     expect(parseCliArgs(['--help'])).toMatchObject({ kind: 'help', text: expect.stringContaining('Usage: vortex') });
+    expect(parseCliArgs(['--help'])).toMatchObject({ kind: 'help', text: expect.stringContaining('Update installed or scheduled') });
     expect(parseCliArgs(['--version'], process.cwd(), '9.9.9')).toEqual({ kind: 'version', text: 'vortex 9.9.9' });
+  });
+
+  it('recognizes update subcommands before workspace arguments', () => {
+    expect(parseCliArgs(['update', '--check', '--channel', 'pre-release', '--config', 'settings.json'], 'C:/repo')).toEqual({
+      kind: 'update',
+      options: {
+        checkOnly: true,
+        assumeYes: false,
+        channel: 'pre-release',
+        configPath: 'C:\\repo\\settings.json',
+      },
+    });
+    expect(parseCliArgs(['C:/workspace'])).toMatchObject({ kind: 'run', options: { workspace: expect.stringContaining('workspace') } });
+    expect(() => parseCliArgs(['update', '--channel', 'nightly'])).toThrow('Invalid update channel');
   });
 
   it('parses quoted slash command arguments and filters the visual palette', () => {

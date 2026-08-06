@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { BridgeRequest, BridgeResponse, RuntimeReadyPayload } from '@hyscode/tui-runtime';
+import { CliUpdater } from '@hyscode/tui-runtime';
 import { TuiController, type RuntimeClient } from './controller';
 
 function readyPayload(workspacePath: string, includeThinkingModel = false): RuntimeReadyPayload {
@@ -134,6 +135,31 @@ describe('TUI controller', () => {
 
     expect(runtime.requests.at(-1)).toMatchObject({ method: 'set_config', params: { sidebarVisible: true } });
     expect(controller.state.sidebarVisible).toBe(true);
+  });
+
+  it('persists VORTEX update preferences through the shared runtime command', async () => {
+    const updater = new CliUpdater({ version: '0.8.2', platform: 'win32', architecture: 'x64' });
+    const runtime = new FakeRuntime();
+    const controller = new TuiController({ workspace: 'C:/workspace' }, runtime, { updater, interactive: false });
+    await controller.start();
+
+    await controller.handleKey({ type: 'character', value: '/update startup off' });
+    await controller.handleKey({ type: 'enter' });
+    await controller.handleKey({ type: 'character', value: '/update auto-download on' });
+    await controller.handleKey({ type: 'enter' });
+    await controller.handleKey({ type: 'character', value: '/update channel pre-release' });
+    await controller.handleKey({ type: 'enter' });
+
+    expect(runtime.requests.slice(-3).map((request) => request.params)).toEqual([
+      { checkForUpdatesOnStartup: false },
+      { autoDownload: true },
+      { updateChannel: 'pre-release' },
+    ]);
+    expect(controller.state.updates).toMatchObject({
+      checkForUpdatesOnStartup: false,
+      autoDownload: true,
+      channel: 'pre-release',
+    });
   });
 
   it('executes aliases from the slash palette without a second runtime loop', async () => {

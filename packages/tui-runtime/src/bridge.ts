@@ -427,6 +427,24 @@ export class TuiBridge {
       }
       settings.sidebarVisible = params.sidebarVisible;
     }
+    if (params.updateChannel !== undefined) {
+      if (params.updateChannel !== 'stable' && params.updateChannel !== 'pre-release') {
+        throw new Error('updateChannel must be stable or pre-release.');
+      }
+      settings.updateChannel = params.updateChannel;
+    }
+    if (params.checkForUpdatesOnStartup !== undefined) {
+      if (typeof params.checkForUpdatesOnStartup !== 'boolean') {
+        throw new Error('checkForUpdatesOnStartup must be a boolean.');
+      }
+      settings.checkForUpdatesOnStartup = params.checkForUpdatesOnStartup;
+    }
+    if (params.autoDownload !== undefined) {
+      if (typeof params.autoDownload !== 'boolean') {
+        throw new Error('autoDownload must be a boolean.');
+      }
+      settings.autoDownload = params.autoDownload;
+    }
     const providerId = typeof params.providerId === 'string' ? params.providerId : this.currentProviderId();
     const modelId = typeof params.modelId === 'string' ? params.modelId : this.currentModelId();
     const approvalMode = normalizeApprovalMode(params.approvalMode ?? settings.approvalMode);
@@ -1144,6 +1162,11 @@ export class TuiBridge {
       themes: this.themes,
       recentSessions: this.dataStore.listSessions(this.workspacePath).slice(0, 4),
       sidebarVisible: this.requireSettings().sidebarVisible,
+      updates: {
+        channel: this.requireSettings().updateChannel,
+        checkForUpdatesOnStartup: this.requireSettings().checkForUpdatesOnStartup,
+        autoDownload: this.requireSettings().autoDownload,
+      },
       git: this.gitSummary,
       capabilities: {
         slashCommands: true,

@@ -127,6 +127,12 @@ and can be changed with `/sidebar`, `/sidebar on`, `/sidebar off`, or
 `/sidebar toggle`. Desktop synchronization preserves this field without exposing
 it as a desktop layout setting.
 
+The shared settings file also contains `updateChannel` (`stable` or
+`pre-release`), `checkForUpdatesOnStartup`, and `autoDownload`. Both the desktop
+and VORTEX CLI preserve these fields. The TUI exposes them through `/update`:
+`/update check`, `/update channel stable`, `/update startup off`, and
+`/update auto-download on`.
+
 The runtime still exports a small NDJSON compatibility entrypoint for external
 protocol clients and tests. The packaged TUI does not launch it; direct in-process
 construction is the only production client path.
@@ -174,7 +180,7 @@ The launcher accepts `--provider`, `--model`, `--mode`, `--config`, and
 `/project`, `/new`, `/sessions`, `/load`, `/tab`, `/rename`, `/export`,
 `/attach`, `/context`, `/rules`, `/skills`, `/memory`, `/terminal`, `/diffs`,
 `/sdd`, `/subagents`, `/usage`, `/diagnostics`, `/retry`, `/continue`,
-`/cancel`, `/clear`, and `/quit` (with aliases such as `/resume`, `/diag`,
+`/update`, `/cancel`, `/clear`, and `/quit` (with aliases such as `/resume`, `/diag`,
 `/q`, and `/exit`). The palette groups commands by session, context,
 workspace, model, and runtime scope and also exposes command usage inline.
 
@@ -193,18 +199,20 @@ focus outside the command palette; `Esc` closes a palette or clears the draft;
 Question prompts support multiple questions, option selection, free-form text,
 and multiline answers.
 
-### Release assets and desktop installation
+### Release assets, self-update, and desktop installation
 
 The release workflow builds the VORTEX bundle on the native runner for each
 supported desktop platform and embeds the release version in the executable.
 It publishes both a complete standalone CLI asset and a desktop installer
-variant:
+variant. VORTEX CLI archives and installers are kept separate from desktop
+assets, and `vortex-cli-manifest-<version>.json` records the exact SHA-256 and
+size for every platform/architecture asset:
 
 | Platform | Standalone CLI | Desktop + optional CLI |
 |---|---|---|
-| Windows x64 | `Vortex-CLI-Setup-<version>-x64.exe` and `vortex-cli-<version>-windows-x64.zip` | `HysCode-Setup-<version>-x64.exe`; select **Install the VORTEX CLI** in the wizard |
-| Linux x64 | `vortex-cli-<version>-linux-x64.deb` and `vortex-cli-<version>-linux-x64.tar.gz` | `HysCode-Setup-<version>-linux-x64-with-vortex-cli.deb`; the package asks through debconf |
-| macOS native runner | `Vortex-CLI-Setup-<version>-macos-<arch>.pkg` and `vortex-cli-<version>-macos-<arch>.tar.gz` | `HysCode-Setup-<version>-macos-<arch>-with-vortex-cli.pkg`; choose VORTEX CLI in the installer choices |
+| Windows x64/arm64 | `Vortex-CLI-Setup-<version>-<arch>.exe` and `vortex-cli-<version>-windows-<arch>.zip` | Desktop installer remains a separate asset |
+| Linux x64/arm64 | `vortex-cli-<version>-linux-<arch>.deb` and `vortex-cli-<version>-linux-<arch>.tar.gz` | Desktop packages remain separate assets |
+| macOS x64/arm64 | `Vortex-CLI-Setup-<version>-macos-<arch>.pkg` and `vortex-cli-<version>-macos-<arch>.tar.gz` | Desktop packages remain separate assets |
 
 The normal Linux AppImage, RPM, macOS DMG, and desktop Windows installer
 remain available as desktop-only assets. The optional component is intentionally
@@ -212,6 +220,16 @@ not injected into the AppImage or DMG because those formats do not expose a
 portable component-selection phase. The standalone CLI packages and archives
 contain the compiled launcher, Codex sidecar, and platform-specific `node-pty`
 assets, so they do not require Bun or Node.js on the target machine.
+
+`vortex update` checks the selected release channel without changing the
+workspace. `vortex update --check` is read-only; `vortex update --yes` is the
+non-interactive confirmation path. A writable user-local installation is
+updated from the archive through a temporary helper and rollback-safe swap.
+Protected or desktop-bundled installations open the official installer or
+direct the user to update HysCode Desktop; VORTEX never invokes `sudo`, UAC,
+or another elevation mechanism silently. Releases without the integrity
+manifest are reported for manual installation and are never installed
+automatically.
 
 ### Configuration and credentials
 

@@ -150,7 +150,7 @@ function sidebarLines(state: UiState, width: number, height: number): string[] {
 }
 
 function transcriptView(items: TranscriptItem[], width: number, state: UiState): string[] {
-  if (items.length === 0 && state.tools.length === 0) return emptyTranscript(state, width);
+  if (items.length === 0) return emptyTranscript(state, width);
   const lines: string[] = [];
   for (const item of items) {
     const [label, marker, color] = transcriptStyle(item.kind);
@@ -162,28 +162,10 @@ function transcriptView(items: TranscriptItem[], width: number, state: UiState):
     }
     lines.push('');
   }
-  if (state.tools.length > 0) {
-    lines.push(...toolCards(state, width));
-  }
   if (state.mainPanel === 'terminal') lines.push(...terminalPanel(state, width));
   else if (state.mainPanel === 'sdd') lines.push(...sddPanel(state, width));
   else if (state.mainPanel === 'activity') lines.push(...activityPanel(state, width));
   if (state.scroll > 0) lines.push(`${MUTED}↑ ${state.scroll} line(s) above · Wheel/PgDn returns to live output${RESET}`);
-  return lines;
-}
-
-function toolCards(state: UiState, width: number): string[] {
-  const lines: string[] = [`${PANEL}┌─ ACTIVITY${RESET}`];
-  for (const tool of state.tools.slice(-8)) {
-    const color = tool.status === 'error' ? ERROR : tool.status === 'success' ? SUCCESS : tool.status === 'pending' ? WARNING : ACCENT;
-    const marker = tool.status === 'success' ? '✓' : tool.status === 'error' ? '×' : tool.status === 'pending' ? '!' : '›';
-    const duration = tool.durationMs ? ` · ${tool.durationMs}ms` : '';
-    lines.push(`${color}${marker}${RESET} ${BOLD}${shorten(tool.name, Math.max(12, width - 48))}${RESET} ${DIM}${tool.status}${duration}${RESET}`);
-    if (tool.description) lines.push(`  ${DIM}${shorten(tool.description, width - 5)}${RESET}`);
-    if (tool.liveOutput) lines.push(...wrapText(stripAnsi(tool.liveOutput.slice(-600)), Math.max(12, width - 6)).slice(-3).map((line) => `  ${SOFT}${line}${RESET}`));
-    if (tool.output && tool.status !== 'success') lines.push(...wrapText(stripAnsi(tool.output.slice(-600)), Math.max(12, width - 6)).slice(-2).map((line) => `  ${SOFT}${line}${RESET}`));
-  }
-  lines.push(`${PANEL}└${'─'.repeat(Math.max(0, Math.min(width - 2, 20)))}${RESET}`, '');
   return lines;
 }
 
@@ -370,7 +352,8 @@ function composerLines(state: UiState, width: number): string[] {
   const contextLine = `${chips ? MUTED : DIM}${contextDetails}${RESET}  ${meter}`;
   const inputWidth = Math.max(12, composerWidth - 6);
   const inputRows = renderInputRows(state, inputWidth);
-  const composerHeader = `${ACCENT}╭─ ${label}${RESET} ${DIM}${status}${RESET}`;
+  const workingFrameText = state.running ? `${WARNING}${workingFrame()}${RESET} ` : '';
+  const composerHeader = `${ACCENT}╭─ ${label}${RESET} ${workingFrameText}${DIM}${status}${RESET}`;
   const composerTop = `${composerHeader}${ACCENT}${'─'.repeat(Math.max(0, composerWidth - visibleLength(composerHeader) - 1))}╮${RESET}`;
   const frame = (line: string): string => insetComposerLine(line, width, composerWidth);
   return [
@@ -386,8 +369,11 @@ function composerLines(state: UiState, width: number): string[] {
 }
 
 function workingIndicator(): string {
-  const frame = WORKING_FRAMES[Math.floor(Date.now() / WORKING_FRAME_INTERVAL_MS) % WORKING_FRAMES.length];
-  return `${ACCENT}${frame}${RESET} ${SOFT}Working...${RESET}`;
+  return `${ACCENT}${workingFrame()}${RESET} ${SOFT}Working...${RESET}`;
+}
+
+function workingFrame(): string {
+  return WORKING_FRAMES[Math.floor(Date.now() / WORKING_FRAME_INTERVAL_MS) % WORKING_FRAMES.length];
 }
 
 function insetComposerLine(line: string, width: number, composerWidth: number): string {
@@ -484,6 +470,8 @@ function commandFlowLines(state: UiState, width: number, maxHeight: number): str
     return lines;
   }
 
+  if (flow.kind === 'update') return updateFlowLines(state, width, maxHeight);
+
   const lines = [`${DIM}↑↓ select · PgUp/PgDn scroll · Enter apply · Esc back${RESET}`];
   const options = flowOptions(state, flow);
   if (options.length === 0) return [...lines, `${WARNING}No options available for the current runtime.${RESET}`];
@@ -496,6 +484,55 @@ function commandFlowLines(state: UiState, width: number, maxHeight: number): str
   }
   if (range.scrollable) lines.push(`${DIM}↑ ${range.start + 1}-${range.end}/${options.length} · PgUp/PgDn scroll${RESET}`);
   return lines;
+}
+
+function updateFlowLines(state: UiState, width: number, maxHeight: number): string[] {
+  const update = state.updates;
+  const release = update.release;
+  const lines = [
+    `${DIM}↑↓ select · Enter apply · Esc back${RESET}`,
+    `${MUTED}Current${RESET} ${SOFT}${release?.currentVersion ?? 'installed version'}${RESET}  ${MUTED}Channel${RESET} ${ACCENT}${update.channel}${RESET}`,
+    `${MUTED}Status${RESET} ${updateStatusLabel(update.status)}`,
+  ];
+  if (release) {
+    lines.push(`${MUTED}Available${RESET} ${ACCENT}${BOLD}${release.version}${RESET}  ${MUTED}${release.asset ? `${formatBytes(release.asset.size)} · ${release.asset.kind}` : 'manual installation'}${RESET}`);
+    if (release.body) lines.push(...wrapText(release.body.replace(/\r?\n/gu, ' '), Math.max(20, width - 8)).slice(0, 2).map((line) => `${SOFT}${line}${RESET}`));
+    if (release.installation) lines.push(`${MUTED}Install${RESET} ${release.installation.kind} · ${release.installation.mode}`);
+    if (release.manualReason) lines.push(...wrapText(release.manualReason, Math.max(20, width - 8)).slice(0, 2).map((line) => `${WARNING}${line}${RESET}`));
+  }
+  if (update.progress && (update.status === 'downloading' || update.status === 'ready')) {
+    const progressWidth = Math.max(10, Math.min(width - 20, 36));
+    const filled = Math.round((update.progress.percent / 100) * progressWidth);
+    lines.push(`${ACCENT}${'━'.repeat(filled)}${MUTED}${'─'.repeat(Math.max(0, progressWidth - filled))}${RESET} ${Math.round(update.progress.percent)}%`);
+  }
+  if (update.error) lines.push(`${ERROR}${shorten(update.error, width - 8)}${RESET}`);
+  const options = selectionOptions(state, { kind: 'update', selected: 0 });
+  const range = listRange(state.commandFlow?.kind === 'update' ? state.commandFlow.selected : 0, options.length, maxHeight, lines.length + 1);
+  for (let index = range.start; index < range.end; index += 1) {
+    const option = options[index];
+    const selected = state.commandFlow?.kind === 'update' && index === state.commandFlow.selected;
+    lines.push(`${selected ? `${ACCENT}${BOLD}›${RESET}` : ' '} ${selected ? BOLD : ''}${shorten(option.label, width - 8)}${selected ? RESET : ''}`);
+  }
+  return lines;
+}
+
+function updateStatusLabel(status: UiState['updates']['status']): string {
+  if (status === 'checking') return `${WARNING}checking…${RESET}`;
+  if (status === 'available') return `${ACCENT}update available${RESET}`;
+  if (status === 'downloading') return `${WARNING}downloading…${RESET}`;
+  if (status === 'ready') return `${SUCCESS}ready to install${RESET}`;
+  if (status === 'applying') return `${WARNING}applying…${RESET}`;
+  if (status === 'up-to-date') return `${SUCCESS}up to date${RESET}`;
+  if (status === 'unsupported') return `${WARNING}unsupported${RESET}`;
+  if (status === 'error') return `${ERROR}error${RESET}`;
+  return `${MUTED}not checked${RESET}`;
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
 }
 
 function flowOptions(state: UiState, flow: CommandFlow): string[] {

@@ -3,12 +3,16 @@ import type { Message, TokenUsage } from '@hyscode/ai-providers';
 import type {
   BridgeMessage,
   ContextStatePayload,
+  CliInstallation,
+  CliUpdateProgress,
+  CliUpdateStatus,
   GitSummary,
   InteractionRequest,
   ProjectSummary,
   RuntimeCapabilities,
   ProviderSummary,
   RuntimeReadyPayload,
+  ReleaseInfo,
   SessionRecord,
   SessionSummary,
   SddStatePayload,
@@ -26,8 +30,17 @@ export type CliOptions = {
   configPath?: string;
 };
 
+export type CliUpdateOptions = {
+  channel?: 'stable' | 'pre-release';
+  checkOnly: boolean;
+  assumeYes: boolean;
+  configPath?: string;
+};
+
 export type CliParseResult =
   | { kind: 'run'; options: CliOptions }
+  | { kind: 'update'; options: CliUpdateOptions }
+  | { kind: 'apply-update'; statePath: string }
   | { kind: 'help'; text: string }
   | { kind: 'version'; text: string };
 
@@ -105,6 +118,17 @@ export type RuntimeNotice = {
   createdAt: number;
 };
 
+export type UpdateView = {
+  status: CliUpdateStatus;
+  channel: 'stable' | 'pre-release';
+  checkForUpdatesOnStartup: boolean;
+  autoDownload: boolean;
+  release: ReleaseInfo | null;
+  progress: CliUpdateProgress | null;
+  installation: CliInstallation | null;
+  error: string | null;
+};
+
 export type TuiTab = {
   id: string;
   title: string;
@@ -167,6 +191,7 @@ export type CommandFlow =
   | { kind: 'model'; providerIndex: number; selected: number }
   | { kind: 'thinking'; selected: number }
   | { kind: 'theme'; selected: number }
+  | { kind: 'update'; selected: number }
   | { kind: 'action'; action: SelectionFlowAction; selected: number }
   | { kind: 'context_remove'; selected: number }
   | { kind: 'terminal_attach'; selected: number }
@@ -216,6 +241,7 @@ export type UiState = {
   subagents: SubAgentView[];
   usage: UsageView;
   notices: RuntimeNotice[];
+  updates: UpdateView;
   connectionState: string;
   recovery: RecoveryView | null;
   mainPanel: MainPanel;

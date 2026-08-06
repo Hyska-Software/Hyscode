@@ -102,12 +102,19 @@ export type RuntimeReadyPayload = {
   sidebarVisible?: boolean;
   /** Current Git branch and line counts for uncommitted tracked changes. */
   git?: GitSummary;
+  updates?: RuntimeUpdatesPayload;
   approvalMode?: ApprovalMode;
   capabilities?: RuntimeCapabilities;
   context?: ContextStatePayload;
   sdd?: SddStatePayload;
   terminals?: TerminalSummary[];
   session?: SessionRecord;
+};
+
+export type RuntimeUpdatesPayload = {
+  channel: 'stable' | 'pre-release';
+  checkForUpdatesOnStartup: boolean;
+  autoDownload: boolean;
 };
 
 export type RuntimeCapabilities = {
@@ -288,6 +295,9 @@ export type SetConfigParams = {
   temperature?: number;
   topP?: number | null;
   thinking?: ThinkingConfig;
+  updateChannel?: 'stable' | 'pre-release';
+  checkForUpdatesOnStartup?: boolean;
+  autoDownload?: boolean;
 };
 
 export function pendingToolToInteraction(
