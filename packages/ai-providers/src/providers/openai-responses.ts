@@ -21,10 +21,18 @@ interface ResponsesInput {
   input: unknown[];
 }
 
+interface ResponsesInputOptions {
+  explicitCacheBreakpoint?: boolean;
+}
+
 /**
  * Convert HysCode messages into Responses API `instructions` + `input` items.
  */
-export function toResponsesInput(messages: Message[], systemPrompt?: string): ResponsesInput {
+export function toResponsesInput(
+  messages: Message[],
+  systemPrompt?: string,
+  options: ResponsesInputOptions = {},
+): ResponsesInput {
   const instructionsParts: string[] = [];
   const input: unknown[] = [];
 
@@ -86,10 +94,22 @@ export function toResponsesInput(messages: Message[], systemPrompt?: string): Re
     if (parts.length) input.push({ role: 'user', content: parts });
   }
 
-  return {
-    instructions: instructionsParts.length ? instructionsParts.join('\n\n') : undefined,
-    input,
-  };
+  const instructions = instructionsParts.length ? instructionsParts.join('\n\n') : undefined;
+  if (options.explicitCacheBreakpoint && instructions) {
+    input.unshift({
+      role: 'system',
+      content: [
+        {
+          type: 'input_text',
+          text: instructions,
+          prompt_cache_breakpoint: { mode: 'explicit' },
+        },
+      ],
+    });
+    return { input };
+  }
+
+  return { instructions, input };
 }
 
 export interface ResponsesAPIConfig {
@@ -99,6 +119,8 @@ export interface ResponsesAPIConfig {
   /** Base URL without the /responses suffix (e.g. https://opencode.ai/zen/v1) */
   baseUrl: string;
   fetchImpl: FetchImpl;
+  /** Whether this endpoint/model accepts the current explicit cache fields. */
+  supportsExplicitPromptCaching?: boolean;
 }
 
 /**
@@ -109,13 +131,23 @@ export async function* chatResponsesAPI(
   params: ChatParams,
   config: ResponsesAPIConfig,
 ): AsyncIterable<StreamChunk> {
-  const { instructions, input } = toResponsesInput(params.messages, params.systemPrompt);
+  const explicitCacheRequested =
+    params.cachePrompt === true || params.promptCacheOptions?.mode === 'explicit';
+  const explicitCache =
+    explicitCacheRequested && config.supportsExplicitPromptCaching === true;
+  const { instructions, input } = toResponsesInput(params.messages, params.systemPrompt, {
+    explicitCacheBreakpoint: explicitCache,
+  });
 
   const body: Record<string, unknown> = {
     model: params.model,
     input,
     stream: true,
   };
+
+  const promptCacheKey = params.promptCacheKey ?? params.promptCacheOptions?.key;
+  if (promptCacheKey) body.prompt_cache_key = promptCacheKey;
+  if (explicitCache) body.prompt_cache_options = { mode: 'explicit' };
 
   if (instructions) body.instructions = instructions;
   if (params.tools?.length) {
@@ -279,6 +311,13 @@ export function parseResponsesChunk(data: string, currentToolId: string, provide
           outputTokens: (usage.output_tokens as number) ?? 0,
           totalTokens: (usage.total_tokens as number) ?? 0,
         };
+        const inputDetails = usage.input_tokens_details as Record<string, unknown> | undefined;
+        if (typeof inputDetails?.cached_tokens === 'number') {
+          tokenUsage.cacheReadTokens = inputDetails.cached_tokens;
+        }
+        if (typeof inputDetails?.cache_write_tokens === 'number') {
+          tokenUsage.cacheWriteTokens = inputDetails.cache_write_tokens;
+        }
         if (typeof outputDetails?.reasoning_tokens === 'number') {
           tokenUsage.reasoningTokens = outputDetails.reasoning_tokens;
         }

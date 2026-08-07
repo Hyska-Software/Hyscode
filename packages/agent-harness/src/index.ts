@@ -91,7 +91,7 @@ export { ReadLoopMiddleware } from './read-loop';
 
 export { ContextManager } from './context-manager';
 export { RequestPreparation, estimateActualCost } from './request-preparation';
-export type { PreparedChatRequest, RequestCostBreakdown } from './request-preparation';
+export type { PreparedChatRequest, PromptCachePlan, RequestCostBreakdown } from './request-preparation';
 export { ToolRouter } from './tool-router';
 export { SkillLoader } from './skill-loader';
 export type { SkillLoaderConfig } from './skill-loader';

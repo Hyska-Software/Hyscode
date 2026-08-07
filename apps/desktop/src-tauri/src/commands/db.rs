@@ -36,6 +36,8 @@ pub fn open_database(app_dir: &std::path::Path) -> Connection {
     apply_migration_011(&conn);
     apply_migration_012(&conn);
     apply_migration_013(&conn);
+    apply_migration_014(&conn);
+    apply_migration_015(&conn);
     conn
 }
 
@@ -152,6 +154,164 @@ fn apply_migration_013(conn: &Connection) {
          CREATE INDEX IF NOT EXISTS idx_traces_parent ON traces(parent_turn_id);",
     )
     .expect("failed to index delegated turn records");
+}
+
+/// Migration 014: persist prompt-cache eligibility and observed hit counters.
+/// Rates remain nullable so historical rows are not misclassified as misses.
+fn apply_migration_014(conn: &Connection) {
+    let additions: &[(&str, &str, &str)] = &[
+        (
+            "turn_records",
+            "token_cache_eligible",
+            "ALTER TABLE turn_records ADD COLUMN token_cache_eligible INTEGER NOT NULL DEFAULT 0",
+        ),
+        (
+            "turn_records",
+            "token_cache_measured_read",
+            "ALTER TABLE turn_records ADD COLUMN token_cache_measured_read INTEGER NOT NULL DEFAULT 0",
+        ),
+        (
+            "turn_records",
+            "token_cache_measured",
+            "ALTER TABLE turn_records ADD COLUMN token_cache_measured INTEGER NOT NULL DEFAULT 0",
+        ),
+        (
+            "turn_records",
+            "token_cache_hit_requests",
+            "ALTER TABLE turn_records ADD COLUMN token_cache_hit_requests INTEGER NOT NULL DEFAULT 0",
+        ),
+        (
+            "turn_records",
+            "token_cache_observed_requests",
+            "ALTER TABLE turn_records ADD COLUMN token_cache_observed_requests INTEGER NOT NULL DEFAULT 0",
+        ),
+        (
+            "turn_records",
+            "token_cache_total_requests",
+            "ALTER TABLE turn_records ADD COLUMN token_cache_total_requests INTEGER NOT NULL DEFAULT 0",
+        ),
+        (
+            "turn_records",
+            "token_cache_unknown_requests",
+            "ALTER TABLE turn_records ADD COLUMN token_cache_unknown_requests INTEGER NOT NULL DEFAULT 0",
+        ),
+        (
+            "traces",
+            "token_cache_eligible",
+            "ALTER TABLE traces ADD COLUMN token_cache_eligible INTEGER NOT NULL DEFAULT 0",
+        ),
+        (
+            "traces",
+            "token_cache_measured_read",
+            "ALTER TABLE traces ADD COLUMN token_cache_measured_read INTEGER NOT NULL DEFAULT 0",
+        ),
+        (
+            "traces",
+            "token_cache_measured",
+            "ALTER TABLE traces ADD COLUMN token_cache_measured INTEGER NOT NULL DEFAULT 0",
+        ),
+        (
+            "traces",
+            "token_cache_hit_requests",
+            "ALTER TABLE traces ADD COLUMN token_cache_hit_requests INTEGER NOT NULL DEFAULT 0",
+        ),
+        (
+            "traces",
+            "token_cache_observed_requests",
+            "ALTER TABLE traces ADD COLUMN token_cache_observed_requests INTEGER NOT NULL DEFAULT 0",
+        ),
+        (
+            "traces",
+            "token_cache_total_requests",
+            "ALTER TABLE traces ADD COLUMN token_cache_total_requests INTEGER NOT NULL DEFAULT 0",
+        ),
+        (
+            "traces",
+            "token_cache_unknown_requests",
+            "ALTER TABLE traces ADD COLUMN token_cache_unknown_requests INTEGER NOT NULL DEFAULT 0",
+        ),
+    ];
+    for (table, column, ddl) in additions {
+        let exists: bool = conn
+            .query_row(
+                "SELECT COUNT(*) > 0 FROM pragma_table_info(?1) WHERE name = ?2",
+                params![table, column],
+                |row| row.get(0),
+            )
+            .unwrap_or(false);
+        if !exists {
+            conn.execute_batch(ddl)
+                .unwrap_or_else(|e| panic!("failed to add column {table}.{column}: {e}"));
+        }
+    }
+}
+
+/// Migration 015: persist the native Codex thread associated with a HysCode
+/// conversation. The fingerprint fences reuse when the stable prompt changes.
+fn apply_migration_015(conn: &Connection) {
+    let additions: &[(&str, &str, &str)] = &[
+        (
+            "conversations",
+            "codex_thread_id",
+            "ALTER TABLE conversations ADD COLUMN codex_thread_id TEXT",
+        ),
+        (
+            "conversations",
+            "codex_thread_fingerprint",
+            "ALTER TABLE conversations ADD COLUMN codex_thread_fingerprint TEXT",
+        ),
+    ];
+    for (table, column, ddl) in additions {
+        let exists: bool = conn
+            .query_row(
+                "SELECT COUNT(*) > 0 FROM pragma_table_info(?1) WHERE name = ?2",
+                params![table, column],
+                |row| row.get(0),
+            )
+            .unwrap_or(false);
+        if !exists {
+            conn.execute_batch(ddl)
+                .unwrap_or_else(|e| panic!("failed to add column {table}.{column}: {e}"));
+        }
+    }
+}
+
+pub fn load_codex_thread(
+    state: &DbState,
+    conversation_id: &str,
+    fingerprint: Option<&str>,
+) -> Result<Option<String>, String> {
+    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    conn.query_row(
+        "SELECT codex_thread_id
+         FROM conversations
+         WHERE id = ?1
+           AND codex_thread_id IS NOT NULL
+           AND (?2 IS NULL OR codex_thread_fingerprint = ?2)",
+        params![conversation_id, fingerprint],
+        |row| row.get(0),
+    )
+    .optional()
+    .map_err(|e| e.to_string())
+}
+
+pub fn save_codex_thread(
+    state: &DbState,
+    conversation_id: &str,
+    fingerprint: Option<&str>,
+    thread_id: &str,
+) -> Result<(), String> {
+    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    conn.execute(
+        "UPDATE conversations
+         SET codex_thread_id = ?2,
+             codex_thread_fingerprint = ?3,
+             updated_at = datetime('now')
+         WHERE id = ?1",
+        params![conversation_id, thread_id, fingerprint],
+    )
+    .map(|_| ())
+    .map_err(|e| e.to_string())
 }
 
 // ─── Row types ──────────────────────────────────────────────────────────────
@@ -580,6 +740,13 @@ pub fn db_create_turn_record(
     token_total: i64,
     token_cache_read: i64,
     token_cache_write: i64,
+    token_cache_measured_read: i64,
+    token_cache_eligible: i64,
+    token_cache_measured: i64,
+    token_cache_hit_requests: i64,
+    token_cache_observed_requests: i64,
+    token_cache_total_requests: i64,
+    token_cache_unknown_requests: i64,
     stop_reason: String,
     verification_performed: bool,
     verification_forced: bool,
@@ -589,8 +756,8 @@ pub fn db_create_turn_record(
 ) -> Result<(), String> {
     let conn = state.0.lock().map_err(|e| e.to_string())?;
     conn.execute(
-        "INSERT INTO turn_records (id, conversation_id, mode, iterations, tool_calls, token_input, token_output, token_total, token_cache_read, token_cache_write, stop_reason, verification_performed, verification_forced, files_modified, duration_ms, parent_turn_id)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
+        "INSERT INTO turn_records (id, conversation_id, mode, iterations, tool_calls, token_input, token_output, token_total, token_cache_read, token_cache_write, token_cache_measured_read, token_cache_eligible, token_cache_measured, token_cache_hit_requests, token_cache_observed_requests, token_cache_total_requests, token_cache_unknown_requests, stop_reason, verification_performed, verification_forced, files_modified, duration_ms, parent_turn_id)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23)",
         params![
             id,
             conversation_id,
@@ -602,6 +769,13 @@ pub fn db_create_turn_record(
             token_total,
             token_cache_read,
             token_cache_write,
+            token_cache_measured_read,
+            token_cache_eligible,
+            token_cache_measured,
+            token_cache_hit_requests,
+            token_cache_observed_requests,
+            token_cache_total_requests,
+            token_cache_unknown_requests,
             stop_reason,
             verification_performed as i64,
             verification_forced as i64,
@@ -637,6 +811,13 @@ pub struct TurnCommitRecord {
     token_total: i64,
     token_cache_read: i64,
     token_cache_write: i64,
+    token_cache_measured_read: i64,
+    token_cache_eligible: i64,
+    token_cache_measured: i64,
+    token_cache_hit_requests: i64,
+    token_cache_observed_requests: i64,
+    token_cache_total_requests: i64,
+    token_cache_unknown_requests: i64,
     stop_reason: String,
     verification_performed: bool,
     verification_forced: bool,
@@ -714,9 +895,12 @@ pub fn db_commit_agent_turn(
         .execute(
             "INSERT OR REPLACE INTO turn_records
              (id, conversation_id, mode, iterations, tool_calls, token_input, token_output,
-              token_total, token_cache_read, token_cache_write, stop_reason,
+              token_total, token_cache_read, token_cache_write, token_cache_measured_read,
+              token_cache_eligible,
+              token_cache_measured, token_cache_hit_requests, token_cache_observed_requests,
+              token_cache_total_requests, token_cache_unknown_requests, stop_reason,
               verification_performed, verification_forced, files_modified, duration_ms)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22)",
             params![
                 turn.id,
                 conversation_id,
@@ -728,6 +912,13 @@ pub fn db_commit_agent_turn(
                 turn.token_total,
                 turn.token_cache_read,
                 turn.token_cache_write,
+                turn.token_cache_measured_read,
+                turn.token_cache_eligible,
+                turn.token_cache_measured,
+                turn.token_cache_hit_requests,
+                turn.token_cache_observed_requests,
+                turn.token_cache_total_requests,
+                turn.token_cache_unknown_requests,
                 turn.stop_reason,
                 turn.verification_performed as i64,
                 turn.verification_forced as i64,
@@ -740,12 +931,24 @@ pub fn db_commit_agent_turn(
 }
 
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct TokenUsageRow {
     pub input_tokens: i64,
     pub output_tokens: i64,
     pub total_tokens: i64,
     pub cache_read_tokens: i64,
     pub cache_write_tokens: i64,
+    pub cache_measured_read_tokens: i64,
+    pub cache_eligible_tokens: i64,
+    pub cache_measured_eligible_tokens: i64,
+    pub cache_hit_requests: i64,
+    pub cache_observed_requests: i64,
+    pub cache_total_requests: i64,
+    pub cache_unknown_requests: i64,
+    pub cache_hit_rate: Option<f64>,
+    pub cache_input_read_ratio: Option<f64>,
+    pub cache_request_hit_rate: Option<f64>,
+    pub cache_unknown_rate: Option<f64>,
 }
 
 /// Sum token usage across all turn records in a conversation.
@@ -763,17 +966,47 @@ pub fn db_get_conversation_token_usage(
                 COALESCE(SUM(token_output), 0),
                 COALESCE(SUM(token_total), 0),
                 COALESCE(SUM(token_cache_read), 0),
-                COALESCE(SUM(token_cache_write), 0)
+                COALESCE(SUM(token_cache_write), 0),
+                COALESCE(SUM(token_cache_measured_read), 0),
+                COALESCE(SUM(token_cache_eligible), 0),
+                COALESCE(SUM(token_cache_measured), 0),
+                COALESCE(SUM(token_cache_hit_requests), 0),
+                COALESCE(SUM(token_cache_observed_requests), 0),
+                COALESCE(SUM(token_cache_total_requests), 0),
+                COALESCE(SUM(token_cache_unknown_requests), 0)
              FROM turn_records
              WHERE conversation_id = ?1",
             params![conversation_id],
             |row| {
+                let input_tokens: i64 = row.get(0)?;
+                let cache_read_tokens: i64 = row.get(3)?;
+                let measured_read_tokens: i64 = row.get(5)?;
+                let eligible_tokens: i64 = row.get(6)?;
+                let measured_tokens: i64 = row.get(7)?;
+                let observed_requests: i64 = row.get(9)?;
+                let total_requests: i64 = row.get(10)?;
+                let unknown_requests: i64 = row.get(11)?;
                 Ok(TokenUsageRow {
-                    input_tokens: row.get(0)?,
+                    input_tokens,
                     output_tokens: row.get(1)?,
                     total_tokens: row.get(2)?,
-                    cache_read_tokens: row.get(3)?,
+                    cache_read_tokens,
                     cache_write_tokens: row.get(4)?,
+                    cache_measured_read_tokens: measured_read_tokens,
+                    cache_eligible_tokens: eligible_tokens,
+                    cache_measured_eligible_tokens: measured_tokens,
+                    cache_hit_requests: row.get(8)?,
+                    cache_observed_requests: observed_requests,
+                    cache_total_requests: total_requests,
+                    cache_unknown_requests: unknown_requests,
+                    cache_hit_rate: (measured_tokens > 0)
+                        .then_some(measured_read_tokens as f64 / measured_tokens as f64),
+                    cache_input_read_ratio: (input_tokens > 0)
+                        .then_some(measured_read_tokens as f64 / input_tokens as f64),
+                    cache_request_hit_rate: (observed_requests > 0)
+                        .then_some(row.get::<_, i64>(8)? as f64 / observed_requests as f64),
+                    cache_unknown_rate: (total_requests > 0)
+                        .then_some(unknown_requests as f64 / total_requests as f64),
                 })
             },
         )
@@ -794,6 +1027,15 @@ pub struct TraceRow {
     pub iterations: String,
     pub token_input: i64,
     pub token_output: i64,
+    pub token_cache_read: i64,
+    pub token_cache_write: i64,
+    pub token_cache_measured_read: i64,
+    pub token_cache_eligible: i64,
+    pub token_cache_measured: i64,
+    pub token_cache_hit_requests: i64,
+    pub token_cache_observed_requests: i64,
+    pub token_cache_total_requests: i64,
+    pub token_cache_unknown_requests: i64,
     pub stop_reason: String,
     pub verification_performed: bool,
     pub verification_forced: bool,
@@ -823,6 +1065,13 @@ pub fn db_create_trace(
     token_total: i64,
     token_cache_read: i64,
     token_cache_write: i64,
+    token_cache_measured_read: i64,
+    token_cache_eligible: i64,
+    token_cache_measured: i64,
+    token_cache_hit_requests: i64,
+    token_cache_observed_requests: i64,
+    token_cache_total_requests: i64,
+    token_cache_unknown_requests: i64,
     stop_reason: String,
     verification_performed: bool,
     verification_forced: bool,
@@ -834,8 +1083,8 @@ pub fn db_create_trace(
 ) -> Result<(), String> {
     let conn = state.0.lock().map_err(|e| e.to_string())?;
     conn.execute(
-        "INSERT INTO traces (id, conversation_id, mode, provider, model, system_prompt_hash, system_prompt_preview, system_prompt_tokens, tool_count, iterations, token_input, token_output, token_total, token_cache_read, token_cache_write, stop_reason, verification_performed, verification_forced, files_modified, errors, loop_warnings, duration_ms, parent_turn_id)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23)",
+        "INSERT INTO traces (id, conversation_id, mode, provider, model, system_prompt_hash, system_prompt_preview, system_prompt_tokens, tool_count, iterations, token_input, token_output, token_total, token_cache_read, token_cache_write, token_cache_measured_read, token_cache_eligible, token_cache_measured, token_cache_hit_requests, token_cache_observed_requests, token_cache_total_requests, token_cache_unknown_requests, stop_reason, verification_performed, verification_forced, files_modified, errors, loop_warnings, duration_ms, parent_turn_id)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30)",
         params![
             id,
             conversation_id,
@@ -852,6 +1101,13 @@ pub fn db_create_trace(
             token_total,
             token_cache_read,
             token_cache_write,
+            token_cache_measured_read,
+            token_cache_eligible,
+            token_cache_measured,
+            token_cache_hit_requests,
+            token_cache_observed_requests,
+            token_cache_total_requests,
+            token_cache_unknown_requests,
             stop_reason,
             verification_performed,
             verification_forced,
@@ -875,7 +1131,11 @@ pub fn db_list_traces(
     let mut stmt = conn
         .prepare(
             "SELECT id, conversation_id, mode, provider, model, system_prompt_hash, iterations,
-                    token_input, token_output, stop_reason, verification_performed, verification_forced,
+                    token_input, token_output, token_cache_read, token_cache_write,
+                    token_cache_measured_read, token_cache_eligible, token_cache_measured,
+                    token_cache_hit_requests, token_cache_observed_requests, token_cache_total_requests,
+                    token_cache_unknown_requests,
+                    stop_reason, verification_performed, verification_forced,
                     files_modified, errors, loop_warnings, duration_ms, created_at, parent_turn_id
              FROM traces
              WHERE conversation_id = ?1
@@ -894,15 +1154,24 @@ pub fn db_list_traces(
                 iterations: row.get(6)?,
                 token_input: row.get(7)?,
                 token_output: row.get(8)?,
-                stop_reason: row.get(9)?,
-                verification_performed: row.get(10)?,
-                verification_forced: row.get(11)?,
-                files_modified: row.get(12)?,
-                errors: row.get(13)?,
-                loop_warnings: row.get(14)?,
-                duration_ms: row.get(15)?,
-                created_at: row.get(16)?,
-                parent_turn_id: row.get(17)?,
+                token_cache_read: row.get(9)?,
+                token_cache_write: row.get(10)?,
+                token_cache_measured_read: row.get(11)?,
+                token_cache_eligible: row.get(12)?,
+                token_cache_measured: row.get(13)?,
+                token_cache_hit_requests: row.get(14)?,
+                token_cache_observed_requests: row.get(15)?,
+                token_cache_total_requests: row.get(16)?,
+                token_cache_unknown_requests: row.get(17)?,
+                stop_reason: row.get(18)?,
+                verification_performed: row.get(19)?,
+                verification_forced: row.get(20)?,
+                files_modified: row.get(21)?,
+                errors: row.get(22)?,
+                loop_warnings: row.get(23)?,
+                duration_ms: row.get(24)?,
+                created_at: row.get(25)?,
+                parent_turn_id: row.get(26)?,
             })
         })
         .map_err(|e| e.to_string())?
@@ -2053,9 +2322,13 @@ pub fn db_sdd_get_tasks(
 
 #[cfg(test)]
 mod database_tests {
-    use super::{list_vortex_project_sessions, open_database, UPSERT_CONVERSATION_SQL};
+    use super::{
+        list_vortex_project_sessions, load_codex_thread, open_database, save_codex_thread, DbState,
+        UPSERT_CONVERSATION_SQL,
+    };
     use rusqlite::params;
     use std::error::Error;
+    use std::sync::Mutex;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
@@ -2118,6 +2391,38 @@ mod database_tests {
         assert_eq!(index.recent_sessions[0].project_path, "C:/project-b");
 
         drop(connection);
+        std::fs::remove_dir_all(directory)?;
+        Ok(())
+    }
+
+    #[test]
+    fn persists_codex_thread_only_for_the_matching_prefix_fingerprint() -> Result<(), Box<dyn Error>>
+    {
+        let suffix = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
+        let directory = std::env::temp_dir().join(format!("hyscode-codex-thread-{suffix}"));
+        let connection = open_database(&directory);
+        connection.execute_batch(
+            "INSERT INTO projects (id,name,path) VALUES ('project','Project','C:/project');
+             INSERT INTO conversations (id,project_id,title,mode) VALUES
+               ('conversation','project','Test','chat');",
+        )?;
+        let state = DbState(Mutex::new(connection));
+
+        assert_eq!(
+            load_codex_thread(&state, "conversation", Some("prefix-a"))?,
+            None
+        );
+        save_codex_thread(&state, "conversation", Some("prefix-a"), "thread-1")?;
+        assert_eq!(
+            load_codex_thread(&state, "conversation", Some("prefix-a"))?.as_deref(),
+            Some("thread-1")
+        );
+        assert_eq!(
+            load_codex_thread(&state, "conversation", Some("prefix-b"))?,
+            None
+        );
+
+        drop(state);
         std::fs::remove_dir_all(directory)?;
         Ok(())
     }

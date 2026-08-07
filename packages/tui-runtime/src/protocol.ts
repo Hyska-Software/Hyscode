@@ -285,6 +285,8 @@ export type SessionSummary = {
   agentType: AgentType;
   updatedAt: string;
   messageCount: number;
+  /** Cumulative usage for the session, including measured prompt-cache metrics. */
+  tokenUsage?: TokenUsage;
 };
 
 export type SessionMessage = Message & {

@@ -6,6 +6,8 @@ import {
   type Message,
   type TokenUsage,
   type ProviderErrorDetails,
+  createPromptCacheObservation,
+  applyPromptCacheAggregate,
   getProviderRegistry,
   normalizeProviderError,
   ProviderError,
@@ -398,6 +400,7 @@ export class Harness {
         | 'turnTimeoutMs'
         | 'approval'
         | 'thinking'
+        | 'promptCaching'
       >
     >,
   ): void {
@@ -429,6 +432,9 @@ export class Harness {
     }
     if (patch.thinking !== undefined) {
       this.config.thinking = patch.thinking;
+    }
+    if (patch.promptCaching !== undefined) {
+      this.config.promptCaching = patch.promptCaching;
     }
   }
 
@@ -868,6 +874,8 @@ export class Harness {
         maxOutputTokens: outputBudget,
         thinking: this.config.thinking,
         enabled: this.config.costOptimization,
+        cacheEnabled: this.config.promptCaching,
+        cacheScope: this.projectId,
       });
       this.traceRecorder.recordPreparedRequest(
         prepared.cost,
@@ -879,6 +887,8 @@ export class Harness {
         ...prepared.params,
         signal: abortController.signal,
         maxTurns: maxIter ?? undefined,
+        sessionId: this.conversationId,
+        sessionFingerprint: prepared.stablePrefixHash,
       };
 
       let assistantText = '';
@@ -894,6 +904,7 @@ export class Harness {
       let invalidToolCall: string | null = null;
       let retryCountThisIteration = 0;
       let iterationFailureStatus: 'error' | 'recoverable_error' | null = null;
+      let usageChunksThisIteration = 0;
 
       const timeoutPromise = new Promise<never>((_, reject) => {
         timeoutId = setTimeout(() => {
@@ -1001,6 +1012,17 @@ export class Harness {
                 case 'usage':
                   // Each provider emits one consolidated usage chunk per API request.
                   // Sum across iterations of a multi-iteration turn.
+                  usageChunksThisIteration++;
+                  this.traceRecorder.recordPromptCacheObservation(
+                    createPromptCacheObservation({
+                      usage: chunk.usage,
+                      eligiblePrefixTokens: prepared.promptCache.eligiblePrefixTokens,
+                      cacheEnabled: prepared.promptCache.enabled,
+                      providerSupportsCache: prepared.promptCache.providerSupportsCache,
+                      prefixHash: prepared.promptCache.stablePrefixHash,
+                      attempt: chunk.usage.retryCount,
+                    }),
+                  );
                   recordRequestUsageMetrics(tokenUsage, chunk.usage);
                   tokenUsage.inputTokens += chunk.usage.inputTokens;
                   tokenUsage.outputTokens += chunk.usage.outputTokens;
@@ -1053,6 +1075,16 @@ export class Harness {
             }
             if (invalidToolCall) {
               throw new Error(`Invalid JSON arguments received for tool "${invalidToolCall}"`);
+            }
+            if (usageChunksThisIteration === 0) {
+              this.traceRecorder.recordPromptCacheObservation(
+                createPromptCacheObservation({
+                  eligiblePrefixTokens: prepared.promptCache.eligiblePrefixTokens,
+                  cacheEnabled: prepared.promptCache.enabled,
+                  providerSupportsCache: prepared.promptCache.providerSupportsCache,
+                  prefixHash: prepared.promptCache.stablePrefixHash,
+                }),
+              );
             }
           })(),
           timeoutPromise,
@@ -1590,14 +1622,17 @@ export class Harness {
     }
 
     // Finalize trace and attach to turn record
-    turnRecord.trace =
-      this.traceRecorder.finalizeTrace(
-        stopReason,
-        turnRecord.tokenUsage,
-        turnRecord.filesModified,
-        turnRecord.verificationPerformed,
-        verificationForced,
-      ) ?? undefined;
+    const trace = this.traceRecorder.finalizeTrace(
+      stopReason,
+      turnRecord.tokenUsage,
+      turnRecord.filesModified,
+      turnRecord.verificationPerformed,
+      verificationForced,
+    );
+    if (trace?.promptCache) {
+      applyPromptCacheAggregate(turnRecord.tokenUsage, trace.promptCache);
+    }
+    turnRecord.trace = trace ?? undefined;
 
     return {
       turnId: activeTurn.turnId,

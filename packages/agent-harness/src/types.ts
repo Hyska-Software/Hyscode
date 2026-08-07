@@ -512,6 +512,8 @@ export interface HarnessConfig {
   thinking?: ThinkingConfig;
   /** Enables eval-gated context and provider cost optimizations. */
   costOptimization: boolean;
+  /** Enables provider-native prompt caching independently of other optimizations. */
+  promptCaching: boolean;
 }
 
 export type TurnTerminalStatus =
@@ -583,6 +585,7 @@ export const DEFAULT_HARNESS_CONFIG: HarnessConfig = {
     mode: 'manual',
   },
   costOptimization: true,
+  promptCaching: true,
 };
 
 // ─── Harness Events ─────────────────────────────────────────────────────────

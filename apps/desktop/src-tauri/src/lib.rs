@@ -154,6 +154,7 @@ pub fn run() {
             // Codex sidecar commands
             commands::codex::codex_run,
             commands::codex::codex_cancel,
+            commands::codex::codex_store_thread,
             commands::codex::codex_login,
             commands::codex::codex_login_status,
             commands::codex::codex_logout,

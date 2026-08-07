@@ -1,5 +1,12 @@
-import type { AIModel, ChatParams, StreamChunk, FetchImpl, ThinkingVariants } from '../types';
-import { OpenAIProvider } from './openai';
+import type {
+  AIModel,
+  ChatParams,
+  StreamChunk,
+  FetchImpl,
+  ProviderCapabilities,
+  ThinkingVariants,
+} from '../types';
+import { OpenAIProvider, supportsExplicitPromptCaching } from './openai';
 import { AnthropicProvider } from './anthropic';
 import { GeminiProvider } from './gemini';
 import { chatResponsesAPI } from './openai-responses';
@@ -931,6 +938,23 @@ export class OpenCodeZenProvider extends OpenAIProvider {
   override readonly name = 'OpenCode Zen';
   override models: AIModel[] = [...ZEN_MODELS];
 
+  override get capabilities(): ProviderCapabilities {
+    return {
+      ...super.capabilities,
+      promptCache: 'automatic-keyed',
+      acceptsPromptCacheKey: true,
+      promptCacheModeForModel: (modelId) => {
+        if (ZEN_ANTHROPIC_MODELS.has(modelId)) return 'explicit-breakpoints';
+        if (ZEN_GPT_MODELS.has(modelId) && supportsExplicitPromptCaching(modelId)) {
+          return 'explicit-breakpoints';
+        }
+        return 'automatic-keyed';
+      },
+      acceptsPromptCacheKeyForModel: (modelId) =>
+        ZEN_GPT_MODELS.has(modelId) && supportsExplicitPromptCaching(modelId),
+    };
+  }
+
   // Delegates Anthropic-format requests to a reusable AnthropicProvider
   // pointed at the Zen endpoint instead of api.anthropic.com.
   private readonly anthropicDelegate: AnthropicProvider;
@@ -1012,6 +1036,7 @@ export class OpenCodeZenProvider extends OpenAIProvider {
         apiKey: this.apiKey,
         baseUrl: this.baseUrl,
         fetchImpl: this.fetchImpl,
+        supportsExplicitPromptCaching: supportsExplicitPromptCaching(params.model),
       });
     } else {
       // All other models (Kimi, MiniMax, GLM, DeepSeek, Grok, free tier) use OpenAI-compatible chat completions

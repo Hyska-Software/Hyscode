@@ -25,7 +25,7 @@ interface OpenAIMessage {
 }
 
 type OpenAIContentPart =
-  | { type: 'text'; text: string }
+  | { type: 'text'; text: string; prompt_cache_breakpoint?: { mode: 'explicit' } }
   | { type: 'image_url'; image_url: { url: string } };
 
 interface OpenAIToolCall {
@@ -43,11 +43,23 @@ export function toOpenAIMessages(
   messages: Message[],
   systemPrompt?: string,
   alwaysReasoningContent = false,
+  explicitCacheBreakpoint = false,
 ): OpenAIMessage[] {
   const result: OpenAIMessage[] = [];
 
   if (systemPrompt) {
-    result.push({ role: 'system', content: systemPrompt });
+    result.push({
+      role: 'system',
+      content: explicitCacheBreakpoint
+        ? [
+            {
+              type: 'text',
+              text: systemPrompt,
+              prompt_cache_breakpoint: { mode: 'explicit' },
+            },
+          ]
+        : systemPrompt,
+    });
   }
 
   for (const msg of messages) {
@@ -221,13 +233,19 @@ function parseOpenAIChunk(data: string): StreamChunk[] {
 function normalizeOpenAIUsage(usage: Record<string, unknown>): import('../types').TokenUsage {
   const promptDetails = usage.prompt_tokens_details as Record<string, unknown> | undefined;
   const completionDetails = usage.completion_tokens_details as Record<string, unknown> | undefined;
-  return {
+  const normalized: import('../types').TokenUsage = {
     inputTokens: Number(usage.prompt_tokens ?? 0),
     outputTokens: Number(usage.completion_tokens ?? 0),
     totalTokens: Number(usage.total_tokens ?? 0),
-    cacheReadTokens: Number(promptDetails?.cached_tokens ?? 0),
     reasoningTokens: Number(completionDetails?.reasoning_tokens ?? 0),
   };
+  if (typeof promptDetails?.cached_tokens === 'number') {
+    normalized.cacheReadTokens = promptDetails.cached_tokens;
+  }
+  if (typeof promptDetails?.cache_write_tokens === 'number') {
+    normalized.cacheWriteTokens = promptDetails.cache_write_tokens;
+  }
+  return normalized;
 }
 
 // ─── Thinking variant presets ────────────────────────────────────────────────
@@ -424,6 +442,12 @@ export class OpenAIProvider implements AIProvider {
       reasoningReplay: this.requiresReasoningContent ? 'required' : 'model-dependent',
       nativeTokenCounting: false,
       acceptsPromptCacheKey: this.id === 'openai',
+      promptCacheModeForModel: (modelId) => {
+        if (this.id !== 'openai') return 'automatic';
+        return supportsExplicitPromptCaching(modelId) ? 'explicit-breakpoints' : 'automatic-keyed';
+      },
+      acceptsPromptCacheKeyForModel: (modelId) =>
+        this.id === 'openai' && modelId.length > 0,
     };
   }
 
@@ -456,10 +480,14 @@ export class OpenAIProvider implements AIProvider {
   }
 
   async *chat(params: ChatParams): AsyncIterable<StreamChunk> {
+    const explicitCache =
+      (params.cachePrompt === true || params.promptCacheOptions?.mode === 'explicit') &&
+      this.capabilities.promptCacheModeForModel?.(params.model) === 'explicit-breakpoints';
     const messages = toOpenAIMessages(
       params.messages,
       params.systemPrompt,
       this.requiresReasoningContent,
+      explicitCache,
     );
 
     const body: Record<string, unknown> = {
@@ -477,8 +505,15 @@ export class OpenAIProvider implements AIProvider {
     if (params.topP !== undefined) body.top_p = params.topP;
     if (params.stopSequences?.length) body.stop = params.stopSequences;
     if (params.tools?.length) body.tools = toOpenAITools(params.tools);
-    if (params.promptCacheKey && this.capabilities.acceptsPromptCacheKey) {
-      body.prompt_cache_key = params.promptCacheKey;
+    const promptCacheKey = params.promptCacheKey ?? params.promptCacheOptions?.key;
+    const acceptsPromptCacheKey =
+      this.capabilities.acceptsPromptCacheKeyForModel?.(params.model) ??
+      this.capabilities.acceptsPromptCacheKey;
+    if (promptCacheKey && acceptsPromptCacheKey) {
+      body.prompt_cache_key = promptCacheKey;
+    }
+    if (explicitCache) {
+      body.prompt_cache_options = { mode: 'explicit' };
     }
     if (params.thinking?.enabled) {
       // Toggle-style thinking (thinking: { type }) applies to Kimi K2.x, MiMo
@@ -560,4 +595,8 @@ export class OpenAIProvider implements AIProvider {
       }
     }
   }
+}
+
+export function supportsExplicitPromptCaching(modelId: string): boolean {
+  return /^gpt-5\.6(?:-|$)/.test(modelId);
 }

@@ -1,5 +1,12 @@
-import type { AIModel, ChatParams, StreamChunk, FetchImpl, ThinkingVariants } from '../types';
-import { OpenAIProvider } from './openai';
+import type {
+  AIModel,
+  ChatParams,
+  StreamChunk,
+  FetchImpl,
+  ProviderCapabilities,
+  ThinkingVariants,
+} from '../types';
+import { OpenAIProvider, supportsExplicitPromptCaching } from './openai';
 import { AnthropicProvider } from './anthropic';
 import { chatResponsesAPI } from './openai-responses';
 
@@ -314,6 +321,23 @@ export class OpenCodeGoProvider extends OpenAIProvider {
   override readonly name = 'OpenCode Go';
   override models: AIModel[] = [...GO_MODELS];
 
+  override get capabilities(): ProviderCapabilities {
+    return {
+      ...super.capabilities,
+      promptCache: 'automatic-keyed',
+      acceptsPromptCacheKey: true,
+      promptCacheModeForModel: (modelId) => {
+        if (GO_ANTHROPIC_MODELS.has(modelId)) return 'explicit-breakpoints';
+        if (GO_GPT_MODELS.has(modelId) && supportsExplicitPromptCaching(modelId)) {
+          return 'explicit-breakpoints';
+        }
+        return 'automatic-keyed';
+      },
+      acceptsPromptCacheKeyForModel: (modelId) =>
+        GO_GPT_MODELS.has(modelId) && supportsExplicitPromptCaching(modelId),
+    };
+  }
+
   // Delegates Anthropic-format requests (MiniMax and Qwen models) to a reusable
   // AnthropicProvider pointed at the Go endpoint.
   private readonly anthropicDelegate: AnthropicProvider;
@@ -373,6 +397,7 @@ export class OpenCodeGoProvider extends OpenAIProvider {
         apiKey: this.apiKey,
         baseUrl: this.baseUrl,
         fetchImpl: this.fetchImpl,
+        supportsExplicitPromptCaching: supportsExplicitPromptCaching(params.model),
       });
     } else if (GO_ANTHROPIC_MODELS.has(params.model)) {
       // Route MiniMax and Qwen models through the Anthropic message format

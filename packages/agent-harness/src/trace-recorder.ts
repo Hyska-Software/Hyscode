@@ -4,7 +4,12 @@
 // tool sequences, token budgets, timing, errors, and stop reasons.
 // Traces are stored in SQLite and can be queried for recurring failure patterns.
 
-import type { TokenUsage } from '@hyscode/ai-providers';
+import {
+  aggregatePromptCacheObservations,
+  type PromptCacheAggregate,
+  type PromptCacheObservation,
+  type TokenUsage,
+} from '@hyscode/ai-providers';
 import type {
   AgentType,
   ContextEntryDecision,
@@ -49,6 +54,7 @@ export interface TraceIteration {
     stablePrefixHash: string;
     optimizations: string[];
     toolSelection: ToolSelectionDecision[];
+    promptCacheObservations: PromptCacheObservation[];
   };
 }
 
@@ -77,6 +83,8 @@ export interface Trace {
   iterations: TraceIteration[];
   /** Aggregated token usage (includes prompt cache fields when provider reports them) */
   tokenUsage: TokenUsage;
+  /** Aggregate prompt-cache telemetry for all provider attempts in this turn. */
+  promptCache?: PromptCacheAggregate;
   /** Stop reason */
   stopReason: TurnTerminalStatus;
   /** Verification flags */
@@ -126,6 +134,7 @@ export interface TraceAnalysisSummary {
   topModifiedFiles: { path: string; count: number }[];
   /** Tool usage distribution */
   toolUsage: { toolName: string; count: number; avgDurationMs: number }[];
+  promptCache: PromptCacheAggregate;
 }
 
 // ─── Trace Recorder Class ───────────────────────────────────────────────────
@@ -186,7 +195,19 @@ export class TraceRecorder {
     toolSelection: ToolSelectionDecision[],
   ): void {
     if (!this.currentIteration) return;
-    this.currentIteration.request = { cost, stablePrefixHash, optimizations, toolSelection };
+    this.currentIteration.request = {
+      cost,
+      stablePrefixHash,
+      optimizations,
+      toolSelection,
+      promptCacheObservations: [],
+    };
+  }
+
+  /** Record provider cache telemetry for the current API request attempt. */
+  recordPromptCacheObservation(observation: PromptCacheObservation): void {
+    if (!this.currentIteration?.request) return;
+    this.currentIteration.request.promptCacheObservations.push(observation);
   }
 
   /** Begin a new iteration within the current trace. */
@@ -288,6 +309,11 @@ export class TraceRecorder {
       toolCount: this.currentTrace.toolCount ?? 0,
       iterations: this.currentTrace.iterations ?? [],
       tokenUsage,
+      promptCache: aggregatePromptCacheObservations(
+        (this.currentTrace.iterations ?? []).flatMap(
+          (iteration) => iteration.request?.promptCacheObservations ?? [],
+        ),
+      ),
       stopReason,
       verificationPerformed: verificationPerformed ?? false,
       verificationForced: verificationForced ?? false,
@@ -332,6 +358,7 @@ export function analyzeTraces(traces: Trace[]): TraceAnalysisSummary {
       topErrors: [],
       topModifiedFiles: [],
       toolUsage: [],
+      promptCache: aggregatePromptCacheObservations([]),
     };
   }
 
@@ -417,6 +444,12 @@ export function analyzeTraces(traces: Trace[]): TraceAnalysisSummary {
     .sort((a, b) => b.count - a.count)
     .slice(0, 15);
 
+  const promptCache = aggregatePromptCacheObservations(
+    traces.flatMap((trace) =>
+      trace.iterations.flatMap((iteration) => iteration.request?.promptCacheObservations ?? []),
+    ),
+  );
+
   return {
     totalTraces: traces.length,
     timeRange,
@@ -435,6 +468,7 @@ export function analyzeTraces(traces: Trace[]): TraceAnalysisSummary {
     topErrors,
     topModifiedFiles,
     toolUsage,
+    promptCache,
   };
 }
 

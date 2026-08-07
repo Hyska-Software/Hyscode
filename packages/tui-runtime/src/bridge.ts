@@ -29,6 +29,7 @@ import {
   type ToolResult,
   type ApprovalDecision,
   type ToolApprovalRequest,
+  type Trace,
 } from '@hyscode/agent-harness';
 import {
   getProviderRegistry,
@@ -36,6 +37,7 @@ import {
   type Message,
   type StreamChunk,
   type ThinkingConfig,
+  type TokenUsage,
 } from '@hyscode/ai-providers';
 import type { ThemeSummary } from '@hyscode/theme';
 import { McpClientManager } from '@hyscode/mcp-client';
@@ -344,6 +346,7 @@ export class TuiBridge {
           activeModelId,
         ),
         costOptimization: true,
+        promptCaching: true,
       },
     });
 
@@ -402,7 +405,12 @@ export class TuiBridge {
     this.activeRun = run;
     try {
       const outcome = await run;
-      await this.persistTurn(effectiveParams, outcome.response, outcome.turnRecord.tokenUsage);
+      await this.persistTurn(
+        effectiveParams,
+        outcome.response,
+        outcome.turnRecord.tokenUsage,
+        outcome.turnRecord.trace,
+      );
       return outcome;
     } finally {
       this.activeRun = null;
@@ -945,7 +953,12 @@ export class TuiBridge {
     return { forwarded: true };
   }
 
-  private async persistTurn(params: SendMessageParams, response: string, tokenUsage: unknown): Promise<void> {
+  private async persistTurn(
+    params: SendMessageParams,
+    response: string,
+    tokenUsage: TokenUsage,
+    trace?: Trace,
+  ): Promise<void> {
     if (!this.session) return;
     const userContent: Message['content'] = [
       { type: 'text', text: params.message },
@@ -955,13 +968,33 @@ export class TuiBridge {
     const turnMessages = this.activeTurnMessages.map((message, index, messages) => makeSessionMessage(
       message,
       index === messages.length - 1 && message.role === 'assistant'
-        ? tokenUsage as SessionRecord['messages'][number]['tokenUsage']
+        ? tokenUsage
         : undefined,
     ));
     const hasAssistantResponse = turnMessages.some((message) => message.role === 'assistant' && message.content.some((block) => block.type === 'text' && block.text === response));
     const messages = [...this.session.messages, user, ...turnMessages];
-    if (response && !hasAssistantResponse) messages.push(makeSessionMessage({ role: 'assistant', content: [{ type: 'text', text: response }] }, tokenUsage as SessionRecord['messages'][number]['tokenUsage']));
-    this.session = { ...this.session, messages, messageCount: messages.length, title: this.session.title === 'New session' ? params.message.slice(0, 80) : this.session.title, updatedAt: new Date().toISOString(), providerId: this.currentProviderId(), modelId: this.currentModelId(), agentType: this.requireHarness().getAgentType() };
+    if (response && !hasAssistantResponse) {
+      messages.push(
+        makeSessionMessage(
+          { role: 'assistant', content: [{ type: 'text', text: response }] },
+          tokenUsage,
+        ),
+      );
+    }
+    if (trace) {
+      await this.dataStore.invoke('db_create_trace', tracePersistenceArgs(trace, this.session.id));
+    }
+    this.session = {
+      ...this.session,
+      messages,
+      messageCount: messages.length,
+      tokenUsage: mergeTokenUsage(this.session.tokenUsage, tokenUsage),
+      title: this.session.title === 'New session' ? params.message.slice(0, 80) : this.session.title,
+      updatedAt: new Date().toISOString(),
+      providerId: this.currentProviderId(),
+      modelId: this.currentModelId(),
+      agentType: this.requireHarness().getAgentType(),
+    };
     await this.dataStore.saveSession(this.session);
     this.emit({ type: 'event', event: 'session_updated', payload: this.session });
   }
@@ -1320,6 +1353,7 @@ export class TuiBridge {
   }
 
   private createCodexInvoke(): CodexInvoke {
+    const dataStore = this.dataStore;
     return async function* (params): AsyncIterable<StreamChunk> {
       const repoRoot = process.env.HYSCODE_REPO_ROOT || process.cwd();
       const sidecar = resolveCodexSidecar(repoRoot);
@@ -1327,10 +1361,23 @@ export class TuiBridge {
         yield { type: 'error', error: 'Codex sidecar was not found. Set HYSCODE_CODEX_SIDECAR or build the Codex sidecar.' };
         return;
       }
+      const threadId = params.sessionId
+        ? await dataStore.loadCodexThread(params.sessionId, params.sessionFingerprint ?? null)
+        : null;
       const child = spawn(sidecar.program, sidecar.args, { cwd: sidecar.cwd, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
       const abort = () => child.kill();
       params.signal?.addEventListener('abort', abort, { once: true });
-      child.stdin.end(JSON.stringify({ apiKey: params.apiKey, model: params.model, systemPrompt: params.systemPrompt, prompt: params.prompt, cwd: params.cwd, reasoningEffort: params.reasoningEffort, sandboxMode: params.sandboxMode }));
+      child.stdin.end(JSON.stringify({
+        apiKey: params.apiKey,
+        model: params.model,
+        systemPrompt: params.systemPrompt,
+        prompt: params.prompt,
+        cwd: params.cwd,
+        reasoningEffort: params.reasoningEffort,
+        sandboxMode: params.sandboxMode,
+        ...(threadId ? { threadId } : {}),
+        ...(params.continuationPrompt ? { continuationPrompt: params.continuationPrompt } : {}),
+      }));
       child.stderr.on('data', (data: Buffer) => { if (String(data).trim()) process.stderr.write(`[codex-sidecar] ${String(data)}`); });
       let exitCode: number | null = null;
       const closePromise = new Promise<number | null>((resolve) => child.once('close', resolve));
@@ -1348,7 +1395,16 @@ export class TuiBridge {
               yield { type: 'error', error: `Codex sidecar emitted invalid JSON: ${error instanceof Error ? error.message : String(error)}` };
               continue;
             }
-            if (event.type === 'text') yield { type: 'text_delta', text: String(event.content ?? '') };
+            if (event.type === 'thread_started') {
+              if (params.sessionId && typeof event.threadId === 'string' && event.threadId) {
+                await dataStore.saveCodexThread(
+                  params.sessionId,
+                  params.sessionFingerprint ?? null,
+                  event.threadId,
+                );
+              }
+            }
+            else if (event.type === 'text') yield { type: 'text_delta', text: String(event.content ?? '') };
             else if (event.type === 'thinking') yield { type: 'thinking_delta', text: String(event.content ?? '') };
             else if (event.type === 'tool_use') {
               const id = String(event.callId ?? crypto.randomUUID());
@@ -1357,7 +1413,19 @@ export class TuiBridge {
               yield { type: 'tool_call_end', id };
             }
             else if (event.type === 'message_boundary') yield { type: 'message_boundary' };
-            else if (event.type === 'usage') yield { type: 'usage', usage: { inputTokens: Number(event.inputTokens ?? 0), outputTokens: Number(event.outputTokens ?? 0), totalTokens: Number(event.inputTokens ?? 0) + Number(event.outputTokens ?? 0), cacheReadTokens: Number(event.cacheReadTokens ?? 0), reasoningTokens: Number(event.reasoningTokens ?? 0) } };
+            else if (event.type === 'usage') {
+              const usage: import('@hyscode/ai-providers').TokenUsage = {
+                inputTokens: Number(event.inputTokens ?? 0),
+                outputTokens: Number(event.outputTokens ?? 0),
+                totalTokens: Number(event.inputTokens ?? 0) + Number(event.outputTokens ?? 0),
+                reasoningTokens: optionalNumber(event.reasoningTokens),
+              };
+              const cacheReadTokens = optionalNumber(event.cacheReadTokens);
+              const cacheWriteTokens = optionalNumber(event.cacheWriteTokens);
+              if (cacheReadTokens !== undefined) usage.cacheReadTokens = cacheReadTokens;
+              if (cacheWriteTokens !== undefined) usage.cacheWriteTokens = cacheWriteTokens;
+              yield { type: 'usage', usage };
+            }
             else if (event.type === 'done') yield { type: 'done', stopReason: 'end_turn' };
             else if (event.type === 'error') yield { type: 'error', error: String(event.error ?? 'Codex sidecar failed') };
           }
@@ -1774,6 +1842,98 @@ class CliTerminalRuntime implements TerminalRuntimeAdapter {
   }
 }
 
+function tracePersistenceArgs(trace: Trace, conversationId: string): Record<string, unknown> {
+  return {
+    id: trace.id,
+    conversationId,
+    mode: trace.mode,
+    provider: trace.provider,
+    model: trace.model,
+    systemPromptHash: trace.systemPromptHash,
+    systemPromptPreview: trace.systemPromptPreview,
+    systemPromptTokens: trace.systemPromptTokens,
+    toolCount: trace.toolCount,
+    iterations: JSON.stringify(trace.iterations),
+    tokenInput: trace.tokenUsage.inputTokens,
+    tokenOutput: trace.tokenUsage.outputTokens,
+    tokenTotal: trace.tokenUsage.totalTokens,
+    tokenCacheRead: trace.tokenUsage.cacheReadTokens ?? 0,
+    tokenCacheWrite: trace.tokenUsage.cacheWriteTokens ?? 0,
+    tokenCacheMeasuredRead: trace.tokenUsage.cacheMeasuredReadTokens ?? 0,
+    tokenCacheEligible: trace.tokenUsage.cacheEligibleTokens ?? 0,
+    tokenCacheMeasured: trace.tokenUsage.cacheMeasuredEligibleTokens ?? 0,
+    tokenCacheHitRequests: trace.tokenUsage.cacheHitRequests ?? 0,
+    tokenCacheObservedRequests: trace.tokenUsage.cacheObservedRequests ?? 0,
+    tokenCacheTotalRequests: trace.tokenUsage.cacheTotalRequests ?? 0,
+    tokenCacheUnknownRequests: trace.tokenUsage.cacheUnknownRequests ?? 0,
+    promptCache: trace.promptCache,
+    stopReason: trace.stopReason,
+    verificationPerformed: trace.verificationPerformed,
+    verificationForced: trace.verificationForced,
+    filesModified: JSON.stringify(trace.filesModified),
+    errors: JSON.stringify(trace.errors),
+    loopWarnings: JSON.stringify(trace.loopWarnings),
+    durationMs: trace.durationMs,
+    parentTurnId: trace.parentTurnId ?? null,
+  };
+}
+
+function mergeTokenUsage(previous: TokenUsage | undefined, current: TokenUsage): TokenUsage {
+  const inputTokens = (previous?.inputTokens ?? 0) + current.inputTokens;
+  const outputTokens = (previous?.outputTokens ?? 0) + current.outputTokens;
+  const measuredReadTokens = sumOptional(previous?.cacheMeasuredReadTokens, current.cacheMeasuredReadTokens);
+  const eligibleTokens = sumOptional(previous?.cacheEligibleTokens, current.cacheEligibleTokens);
+  const measuredEligibleTokens = sumOptional(
+    previous?.cacheMeasuredEligibleTokens,
+    current.cacheMeasuredEligibleTokens,
+  );
+  const hitRequests = sumOptional(previous?.cacheHitRequests, current.cacheHitRequests);
+  const observedRequests = sumOptional(previous?.cacheObservedRequests, current.cacheObservedRequests);
+  const totalRequests = sumOptional(previous?.cacheTotalRequests, current.cacheTotalRequests);
+  const unknownRequests = sumOptional(previous?.cacheUnknownRequests, current.cacheUnknownRequests);
+  const merged: TokenUsage = {
+    inputTokens,
+    outputTokens,
+    totalTokens: (previous?.totalTokens ?? 0) + current.totalTokens,
+    cacheReadTokens: (previous?.cacheReadTokens ?? 0) + (current.cacheReadTokens ?? 0),
+    cacheWriteTokens: (previous?.cacheWriteTokens ?? 0) + (current.cacheWriteTokens ?? 0),
+    reasoningTokens: sumOptional(previous?.reasoningTokens, current.reasoningTokens),
+    retryCount: sumOptional(previous?.retryCount, current.retryCount),
+    requestCount: sumOptional(previous?.requestCount, current.requestCount),
+    estimatedCostUsd: sumOptional(previous?.estimatedCostUsd, current.estimatedCostUsd),
+    possibleDuplicateCharge: previous?.possibleDuplicateCharge || current.possibleDuplicateCharge || undefined,
+    lastInputTokens: current.lastInputTokens ?? previous?.lastInputTokens,
+    lastEffectiveInputTokens: current.lastEffectiveInputTokens ?? previous?.lastEffectiveInputTokens,
+    peakInputTokens: Math.max(previous?.peakInputTokens ?? 0, current.peakInputTokens ?? 0),
+    peakEffectiveInputTokens: Math.max(previous?.peakEffectiveInputTokens ?? 0, current.peakEffectiveInputTokens ?? 0),
+  };
+  if (measuredReadTokens !== undefined) merged.cacheMeasuredReadTokens = measuredReadTokens;
+  if (eligibleTokens !== undefined) merged.cacheEligibleTokens = eligibleTokens;
+  if (measuredEligibleTokens !== undefined) merged.cacheMeasuredEligibleTokens = measuredEligibleTokens;
+  if (hitRequests !== undefined) merged.cacheHitRequests = hitRequests;
+  if (observedRequests !== undefined) merged.cacheObservedRequests = observedRequests;
+  if (totalRequests !== undefined) merged.cacheTotalRequests = totalRequests;
+  if (unknownRequests !== undefined) merged.cacheUnknownRequests = unknownRequests;
+  if ((measuredEligibleTokens ?? 0) > 0) {
+    merged.cacheHitRate = (measuredReadTokens ?? 0) / (measuredEligibleTokens ?? 1);
+  }
+  if (inputTokens > 0 && measuredReadTokens !== undefined) {
+    merged.cacheInputReadRatio = measuredReadTokens / inputTokens;
+  }
+  if ((observedRequests ?? 0) > 0) {
+    merged.cacheRequestHitRate = (hitRequests ?? 0) / (observedRequests ?? 1);
+  }
+  if ((totalRequests ?? 0) > 0) {
+    merged.cacheUnknownRate = (unknownRequests ?? 0) / (totalRequests ?? 1);
+  }
+  return merged;
+}
+
+function sumOptional(left: number | undefined, right: number | undefined): number | undefined {
+  if (left === undefined && right === undefined) return undefined;
+  return (left ?? 0) + (right ?? 0);
+}
+
 function normalizeTerminalPath(value: string): string {
   const normalized = path.normalize(path.resolve(value));
   return process.platform === 'win32' ? normalized.toLowerCase() : normalized;
@@ -1850,6 +2010,10 @@ function numberOrDefault(value: unknown, fallback: number): number {
 
 function numberValue(value: unknown, fallback: number): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
+}
+
+function optionalNumber(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
 }
 
 type SidecarCommand = {

@@ -156,15 +156,18 @@ function* parseGeminiResponse(data: string): Iterable<StreamChunk> {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const usage = parsed.usageMetadata as any;
     if (usage) {
+      const tokenUsage: import('../types').TokenUsage = {
+        inputTokens: usage.promptTokenCount ?? 0,
+        outputTokens: usage.candidatesTokenCount ?? 0,
+        totalTokens: usage.totalTokenCount ?? 0,
+        reasoningTokens: usage.thoughtsTokenCount ?? 0,
+      };
+      if (typeof usage.cachedContentTokenCount === 'number') {
+        tokenUsage.cacheReadTokens = usage.cachedContentTokenCount;
+      }
       yield {
         type: 'usage',
-        usage: {
-          inputTokens: usage.promptTokenCount ?? 0,
-          outputTokens: usage.candidatesTokenCount ?? 0,
-          totalTokens: usage.totalTokenCount ?? 0,
-          cacheReadTokens: usage.cachedContentTokenCount ?? 0,
-          reasoningTokens: usage.thoughtsTokenCount ?? 0,
-        },
+        usage: tokenUsage,
       };
     }
     return;
@@ -221,15 +224,18 @@ function* parseGeminiResponse(data: string): Iterable<StreamChunk> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const usageMeta = parsed.usageMetadata as any;
   if (usageMeta) {
+    const tokenUsage: import('../types').TokenUsage = {
+      inputTokens: usageMeta.promptTokenCount ?? 0,
+      outputTokens: usageMeta.candidatesTokenCount ?? 0,
+      totalTokens: usageMeta.totalTokenCount ?? 0,
+      reasoningTokens: usageMeta.thoughtsTokenCount ?? 0,
+    };
+    if (typeof usageMeta.cachedContentTokenCount === 'number') {
+      tokenUsage.cacheReadTokens = usageMeta.cachedContentTokenCount;
+    }
     yield {
       type: 'usage',
-      usage: {
-        inputTokens: usageMeta.promptTokenCount ?? 0,
-        outputTokens: usageMeta.candidatesTokenCount ?? 0,
-        totalTokens: usageMeta.totalTokenCount ?? 0,
-        cacheReadTokens: usageMeta.cachedContentTokenCount ?? 0,
-        reasoningTokens: usageMeta.thoughtsTokenCount ?? 0,
-      },
+      usage: tokenUsage,
     };
   }
 }

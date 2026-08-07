@@ -27,7 +27,7 @@ describe('provider cost metadata', () => {
           prompt_tokens: 1200,
           completion_tokens: 100,
           total_tokens: 1300,
-          prompt_tokens_details: { cached_tokens: 900 },
+          prompt_tokens_details: { cached_tokens: 900, cache_write_tokens: 120 },
           completion_tokens_details: { reasoning_tokens: 40 },
         },
       });
@@ -43,7 +43,7 @@ describe('provider cost metadata', () => {
     expect(body.prompt_cache_key).toBe('stable-key');
     expect(chunks.find((chunk) => chunk.type === 'usage')).toMatchObject({
       type: 'usage',
-      usage: { cacheReadTokens: 900, reasoningTokens: 40 },
+      usage: { cacheReadTokens: 900, cacheWriteTokens: 120, reasoningTokens: 40 },
     });
   });
 
@@ -70,6 +70,48 @@ describe('provider cost metadata', () => {
     expect(chunks.find((chunk) => chunk.type === 'usage')).toMatchObject({
       type: 'usage',
       usage: { cacheReadTokens: 700, reasoningTokens: 30 },
+    });
+  });
+
+  it('marks the stable system block when explicit caching is supported', async () => {
+    let body: Record<string, unknown> = {};
+    const fetchMock = vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
+      body = JSON.parse(String(init?.body));
+      return sseResponse({
+        choices: [],
+        usage: {
+          prompt_tokens: 1_200,
+          completion_tokens: 1,
+          total_tokens: 1_201,
+          prompt_tokens_details: { cached_tokens: 1_000, cache_write_tokens: 200 },
+        },
+      });
+    });
+    const provider = new OpenAIProvider('key', undefined, undefined, fetchMock);
+    await collect(
+      provider.chat({
+        model: 'gpt-5.6-luna',
+        systemPrompt: 'Stable system contract',
+        messages: [{ role: 'user', content: [{ type: 'text', text: 'Current input' }] }],
+        promptCacheKey: 'stable-key',
+        cachePrompt: true,
+        promptCacheOptions: { mode: 'explicit', key: 'stable-key', breakpoint: 'stable-prefix' },
+      }),
+    );
+
+    expect(body).toMatchObject({
+      prompt_cache_key: 'stable-key',
+      prompt_cache_options: { mode: 'explicit' },
+    });
+    expect((body.messages as Array<Record<string, unknown>>)[0]).toEqual({
+      role: 'system',
+      content: [
+        {
+          type: 'text',
+          text: 'Stable system contract',
+          prompt_cache_breakpoint: { mode: 'explicit' },
+        },
+      ],
     });
   });
 });

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { TokenUsage } from '@hyscode/ai-providers';
+import { createPromptCacheObservation, type TokenUsage } from '@hyscode/ai-providers';
 
 import { TraceRecorder, analyzeTraces, type Trace } from './trace-recorder';
 import type { ToolCallRecord } from './types';
@@ -104,10 +104,30 @@ describe('TraceRecorder', () => {
       ['cache'],
       [],
     );
+    recorder.recordPromptCacheObservation(
+      createPromptCacheObservation({
+        cacheEnabled: true,
+        providerSupportsCache: true,
+        eligiblePrefixTokens: 2_000,
+        usage: {
+          inputTokens: 2_000,
+          outputTokens: 10,
+          totalTokens: 2_010,
+          cacheReadTokens: 1_950,
+        },
+      }),
+    );
     recorder.endIteration();
     const trace = recorder.finalizeTrace('complete', tokenUsage, []);
     expect(trace!.iterations[0].context).toBeDefined();
-    expect(trace!.iterations[0].request).toMatchObject({ stablePrefixHash: 'h1' });
+    expect(trace!.iterations[0].request).toMatchObject({
+      stablePrefixHash: 'h1',
+      promptCacheObservations: [{ status: 'hit', cacheReadTokens: 1_950 }],
+    });
+    expect(trace!.promptCache).toMatchObject({
+      weightedHitRate: 0.975,
+      requestHitRate: 1,
+    });
   });
 });
 
@@ -206,5 +226,43 @@ describe('analyzeTraces', () => {
     ]);
     expect(summary.maxIterationHits).toBe(1);
     expect(summary.loopWarningCount).toBe(2);
+  });
+
+  it('aggregates prompt cache observations without treating unknown usage as a miss', () => {
+    const cachedTrace = trace({
+      iterations: [
+        {
+          number: 1,
+          startMs: 0,
+          durationMs: 10,
+          toolCalls: [],
+          hadToolCalls: false,
+          middlewareInjections: [],
+          wasRepeatedCall: false,
+          request: {
+            cost: {} as never,
+            stablePrefixHash: 'prefix',
+            optimizations: [],
+            toolSelection: [],
+            promptCacheObservations: [
+              {
+                status: 'hit',
+                eligible: true,
+                providerReported: true,
+                inputTokens: 2_000,
+                eligiblePrefixTokens: 2_000,
+                cacheReadTokens: 1_950,
+                cacheWriteTokens: 50,
+              },
+            ],
+          },
+        },
+      ],
+    });
+
+    expect(analyzeTraces([cachedTrace]).promptCache).toMatchObject({
+      weightedHitRate: 0.975,
+      cacheWriteTokens: 50,
+    });
   });
 });

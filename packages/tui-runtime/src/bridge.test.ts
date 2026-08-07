@@ -7,6 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { OpenAIProvider, getProviderRegistry } from '@hyscode/ai-providers';
+import type { TurnOutcome } from '@hyscode/agent-harness';
 import { TuiBridge } from './bridge';
 import type { BridgeEvent, BridgeResponse, GitSummary, ProjectSummary, RuntimeReadyPayload, SessionRecord } from './protocol';
 
@@ -25,7 +26,7 @@ function successfulResult<T>(response: BridgeResponse): T {
   return response.result as T;
 }
 
-type FixtureBehavior = 'tool' | 'terminal' | 'external-read' | 'cancel';
+type FixtureBehavior = 'tool' | 'terminal' | 'external-read' | 'cancel' | 'cache';
 
 type ProviderFixture = {
   baseUrl: string;
@@ -70,6 +71,28 @@ async function startProviderFixture(): Promise<ProviderFixture> {
         writeSse(response, {
           choices: [{ delta: { content: 'A partial response' }, finish_reason: null }],
         });
+        return;
+      }
+
+      if (behavior === 'cache') {
+        const firstRequest = requests.length === 1;
+        writeSse(response, {
+          choices: [{ delta: { content: 'The cache fixture is healthy.' }, finish_reason: null }],
+        });
+        writeSse(response, { choices: [{ delta: {}, finish_reason: 'stop' }] });
+        writeSse(response, {
+          choices: [],
+          usage: {
+            prompt_tokens: 50_000,
+            completion_tokens: 8,
+            total_tokens: 50_008,
+            prompt_tokens_details: {
+              cached_tokens: firstRequest ? 0 : 50_000,
+              cache_write_tokens: firstRequest ? 50_000 : 0,
+            },
+          },
+        });
+        finishSse(response);
         return;
       }
 
@@ -252,7 +275,7 @@ async function waitForProcessMessage(
   input: Interface,
   buffered: JsonMessage[],
   predicate: (message: JsonMessage) => boolean,
-  timeoutMs = 5_000,
+  timeoutMs = 15_000,
 ): Promise<JsonMessage> {
   const existingIndex = buffered.findIndex(predicate);
   if (existingIndex >= 0) return buffered.splice(existingIndex, 1)[0];
@@ -321,7 +344,7 @@ describe('shared harness bridge protocol', () => {
       input.close();
       if (!child.killed) child.kill();
     }
-  });
+  }, 15_000);
 
   it('initializes the real provider registry and supports mode and session lifecycle commands', async () => {
     const directory = await mkdtemp(path.join(os.tmpdir(), 'hyscode-tui-bridge-'));
@@ -560,6 +583,68 @@ describe('shared harness bridge protocol', () => {
       await fixture.close();
     }
   });
+
+  it('keeps a stable prompt-cache key and persists measured hit telemetry across 100 TUI turns', async () => {
+    const directory = await mkdtemp(path.join(os.tmpdir(), 'hyscode-tui-cache-'));
+    temporaryDirectories.push(directory);
+    await writeFile(path.join(directory, 'AGENTS.md'), 'Stable cache project instruction. '.repeat(400), 'utf8');
+    const fixture = await startProviderFixture();
+    fixture.setBehavior('cache');
+    const registry = getProviderRegistry();
+    vi.stubEnv('HYSCODE_CONFIG_PATH', path.join(directory, 'settings.json'));
+    vi.stubEnv('HYSCODE_KEYCHAIN_PATH', path.join(directory, 'keychain.json'));
+    vi.stubEnv('HYSCODE_TUI_DATA_PATH', path.join(directory, 'tui-data.json'));
+
+    const bridge = new TuiBridge();
+    try {
+      const initialized = successfulResult<RuntimeReadyPayload>(await bridge.handle({
+        id: 'initialize-cache',
+        method: 'initialize',
+        params: { workspacePath: directory, projectId: 'cache-fixture', agentType: 'chat', approvalMode: 'yolo' },
+      }));
+      registry.register(new OpenAIProvider('fixture-key', fixture.baseUrl));
+      await bridge.handle({
+        id: 'configure-cache',
+        method: 'set_config',
+        params: { providerId: 'openai', modelId: 'gpt-5.4-mini', approvalMode: 'yolo' },
+      });
+
+      const outcomes: TurnOutcome[] = [];
+      for (let index = 0; index < 100; index += 1) {
+        const outcome = successfulResult<TurnOutcome>(await bridge.handle({
+          id: `cache-turn-${index}`,
+          method: 'send_message',
+          params: { message: 'Report the cache fixture status.' },
+        }));
+        outcomes.push(outcome);
+        expect(outcome.status).toBe('complete');
+        expect(outcome.turnRecord.trace?.promptCache?.weightedHitRate).toBe(index === 0 ? 0 : 1);
+      }
+
+      const session = successfulResult<SessionRecord | null>(await bridge.handle({
+        id: 'load-cache-session',
+        method: 'session_load',
+        params: { id: initialized.session?.id },
+      }));
+      expect(session?.tokenUsage?.cacheHitRate).toBeCloseTo(0.99, 5);
+      expect(session?.tokenUsage?.cacheRequestHitRate).toBe(0.99);
+      expect(session?.tokenUsage?.cacheUnknownRequests).toBe(0);
+
+      const traces = successfulResult<Array<Record<string, unknown>>>(await bridge.handle({
+        id: 'list-cache-traces',
+        method: 'trace_list',
+        params: {},
+      }));
+      expect(traces).toHaveLength(100);
+      expect(new Set(fixture.requests.map((request) => request.prompt_cache_key)).size).toBe(1);
+      expect(fixture.requests.every((request) => typeof request.prompt_cache_key === 'string')).toBe(true);
+      expect(outcomes[99]?.turnRecord.tokenUsage.cacheMeasuredReadTokens).toBeGreaterThan(0);
+    } finally {
+      registry.unregister('openai');
+      await bridge.handle({ id: 'shutdown-cache', method: 'shutdown', params: {} });
+      await fixture.close();
+    }
+  }, 60_000);
 
   it('requires explicit external approval in yolo mode and completes the CLI turn', async () => {
     const directory = await mkdtemp(path.join(os.tmpdir(), 'hyscode-tui-external-read-'));

@@ -24,7 +24,9 @@ interface CodexChunk {
   input_tokens?: number | null;
   output_tokens?: number | null;
   cache_read_tokens?: number | null;
+  cache_write_tokens?: number | null;
   reasoning_tokens?: number | null;
+  thread_id?: string | null;
 }
 
 let _counter = 0;
@@ -66,6 +68,18 @@ export function createCodexInvoke(): CodexInvoke {
 
         function mapChunk(chunk: CodexChunk): void {
           switch (chunk.type) {
+            case 'thread_started':
+              if (chunk.thread_id && params.sessionId) {
+                invoke<void>('codex_store_thread', {
+                  sessionId: params.sessionId,
+                  fingerprint: params.sessionFingerprint,
+                  threadId: chunk.thread_id,
+                }).catch(() => {
+                  // Runtime continuity is already held in Rust; persistence is best effort.
+                });
+              }
+              break;
+
             case 'text':
               if (chunk.content) {
                 enqueue({ type: 'text_delta', text: chunk.content });
@@ -104,6 +118,7 @@ export function createCodexInvoke(): CodexInvoke {
                     outputTokens: chunk.output_tokens ?? 0,
                     totalTokens: (chunk.input_tokens ?? 0) + (chunk.output_tokens ?? 0),
                     cacheReadTokens: chunk.cache_read_tokens ?? undefined,
+                    cacheWriteTokens: chunk.cache_write_tokens ?? undefined,
                     reasoningTokens: chunk.reasoning_tokens ?? undefined,
                   },
                 });
@@ -166,6 +181,9 @@ export function createCodexInvoke(): CodexInvoke {
                 cwd,
                 reasoning_effort: params.reasoningEffort,
                 sandbox_mode: params.sandboxMode,
+                session_id: params.sessionId,
+                session_fingerprint: params.sessionFingerprint,
+                continuation_prompt: params.continuationPrompt,
               },
             });
           } catch (err) {

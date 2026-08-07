@@ -104,6 +104,83 @@ describe('toResponsesInput', () => {
 });
 
 describe('chatResponsesAPI', () => {
+  it('sends an explicit stable-prefix breakpoint and preserves cache usage fields', async () => {
+    let captured: Record<string, unknown> | null = null;
+    const fetchImpl: FetchImpl = async (_input, init) => {
+      captured = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      return sseResponse([
+        JSON.stringify({
+          type: 'response.completed',
+          response: {
+            usage: {
+              input_tokens: 1_200,
+              output_tokens: 5,
+              total_tokens: 1_205,
+              input_tokens_details: { cached_tokens: 1_000, cache_write_tokens: 200 },
+              output_tokens_details: { reasoning_tokens: 3 },
+            },
+          },
+        }),
+      ]);
+    };
+
+    const chunks: StreamChunk[] = [];
+    for await (const chunk of chatResponsesAPI(
+      {
+        model: 'gpt-5.6-luna',
+        systemPrompt: 'Stable system contract',
+        messages: [{ role: 'user', content: [{ type: 'text', text: 'Current question' }] }],
+        promptCacheKey: 'stable-key',
+        cachePrompt: true,
+        promptCacheOptions: {
+          mode: 'explicit',
+          key: 'stable-key',
+          stablePrefixHash: 'prefix-hash',
+          breakpoint: 'stable-prefix',
+        },
+      },
+      {
+        providerId: 'openai',
+        providerName: 'OpenAI',
+        apiKey: 'key',
+        baseUrl: 'https://api.openai.com/v1',
+        fetchImpl,
+        supportsExplicitPromptCaching: true,
+      },
+    )) {
+      chunks.push(chunk);
+    }
+
+    expect(captured).toMatchObject({
+      model: 'gpt-5.6-luna',
+      prompt_cache_key: 'stable-key',
+      prompt_cache_options: { mode: 'explicit' },
+    });
+    const body = captured as unknown as Record<string, unknown>;
+    expect(body.instructions).toBeUndefined();
+    expect((body.input as Array<Record<string, unknown>>)[0]).toEqual({
+      role: 'system',
+      content: [
+        {
+          type: 'input_text',
+          text: 'Stable system contract',
+          prompt_cache_breakpoint: { mode: 'explicit' },
+        },
+      ],
+    });
+    expect(chunks).toContainEqual({
+      type: 'usage',
+      usage: {
+        inputTokens: 1_200,
+        outputTokens: 5,
+        totalTokens: 1_205,
+        cacheReadTokens: 1_000,
+        cacheWriteTokens: 200,
+        reasoningTokens: 3,
+      },
+    });
+  });
+
   it('builds a valid Responses API payload (instructions, items, flat tools, no stop)', async () => {
     let captured: Record<string, unknown> | null = null;
 

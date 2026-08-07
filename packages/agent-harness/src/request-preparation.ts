@@ -1,9 +1,11 @@
 import {
   estimateMessageTokens,
+  estimateToolDefinitionTokens,
   type AIModel,
   type AIProvider,
   type ChatParams,
   type Message,
+  type PromptCacheMode,
   type ThinkingConfig,
   type TokenUsage,
 } from '@hyscode/ai-providers';
@@ -23,8 +25,18 @@ export type PreparedChatRequest = {
   params: Omit<ChatParams, 'signal'>;
   stablePrefixHash: string;
   promptCacheKey?: string;
+  promptCache: PromptCachePlan;
   cost: RequestCostBreakdown;
   optimizations: string[];
+};
+
+export type PromptCachePlan = {
+  mode: PromptCacheMode;
+  enabled: boolean;
+  providerSupportsCache: boolean;
+  eligiblePrefixTokens: number;
+  stablePrefixHash: string;
+  promptCacheKey?: string;
 };
 
 type PrepareRequestInput = {
@@ -36,13 +48,18 @@ type PrepareRequestInput = {
   maxOutputTokens: number;
   thinking?: ThinkingConfig;
   enabled: boolean;
+  cacheEnabled?: boolean;
+  cacheScope?: string;
 };
+
+const CACHE_PREFIX_VERSION = 'v2';
 
 export class RequestPreparation {
   private calibration = new Map<string, { ratio: number; samples: number }>();
 
   prepare(input: PrepareRequestInput): PreparedChatRequest {
     const capabilities = input.provider?.capabilities;
+    const cacheEnabled = input.cacheEnabled ?? input.enabled;
     const shouldReplayReasoning =
       capabilities?.reasoningReplay === 'required' ||
       (capabilities?.reasoningReplay === 'model-dependent' &&
@@ -51,11 +68,21 @@ export class RequestPreparation {
       input.enabled && !shouldReplayReasoning
         ? stripReasoningReplay(input.snapshot.messages)
         : input.snapshot.messages;
-    const stablePrefixHash = hashStablePrefix(input.snapshot.systemPrompt, input.snapshot.tools);
+    const tools = canonicalizeTools(input.snapshot.tools);
+    const stablePrefixHash = hashStablePrefix(input.snapshot.systemPrompt, tools);
+    const promptCacheMode =
+      capabilities?.promptCacheModeForModel?.(input.modelId) ?? capabilities?.promptCache ?? 'none';
+    const acceptsPromptCacheKey =
+      capabilities?.acceptsPromptCacheKeyForModel?.(input.modelId) ??
+      capabilities?.acceptsPromptCacheKey ??
+      false;
     const promptCacheKey =
-      input.enabled && capabilities?.acceptsPromptCacheKey
-        ? `hyscode:${input.provider?.id}:${input.modelId}:${stablePrefixHash}`
+      cacheEnabled && acceptsPromptCacheKey
+        ? `hyscode:${CACHE_PREFIX_VERSION}:${input.provider?.id}:${input.modelId}:${hashText(input.cacheScope ?? 'global')}:${stablePrefixHash}`
         : undefined;
+    const explicitCache = cacheEnabled && promptCacheMode === 'explicit-breakpoints';
+    const eligiblePrefixTokens =
+      input.snapshot.tokenBreakdown.system + estimateToolDefinitionTokens(tools);
     const estimatedInputTokens =
       input.snapshot.tokenBreakdown.system +
       input.snapshot.tokenBreakdown.tools +
@@ -71,12 +98,29 @@ export class RequestPreparation {
         model: input.modelId,
         messages,
         systemPrompt: input.snapshot.systemPrompt,
-        tools: input.snapshot.tools,
+        tools,
         maxTokens: input.maxOutputTokens,
         thinking: input.thinking,
-        cachePrompt: input.enabled && capabilities?.promptCache === 'explicit-breakpoints',
+        cachePrompt: explicitCache,
         promptCacheKey,
+        promptCacheOptions:
+          cacheEnabled && promptCacheMode !== 'none'
+            ? {
+                mode: explicitCache ? 'explicit' : 'implicit',
+                key: promptCacheKey,
+                stablePrefixHash,
+                ...(explicitCache ? { breakpoint: 'stable-prefix' as const } : {}),
+              }
+            : undefined,
         agentMode: input.mode,
+      },
+      promptCache: {
+        mode: promptCacheMode,
+        enabled: cacheEnabled && promptCacheMode !== 'none',
+        providerSupportsCache: promptCacheMode !== 'none',
+        eligiblePrefixTokens,
+        stablePrefixHash,
+        promptCacheKey,
       },
       stablePrefixHash,
       promptCacheKey,
@@ -92,11 +136,11 @@ export class RequestPreparation {
           input.model?.outputPricePerMToken,
         ),
       },
-      optimizations: input.enabled
+      optimizations: input.enabled || cacheEnabled
         ? [
             ...(messages !== input.snapshot.messages ? ['reasoning-replay-pruned'] : []),
             ...(promptCacheKey ? ['prompt-cache-key'] : []),
-            ...(capabilities?.promptCache === 'explicit-breakpoints' ? ['cache-breakpoints'] : []),
+            ...(explicitCache ? ['cache-breakpoints'] : []),
           ]
         : [],
     };
@@ -166,11 +210,45 @@ function countImages(messages: Message[]): number {
 }
 
 function hashStablePrefix(systemPrompt: string, tools: ContextSnapshot['tools']): string {
-  const text = `${systemPrompt}\n${JSON.stringify(tools)}`;
+  const text = stableStringify({ version: CACHE_PREFIX_VERSION, systemPrompt, tools });
+  return hashText(text);
+}
+
+function hashText(text: string): string {
   let hash = 2166136261;
   for (let index = 0; index < text.length; index++)
     hash = Math.imul(hash ^ text.charCodeAt(index), 16777619);
   return (hash >>> 0).toString(36);
+}
+
+function canonicalizeTools(tools: ContextSnapshot['tools']): ContextSnapshot['tools'] {
+  return [...tools]
+    .map((tool) => ({
+      ...tool,
+      inputSchema: canonicalizeObject(tool.inputSchema) as Record<string, unknown>,
+    }))
+    .sort((left, right) => left.name.localeCompare(right.name));
+}
+
+function canonicalizeObject(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonicalizeObject);
+  if (value === null || typeof value !== 'object') return value;
+  const record = value as Record<string, unknown>;
+  return Object.fromEntries(
+    Object.keys(record)
+      .sort()
+      .map((key) => [key, canonicalizeObject(record[key])]),
+  );
+}
+
+function stableStringify(value: unknown): string {
+  if (value === null || typeof value !== 'object') return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(stableStringify).join(',')}]`;
+  const record = value as Record<string, unknown>;
+  return `{${Object.keys(record)
+    .sort()
+    .map((key) => `${JSON.stringify(key)}:${stableStringify(record[key])}`)
+    .join(',')}}`;
 }
 
 function tokenCost(tokens: number, pricePerMillion?: number): number {

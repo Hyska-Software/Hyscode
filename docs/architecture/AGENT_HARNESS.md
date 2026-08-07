@@ -112,6 +112,21 @@ propagated to provider streams, tool execution, approvals, mode switches, and
 agent questions through a shared `AbortSignal`. A harness rejects concurrent
 turns rather than allowing their events to interleave.
 
+### Prompt Cache Observability and Persistence
+
+Prompt-cache measurements travel through the shared `TokenUsage` and `Trace`
+contracts. Providers report raw cache-read and cache-write tokens when the
+provider exposes them; the harness preserves unknown measurements instead of
+turning them into false misses, and derives token-weighted and request-weighted
+hit rates only from eligible observations.
+
+The desktop persists turn-level cache metrics and cumulative session usage in
+SQLite. The standalone TUI uses `CliDataStore` JSON but persists the same raw
+counters, derived session metrics, and trace-level `promptCache` snapshots.
+Codex conversations in the TUI also persist the provider thread id together
+with the stable prompt fingerprint, so a changed system prompt cannot resume a
+thread with incompatible cached context.
+
 ### Thinking Configuration and Client Synchronization
 
 The harness accepts the shared `ThinkingConfig` contract from the provider layer.
@@ -319,6 +334,41 @@ interface TokenBudget {
   available: number; // maxInput - reserved totals
 }
 ```
+
+### Prompt-cache preparation and telemetry
+
+Prompt caching is a first-class harness concern and is independent from the other
+cost-optimization switches. Before each provider request, `RequestPreparation`
+canonicalizes the tool definitions, computes a versioned stable-prefix hash, and
+creates a project-scoped key only when the provider/model declares keyed caching.
+The request carries the provider-specific cache policy while the trace records the
+same prefix fingerprint for later diagnosis.
+
+Each API attempt records a `PromptCacheObservation` with one of these states:
+
+| State | Meaning | Hit denominator |
+| --- | --- | --- |
+| `hit` | Native cache read was reported for an eligible prefix | yes |
+| `miss` | Native cache fields were reported but no read occurred | yes |
+| `not-reported` | Provider supports caching but omitted cache usage fields | no |
+| `ineligible` | Stable prefix is below the 1,024-token minimum | no |
+| `unsupported` | Provider/model does not expose prompt caching | no |
+
+The trace and persisted turn record keep both token-weighted and request-weighted
+metrics. The weighted rate is bounded to the eligible prefix, so cached history or
+provider bookkeeping cannot inflate the result above 100%. Unknown telemetry is
+visible and never silently counted as a miss.
+
+The desktop database migration stores raw counters rather than derived floating
+point rates. This keeps historical rows safe and lets the read path derive
+`cacheHitRate`, `cacheRequestHitRate`, `cacheInputReadRatio`, and `cacheUnknownRate`
+consistently after restart.
+
+For the Codex sidecar, `sessionId` and `sessionFingerprint` are propagated through
+the harness. Rust remembers and persists the native SDK thread id; a changed stable
+fingerprint fences reuse and starts a new native thread. This preserves Codex's own
+cache/session semantics without duplicating the complete HysCode history on every
+resumed request.
 
 **Strategy:**
 

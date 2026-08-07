@@ -2,7 +2,7 @@ import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import type { AgentType, Memory, MemoryType } from '@hyscode/agent-harness';
-import type { Message } from '@hyscode/ai-providers';
+import type { Message, TokenUsage } from '@hyscode/ai-providers';
 import type { ProjectSummary, SessionMessage, SessionRecord, SessionSummary } from './protocol';
 
 type MemoryRow = {
@@ -34,6 +34,9 @@ type PersistedConversation = {
   createdAt: string;
   updatedAt: string;
   messages: SessionMessage[];
+  tokenUsage?: TokenUsage;
+  codexThreadId?: string;
+  codexThreadFingerprint?: string;
 };
 
 type PersistedData = {
@@ -162,6 +165,15 @@ export class CliDataStore {
         return undefined as T;
       case 'db_list_traces':
         return this.data.traces.filter((trace) => trace.conversationId === args.conversationId) as T;
+      case 'db_load_codex_thread':
+        return (await this.loadCodexThread(String(args.sessionId ?? ''), typeof args.fingerprint === 'string' ? args.fingerprint : null)) as T;
+      case 'db_save_codex_thread':
+        await this.saveCodexThread(
+          String(args.sessionId ?? ''),
+          typeof args.fingerprint === 'string' ? args.fingerprint : null,
+          String(args.threadId ?? ''),
+        );
+        return undefined as T;
       default:
         throw new Error(`CLI data store does not implement command "${command}"`);
     }
@@ -216,6 +228,7 @@ export class CliDataStore {
 
   async saveSession(session: SessionRecord): Promise<void> {
     const existing = this.data.conversations.findIndex((conversation) => conversation.id === session.id);
+    const existingConversation = existing >= 0 ? this.data.conversations[existing] : undefined;
     const record: PersistedConversation = {
       id: session.id,
       projectId: session.id,
@@ -227,9 +240,30 @@ export class CliDataStore {
       createdAt: existing >= 0 ? this.data.conversations[existing].createdAt : session.updatedAt,
       updatedAt: session.updatedAt,
       messages: [...session.messages],
+      tokenUsage: session.tokenUsage ?? existingConversation?.tokenUsage,
+      codexThreadId: existingConversation?.codexThreadId,
+      codexThreadFingerprint: existingConversation?.codexThreadFingerprint,
     };
     if (existing >= 0) this.data.conversations[existing] = record;
     else this.data.conversations.push(record);
+    await this.persist();
+  }
+
+  async loadCodexThread(sessionId: string, fingerprint: string | null): Promise<string | null> {
+    await this.load();
+    const conversation = this.data.conversations.find((candidate) => candidate.id === sessionId);
+    if (!conversation?.codexThreadId) return null;
+    if (fingerprint !== null && conversation.codexThreadFingerprint !== fingerprint) return null;
+    return conversation.codexThreadId;
+  }
+
+  async saveCodexThread(sessionId: string, fingerprint: string | null, threadId: string): Promise<void> {
+    await this.load();
+    const conversation = this.data.conversations.find((candidate) => candidate.id === sessionId);
+    if (!conversation || !threadId) return;
+    conversation.codexThreadId = threadId;
+    conversation.codexThreadFingerprint = fingerprint ?? undefined;
+    conversation.updatedAt = now();
     await this.persist();
   }
 
@@ -260,6 +294,7 @@ export class CliDataStore {
       agentType: conversation.mode,
       updatedAt: conversation.updatedAt,
       messageCount: conversation.messages.length,
+      tokenUsage: conversation.tokenUsage,
     };
   }
 

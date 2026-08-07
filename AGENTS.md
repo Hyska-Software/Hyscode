@@ -52,7 +52,7 @@ documentado em [`docs/WORKFLOW.md`](docs/WORKFLOW.md) e operacionalizado em
 - **Sempre** atualizar `docs/` quando contrato/arquitetura mudar.
 - **Sempre** atualizar `AGENTS.md` ou `docs/WORKFLOW.md` se a convenção mudar.
 - **Sempre** referenciar este `AGENTS.md` em qualquer resposta sobre workflow.
-- **Sempre** verifique se as alterações feitas necessitão de alguma atualização tambem no TUi
+- **Always** evaluate and update the TUI when shared contracts or user-facing behavior change.
 
 ## Commit & PR — apenas sob pedido explícito
 

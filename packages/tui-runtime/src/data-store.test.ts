@@ -92,4 +92,18 @@ describe('CLI persistence adapter', () => {
     expect(store.loadSession(second.id)?.id).toBe(second.id);
     expect(await store.deleteSession(first.id)).toBe(false);
   });
+
+  it('persists a Codex thread only for the matching stable-prefix fingerprint', async () => {
+    const { store, directory } = await dataStore();
+    const session = await store.createSession(directory, 'chat', 'codex', 'codex-1');
+
+    expect(await store.loadCodexThread(session.id, 'prefix-a')).toBeNull();
+    await store.saveCodexThread(session.id, 'prefix-a', 'thread-1');
+    expect(await store.loadCodexThread(session.id, 'prefix-a')).toBe('thread-1');
+    expect(await store.loadCodexThread(session.id, 'prefix-b')).toBeNull();
+
+    const reopened = new CliDataStore(store.path);
+    await reopened.load();
+    expect(await reopened.loadCodexThread(session.id, 'prefix-a')).toBe('thread-1');
+  });
 });
