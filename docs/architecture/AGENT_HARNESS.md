@@ -493,9 +493,31 @@ The harness owns provider-native assistant and tool-result blocks. It emits `tra
 Cancellation is cooperative for PTY and provider operations. Native calls without cancellation support are awaited; if one completes after cancellation, the turn ends as `cancelled_partial`.
 
 Terminal execution is delegated through `TerminalRuntimeAdapter`. The harness owns framed command
-capture and the canonical result returned to the model; the desktop adapter owns visible session and
-conversation identity; Rust owns process lifecycle, ordered replay, and exit state. Live
-`terminal_progress` events update the UI but are not persisted as provider transcript blocks.
+capture and the canonical result returned to the model. The adapter owns the runtime boundary and
+must enforce `TerminalAccess` for conversation, owner, tool-call, and source (`agent`/`user`).
+Desktop uses the Rust PTY registry through `DesktopTerminalRuntime`; the standalone CLI uses
+`CliHost/node-pty` through `CliTerminalRuntime`. Both runtimes separate manual terminals from agent
+terminals, reuse only the same owner/conversation/normalized `cwd`, expose resize, and retain an
+inspectable terminal summary after exit until shutdown.
+
+Terminal streams are replay-capable event hubs rather than one mutable listener. A subscriber is
+registered before its snapshot is captured, concurrent PTY data is queued, snapshot sequences are
+applied first, and queued events are drained only when newer. Sequence values are monotonic and exit
+is emitted once. The bridge projects `terminal_updated` (`created`, `output`, `state`, `exit`) and
+includes current terminals in every `runtime_ready`; the TUI consumes these by `terminalId` and
+keeps raw output only for parsing, normalizing ANSI and framing before display. Live
+`terminal_progress` events update tool activity but are not persisted as provider transcript blocks.
+
+An `awaiting_input` terminal is a guarded interaction: the agent can use the approved
+`respond_terminal_input` tool only for its owner and non-sensitive prompts. The TUI may write only
+when no tool is actively controlling the terminal and the approval mode is not `yolo`; sensitive
+input is masked and never added to transcript or model context. Chat, review, and plan policies deny
+terminal tools, while build and debug policies retain them.
+
+The fullscreen TUI embeds the bridge in-process. The packaged `vortex --protocol ndjson` launcher
+and the compatibility runtime entrypoint reuse the same serialized request/event loop for
+automation, including `initialize`, `send_message`, approvals, terminal events, cancellation, and
+shutdown.
 
 Workspace-relative paths are normalized and checked by segment containment. External absolute paths are rejected by default and require explicitly authorized adapter policy.
 

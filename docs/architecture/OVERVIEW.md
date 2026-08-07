@@ -69,11 +69,11 @@ header and adaptive session sidebar frame the transcript, while the composer
 and action panels stay anchored at the bottom. Typing `/` opens a filtered
 command palette in place; `Tab` completes the selected command and `Enter`
 executes it. `Ctrl-K` opens the same palette without discarding a normal draft.
-It instantiates `TuiBridge` in-process instead of launching a second NDJSON
-bridge process. This keeps the CLI on the same
+The fullscreen path instantiates `TuiBridge` in-process instead of launching a second bridge
+process. This keeps the CLI on the same
 `@hyscode/agent-harness`, `@hyscode/ai-providers`, `@hyscode/mcp-client`, built-in
 skills, rules, agent modes, sub-agent flow, SDD services, and provider streaming
-protocol as HysCode Desktop. Additive protocol capability version 2 exposes
+protocol as HysCode Desktop. Additive protocol capability version 3 exposes
 structured tool cards, terminal progress, file-review state, gathered context,
 SDD phases/tasks, scoped child-agent events, usage telemetry, and connection
 recovery while retaining protocol version 1 for older NDJSON clients.
@@ -87,11 +87,13 @@ accent at render time, so `/theme` repaints the mark together with the rest of
 the shell.
 
 `@hyscode/tui-runtime` owns the TypeScript host adapter and creates native PTYs
-through `node-pty`. PTY output is sequenced and bounded, supports snapshot/replay
-from a sequence, resize, interrupt, kill, exit events, and shutdown. The same
-host also exposes filesystem, Git, Docker, web, keychain, memory, SDD, and
-diagnostic commands to the harness. There is no Rust UI, Rust agent runtime, or
-production host round trip in the TUI path.
+through `node-pty`. PTY output is sequenced and bounded to the Harness capture limit, supports
+snapshot/replay from a sequence, independent subscribers, resize, interrupt, kill, exit events,
+and shutdown. Agent and manual terminals have separate roles and ownership; agent reuse requires
+the same owner, conversation, and normalized `cwd`. The TUI receives `terminal_updated` projections
+and never owns a PTY. The same host also exposes filesystem, Git, Docker, web, keychain, memory,
+SDD, and diagnostic commands to the harness. There is no Rust UI, Rust agent runtime, or production
+host round trip in the TUI path.
 
 Desktop settings are mirrored from the existing Zustand/local-storage store to
 the platform shared settings file (`%LOCALAPPDATA%/hyscode/settings.json` on
@@ -133,9 +135,12 @@ and VORTEX CLI preserve these fields. The TUI exposes them through `/update`:
 `/update check`, `/update channel stable`, `/update startup off`, and
 `/update auto-download on`.
 
-The runtime still exports a small NDJSON compatibility entrypoint for external
-protocol clients and tests. The packaged TUI does not launch it; direct in-process
-construction is the only production client path.
+The runtime exports the reusable NDJSON bridge loop for external protocol clients and tests. The
+packaged launcher preserves the fullscreen experience by default, and `vortex --protocol ndjson`
+selects the official automation surface. It accepts `initialize`, `send_message`, terminal events,
+approval resolutions, cancellation, and shutdown over stdin/stdout. CLI flags such as `--workspace`,
+`--provider`, `--model`, `--mode`, and `--config` provide defaults for the protocol's `initialize`
+request; explicit request fields take precedence.
 
 ### Build and launch
 
@@ -173,8 +178,8 @@ Bun. A repository-side executable can use `HYSCODE_REPO_ROOT` as a fallback
 when its sidecar is not next to the executable; production installations do
 not need that variable because the sidecar is bundled beside `vortex`.
 
-The launcher accepts `--provider`, `--model`, `--mode`, `--config`, and
-`--workspace`. Inside the TUI, the supported commands are:
+The launcher accepts `--provider`, `--model`, `--mode`, `--config`, `--workspace`, and
+`--protocol ndjson`. Inside the TUI, the supported commands are:
 
 `/help`, `/mode`, `/thinking`, `/theme`, `/sidebar`, `/approval`, `/model`, `/models`, `/projects`,
 `/project`, `/new`, `/sessions`, `/load`, `/tab`, `/rename`, `/export`,
@@ -189,7 +194,12 @@ OpenCode-style composer shortcuts are supported for the terminal workflow:
 `!command` writes to a persistent PTY, `/attach image:path` sends a supported
 image on the next model request, `Shift+Enter` inserts a multiline break, and
 bracketed paste preserves newlines. `/diffs` shows bounded textual diffs and
-accept/reject actions for file changes emitted by the shared harness.
+accept/reject actions for file changes emitted by the shared harness. `/terminal` exposes
+`list`, `open`, `focus`, `read`, `interrupt`, and `kill`; agent terminals appear automatically,
+and a terminal waiting for non-sensitive input switches the composer into guarded terminal-input
+mode. Resize events are forwarded to the active PTY. Chat, review, and plan policies continue to
+deny terminal tools; build and debug keep them enabled and report tool errors through the normal
+TUI activity and result surfaces.
 
 `Ctrl-C` cancels an active turn and quits when the input is empty; `Shift-Tab`
 cycles agent modes; `Ctrl-T` cycles supported thinking levels; `Tab` changes

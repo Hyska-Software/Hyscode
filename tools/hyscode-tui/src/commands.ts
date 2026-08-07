@@ -89,6 +89,9 @@ const TERMINAL_ACTIONS: readonly SelectionOption[] = [
   { id: 'list', label: 'List terminals' },
   { id: 'open', label: 'Open a new terminal' },
   { id: 'focus', label: 'Choose a terminal to focus' },
+  { id: 'read', label: 'Read the active terminal output' },
+  { id: 'interrupt', label: 'Interrupt the active terminal' },
+  { id: 'kill', label: 'Stop the active terminal' },
 ];
 
 const DIFF_ACTIONS: readonly SelectionOption[] = [
@@ -179,7 +182,7 @@ function actionOptions(state: UiState, action: SelectionFlowAction): readonly Se
         return true;
       });
     case 'terminal':
-      return TERMINAL_ACTIONS.filter((option) => option.id !== 'focus' || state.terminals.length > 0);
+      return TERMINAL_ACTIONS.filter((option) => !['focus', 'read', 'interrupt', 'kill'].includes(option.id) || state.terminals.length > 0);
     case 'diffs': {
       const hasPendingChanges = state.fileChanges.some((change) => change.status === 'pending');
       return DIFF_ACTIONS.filter((option) => option.id === 'list' || hasPendingChanges);
@@ -249,6 +252,7 @@ export function parseCliArgs(args: readonly string[], cwd = process.cwd(), versi
   let model: string | undefined;
   let mode: AgentType | undefined;
   let configPath: string | undefined;
+  let protocol: 'ndjson' | undefined;
 
   const nextValue = (index: number, option: string): string => {
     const value = args[index + 1];
@@ -288,6 +292,13 @@ export function parseCliArgs(args: readonly string[], cwd = process.cwd(), versi
         configPath = nextValue(index, argument);
         index += 1;
         break;
+      case '--protocol': {
+        const value = nextValue(index, argument);
+        if (value !== 'ndjson') throw new Error(`Unsupported protocol "${value}". Expected ndjson.`);
+        protocol = 'ndjson';
+        index += 1;
+        break;
+      }
       default:
         if (argument.startsWith('-')) throw new Error(`Unknown option: ${argument}. Use --help for usage.`);
         if (workspace) throw new Error(`Unexpected argument: ${argument}. Use --help for usage.`);
@@ -303,6 +314,7 @@ export function parseCliArgs(args: readonly string[], cwd = process.cwd(), versi
       ...(model ? { model } : {}),
       ...(mode ? { mode } : {}),
       ...(configPath ? { configPath: path.resolve(cwd, configPath) } : {}),
+      ...(protocol ? { protocol } : {}),
     },
   };
 }
@@ -323,6 +335,7 @@ export function helpText(): string {
     '      --model <id>           Override the shared active model',
     '      --mode <mode>          Start in chat, build, review, debug, or plan mode',
     '      --config <path>        Read shared settings JSON from this path',
+    '      --protocol ndjson      Run the typed runtime protocol over stdin/stdout',
     '',
     'Update exit codes:',
     `  ${VORTEX_UPDATE_EXIT_CODES.upToDate}                         No update available`,

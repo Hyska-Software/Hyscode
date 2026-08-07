@@ -5,6 +5,7 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import {
   Harness,
+  invalidateTerminalInput,
   MemoryManager,
   RuleLoader,
   SkillLoader,
@@ -18,8 +19,10 @@ import {
   type SddSession,
   type SddTask,
   type Skill,
+  type TerminalAccess,
   type TerminalAcquireRequest,
   type TerminalBinding,
+  type TerminalRole,
   type TerminalRuntimeAdapter,
   type TerminalSnapshot,
   type ToolHandler,
@@ -64,6 +67,7 @@ import {
   type SessionRecord,
   type SetConfigParams,
   type TerminalSummary,
+  type TerminalUpdatedPayload,
 } from './protocol';
 
 type PendingInteraction = {
@@ -76,13 +80,29 @@ type PendingHostRequest = {
   reject: (error: Error) => void;
 };
 
-type TerminalEntry = {
+type CliTerminalEntry = {
   binding: TerminalBinding;
-  unsubscribe: (() => void) | null;
+  role: TerminalRole;
   isolationKey: string;
+  ownerConversationId: string;
+  ownerId?: string;
+  cwd: string;
   sessionName?: string;
   activeToolCallId: string | null;
+  awaitingInput: boolean;
+  alive: boolean;
+  exitCode: number | null;
+  sequence: number;
+  outputPreview: string;
+  truncated: boolean;
+  observerUnsubscribe: (() => void) | null;
 };
+
+type TerminalUpdateCause = TerminalUpdatedPayload['cause'];
+type TerminalDataEvent = { pty_id?: string; data?: string; sequence?: number };
+type TerminalExitEvent = { pty_id?: string; code?: number | null; sequence?: number };
+
+const MAX_TERMINAL_PREVIEW = 4_000;
 
 type BridgeOutput = (message: BridgeResponse | BridgeEvent) => void;
 
@@ -114,7 +134,6 @@ export class TuiBridge {
   private readonly subAgentWaiters: Array<() => void> = [];
   private readonly interactions = new Map<string, PendingInteraction>();
   private readonly hostRequests = new Map<string, PendingHostRequest>();
-  private readonly terminals = new Map<string, TerminalEntry>();
   private readonly attachments = new Map<string, ContextAttachment>();
   private readonly pendingFileChanges = new Map<string, FileChangeState>();
   private readonly childAgents = new Map<string, Harness>();
@@ -187,6 +206,8 @@ export class TuiBridge {
           return this.ok(request.id, await this.terminalSnapshot(request.params ?? {}));
         case 'terminal_write':
           return this.ok(request.id, await this.terminalWrite(request.params ?? {}));
+        case 'terminal_resize':
+          return this.ok(request.id, await this.terminalResize(request.params ?? {}));
         case 'terminal_interrupt':
           return this.ok(request.id, await this.terminalInterrupt(request.params ?? {}));
         case 'terminal_kill':
@@ -271,7 +292,20 @@ export class TuiBridge {
     this.pendingFileChanges.clear();
     const skillLoader = this.createSkillLoader();
     const ruleLoader = this.createRuleLoader();
-    const terminalRuntime = new CliTerminalRuntime(this.host, this.settings.terminalShell);
+    const terminalRuntime = new CliTerminalRuntime(
+      this.host,
+      this.settings.terminalShell,
+      (terminal, cause) => this.emit({
+        type: 'event',
+        event: 'terminal_updated',
+        payload: {
+          terminal,
+          cause,
+          ...(this.activeTurnId ? { turnId: this.activeTurnId } : {}),
+          ...(this.session?.id ? { conversationId: this.session.id } : {}),
+        },
+      }),
+    );
     this.terminalRuntime = terminalRuntime;
     const sddDb = this.createSddDatabase();
     this.harness = new Harness({
@@ -330,7 +364,7 @@ export class TuiBridge {
       ? this.dataStore.loadSession(existingSession.id)
       : await this.dataStore.createSession(workspacePath, this.harness.getAgentType(), this.currentProviderId(), this.currentModelId());
     this.harness.setConversationId(this.session?.id ?? crypto.randomUUID());
-    const ready = this.runtimeReady();
+    const ready = await this.runtimeReady();
     this.emit({ type: 'event', event: 'runtime_ready', payload: ready });
     return ready;
   }
@@ -539,7 +573,9 @@ export class TuiBridge {
     } else if (kind === 'terminal') {
       const terminalId = String(rawParams.terminalId ?? '');
       if (!terminalId) throw new Error('Terminal attachment requires terminalId.');
-      const snapshot = await this.requireTerminalRuntime().snapshot(terminalId, 0);
+      const runtime = this.requireTerminalRuntime();
+      runtime.authorize(terminalId, this.userTerminalAccess());
+      const snapshot = await runtime.snapshot(terminalId, 0);
       const content = snapshot.data.slice(-MAX_TERMINAL_CONTEXT_BYTES);
       attachment.terminalId = terminalId;
       attachment.content = content;
@@ -644,33 +680,59 @@ export class TuiBridge {
 
   private async openTerminal(rawParams: Record<string, unknown>): Promise<TerminalSummary> {
     const runtime = this.requireTerminalRuntime();
-    const binding = await runtime.acquire({
+    const binding = await runtime.openUserTerminal({
       conversationId: this.session?.id ?? this.projectId,
-      toolCallId: `tui-${crypto.randomUUID()}`,
       cwd: this.resolveWorkspacePath(String(rawParams.cwd ?? this.workspacePath)),
       forceNew: rawParams.forceNew !== false,
-      background: true,
-      ...(typeof rawParams.name === 'string' && rawParams.name ? { sessionName: rawParams.name } : {}),
+      ...(typeof rawParams.name === 'string' && rawParams.name ? { name: rawParams.name } : {}),
     });
     return runtime.summary(binding.terminalId);
   }
 
   private async terminalSnapshot(rawParams: Record<string, unknown>): Promise<unknown> {
-    return this.requireTerminalRuntime().snapshot(String(rawParams.terminalId ?? ''), numberValue(rawParams.afterSequence, 0));
+    const terminalId = String(rawParams.terminalId ?? '');
+    const runtime = this.requireTerminalRuntime();
+    runtime.authorize(terminalId, this.userTerminalAccess());
+    return { terminalId, ...(await runtime.snapshot(terminalId, numberValue(rawParams.afterSequence, 0))) };
   }
 
   private async terminalWrite(rawParams: Record<string, unknown>): Promise<{ written: boolean }> {
-    await this.requireTerminalRuntime().write(String(rawParams.terminalId ?? ''), String(rawParams.data ?? ''));
+    const settings = this.requireSettings();
+    await this.requireTerminalRuntime().writeUser(
+      String(rawParams.terminalId ?? ''),
+      String(rawParams.data ?? ''),
+      settings.approvalMode,
+      this.userTerminalAccess(),
+    );
+    invalidateTerminalInput(String(rawParams.terminalId ?? ''), this.userTerminalAccess());
     return { written: true };
   }
 
+  private async terminalResize(rawParams: Record<string, unknown>): Promise<{ resized: boolean }> {
+    const runtime = this.requireTerminalRuntime();
+    const terminalId = String(rawParams.terminalId ?? '');
+    runtime.authorize(terminalId, this.userTerminalAccess());
+    await runtime.resize(
+      terminalId,
+      Math.max(1, Math.floor(numberValue(rawParams.cols, 120))),
+      Math.max(1, Math.floor(numberValue(rawParams.rows, 32))),
+    );
+    return { resized: true };
+  }
+
   private async terminalInterrupt(rawParams: Record<string, unknown>): Promise<{ interrupted: boolean }> {
-    await this.requireTerminalRuntime().interrupt(String(rawParams.terminalId ?? ''));
+    const runtime = this.requireTerminalRuntime();
+    const terminalId = String(rawParams.terminalId ?? '');
+    runtime.authorize(terminalId, this.userTerminalAccess());
+    await runtime.interrupt(terminalId);
     return { interrupted: true };
   }
 
   private async terminalKill(rawParams: Record<string, unknown>): Promise<{ killed: boolean }> {
-    await this.requireTerminalRuntime().kill(String(rawParams.terminalId ?? ''));
+    const runtime = this.requireTerminalRuntime();
+    const terminalId = String(rawParams.terminalId ?? '');
+    runtime.authorize(terminalId, this.userTerminalAccess());
+    await runtime.kill(terminalId);
     return { killed: true };
   }
 
@@ -825,11 +887,12 @@ export class TuiBridge {
   }
 
   private async shutdown(): Promise<void> {
+    const activeRun = this.activeRun;
     this.cancel();
+    await activeRun?.catch(() => undefined);
     for (const pending of this.hostRequests.values()) pending.reject(new Error('Runtime host was shut down.'));
     this.hostRequests.clear();
-    for (const terminal of this.terminals.values()) terminal.unsubscribe?.();
-    this.terminals.clear();
+    await this.terminalRuntime?.shutdown();
     this.terminalRuntime = null;
     this.attachments.clear();
     this.pendingFileChanges.clear();
@@ -1101,6 +1164,7 @@ export class TuiBridge {
 
   private emitHarnessEvent(event: HarnessEvent): void {
     if (event.type === 'turn_recoverable_error') this.lastRecovery = event.recovery;
+    if (event.type === 'terminal_progress') this.terminalRuntime?.setProgress(event.progress);
     if (event.type === 'turn_start' && !this.activeTurnId) this.activeTurnId = event.turnId ?? null;
     if (event.type === 'transcript_message' && this.belongsToActiveTurn(event)) {
       this.activeTurnMessages.push({ role: event.role, content: event.blocks });
@@ -1135,14 +1199,14 @@ export class TuiBridge {
     this.output?.(message);
   }
 
-  private runtimeReady(): RuntimeReadyPayload {
+  private async runtimeReady(): Promise<RuntimeReadyPayload> {
     const harness = this.requireHarness();
     const registry = getProviderRegistry();
     const providers = registry.list().map((provider) => ({ id: provider.id, name: provider.name, configured: provider.isConfigured(), models: provider.models }));
     const models = providers.flatMap((provider) => provider.configured ? provider.models : []);
     return {
       protocolVersion: 1,
-      capabilitiesVersion: 2,
+      capabilitiesVersion: 3,
       workspacePath: this.workspacePath,
       projectId: this.projectId,
       providers,
@@ -1181,6 +1245,10 @@ export class TuiBridge {
         sdd: harness.getSddEngine() !== null,
         subAgents: this.requireSettings().subAgentEnabled,
         sessionManagement: true,
+        terminalEvents: true,
+        terminalInput: true,
+        terminalResize: true,
+        ndjsonProtocol: true,
       },
       context: this.contextState(),
       sdd: {
@@ -1192,7 +1260,7 @@ export class TuiBridge {
         review: null,
         failedTask: harness.getSddFailedTask(),
       },
-      terminals: [],
+      terminals: await this.requireTerminalRuntime().list(),
       ...(this.session ? { session: this.session } : {}),
     };
   }
@@ -1290,6 +1358,13 @@ export class TuiBridge {
     return this.terminalRuntime;
   }
 
+  private userTerminalAccess(): TerminalAccess {
+    return {
+      conversationId: this.session?.id ?? this.projectId,
+      source: 'user',
+    };
+  }
+
   private resolveWorkspacePath(value: string): string {
     return path.isAbsolute(value) ? path.normalize(value) : path.resolve(this.workspacePath, value);
   }
@@ -1314,118 +1389,367 @@ export class TuiBridge {
 }
 
 class CliTerminalRuntime implements TerminalRuntimeAdapter {
-  private readonly entries = new Map<string, TerminalEntry>();
+  private readonly entries = new Map<string, CliTerminalEntry>();
 
-  constructor(private readonly host: CliHost, private readonly configuredShell: string) {}
+  constructor(
+    private readonly host: CliHost,
+    private readonly configuredShell: string,
+    private readonly onUpdate: (terminal: TerminalSummary, cause: TerminalUpdateCause) => void = () => undefined,
+  ) {}
 
   async acquire(request: TerminalAcquireRequest): Promise<TerminalBinding> {
     const isolationKey = request.ownerId ?? request.conversationId;
     if (!request.forceNew) {
-      for (const [terminalId, entry] of this.entries) {
+      for (const entry of this.entries.values()) {
+        if (entry.role !== 'agent') continue;
         if (entry.isolationKey !== isolationKey) continue;
+        if (entry.cwd !== normalizeTerminalPath(request.cwd)) continue;
         if (request.sessionName && entry.sessionName !== request.sessionName) continue;
+        if (entry.awaitingInput) continue;
         if (entry.activeToolCallId && entry.activeToolCallId !== request.toolCallId) continue;
         const alive = await this.host.invoke<boolean>('pty_exists', { ptyId: entry.binding.ptyId }).catch(() => false);
         if (!alive) {
-          this.entries.delete(terminalId);
+          this.markExited(entry, entry.exitCode);
           continue;
         }
+        entry.alive = true;
         entry.activeToolCallId = request.toolCallId;
+        entry.awaitingInput = false;
+        this.notify(entry, 'state');
         return entry.binding;
       }
     }
 
-    const terminalId = `terminal-${crypto.randomUUID()}`;
-    const frameLanguage = process.platform === 'win32' ? 'powershell' : 'bash';
-    const ptyId = await this.host.invoke<string>('pty_spawn', { id: terminalId, shell: this.configuredShell || (process.platform === 'win32' ? 'powershell.exe' : process.env.SHELL || '/bin/sh'), cwd: request.cwd, cols: 120, rows: 32 });
-    const binding: TerminalBinding = { terminalId, ptyId, persistent: true, frameLanguage };
-    this.entries.set(terminalId, {
-      binding,
-      unsubscribe: null,
+    return this.spawn({
+      role: 'agent',
       isolationKey,
-      ...(request.sessionName ? { sessionName: request.sessionName } : {}),
+      ownerConversationId: request.conversationId,
+      ...(request.ownerId ? { ownerId: request.ownerId } : {}),
+      cwd: request.cwd,
+      sessionName: request.sessionName,
       activeToolCallId: request.toolCallId,
     });
-    return binding;
+  }
+
+  async openUserTerminal(request: {
+    conversationId: string;
+    cwd: string;
+    name?: string;
+    forceNew: boolean;
+  }): Promise<TerminalBinding> {
+    const cwd = normalizeTerminalPath(request.cwd);
+    if (!request.forceNew) {
+      for (const entry of this.entries.values()) {
+        if (entry.role !== 'user' || entry.isolationKey !== request.conversationId || entry.cwd !== cwd) continue;
+        if (request.name && entry.sessionName !== request.name) continue;
+        if (entry.alive) return entry.binding;
+      }
+    }
+    return this.spawn({
+      role: 'user',
+      isolationKey: request.conversationId,
+      ownerConversationId: request.conversationId,
+      cwd,
+      ...(request.name ? { sessionName: request.name } : {}),
+      activeToolCallId: null,
+    });
   }
 
   async snapshot(terminalId: string, afterSequence = 0): Promise<TerminalSnapshot> {
-    const entry = this.entries.get(terminalId);
-    if (!entry) throw new Error(`Terminal "${terminalId}" not found.`);
-    const snapshot = await this.host.invoke<{ data: string; from_sequence: number; to_sequence: number; truncated: boolean; alive: boolean; exit_code: number | null }>('pty_snapshot', { ptyId: entry.binding.ptyId, afterSequence });
-    return { data: snapshot.data, fromSequence: snapshot.from_sequence, toSequence: snapshot.to_sequence, truncated: snapshot.truncated, alive: snapshot.alive, exitCode: snapshot.exit_code };
+    const entry = this.requireEntry(terminalId);
+    const snapshot = await this.host.invoke<{
+      data: string;
+      from_sequence: number;
+      to_sequence: number;
+      truncated: boolean;
+      alive: boolean;
+      exit_code: number | null;
+    }>('pty_snapshot', { ptyId: entry.binding.ptyId, afterSequence });
+    entry.sequence = Math.max(entry.sequence, snapshot.to_sequence);
+    entry.truncated = entry.truncated || snapshot.truncated;
+    if (afterSequence === 0) entry.outputPreview = tail(snapshot.data);
+    else if (snapshot.data) entry.outputPreview = tail(`${entry.outputPreview}${snapshot.data}`);
+    if (snapshot.alive) {
+      if (entry.alive) {
+        entry.exitCode = snapshot.exit_code;
+        this.notify(entry, 'output');
+      }
+    } else {
+      this.markExited(entry, snapshot.exit_code);
+    }
+    return {
+      data: snapshot.data,
+      fromSequence: snapshot.from_sequence,
+      toSequence: snapshot.to_sequence,
+      truncated: snapshot.truncated,
+      alive: snapshot.alive,
+      exitCode: snapshot.exit_code,
+    };
   }
 
   async list(): Promise<TerminalSummary[]> {
     const summaries: TerminalSummary[] = [];
-    for (const terminalId of this.entries.keys()) {
-      summaries.push(await this.summary(terminalId));
-    }
+    for (const terminalId of this.entries.keys()) summaries.push(await this.summary(terminalId));
     return summaries;
   }
 
   async summary(terminalId: string): Promise<TerminalSummary> {
-    const entry = this.entries.get(terminalId);
-    if (!entry) throw new Error(`Terminal "${terminalId}" not found.`);
-    const snapshot = await this.snapshot(terminalId, 0);
-    return {
-      terminalId,
-      ptyId: entry.binding.ptyId,
-      name: entry.sessionName ?? terminalId,
-      alive: snapshot.alive,
-      sequence: snapshot.toSequence,
-      outputPreview: snapshot.data.slice(-4000),
-      frameLanguage: entry.binding.frameLanguage,
-    };
+    const entry = this.requireEntry(terminalId);
+    await this.snapshot(terminalId, 0);
+    return this.toSummary(entry);
   }
 
   async write(terminalId: string, data: string): Promise<void> {
-    const entry = this.entries.get(terminalId);
-    if (!entry) throw new Error(`Terminal "${terminalId}" not found.`);
+    const entry = this.requireEntry(terminalId);
+    if (!entry.alive) throw new Error(`Terminal "${terminalId}" is not writable.`);
     await this.host.invoke('pty_write', { ptyId: entry.binding.ptyId, data });
   }
 
+  async writeUser(terminalId: string, data: string, approvalMode: string, access: TerminalAccess): Promise<void> {
+    const entry = this.requireEntry(terminalId);
+    this.authorize(terminalId, access);
+    const allowed = entry.role === 'user'
+      || (!entry.activeToolCallId && entry.awaitingInput && approvalMode !== 'yolo');
+    if (!allowed) throw new Error('The terminal is owned by the Harness or is not waiting for input.');
+    entry.awaitingInput = false;
+    this.notify(entry, 'state');
+    await this.write(terminalId, data);
+  }
+
   async interrupt(terminalId: string): Promise<void> {
-    const entry = this.entries.get(terminalId);
-    if (entry) await this.host.invoke('pty_interrupt', { ptyId: entry.binding.ptyId });
+    const entry = this.requireEntry(terminalId);
+    if (entry.alive) await this.host.invoke('pty_interrupt', { ptyId: entry.binding.ptyId });
   }
 
   async kill(terminalId: string): Promise<void> {
-    const entry = this.entries.get(terminalId);
-    if (!entry) return;
-    entry.unsubscribe?.();
+    const entry = this.requireEntry(terminalId);
     await this.host.invoke('pty_kill', { ptyId: entry.binding.ptyId });
-    this.entries.delete(terminalId);
+    this.markExited(entry, entry.exitCode);
+  }
+
+  async resize(terminalId: string, cols: number, rows: number): Promise<void> {
+    const entry = this.requireEntry(terminalId);
+    await this.host.invoke('pty_resize', { ptyId: entry.binding.ptyId, cols, rows });
+  }
+
+  authorize(terminalId: string, access: TerminalAccess): void {
+    const entry = this.requireEntry(terminalId);
+    const ownerMatches = entry.ownerConversationId === access.conversationId
+      && entry.ownerId === access.ownerId;
+    if (access.source === 'agent') {
+      if (entry.role !== 'agent' || !ownerMatches) {
+        throw new Error(`Terminal "${terminalId}" belongs to another terminal owner.`);
+      }
+      if (access.toolCallId && entry.activeToolCallId && entry.activeToolCallId !== access.toolCallId) {
+        throw new Error(`Terminal "${terminalId}" is controlled by another tool.`);
+      }
+      return;
+    }
+    if (ownerMatches) return;
+    throw new Error(`Terminal "${terminalId}" belongs to another conversation.`);
+  }
+
+  setProgress(progress: { terminalId: string; toolCallId: string; state: string; sequence: number }): void {
+    const entry = this.entries.get(progress.terminalId);
+    if (!entry) return;
+    entry.sequence = Math.max(entry.sequence, progress.sequence);
+    if (progress.state === 'awaiting_input') {
+      entry.awaitingInput = true;
+      entry.activeToolCallId = null;
+    } else if (progress.state === 'started' || progress.state === 'running') {
+      entry.awaitingInput = false;
+      entry.activeToolCallId = progress.toolCallId;
+    } else if (progress.state === 'complete' || progress.state === 'error' || progress.state === 'cancelled' || progress.state === 'background') {
+      entry.awaitingInput = false;
+    }
+    this.notify(entry, 'state');
   }
 
   release(terminalId: string, toolCallId: string): void {
     const entry = this.entries.get(terminalId);
     if (!entry || (entry.activeToolCallId && entry.activeToolCallId !== toolCallId)) return;
-    entry?.unsubscribe?.();
-    if (entry) {
-      entry.unsubscribe = null;
-      entry.activeToolCallId = null;
-    }
+    entry.activeToolCallId = null;
+    this.notify(entry, 'state');
   }
 
-  async subscribe(terminalId: string, onData: (data: string, sequence: number) => void, onExit: (exitCode: number | null) => void): Promise<() => void> {
-    const entry = this.entries.get(terminalId);
-    if (!entry) throw new Error(`Terminal "${terminalId}" not found.`);
-    entry.unsubscribe?.();
+  async subscribe(
+    terminalId: string,
+    onData: (data: string, sequence: number) => void,
+    onExit: (exitCode: number | null) => void,
+  ): Promise<() => void> {
+    const entry = this.requireEntry(terminalId);
+    const queued: Array<{ data: string; sequence: number }> = [];
+    let replayComplete = false;
+    let appliedSequence = 0;
+    let exited = false;
+    const deliverData = (data: string, sequence: number): void => {
+      if (sequence <= appliedSequence) return;
+      appliedSequence = sequence;
+      onData(data, sequence);
+    };
     const unsubscribeData = await this.host.listen('pty:data', (payload) => {
-      const event = payload as { pty_id?: string; data?: string; sequence?: number };
-      if (event.pty_id === entry.binding.ptyId && typeof event.data === 'string') onData(event.data, event.sequence ?? 0);
+      const event = payload as TerminalDataEvent;
+      if (event.pty_id !== entry.binding.ptyId || typeof event.data !== 'string') return;
+      const chunk = { data: event.data, sequence: event.sequence ?? appliedSequence + 1 };
+      if (!replayComplete) queued.push(chunk);
+      else deliverData(chunk.data, chunk.sequence);
     });
     const unsubscribeExit = await this.host.listen('pty:exit', (payload) => {
-      const event = payload as { pty_id?: string; code?: number | null };
-      if (event.pty_id === entry.binding.ptyId) onExit(event.code ?? null);
+      const event = payload as TerminalExitEvent;
+      if (event.pty_id !== entry.binding.ptyId || exited) return;
+      exited = true;
+      onExit(event.code ?? null);
     });
-    const unsubscribe = () => { unsubscribeData(); unsubscribeExit(); };
-    entry.unsubscribe = unsubscribe;
     const replay = await this.snapshot(terminalId, 0);
+    appliedSequence = replay.toSequence;
     if (replay.data) onData(replay.data, replay.toSequence);
-    return unsubscribe;
+    replayComplete = true;
+    for (const chunk of queued.sort((left, right) => left.sequence - right.sequence)) deliverData(chunk.data, chunk.sequence);
+    if (!replay.alive && !exited) {
+      exited = true;
+      onExit(replay.exitCode);
+    }
+    return () => {
+      unsubscribeData();
+      unsubscribeExit();
+    };
   }
+
+  async shutdown(): Promise<void> {
+    for (const entry of this.entries.values()) entry.observerUnsubscribe?.();
+    this.entries.clear();
+  }
+
+  private async spawn(request: {
+    role: TerminalRole;
+    isolationKey: string;
+    ownerConversationId: string;
+    ownerId?: string;
+    cwd: string;
+    sessionName?: string;
+    activeToolCallId: string | null;
+  }): Promise<TerminalBinding> {
+    const terminalId = `terminal-${crypto.randomUUID()}`;
+    const shell = this.resolveShell();
+    const ptyId = await this.host.invoke<string>('pty_spawn', {
+      id: terminalId,
+      shell: shell.command,
+      cwd: request.cwd,
+      cols: 120,
+      rows: 32,
+    });
+    const binding: TerminalBinding = { terminalId, ptyId, persistent: true, frameLanguage: shell.frameLanguage };
+    const entry: CliTerminalEntry = {
+      binding,
+      role: request.role,
+      isolationKey: request.isolationKey,
+      ownerConversationId: request.ownerConversationId,
+      ...(request.ownerId ? { ownerId: request.ownerId } : {}),
+      cwd: normalizeTerminalPath(request.cwd),
+      ...(request.sessionName ? { sessionName: request.sessionName } : {}),
+      activeToolCallId: request.activeToolCallId,
+      awaitingInput: false,
+      alive: true,
+      exitCode: null,
+      sequence: 0,
+      outputPreview: '',
+      truncated: false,
+      observerUnsubscribe: null,
+    };
+    this.entries.set(terminalId, entry);
+    await this.attachObserver(entry);
+    this.notify(entry, 'created');
+    return binding;
+  }
+
+  private async attachObserver(entry: CliTerminalEntry): Promise<void> {
+    const unsubscribeData = await this.host.listen('pty:data', (payload) => {
+      const event = payload as TerminalDataEvent;
+      if (event.pty_id !== entry.binding.ptyId || typeof event.data !== 'string') return;
+      entry.sequence = Math.max(entry.sequence, event.sequence ?? entry.sequence + 1);
+      entry.outputPreview = tail(`${entry.outputPreview}${event.data}`);
+      this.notify(entry, 'output');
+    });
+    const unsubscribeExit = await this.host.listen('pty:exit', (payload) => {
+      const event = payload as TerminalExitEvent;
+      if (event.pty_id !== entry.binding.ptyId) return;
+      entry.sequence = Math.max(entry.sequence, event.sequence ?? entry.sequence);
+      this.markExited(entry, event.code ?? null);
+    });
+    entry.observerUnsubscribe = () => {
+      unsubscribeData();
+      unsubscribeExit();
+    };
+  }
+
+  private markExited(entry: CliTerminalEntry, exitCode: number | null): void {
+    if (!entry.alive) {
+      if (entry.exitCode === null && exitCode !== null) entry.exitCode = exitCode;
+      return;
+    }
+    entry.alive = false;
+    entry.exitCode = exitCode;
+    entry.activeToolCallId = null;
+    entry.awaitingInput = false;
+    this.notify(entry, 'exit');
+  }
+
+  private requireEntry(terminalId: string): CliTerminalEntry {
+    const entry = this.entries.get(terminalId);
+    if (!entry) throw new Error(`Terminal "${terminalId}" not found.`);
+    return entry;
+  }
+
+  private toSummary(entry: CliTerminalEntry): TerminalSummary {
+    const canUserWrite = entry.role === 'user' || (!entry.activeToolCallId && entry.awaitingInput);
+    return {
+      terminalId: entry.binding.terminalId,
+      ptyId: entry.binding.ptyId,
+      name: entry.sessionName ?? entry.binding.terminalId,
+      alive: entry.alive,
+      sequence: entry.sequence,
+      outputPreview: entry.outputPreview,
+      frameLanguage: entry.binding.frameLanguage,
+      role: entry.role,
+      cwd: entry.cwd,
+      ownerConversationId: entry.ownerConversationId,
+      ...(entry.ownerId ? { ownerId: entry.ownerId } : {}),
+      activeToolCallId: entry.activeToolCallId,
+      awaitingInput: entry.awaitingInput,
+      exitCode: entry.exitCode,
+      truncated: entry.truncated,
+      canUserWrite,
+      permissions: {
+        read: true,
+        write: canUserWrite,
+        respond: entry.role === 'agent' && !entry.activeToolCallId && entry.awaitingInput,
+        interrupt: entry.alive,
+        kill: entry.alive,
+        resize: entry.alive,
+      },
+    };
+  }
+
+  private notify(entry: CliTerminalEntry, cause: TerminalUpdateCause): void {
+    this.onUpdate(this.toSummary(entry), cause);
+  }
+
+  private resolveShell(): { command: string; frameLanguage: TerminalBinding['frameLanguage'] } {
+    const command = this.configuredShell || (process.platform === 'win32' ? 'powershell.exe' : process.env.SHELL || '/bin/sh');
+    const name = path.basename(command).toLowerCase().replace(/\.exe$/u, '');
+    if (name === 'powershell' || name === 'pwsh') return { command, frameLanguage: 'powershell' };
+    if (name === 'bash' || name === 'sh' || name === 'zsh' || name === 'dash') return { command, frameLanguage: 'bash' };
+    throw new Error(`Unsupported terminal shell "${command}". Configure PowerShell, bash, sh, zsh, or dash.`);
+  }
+}
+
+function normalizeTerminalPath(value: string): string {
+  const normalized = path.normalize(path.resolve(value));
+  return process.platform === 'win32' ? normalized.toLowerCase() : normalized;
+}
+
+function tail(value: string): string {
+  return value.length <= MAX_TERMINAL_PREVIEW ? value : value.slice(-MAX_TERMINAL_PREVIEW);
 }
 
 function normalizeAgentType(value: unknown): AgentType {

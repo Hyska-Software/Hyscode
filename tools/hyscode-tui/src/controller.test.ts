@@ -67,6 +67,144 @@ describe('TUI controller', () => {
     expect(controller.state.running).toBe(false);
   });
 
+  it('projects terminal updates by id, normalizes framing, and ignores stale sequences', async () => {
+    const runtime = new FakeRuntime();
+    const controller = new TuiController({ workspace: 'C:/workspace' }, runtime);
+    await controller.start();
+    const terminal = {
+      terminalId: 'agent-terminal',
+      ptyId: 'pty-agent',
+      name: 'Agent Terminal',
+      alive: true,
+      sequence: 4,
+      outputPreview: '\u001b[31m__HYSCODE_BEGIN_nonce__\r\nvisible output\r\n__HYSCODE_END_nonce__:0\r\n',
+      frameLanguage: 'powershell' as const,
+      role: 'agent' as const,
+      cwd: 'c:/workspace',
+      ownerConversationId: 'conversation-1',
+      activeToolCallId: 'tool-terminal',
+      awaitingInput: false,
+      exitCode: null,
+      truncated: false,
+      canUserWrite: false,
+    };
+    controller.handleRuntimeMessage({ type: 'event', event: 'terminal_updated', payload: { terminal, cause: 'created' } });
+    expect(controller.state.terminals).toHaveLength(1);
+    expect(controller.state.terminals[0]?.outputPreview).toBe('visible output');
+
+    controller.handleRuntimeMessage({
+      type: 'event',
+      event: 'harness_event',
+      payload: {
+        type: 'terminal_progress',
+        progress: { toolCallId: 'tool-terminal', terminalId: 'agent-terminal', sequence: 3, chunk: 'stale', state: 'running' },
+      },
+    });
+    expect(controller.state.tools).toHaveLength(0);
+
+    controller.handleRuntimeMessage({
+      type: 'event',
+      event: 'harness_event',
+      payload: {
+        type: 'terminal_progress',
+        progress: { toolCallId: 'tool-terminal', terminalId: 'agent-terminal', sequence: 5, chunk: '\u001b[32m__HYSCODE_BEGIN_nonce__\nnew output\n__HYSCODE_END_nonce__:0\n', state: 'running' },
+      },
+    });
+    expect(controller.state.tools[0]).toMatchObject({ terminalId: 'agent-terminal', outputSequence: 5 });
+    expect(controller.state.tools[0]?.liveOutput).toBe('new output');
+  });
+
+  it('enters guarded terminal input mode and forwards the response without trimming it', async () => {
+    const runtime = new FakeRuntime();
+    const controller = new TuiController({ workspace: 'C:/workspace' }, runtime);
+    await controller.start();
+    const terminal = {
+      terminalId: 'waiting-terminal',
+      ptyId: 'pty-waiting',
+      name: 'Waiting Agent Terminal',
+      alive: true,
+      sequence: 10,
+      outputPreview: 'Continue? [Y/n]',
+      frameLanguage: 'powershell' as const,
+      role: 'agent' as const,
+      cwd: 'c:/workspace',
+      ownerConversationId: 'conversation-1',
+      activeToolCallId: null,
+      awaitingInput: true,
+      exitCode: null,
+      truncated: false,
+      canUserWrite: true,
+    };
+    controller.handleRuntimeMessage({ type: 'event', event: 'terminal_updated', payload: { terminal, cause: 'state' } });
+    expect(controller.state.terminalInput).toEqual({ terminalId: 'waiting-terminal', masked: false });
+
+    await controller.handleKey({ type: 'character', value: '  yes  ' });
+    await controller.handleKey({ type: 'enter' });
+
+    expect(runtime.requests.at(-1)).toMatchObject({
+      method: 'terminal_write',
+      params: { terminalId: 'waiting-terminal', data: '  yes  \r\n' },
+    });
+    expect(controller.state.terminalInput).toBeNull();
+  });
+
+  it('rejects terminal events from an older turn or conversation', async () => {
+    const runtime = new FakeRuntime();
+    const controller = new TuiController({ workspace: 'C:/workspace' }, runtime);
+    await controller.start();
+    controller.handleRuntimeMessage({
+      type: 'event',
+      event: 'harness_event',
+      payload: { type: 'turn_start', turnId: 'turn-current', conversationId: 'conversation-current', iteration: 1 },
+    });
+    const terminal = {
+      terminalId: 'stale-terminal',
+      ptyId: 'pty-stale',
+      name: 'Stale Terminal',
+      alive: true,
+      sequence: 12,
+      outputPreview: 'stale output',
+      frameLanguage: 'bash' as const,
+      role: 'agent' as const,
+      ownerConversationId: 'conversation-current',
+    };
+    controller.handleRuntimeMessage({
+      type: 'event',
+      event: 'terminal_updated',
+      payload: { terminal, cause: 'output', turnId: 'turn-old', conversationId: 'conversation-current' },
+    });
+    controller.handleRuntimeMessage({
+      type: 'event',
+      event: 'harness_event',
+      payload: {
+        type: 'terminal_progress',
+        turnId: 'turn-old',
+        conversationId: 'conversation-current',
+        progress: { toolCallId: 'stale-tool', terminalId: 'stale-terminal', sequence: 12, chunk: 'stale', state: 'running' },
+      },
+    });
+    expect(controller.state.terminals).toHaveLength(0);
+    expect(controller.state.tools).toHaveLength(0);
+
+    controller.handleRuntimeMessage({
+      type: 'event',
+      event: 'terminal_updated',
+      payload: {
+        terminal: {
+          ...terminal,
+          terminalId: 'child-terminal',
+          ownerId: 'sub-agent-1',
+          sequence: 13,
+          awaitingInput: true,
+          canUserWrite: true,
+        },
+        cause: 'state',
+        conversationId: 'conversation-current',
+      },
+    });
+    expect(controller.state.terminalInput).toBeNull();
+  });
+
   it('resolves approval interactions with the same fields used by the shared bridge', async () => {
     const runtime = new FakeRuntime();
     const controller = new TuiController({ workspace: 'C:/workspace' }, runtime);

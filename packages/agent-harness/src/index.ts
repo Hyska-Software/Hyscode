@@ -5,11 +5,13 @@ export type {
   ToolHandler,
   ToolExecutionContext,
   TerminalRuntimeAdapter,
+  TerminalAccess,
   TerminalAcquireRequest,
   TerminalBinding,
   TerminalSnapshot,
   TerminalProgress,
   TerminalFrameLanguage,
+  TerminalRole,
   ToolCallRecord,
   ApprovalMode,
   ApprovalConfig,
@@ -118,7 +120,7 @@ export { verificationMiddleware, LoopDetectionMiddleware, compactToolOutput } fr
 export { getAgentDefinition, getAllAgentDefinitions, getAgentTypes } from './agents';
 
 // ─── Tools ──────────────────────────────────────────────────────────────────
-export { getAllBuiltinTools } from './tools';
+export { getAllBuiltinTools, invalidateTerminalInput } from './tools';
 export { resolveWorkspacePath } from './path-policy';
 export type { WorkspacePathOptions } from './path-policy';
 

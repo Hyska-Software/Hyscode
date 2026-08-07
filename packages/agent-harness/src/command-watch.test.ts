@@ -70,6 +70,12 @@ describe('CommandWatch syncSnapshot', () => {
     watch.syncSnapshot(huge, 1);
     expect(watch.output().length).toBe(MAX_CAPTURE_CHARS);
   });
+
+  it('retains the truncation marker from the authoritative runtime', () => {
+    const watch = makeWatch();
+    watch.syncSnapshot('__HYSCODE_BEGIN_watch__\npartial\n', 12, true);
+    expect(watch.truncated).toBe(true);
+  });
 });
 
 describe('CommandWatch evaluate', () => {

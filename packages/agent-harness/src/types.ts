@@ -107,6 +107,15 @@ export type TerminalAcquireRequest = {
   ownerId?: string;
 };
 
+export type TerminalRole = 'user' | 'agent';
+
+export type TerminalAccess = {
+  conversationId: string;
+  ownerId?: string;
+  toolCallId?: string;
+  source: TerminalRole;
+};
+
 export type TerminalFrameLanguage = 'bash' | 'powershell';
 
 export type TerminalBinding = {
@@ -132,6 +141,10 @@ export interface TerminalRuntimeAdapter {
   write(terminalId: string, data: string): Promise<void>;
   interrupt(terminalId: string): Promise<void>;
   kill(terminalId: string): Promise<void>;
+  /** Optional access check used by runtimes that expose multiple owners. */
+  authorize?(terminalId: string, access: TerminalAccess): Promise<void> | void;
+  /** Resize the PTY when the backend supports interactive dimensions. */
+  resize?(terminalId: string, cols: number, rows: number): Promise<void>;
   release?(terminalId: string, toolCallId: string): void;
   /** Stream output with replay: the runtime must deliver buffered output that
    *  arrived before the subscription, not just live chunks. */

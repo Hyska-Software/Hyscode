@@ -43,6 +43,7 @@ export type BridgeRequest = {
     | 'terminal_open'
     | 'terminal_snapshot'
     | 'terminal_write'
+    | 'terminal_resize'
     | 'terminal_interrupt'
     | 'terminal_kill'
     | 'file_change_resolve'
@@ -75,6 +76,7 @@ export type BridgeEvent =
   | { type: 'event'; event: 'file_change_updated'; payload: FileChangeState }
   | { type: 'event'; event: 'sdd_updated'; payload: SddStatePayload }
   | { type: 'event'; event: 'scoped_harness_event'; payload: ScopedHarnessEventPayload }
+  | { type: 'event'; event: 'terminal_updated'; payload: TerminalUpdatedPayload }
   | { type: 'event'; event: 'fatal'; payload: { message: string } };
 
 export type BridgeMessage = BridgeResponse | BridgeEvent;
@@ -82,7 +84,7 @@ export type BridgeMessage = BridgeResponse | BridgeEvent;
 export type RuntimeReadyPayload = {
   protocolVersion: 1;
   /** Additive capability version. protocolVersion remains 1 for old clients. */
-  capabilitiesVersion?: 2;
+  capabilitiesVersion?: number;
   workspacePath: string;
   projectId: string;
   providers: ProviderSummary[];
@@ -130,6 +132,10 @@ export type RuntimeCapabilities = {
   sdd: boolean;
   subAgents: boolean;
   sessionManagement: boolean;
+  terminalEvents?: boolean;
+  terminalInput?: boolean;
+  terminalResize?: boolean;
+  ndjsonProtocol?: boolean;
 };
 
 export type GitSummary = {
@@ -168,6 +174,32 @@ export type TerminalSummary = {
   sequence: number;
   outputPreview: string;
   frameLanguage: 'bash' | 'powershell';
+  role?: 'user' | 'agent';
+  cwd?: string;
+  ownerConversationId?: string;
+  ownerId?: string;
+  activeToolCallId?: string | null;
+  awaitingInput?: boolean;
+  exitCode?: number | null;
+  truncated?: boolean;
+  canUserWrite?: boolean;
+  permissions?: TerminalPermissions;
+};
+
+export type TerminalPermissions = {
+  read: boolean;
+  write: boolean;
+  respond: boolean;
+  interrupt: boolean;
+  kill: boolean;
+  resize: boolean;
+};
+
+export type TerminalUpdatedPayload = {
+  terminal: TerminalSummary;
+  cause: 'created' | 'output' | 'state' | 'exit';
+  turnId?: string;
+  conversationId?: string;
 };
 
 export type FileChangeState = FileChangePending & {

@@ -26,24 +26,30 @@ const baseRequest = {
   conversationId: 'conversation-a',
   toolCallId: 'tool-1',
   forceNew: false,
+  cwd: 'C:/workspace',
 };
 
 describe('selectAgentSession', () => {
   it('reuses a healthy session owned by the same conversation', () => {
     const sessions = [
-      session({ id: 'term-a', ownerConversationId: 'conversation-a', ptyId: 'pty-a' }),
-      session({ id: 'term-b', ownerConversationId: 'conversation-b', ptyId: 'pty-b' }),
+      session({ id: 'term-a', ownerConversationId: 'conversation-a', cwd: 'C:/workspace', ptyId: 'pty-a' }),
+      session({ id: 'term-b', ownerConversationId: 'conversation-b', cwd: 'C:/workspace', ptyId: 'pty-b' }),
     ];
     expect(selectAgentSession(sessions, baseRequest)?.id).toBe('term-a');
   });
 
   it('never reuses a session owned by another conversation', () => {
-    const sessions = [session({ id: 'term-b', ownerConversationId: 'conversation-b', ptyId: 'pty-b' })];
+    const sessions = [session({ id: 'term-b', ownerConversationId: 'conversation-b', cwd: 'C:/workspace', ptyId: 'pty-b' })];
+    expect(selectAgentSession(sessions, baseRequest)).toBeNull();
+  });
+
+  it('does not reuse an owned session from another cwd', () => {
+    const sessions = [session({ id: 'term-other-cwd', ownerConversationId: 'conversation-a', cwd: 'C:/other', ptyId: 'pty-other' })];
     expect(selectAgentSession(sessions, baseRequest)).toBeNull();
   });
 
   it('isolates sub-agents through the owner id', () => {
-    const sessions = [session({ id: 'term-a', ownerConversationId: 'conversation-a', ptyId: 'pty-a' })];
+    const sessions = [session({ id: 'term-a', ownerConversationId: 'conversation-a', cwd: 'C:/workspace', ptyId: 'pty-a' })];
     const child = selectAgentSession(sessions, {
       ...baseRequest,
       ownerId: 'sub-agent-1',
@@ -53,14 +59,14 @@ describe('selectAgentSession', () => {
 
   it('skips dead and PTY-less sessions', () => {
     const sessions = [
-      session({ id: 'term-dead', ownerConversationId: 'conversation-a', ptyId: 'pty-a', isDead: true }),
-      session({ id: 'term-nopty', ownerConversationId: 'conversation-a', ptyId: null }),
+      session({ id: 'term-dead', ownerConversationId: 'conversation-a', cwd: 'C:/workspace', ptyId: 'pty-a', isDead: true }),
+      session({ id: 'term-nopty', ownerConversationId: 'conversation-a', cwd: 'C:/workspace', ptyId: null }),
     ];
     expect(selectAgentSession(sessions, baseRequest)).toBeNull();
   });
 
   it('respects forceNew', () => {
-    const sessions = [session({ id: 'term-a', ownerConversationId: 'conversation-a', ptyId: 'pty-a' })];
+    const sessions = [session({ id: 'term-a', ownerConversationId: 'conversation-a', cwd: 'C:/workspace', ptyId: 'pty-a' })];
     expect(selectAgentSession(sessions, { ...baseRequest, forceNew: true })).toBeNull();
   });
 
@@ -69,6 +75,7 @@ describe('selectAgentSession', () => {
       session({
         id: 'term-a',
         ownerConversationId: 'conversation-a',
+        cwd: 'C:/workspace',
         ptyId: 'pty-a',
         activeToolCallId: 'tool-other',
       }),
@@ -79,9 +86,22 @@ describe('selectAgentSession', () => {
     );
   });
 
+  it('does not reuse a session waiting for user input', () => {
+    const sessions = [
+      session({
+        id: 'term-awaiting',
+        ownerConversationId: 'conversation-a',
+        cwd: 'C:/workspace',
+        ptyId: 'pty-awaiting',
+        awaitingInput: true,
+      }),
+    ];
+    expect(selectAgentSession(sessions, baseRequest)).toBeNull();
+  });
+
   it('matches a named session within the same conversation', () => {
     const sessions = [
-      session({ id: 'term-a', name: 'dev server', ownerConversationId: 'conversation-a', ptyId: 'pty-a' }),
+      session({ id: 'term-a', name: 'dev server', ownerConversationId: 'conversation-a', cwd: 'C:/workspace', ptyId: 'pty-a' }),
     ];
     expect(selectAgentSession(sessions, { ...baseRequest, sessionName: 'dev server' })?.id).toBe(
       'term-a',
@@ -95,6 +115,7 @@ describe('selectAgentSession', () => {
         id: 'term-a',
         name: 'dev server',
         ownerConversationId: 'conversation-a',
+        cwd: 'C:/workspace',
         ptyId: 'pty-a',
         activeToolCallId: 'tool-other',
       }),

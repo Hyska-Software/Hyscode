@@ -1,3 +1,4 @@
+import { isSensitiveTerminalPrompt, normalizeTerminalOutput } from '@hyscode/agent-harness';
 import type { AgentType, FileChangePending, HarnessEvent, SddTask } from '@hyscode/agent-harness';
 import type { Message, ThinkingConfig } from '@hyscode/ai-providers';
 import type {
@@ -13,6 +14,7 @@ import type {
   SessionRecord,
   SddStatePayload,
   TerminalSummary,
+  TerminalUpdatedPayload,
   TuiBridge,
 } from '@hyscode/tui-runtime';
 import { BUILTIN_THEMES, CliUpdaterError, DEFAULT_THEME_ID } from '@hyscode/tui-runtime';
@@ -44,6 +46,10 @@ export class TuiController {
   private downloadedUpdate: DownloadedUpdate | null = null;
   private initialized = false;
   private updateOperation = 0;
+  private readonly terminalRawOutput = new Map<string, string>();
+  private readonly terminalOutputSequence = new Map<string, number>();
+  private currentTurnId: string | null = null;
+  private currentConversationId: string | null = null;
 
   constructor(readonly options: CliOptions, private readonly runtime: RuntimeClient, controllerOptions: TuiControllerOptions = {}) {
     this.updater = controllerOptions.updater ?? null;
@@ -77,6 +83,7 @@ export class TuiController {
       context: emptyContext(),
       terminals: [],
       activeTerminalId: null,
+      terminalInput: null,
       sdd: emptySdd(),
       subagents: [],
       usage: emptyUsage(),
@@ -179,7 +186,12 @@ export class TuiController {
       } else if (key.value === 't') {
         await this.cycleThinking();
       } else if (key.value === 'c') {
-        if (this.state.running) {
+        if (this.state.terminalInput) {
+          await this.request('terminal_interrupt', { terminalId: this.state.terminalInput.terminalId });
+          this.state.terminalInput = null;
+          this.clearInput();
+          this.state.status = 'Terminal interrupt requested';
+        } else if (this.state.running) {
           await this.request('cancel', {});
           this.state.status = 'Cancellation requested';
         } else if (this.state.input) {
@@ -271,6 +283,9 @@ export class TuiController {
         break;
       case 'scoped_harness_event':
         this.applyScopedHarnessEvent(message.payload.ownerId, message.payload.event);
+        break;
+      case 'terminal_updated':
+        this.applyTerminalUpdated(message.payload);
         break;
       case 'context_updated':
         this.applyContext(message.payload);
@@ -425,6 +440,7 @@ export class TuiController {
   private applyRuntimeReady(payload: RuntimeReadyPayload): void {
     this.state.workspace = payload.workspacePath;
     this.state.projectId = payload.projectId;
+    this.currentConversationId = payload.session?.id ?? this.currentConversationId;
     this.state.mode = payload.activeAgentType;
     this.state.provider = payload.activeProviderId;
     this.state.model = payload.activeModelId;
@@ -448,17 +464,30 @@ export class TuiController {
     this.state.models = payload.models;
     this.state.usage.contextWindow = payload.models.find((model) => model.provider === payload.activeProviderId && model.id === payload.activeModelId)?.contextWindow ?? 0;
     this.state.capabilities = payload.capabilities ?? null;
+    if (payload.session) {
+      this.state.connectionState = 'connected';
+      this.applySession(payload.session);
+    }
     if (payload.context) this.applyContext(payload.context);
     if (payload.sdd) this.applySdd(payload.sdd);
-    if (payload.terminals) this.applyTerminals(payload.terminals);
-    if (payload.session) this.state.connectionState = 'connected';
+    if (payload.terminals) {
+      const merged = new Map<string, TerminalSummary>();
+      for (const terminal of payload.terminals) {
+        this.mergeTerminal(merged, terminal);
+        this.terminalOutputSequence.set(terminal.terminalId, terminal.sequence);
+      }
+      this.state.terminals = [...merged.values()];
+      if (this.state.activeTerminalId && !merged.has(this.state.activeTerminalId)) this.state.activeTerminalId = null;
+      if (!this.state.activeTerminalId) this.state.activeTerminalId = this.state.terminals[0]?.terminalId ?? null;
+    }
     this.state.status = this.state.provider ? `Ready · thinking ${this.thinkingLabel()}` : 'No configured provider';
-    if (payload.session) this.applySession(payload.session);
   }
 
   private applySession(session: SessionRecord): void {
     if (!session?.id) return;
     this.state.currentSessionId = session.id;
+    this.currentConversationId = session.id;
+    this.currentTurnId = null;
     this.state.sessionTitle = session.title || 'Untitled session';
     this.state.sessionMessageCount = session.messageCount;
     this.state.tabs = [
@@ -470,6 +499,9 @@ export class TuiController {
     this.state.fileChanges = [];
     this.state.subagents = [];
     this.state.sdd = emptySdd();
+    this.state.terminalInput = null;
+    this.terminalRawOutput.clear();
+    this.terminalOutputSequence.clear();
     this.liveStreamStart = null;
     this.state.lastUserMessage = null;
     for (const message of session.messages) {
@@ -550,26 +582,81 @@ export class TuiController {
       const item = asRecord(value);
       return typeof item.terminalId === 'string' && typeof item.ptyId === 'string';
     });
-    if (Array.isArray(result)) this.state.terminals = terminals;
+    if (Array.isArray(result)) {
+      const merged = new Map(this.state.terminals.map((terminal) => [terminal.terminalId, terminal]));
+      for (const terminal of terminals) this.mergeTerminal(merged, terminal);
+      this.state.terminals = [...merged.values()];
+    }
     else {
       const next = terminals[0];
       if (next) {
-        const index = this.state.terminals.findIndex((terminal) => terminal.terminalId === next.terminalId);
-        if (index >= 0) this.state.terminals[index] = next;
-        else this.state.terminals.push(next);
+        const merged = new Map(this.state.terminals.map((terminal) => [terminal.terminalId, terminal]));
+        this.mergeTerminal(merged, next);
+        this.state.terminals = [...merged.values()];
         this.state.activeTerminalId = next.terminalId;
       }
     }
   }
 
   private applyTerminalSnapshot(result: unknown): void {
-    if (!this.state.activeTerminalId) return;
     const snapshot = asRecord(result);
-    const terminal = this.state.terminals.find((candidate) => candidate.terminalId === this.state.activeTerminalId);
+    const terminalId = stringValue(snapshot.terminalId, this.state.activeTerminalId ?? '');
+    const terminal = this.state.terminals.find((candidate) => candidate.terminalId === terminalId);
     if (!terminal) return;
-    terminal.outputPreview = stringValue(snapshot.data, terminal.outputPreview).slice(-4000);
-    terminal.sequence = numberValue(snapshot.toSequence, terminal.sequence);
+    const sequence = numberValue(snapshot.toSequence, terminal.sequence);
+    if (sequence < terminal.sequence) return;
+    terminal.outputPreview = normalizeTerminalOutput(stringValue(snapshot.data, terminal.outputPreview), 4_000);
+    terminal.sequence = sequence;
+    this.terminalOutputSequence.set(terminalId, Math.max(this.terminalOutputSequence.get(terminalId) ?? 0, sequence));
     terminal.alive = snapshot.alive !== false;
+    terminal.exitCode = typeof snapshot.exitCode === 'number' || snapshot.exitCode === null ? snapshot.exitCode : terminal.exitCode;
+    terminal.truncated = snapshot.truncated === true || terminal.truncated;
+  }
+
+  private applyTerminalUpdated(payload: TerminalUpdatedPayload): void {
+    const terminal = payload.terminal;
+    if (payload.turnId && this.currentTurnId && payload.turnId !== this.currentTurnId) return;
+    if (payload.conversationId && this.currentConversationId && payload.conversationId !== this.currentConversationId) return;
+    if (terminal.ownerConversationId && this.currentConversationId && terminal.ownerConversationId !== this.currentConversationId) return;
+    const previousSequence = this.terminalOutputSequence.get(terminal.terminalId) ?? 0;
+    if (terminal.sequence < previousSequence) return;
+    const merged = new Map(this.state.terminals.map((item) => [item.terminalId, item]));
+    this.mergeTerminal(merged, terminal);
+    this.state.terminals = [...merged.values()];
+    this.terminalOutputSequence.set(terminal.terminalId, terminal.sequence);
+    if (!this.state.activeTerminalId) this.state.activeTerminalId = terminal.terminalId;
+    if (
+      terminal.awaitingInput
+      && terminal.role === 'agent'
+      && !terminal.ownerId
+      && terminal.canUserWrite !== false
+      && this.state.approvalMode !== 'yolo'
+    ) {
+      this.state.terminalInput = {
+        terminalId: terminal.terminalId,
+        masked: isSensitiveTerminalPrompt(terminal.outputPreview),
+      };
+      this.state.status = 'Terminal input required';
+    }
+    if (!terminal.awaitingInput && this.state.terminalInput?.terminalId === terminal.terminalId) {
+      this.state.terminalInput = null;
+      this.clearInput();
+    }
+    if (payload.cause === 'exit' && this.state.terminalInput?.terminalId === terminal.terminalId) {
+      this.state.terminalInput = null;
+      this.clearInput();
+    }
+  }
+
+  private mergeTerminal(target: Map<string, TerminalSummary>, next: TerminalSummary): void {
+    const current = target.get(next.terminalId);
+    if (current && next.sequence < current.sequence) return;
+    target.set(next.terminalId, {
+      ...current,
+      ...next,
+      outputPreview: normalizeTerminalOutput(next.outputPreview ?? current?.outputPreview ?? '', 4_000),
+    });
+    this.terminalOutputSequence.set(next.terminalId, Math.max(this.terminalOutputSequence.get(next.terminalId) ?? 0, next.sequence));
   }
 
   private applySdd(payload: SddStatePayload): void {
@@ -638,6 +725,8 @@ export class TuiController {
         if (ownerId) {
           this.upsertSubAgent(ownerId, { status: 'running', startedAt: Date.now() });
         } else {
+          this.currentTurnId = event.turnId ?? null;
+          this.currentConversationId = event.conversationId ?? this.currentConversationId;
           this.state.running = true;
           this.liveStreamStart = this.state.transcript.length;
           this.state.status = `Working · iteration ${event.iteration}`;
@@ -717,14 +806,8 @@ export class TuiController {
         else this.append('result', `${event.toolName} → ${(event.result.error ?? event.result.output) || formatValue(event.result)}`);
         break;
       case 'terminal_progress':
-        this.updateTool(event.progress.toolCallId, {
-          liveOutputAppend: event.progress.chunk,
-          terminalId: event.progress.terminalId,
-          terminalState: event.progress.state,
-          outputSequence: event.progress.sequence,
-          status: event.progress.state === 'error' ? 'error' : event.progress.state === 'complete' ? 'success' : 'running',
-        });
-        if (!ownerId && event.progress.chunk) this.appendLive('tool', event.progress.chunk);
+        if (!this.acceptsCurrentTerminalEvent(event)) break;
+        this.applyTerminalProgress(event.progress, ownerId);
         break;
       case 'api_request_sent':
         this.state.status = `Requesting ${event.providerId} / ${event.modelId} · iteration ${event.iteration}`;
@@ -839,8 +922,47 @@ export class TuiController {
       return;
     }
     const { liveOutputAppend, ...rest } = patch;
+    if (rest.outputSequence !== undefined && rest.outputSequence < existing.outputSequence) delete rest.outputSequence;
     Object.assign(existing, rest);
     if (liveOutputAppend) existing.liveOutput += liveOutputAppend;
+    if (existing.liveOutput.length > 65_536) existing.liveOutput = existing.liveOutput.slice(-65_536);
+  }
+
+  private applyTerminalProgress(progress: NonNullable<Extract<HarnessEvent, { type: 'terminal_progress' }>['progress']>, ownerId: string | null): void {
+    const previousSequence = this.terminalOutputSequence.get(progress.terminalId) ?? 0;
+    if (progress.sequence < previousSequence || (progress.sequence === previousSequence && progress.chunk)) return;
+    if (progress.sequence > previousSequence) this.terminalOutputSequence.set(progress.terminalId, progress.sequence);
+    const raw = this.terminalRawOutput.get(progress.terminalId) ?? '';
+    const nextRaw = progress.chunk ? `${raw}${progress.chunk}`.slice(-65_536) : raw;
+    this.terminalRawOutput.set(progress.terminalId, nextRaw);
+    const liveOutput = normalizeTerminalOutput(nextRaw, 65_536);
+    const status = progress.state === 'error'
+      ? 'error'
+      : progress.state === 'complete' || progress.state === 'background'
+        ? 'success'
+        : progress.state === 'cancelled'
+          ? 'cancelled'
+          : progress.state === 'awaiting_input'
+            ? 'awaiting_input'
+            : 'running';
+    this.updateTool(progress.toolCallId, {
+      liveOutput,
+      terminalId: progress.terminalId,
+      terminalState: progress.state,
+      outputSequence: Math.max(previousSequence, progress.sequence),
+      status,
+    });
+    if (progress.state === 'awaiting_input' && !ownerId && this.state.approvalMode !== 'yolo') {
+      this.state.terminalInput = { terminalId: progress.terminalId, masked: isSensitiveTerminalPrompt(nextRaw) };
+      this.state.mainPanel = 'terminal';
+      this.state.status = 'Terminal input required';
+    }
+  }
+
+  private acceptsCurrentTerminalEvent(event: HarnessEvent): boolean {
+    if (event.turnId && this.currentTurnId && event.turnId !== this.currentTurnId) return false;
+    if (event.conversationId && this.currentConversationId && event.conversationId !== this.currentConversationId) return false;
+    return true;
   }
 
   private upsertFileChange(change: FileChangePending): void {
@@ -928,8 +1050,22 @@ export class TuiController {
       await this.submitQuestionAnswer();
       return;
     }
-    const input = this.state.input.trim();
+    const rawInput = this.state.input;
+    const terminalInput = this.state.terminalInput;
     this.clearInput();
+    if (terminalInput) {
+      if (!rawInput.trim()) return;
+      const terminalId = terminalInput.terminalId;
+      this.state.terminalInput = null;
+      try {
+        await this.request('terminal_write', { terminalId, data: `${rawInput}\r\n` });
+        this.state.status = 'Terminal input sent';
+      } catch {
+        this.state.status = 'Terminal input was rejected';
+      }
+      return;
+    }
+    const input = rawInput.trim();
     if (!input || this.state.running) return;
     this.state.inputHistory.push(input);
     if (input.startsWith('/')) {
@@ -1196,6 +1332,14 @@ export class TuiController {
       this.state.activeTerminalId = commandArgument(tokens[1]);
       await this.request('terminal_snapshot', { terminalId: this.state.activeTerminalId });
       this.state.mainPanel = 'terminal';
+    } else if (['read', 'interrupt', 'kill'].includes(action)) {
+      if (!this.state.activeTerminalId) {
+        this.state.status = 'No active terminal selected';
+        return;
+      }
+      if (action === 'read') await this.request('terminal_snapshot', { terminalId: this.state.activeTerminalId });
+      if (action === 'interrupt') await this.request('terminal_interrupt', { terminalId: this.state.activeTerminalId });
+      if (action === 'kill') await this.request('terminal_kill', { terminalId: this.state.activeTerminalId });
     } else {
       await this.request('terminal_list', {});
     }
@@ -1208,7 +1352,8 @@ export class TuiController {
       await this.runTerminalCommandAction('list');
       return;
     }
-    if (!this.state.activeTerminalId) {
+    const active = this.state.terminals.find((terminal) => terminal.terminalId === this.state.activeTerminalId);
+    if (!active || active.role !== 'user' || !active.alive) {
       const terminal = await this.request('terminal_open', {}) as TerminalSummary;
       this.applyTerminals(terminal);
     }
@@ -2063,6 +2208,16 @@ export class TuiController {
   setViewport(width: number, height: number): void {
     this.state.width = Math.max(40, width);
     this.state.height = Math.max(12, height);
+  }
+
+  async resizeActiveTerminal(width: number, height: number): Promise<void> {
+    this.setViewport(width, height);
+    if (!this.state.activeTerminalId) return;
+    await this.request('terminal_resize', {
+      terminalId: this.state.activeTerminalId,
+      cols: Math.max(20, width),
+      rows: Math.max(8, height),
+    }).catch(() => undefined);
   }
 
   pendingRequestCount(): number {

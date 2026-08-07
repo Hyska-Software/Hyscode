@@ -411,6 +411,27 @@ describe('terminal command runner — run paths', () => {
     expect(adapter.kill).toHaveBeenCalled();
   });
 
+  it('reports output truncation instead of hiding it behind a timeout', async () => {
+    const adapter = staticAdapter({
+      snapshot: vi.fn(async () => ({
+        data: '__HYSCODE_BEGIN_watch__\npartial frame\n',
+        fromSequence: 4,
+        toSequence: 4,
+        truncated: true,
+        alive: true,
+        exitCode: null,
+      })),
+    });
+    const result = await new TerminalCommandRunner().run(
+      { command: 'large-output', timeoutMs: 100 },
+      contextWith(adapter),
+    );
+    expect(result).toMatchObject({
+      success: false,
+      error: 'Terminal output was truncated before the command frame completed.',
+    });
+  });
+
   it('cancels through the abort signal and stops the process', async () => {
     const { adapter, nonce, emit } = dataAdapter();
     const controller = new AbortController();
@@ -636,6 +657,28 @@ describe('terminal command runner — respond paths', () => {
       error: 'Terminal is no longer waiting for input.',
     });
     expect(adapter.write).not.toHaveBeenCalled();
+  });
+
+  it('invalidates a suspended response after an owner-bound manual answer', async () => {
+    vi.useFakeTimers();
+    const { context } = suspendedContext();
+    const runner = new TerminalCommandRunner();
+    await suspend(runner, context);
+
+    expect(runner.invalidateInteractive('terminal-i', {
+      conversationId: 'conversation-other',
+      source: 'user',
+    })).toBe(false);
+    expect(runner.invalidateInteractive('terminal-i', {
+      conversationId: context.conversationId,
+      source: 'user',
+    })).toBe(true);
+
+    const result = await runner.respond('terminal-i', 'Y', 1_000, context);
+    expect(result).toMatchObject({
+      success: false,
+      error: 'Terminal is not waiting for agent input.',
+    });
   });
 
   it('reserves sensitive prompts for the user', async () => {

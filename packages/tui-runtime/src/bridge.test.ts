@@ -25,7 +25,7 @@ function successfulResult<T>(response: BridgeResponse): T {
   return response.result as T;
 }
 
-type FixtureBehavior = 'tool' | 'cancel';
+type FixtureBehavior = 'tool' | 'terminal' | 'cancel';
 
 type ProviderFixture = {
   baseUrl: string;
@@ -68,6 +68,46 @@ async function startProviderFixture(): Promise<ProviderFixture> {
         writeSse(response, {
           choices: [{ delta: { content: 'A partial response' }, finish_reason: null }],
         });
+        return;
+      }
+
+      if (behavior === 'terminal' && requests.length === 1) {
+        const command = process.platform === 'win32'
+          ? 'Write-Output terminal-fixture'
+          : "printf 'terminal-fixture\\n'";
+        writeSse(response, {
+          choices: [{ delta: { content: 'I will run the terminal fixture.' }, finish_reason: null }],
+        });
+        writeSse(response, {
+          choices: [{
+            delta: {
+              tool_calls: [{
+                index: 0,
+                id: 'fixture-terminal-call',
+                type: 'function',
+                function: { name: 'run_terminal_command' },
+              }],
+            },
+            finish_reason: null,
+          }],
+        });
+        writeSse(response, {
+          choices: [{
+            delta: {
+              tool_calls: [{
+                index: 0,
+                function: { arguments: JSON.stringify({ command }) },
+              }],
+            },
+            finish_reason: null,
+          }],
+        });
+        writeSse(response, { choices: [{ delta: {}, finish_reason: 'tool_calls' }] });
+        writeSse(response, {
+          choices: [],
+          usage: { prompt_tokens: 10, completion_tokens: 8, total_tokens: 18 },
+        });
+        finishSse(response);
         return;
       }
 
@@ -120,7 +160,14 @@ async function startProviderFixture(): Promise<ProviderFixture> {
         return;
       }
       writeSse(response, {
-        choices: [{ delta: { content: 'The fixture file was updated successfully.' }, finish_reason: null }],
+        choices: [{
+          delta: {
+            content: behavior === 'terminal'
+              ? 'The terminal fixture completed successfully.'
+              : 'The fixture file was updated successfully.',
+          },
+          finish_reason: null,
+        }],
       });
       writeSse(response, { choices: [{ delta: {}, finish_reason: 'stop' }] });
       writeSse(response, {
@@ -471,6 +518,129 @@ describe('shared harness bridge protocol', () => {
       await fixture.close();
     }
   });
+
+  it('executes a real Harness terminal through CliHost and isolates it from a user terminal', async () => {
+    const directory = await mkdtemp(path.join(os.tmpdir(), 'hyscode-tui-terminal-'));
+    temporaryDirectories.push(directory);
+    const fixture = await startProviderFixture();
+    fixture.setBehavior('terminal');
+    const registry = getProviderRegistry();
+    vi.stubEnv('HYSCODE_CONFIG_PATH', path.join(directory, 'settings.json'));
+    vi.stubEnv('HYSCODE_KEYCHAIN_PATH', path.join(directory, 'keychain.json'));
+    vi.stubEnv('HYSCODE_TUI_DATA_PATH', path.join(directory, 'tui-data.json'));
+
+    const events: BridgeEvent[] = [];
+    const bridge = new TuiBridge((message) => {
+      if (message.type === 'event') events.push(message);
+    });
+    try {
+      const initialized = successfulResult<RuntimeReadyPayload>(await bridge.handle({
+        id: 'initialize',
+        method: 'initialize',
+        params: { workspacePath: directory, projectId: 'terminal-fixture', agentType: 'build', approvalMode: 'yolo' },
+      }));
+      const userTerminal = successfulResult<{
+        terminalId: string;
+        role?: string;
+        cwd?: string;
+      }>(await bridge.handle({
+        id: 'open-user-terminal',
+        method: 'terminal_open',
+        params: { forceNew: true },
+      }));
+      expect(userTerminal.role).toBe('user');
+      expect(userTerminal.cwd).toBe(process.platform === 'win32' ? directory.toLowerCase() : directory);
+
+      await bridge.handle({ id: 'new-session', method: 'session_new', params: {} });
+      const deniedSnapshot = await bridge.handle({
+        id: 'denied-user-snapshot',
+        method: 'terminal_snapshot',
+        params: { terminalId: userTerminal.terminalId },
+      });
+      expect(deniedSnapshot.ok).toBe(false);
+      expect(deniedSnapshot).toMatchObject({ error: expect.stringContaining('another conversation') });
+      await bridge.handle({ id: 'restore-session', method: 'session_load', params: { id: initialized.session?.id } });
+
+      registry.register(new OpenAIProvider('fixture-key', fixture.baseUrl));
+      await bridge.handle({
+        id: 'config',
+        method: 'set_config',
+        params: { providerId: 'openai', modelId: 'gpt-5.4-mini', approvalMode: 'yolo' },
+      });
+
+      const turnPromise = bridge.handle({
+        id: 'terminal-turn',
+        method: 'send_message',
+        params: { message: 'Run the terminal fixture.' },
+      });
+      const created = await waitForEvent(
+        events,
+        (event) => event.event === 'terminal_updated' && event.payload.cause === 'created' && event.payload.terminal.role === 'agent',
+        20_000,
+      );
+      if (created.event !== 'terminal_updated') throw new Error('Expected an agent terminal event.');
+      expect(created.payload.terminal.terminalId).not.toBe(userTerminal.terminalId);
+      expect(created.payload.terminal.ownerConversationId).toBe(initialized.session?.id);
+
+      const output = await waitForEvent(
+        events,
+        (event) => event.event === 'harness_event'
+          && event.payload.type === 'terminal_progress'
+          && event.payload.progress.chunk.includes('terminal-fixture'),
+        20_000,
+      );
+      if (output.event !== 'harness_event' || output.payload.type !== 'terminal_progress') {
+        throw new Error('Expected normalized terminal progress.');
+      }
+      expect(output.payload.progress.state).toBe('running');
+
+      const turn = successfulResult<{ status: string; response: string }>(await turnPromise);
+      expect(turn.status).toBe('complete');
+      expect(turn.response).toContain('terminal fixture completed');
+
+      const terminals = successfulResult<Array<{
+        terminalId: string;
+        role?: string;
+        alive: boolean;
+        outputPreview: string;
+      }>>(await bridge.handle({ id: 'list-terminals', method: 'terminal_list', params: {} }));
+      expect(terminals).toEqual(expect.arrayContaining([
+        expect.objectContaining({ terminalId: userTerminal.terminalId, role: 'user' }),
+        expect.objectContaining({ role: 'agent', alive: true }),
+      ]));
+      const agentTerminal = terminals.find((terminal) => terminal.role === 'agent');
+      expect(agentTerminal?.outputPreview).toContain('terminal-fixture');
+
+      const refreshed = successfulResult<RuntimeReadyPayload>(await bridge.handle({
+        id: 'runtime-refresh',
+        method: 'set_config',
+        params: {},
+      }));
+      expect(refreshed.terminals).toEqual(expect.arrayContaining([
+        expect.objectContaining({ terminalId: userTerminal.terminalId, role: 'user' }),
+        expect.objectContaining({ role: 'agent' }),
+      ]));
+
+      const agentId = agentTerminal?.terminalId;
+      if (!agentId) throw new Error('The agent terminal was not listed.');
+      expect(successfulResult<{ killed: boolean }>(await bridge.handle({
+        id: 'kill-agent-terminal',
+        method: 'terminal_kill',
+        params: { terminalId: agentId },
+      })).killed).toBe(true);
+      const afterKill = successfulResult<{ alive: boolean; exitCode: number | null }>(await bridge.handle({
+        id: 'snapshot-agent-terminal',
+        method: 'terminal_snapshot',
+        params: { terminalId: agentId },
+      }));
+      expect(afterKill.alive).toBe(false);
+      expect(afterKill.exitCode).not.toBeUndefined();
+    } finally {
+      registry.unregister('openai');
+      await bridge.handle({ id: 'shutdown', method: 'shutdown', params: {} });
+      await fixture.close();
+    }
+  }, 30_000);
 
   it('cancels an active streamed turn through the shared harness and completes the session lifecycle', async () => {
     const directory = await mkdtemp(path.join(os.tmpdir(), 'hyscode-tui-cancel-'));

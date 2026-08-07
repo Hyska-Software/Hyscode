@@ -125,6 +125,22 @@ describe('read_terminal_output tool', () => {
     expect(adapter.snapshot).toHaveBeenCalledWith('terminal-1', 3);
   });
 
+  it('authorizes reads with the current conversation and owner', async () => {
+    const authorize = vi.fn();
+    const adapter = snapshotAdapter({ authorize });
+    const result = await readTerminalOutputTool.execute(
+      { terminal_id: 'terminal-1' },
+      contextWith(adapter, { ownerId: 'owner-1' }),
+    );
+    expect(result.success).toBe(true);
+    expect(authorize).toHaveBeenCalledWith('terminal-1', {
+      conversationId: 'conversation-1',
+      ownerId: 'owner-1',
+      toolCallId: 'tool-1',
+      source: 'agent',
+    });
+  });
+
   it('surfaces runtime failures', async () => {
     const adapter = snapshotAdapter({
       snapshot: vi.fn(async () => {
@@ -221,7 +237,9 @@ describe('respond_terminal_input tool', () => {
 
 describe('stop_terminal_process tool', () => {
   it('interrupts, verifies and reports the stopped terminal', async () => {
+    const authorize = vi.fn();
     const adapter = snapshotAdapter({
+      authorize,
       snapshot: vi.fn(async () => ({
         data: '',
         fromSequence: 0,
@@ -238,6 +256,7 @@ describe('stop_terminal_process tool', () => {
     expect(result).toMatchObject({ success: true, output: 'Stopped terminal terminal-1.' });
     expect(adapter.interrupt).toHaveBeenCalledWith('terminal-1');
     expect(adapter.kill).not.toHaveBeenCalled();
+    expect(authorize).toHaveBeenCalledWith('terminal-1', expect.objectContaining({ source: 'agent' }));
   });
 
   it('escalates to kill when the process stays alive', async () => {

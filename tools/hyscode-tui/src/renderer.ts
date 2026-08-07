@@ -175,7 +175,7 @@ function terminalPanel(state: UiState, width: number): string[] {
   return [
     `${ACCENT}${BOLD}TERMINAL · ${shorten(terminal.name, width - 24)}${RESET} ${DIM}${terminal.frameLanguage} · ${terminal.alive ? 'alive' : 'exited'} · seq ${terminal.sequence}${RESET}`,
     ...wrapText(terminal.outputPreview || 'Terminal is ready for input.', Math.max(12, width - 4)).slice(-10).map((line) => `${SOFT}${line}${RESET}`),
-    `${DIM}Type !command to send input · /terminal to focus · /attach terminal:${terminal.terminalId}${RESET}`,
+    `${terminal.awaitingInput ? `${WARNING}Input is required${RESET} · type a response and press Enter` : `${DIM}Type !command to send input`}${RESET} · /terminal to focus · /attach terminal:${terminal.terminalId}${RESET}`,
     '',
   ];
 }
@@ -212,6 +212,19 @@ function activityPanel(state: UiState, width: number): string[] {
   if (state.subagents.length) {
     lines.push(`${ACCENT}SUB-AGENTS · ${state.subagents.length}${RESET}`);
     for (const agent of state.subagents.slice(-6)) lines.push(`  ${agent.status === 'done' ? SUCCESS : agent.status === 'error' ? ERROR : WARNING}●${RESET} ${shorten(agent.task || agent.ownerId, width - 18)} ${DIM}${agent.status}${RESET}`);
+  }
+  const terminalTools = state.tools.filter((tool) => tool.terminalId);
+  if (terminalTools.length) {
+    lines.push(`${ACCENT}TERMINAL TOOLS · ${terminalTools.length}${RESET}`);
+    for (const tool of terminalTools.slice(-6)) {
+      const stateLabel = tool.terminalState ?? tool.status;
+      const command = typeof tool.input.command === 'string' ? tool.input.command : '';
+      const terminalLabel = tool.terminalId ? shorten(tool.terminalId, 24) : 'terminal';
+      lines.push(`  ${tool.status === 'error' ? ERROR : tool.status === 'success' ? SUCCESS : WARNING}●${RESET} ${shorten(tool.name, width - 28)} ${DIM}${stateLabel} · ${terminalLabel}${RESET}`);
+      if (command) lines.push(`    ${DIM}$ ${shorten(command, width - 8)}${RESET}`);
+      if (tool.liveOutput) lines.push(`    ${shorten(tool.liveOutput.split(/\r?\n/u).at(-1) ?? '', width - 10)}`);
+    }
+    lines.push(`${DIM}Use /terminal focus <id> to inspect a terminal.${RESET}`);
   }
   if (state.rules.length) {
     lines.push(`${ACCENT}RULES · ${state.rules.length}${RESET}`);
@@ -334,7 +347,9 @@ function transcriptStyle(kind: TranscriptItem['kind']): [string, string, AnsiTok
 
 function composerLines(state: UiState, width: number): string[] {
   const composerWidth = Math.max(12, width - COMPOSER_HORIZONTAL_PADDING * 2);
-  const label = state.interaction?.kind === 'approval' || state.interaction?.kind === 'mode_switch'
+  const label = state.terminalInput
+    ? 'TERMINAL INPUT'
+    : state.interaction?.kind === 'approval' || state.interaction?.kind === 'mode_switch'
     ? 'CONFIRM'
     : state.interaction?.kind === 'question'
       ? 'ANSWER'
@@ -343,7 +358,7 @@ function composerLines(state: UiState, width: number): string[] {
         : state.running
           ? 'WORKING'
           : 'MESSAGE';
-  const prompt = state.interaction?.kind === 'question' ? '?' : state.input.startsWith('/') ? '/' : '>';
+  const prompt = state.terminalInput ? '$' : state.interaction?.kind === 'question' ? '?' : state.input.startsWith('/') ? '/' : '>';
   const status = shorten(composerStatus(state), Math.max(20, composerWidth - label.length - 10));
   const chips = state.context.attachments.map((attachment) => `${attachment.kind}:${attachment.label}`).join('  ');
   const rawContextDetails = chips ? `context ${chips}` : 'context none · /attach path · @path · !command';
@@ -392,7 +407,7 @@ type InputUnit = { value: string; index: number };
 type InputLine = { units: InputUnit[]; segmentStart: number; segmentEnd: number; lastInSegment: boolean };
 
 function renderInputRows(state: UiState, width: number): string[] {
-  const characters = Array.from(state.input);
+  const characters = Array.from(state.input).map((value) => state.terminalInput?.masked && value !== '\n' ? '•' : value);
   if (characters.length === 0) return [`${MUTED}Describe what you want to build or investigate${RESET}`];
   const cursor = Math.min(state.inputCursor, characters.length);
   const lines: InputLine[] = [];

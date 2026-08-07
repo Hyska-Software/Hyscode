@@ -376,10 +376,19 @@ type ToolCategory = 'filesystem' | 'terminal' | 'git' | 'code' | 'browser' | 'mc
 `background`. With `background=true`, the tool uses a dedicated persistent terminal and returns once
 `ready_pattern` matches or observable startup is confirmed.
 
+Agent terminals are distinct from manual TUI terminals. A runtime may reuse an agent PTY only when
+conversation, owner, and normalized `cwd` all match; a manual terminal is never acquired by the
+Harness. Every terminal summary exposes its role, working directory, owner, active tool call,
+awaiting-input state, exit/truncation state, and effective read/write/respond/interrupt/kill/resize
+permissions. Terminal access is checked against conversation, owner, and tool call rather than by
+terminal id alone.
+
 ### 7b. read_terminal_output
 
 Reads buffered output and lifecycle state from a terminal id returned by `run_terminal_command`.
-Supports incremental reads through `after_sequence`. This read-only tool does not require approval.
+Supports incremental reads through `after_sequence`, monotonic sequence reconciliation, and an
+explicit truncation marker when the retained PTY buffer no longer contains the requested history.
+This read-only tool does not require approval, but it remains owner-bound.
 
 ### 7c. stop_terminal_process
 
@@ -391,6 +400,25 @@ terminal mutation requires approval.
 Sends an exact response to a resumable terminal interaction. Each call follows normal terminal
 approval policy and displays the response before execution. Passwords, tokens, MFA codes, CAPTCHA
 answers, and other sensitive values cannot be supplied by the agent and must be entered by the user.
+
+When a terminal is `awaiting_input`, the bridge emits `terminal_updated` and the Harness emits
+`terminal_progress`. The TUI switches to a dedicated input mode only when the terminal is not under
+an active tool owner and approval mode is not `yolo`; typed sensitive values are masked and are not
+written to transcript or model context. `/terminal` supports `list`, `open`, `focus`, `read`,
+`interrupt`, and `kill`. `terminal_resize` forwards the TUI viewport dimensions to the PTY.
+
+### 7e. Terminal bridge protocol
+
+The bridge emits `runtime_ready` with the current terminal summaries and publishes
+`terminal_updated` for `created`, `output`, `state`, and `exit`. Terminal subscriptions use replay:
+the listener is registered before the snapshot, concurrent events are queued, and sequences already
+included in the snapshot are discarded. Exits are emitted once and exited sessions remain readable
+until explicit cleanup or shutdown.
+
+The fullscreen VORTEX client embeds this bridge. `vortex --protocol ndjson` is the supported
+non-interactive automation surface and accepts the same `initialize`, `send_message`, approval,
+terminal-event, cancellation, and shutdown messages over stdin/stdout. Without the explicit
+protocol option, a non-TTY launcher keeps its readiness-only behavior.
 
 ---
 

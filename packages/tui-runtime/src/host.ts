@@ -3,6 +3,7 @@ import { mkdir, readFile, readdir, rename, rm, stat, writeFile, copyFile } from 
 import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
+import { MAX_CAPTURE_CHARS } from '@hyscode/agent-harness';
 import { spawn as spawnPtyProcess, type IDisposable, type IPty } from './pty';
 import type { CliDataStore } from './data-store';
 import type { SharedKeyStore } from './config';
@@ -33,7 +34,7 @@ type ProcessResult = {
   exitCode: number;
 };
 
-const MAX_PTY_OUTPUT = 512_000;
+const MAX_PTY_OUTPUT = MAX_CAPTURE_CHARS;
 const MAX_SEARCH_FILES = 20_000;
 const DEFAULT_COMMAND_TIMEOUT = 120_000;
 
@@ -452,8 +453,8 @@ export class CliHost {
     session.dataSubscription = terminal.onData((data) => this.emitPtyData(session, data));
     session.exitSubscription = terminal.onExit(({ exitCode }) => {
       session.alive = false;
-      session.exitCode = exitCode;
-      this.emit('pty:exit', { pty_id: id, code: exitCode, sequence: session.sequence });
+      session.exitCode = exitCode ?? null;
+      this.emit('pty:exit', { pty_id: id, code: session.exitCode, sequence: session.sequence });
     });
     return id;
   }
@@ -485,7 +486,11 @@ export class CliHost {
   private async killPty(id: string): Promise<void> {
     const session = this.ptys.get(id);
     if (!session) return;
-    if (!session.alive) return;
+    if (!session.alive) {
+      session.dataSubscription.dispose();
+      session.exitSubscription.dispose();
+      return;
+    }
     await new Promise<void>((resolve) => {
       let settled = false;
       const finish = () => {
@@ -502,6 +507,8 @@ export class CliHost {
       setTimeout(() => exitSubscription.dispose(), 2000);
       setTimeout(finish, 2000);
     });
+    session.dataSubscription.dispose();
+    session.exitSubscription.dispose();
   }
 
   private interruptPty(id: string): void {

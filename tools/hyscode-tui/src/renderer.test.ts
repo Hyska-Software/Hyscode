@@ -223,6 +223,29 @@ describe('TUI renderer', () => {
     expect(plain).not.toContain('list_directory');
   });
 
+  it('renders terminal tool command, state, terminal id, and focus action in activity', () => {
+    const rendered = new TerminalRenderer().render(state({
+      mainPanel: 'activity',
+      transcript: [{ kind: 'assistant', text: 'The build is running.' }],
+      tools: [{
+        id: 'tool-terminal',
+        name: 'run_terminal_command',
+        input: { command: 'npm run build' },
+        status: 'running',
+        liveOutput: 'building',
+        terminalId: 'terminal-agent-1',
+        terminalState: 'running',
+        outputSequence: 3,
+        expanded: false,
+      }],
+    }));
+    const plain = rendered.replace(/\u001b\[[0-9;]*[A-Za-z]/g, '');
+
+    expect(plain).toContain('npm run build');
+    expect(plain).toContain('terminal-agent-1');
+    expect(plain).toContain('/terminal focus <id>');
+  });
+
   it('renders a compact context meter from the active model window and current usage', () => {
     const rendered = new TerminalRenderer().render(state({
       usage: { current: null, session: null, requestCount: 1, estimatedCost: 0, contextWindow: 1000, inputTokens: 375, outputTokens: 20, totalTokens: 395 },
@@ -314,6 +337,32 @@ describe('TUI renderer', () => {
     const composerBottom = plainLines.slice(composerHeaderIndex).find((line) => line.includes('╰'));
     expect(composerBottom?.startsWith('  ')).toBe(true);
     expect(composerBottom?.trim()).toMatch(/^╰─+╯$/);
+  });
+
+  it('masks sensitive terminal input and exposes the guarded terminal composer', () => {
+    const rendered = new TerminalRenderer().render(state({
+      mainPanel: 'terminal',
+      input: 'secret-value',
+      inputCursor: 12,
+      terminalInput: { terminalId: 'term-1', masked: true },
+      terminals: [{
+        terminalId: 'term-1',
+        ptyId: 'pty-1',
+        name: 'Agent Terminal',
+        alive: true,
+        sequence: 4,
+        outputPreview: 'Password:',
+        frameLanguage: 'powershell',
+        role: 'agent',
+        awaitingInput: true,
+      }],
+      activeTerminalId: 'term-1',
+    }));
+    const plain = rendered.replace(/\u001b\[[0-9;]*[A-Za-z]/g, '');
+
+    expect(plain).toContain('TERMINAL INPUT');
+    expect(plain).toContain('••••••••••••');
+    expect(plain).not.toContain('secret-value');
   });
 
   it('shows an animated working indicator at the top of the execution chat area', () => {

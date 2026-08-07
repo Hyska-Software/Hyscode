@@ -10,7 +10,7 @@ export function selectAgentSession(
   sessions: TerminalSession[],
   request: Pick<
     TerminalAcquireRequest,
-    'ownerId' | 'conversationId' | 'forceNew' | 'sessionName' | 'toolCallId'
+    'ownerId' | 'conversationId' | 'forceNew' | 'sessionName' | 'toolCallId' | 'cwd'
   >,
 ): TerminalSession | null {
   const isolationKey = request.ownerId ?? request.conversationId;
@@ -23,7 +23,9 @@ export function selectAgentSession(
         (session) =>
           session.isAgentSession &&
           session.name === request.sessionName &&
-          session.ownerConversationId === isolationKey,
+          session.ownerConversationId === isolationKey &&
+          !session.awaitingInput &&
+          session.cwd === request.cwd,
       ) ?? null;
   } else {
     candidate =
@@ -31,8 +33,10 @@ export function selectAgentSession(
         (session) =>
           session.isAgentSession &&
           !session.isDead &&
+          !session.awaitingInput &&
           session.ptyId &&
-          session.ownerConversationId === isolationKey,
+          session.ownerConversationId === isolationKey &&
+          session.cwd === request.cwd,
       ) ?? null;
   }
   if (candidate?.activeToolCallId && candidate.activeToolCallId !== request.toolCallId) {

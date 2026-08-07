@@ -2,6 +2,7 @@ import { listen } from '@tauri-apps/api/event';
 
 import {
   normalizeTerminalOutput,
+  type TerminalAccess,
   type TerminalAcquireRequest,
   type TerminalBinding,
   type TerminalRuntimeAdapter,
@@ -82,6 +83,33 @@ export class DesktopTerminalRuntime implements TerminalRuntimeAdapter {
     await tauriInvokeRaw('pty_write', { ptyId: session.ptyId, data });
   }
 
+  async resize(terminalId: string, cols: number, rows: number): Promise<void> {
+    const session = this.getSession(terminalId);
+    if (session.ptyId) await tauriInvokeRaw('pty_resize', { ptyId: session.ptyId, cols, rows });
+  }
+
+  authorize(terminalId: string, access: TerminalAccess): void {
+    const session = this.getSession(terminalId);
+    const isolationKey = access.ownerId ?? access.conversationId;
+    if (access.source === 'agent') {
+      if (!session.isAgentSession || session.ownerConversationId !== isolationKey) {
+        throw new Error(`Terminal "${terminalId}" belongs to another terminal owner.`);
+      }
+      if (access.toolCallId && session.activeToolCallId && session.activeToolCallId !== access.toolCallId) {
+        throw new Error(`Terminal "${terminalId}" is controlled by another tool.`);
+      }
+      return;
+    }
+    if (session.isAgentSession) {
+      if (session.ownerConversationId !== access.conversationId) {
+        throw new Error(`Terminal "${terminalId}" belongs to another conversation.`);
+      }
+      if (session.activeToolCallId || !session.awaitingInput) {
+        throw new Error(`Terminal "${terminalId}" is owned by the Harness.`);
+      }
+    }
+  }
+
   async interrupt(terminalId: string): Promise<void> {
     const session = this.getSession(terminalId);
     if (session.ptyId) await tauriInvokeRaw('pty_interrupt', { ptyId: session.ptyId });
@@ -134,6 +162,7 @@ export class DesktopTerminalRuntime implements TerminalRuntimeAdapter {
     const queued: Array<{ data: string; sequence: number }> = [];
     let replayComplete = false;
     let appliedSequence = 0;
+    let exited = false;
     const unlistenData = await listen<{ pty_id: string; sequence: number; data: string }>(
       'pty:data',
       (event) => {
@@ -149,19 +178,24 @@ export class DesktopTerminalRuntime implements TerminalRuntimeAdapter {
     const unlistenExit = await listen<{ pty_id: string; code: number | null }>(
       'pty:exit',
       (event) => {
-        if (event.payload.pty_id === ptyId) onExit(event.payload.code);
+        if (event.payload.pty_id !== ptyId || exited) return;
+        exited = true;
+        onExit(event.payload.code ?? null);
       },
     );
     const snapshot = await this.snapshot(terminalId);
     appliedSequence = snapshot.toSequence;
     if (snapshot.data) onData(snapshot.data, snapshot.toSequence);
     replayComplete = true;
-    for (const chunk of queued) {
+    for (const chunk of queued.sort((left, right) => left.sequence - right.sequence)) {
       if (chunk.sequence <= appliedSequence) continue;
       appliedSequence = chunk.sequence;
       onData(chunk.data, chunk.sequence);
     }
-    if (!snapshot.alive) onExit(snapshot.exitCode);
+    if (!snapshot.alive && !exited) {
+      exited = true;
+      onExit(snapshot.exitCode);
+    }
     return () => {
       unlistenData();
       unlistenExit();

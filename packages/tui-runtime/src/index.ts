@@ -38,7 +38,10 @@ export type {
   SessionSummary,
   SetConfigParams,
   TerminalSummary,
+  TerminalPermissions,
+  TerminalUpdatedPayload,
 } from './protocol';
+export { runNdjsonBridge } from './ndjson';
 export type { ThemeSummary } from '@hyscode/theme';
 export type {
   CliInstallation,

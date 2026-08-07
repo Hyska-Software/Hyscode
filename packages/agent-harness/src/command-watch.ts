@@ -40,6 +40,7 @@ export class CommandWatch {
   private lastDataAt: number;
   private exited = false;
   private exitValue: number | null = null;
+  private outputTruncated = false;
 
   constructor(private readonly config: CommandWatchConfig) {
     this.lastDataAt = config.startedAt;
@@ -52,8 +53,9 @@ export class CommandWatch {
   }
 
   /** Reconcile with an authoritative snapshot without allowing older data to overwrite live output. */
-  syncSnapshot(data: string, sequence: number): void {
+  syncSnapshot(data: string, sequence: number, truncated = false): void {
     if (sequence < this.maxSequence) return;
+    this.outputTruncated = this.outputTruncated || truncated;
     const nextOutput = data.length <= MAX_CAPTURE_CHARS ? data : data.slice(-MAX_CAPTURE_CHARS);
     const current = this.parsed();
     const next = parseTerminalFrame(nextOutput, this.config.nonce);
@@ -78,6 +80,10 @@ export class CommandWatch {
 
   get sequence(): number {
     return this.maxSequence;
+  }
+
+  get truncated(): boolean {
+    return this.outputTruncated;
   }
 
   output(): string {

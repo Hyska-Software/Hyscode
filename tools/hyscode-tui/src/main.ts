@@ -1,7 +1,7 @@
 import { access } from 'node:fs/promises';
 import { createInterface } from 'node:readline/promises';
 import process from 'node:process';
-import { CliUpdater, CliUpdaterError, runUpdateHelper, SharedConfigStore, TuiBridge } from '@hyscode/tui-runtime';
+import { CliUpdater, CliUpdaterError, runNdjsonBridge, runUpdateHelper, SharedConfigStore, TuiBridge } from '@hyscode/tui-runtime';
 import { parseCliArgs, VORTEX_UPDATE_EXIT_CODES } from './commands';
 import { TuiController } from './controller';
 import { enterAlternateScreen, leaveAlternateScreen, TerminalInput } from './input';
@@ -41,6 +41,20 @@ async function main(): Promise<void> {
     return;
   }
 
+  if (parsed.options.protocol === 'ndjson') {
+    await runNdjsonBridge({
+      initializeDefaults: {
+        workspacePath: parsed.options.workspace,
+        projectId: parsed.options.workspace,
+        ...(parsed.options.provider ? { providerId: parsed.options.provider } : {}),
+        ...(parsed.options.model ? { modelId: parsed.options.model } : {}),
+        ...(parsed.options.mode ? { agentType: parsed.options.mode } : {}),
+        ...(parsed.options.configPath ? { configPath: parsed.options.configPath } : {}),
+      },
+    });
+    return;
+  }
+
   try {
     await access(parsed.options.workspace);
   } catch {
@@ -75,7 +89,7 @@ async function main(): Promise<void> {
       stdin: process.stdin,
       stdout: process.stdout,
       onKey: (key) => { void controller.handleKey(key).catch((error: unknown) => process.stderr.write(`${String(error)}\n`)); },
-      onResize: (width, height) => controller.setViewport(width, height),
+      onResize: (width, height) => { void controller.resizeActiveTerminal(width, height); },
     });
     enterAlternateScreen(process.stdout);
     input.start();

@@ -28,6 +28,7 @@ export type CliOptions = {
   model?: string;
   mode?: AgentType;
   configPath?: string;
+  protocol?: 'ndjson';
 };
 
 export type CliUpdateOptions = {
@@ -51,7 +52,7 @@ export type TranscriptItem = {
   text: string;
 };
 
-export type ToolViewStatus = 'pending' | 'approved' | 'running' | 'success' | 'error' | 'cancelled';
+export type ToolViewStatus = 'pending' | 'approved' | 'running' | 'awaiting_input' | 'success' | 'error' | 'cancelled';
 
 export type ToolView = {
   id: string;
@@ -134,6 +135,11 @@ export type TuiTab = {
   title: string;
   sessionId: string;
   active: boolean;
+};
+
+export type TerminalInputState = {
+  terminalId: string;
+  masked: boolean;
 };
 
 export type RuleView = { id: string; name: string; filePath: string; scope: string; origin: string; mandatory: boolean; enabled: boolean };
@@ -237,6 +243,7 @@ export type UiState = {
   context: ContextView;
   terminals: TerminalSummary[];
   activeTerminalId: string | null;
+  terminalInput?: TerminalInputState | null;
   sdd: SddView;
   subagents: SubAgentView[];
   usage: UsageView;

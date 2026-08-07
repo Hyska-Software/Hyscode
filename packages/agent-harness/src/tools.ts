@@ -11,6 +11,7 @@ import type {
   ToolRiskLevel,
   AgentQuestion,
   MemoryType,
+  TerminalAccess,
 } from './types';
 import { CATEGORY_RISK } from './types';
 import { resolveWorkspacePath } from './path-policy';
@@ -621,6 +622,10 @@ export const searchCodeTool = defineTool(
 
 const terminalCommandRunner = new TerminalCommandRunner();
 
+export function invalidateTerminalInput(terminalId: string, access: TerminalAccess): boolean {
+  return terminalCommandRunner.invalidateInteractive(terminalId, access);
+}
+
 export const runTerminalCommandTool = defineTool(
   'run_terminal_command',
   'Execute a command in the terminal. The command runs in the visible Agent Terminal so the user can watch it live. Returns stdout and stderr. Use for running tests, installing packages, running scripts, etc.',
@@ -692,6 +697,12 @@ export const readTerminalOutputTool = defineTool(
     const adapter = ctx.terminal;
     if (!adapter) return { success: false, output: '', error: 'Terminal runtime is unavailable.' };
     try {
+      await adapter.authorize?.(terminalId, {
+        conversationId: ctx.conversationId,
+        ...(ctx.ownerId ? { ownerId: ctx.ownerId } : {}),
+        toolCallId: ctx.toolCallId,
+        source: 'agent',
+      });
       const snapshot = await adapter.snapshot(
         terminalId,
         input.after_sequence as number | undefined,
@@ -759,7 +770,12 @@ export const stopTerminalProcessTool = defineTool(
     const adapter = ctx.terminal;
     if (!adapter) return { success: false, output: '', error: 'Terminal runtime is unavailable.' };
     try {
-      await stopCommand(adapter, terminalId);
+      await stopCommand(adapter, terminalId, {
+        conversationId: ctx.conversationId,
+        ...(ctx.ownerId ? { ownerId: ctx.ownerId } : {}),
+        toolCallId: ctx.toolCallId,
+        source: 'agent',
+      });
       const snapshot = await adapter.snapshot(terminalId).catch(() => null);
       if (snapshot?.alive)
         return { success: false, output: '', error: `Process did not stop: ${terminalId}` };
