@@ -31,6 +31,7 @@ export type DelegatedRunnerOptions = {
   activeSkills?: Skill[];
   activeRules?: Rule[];
   externalTools?: ToolHandler[];
+  onApprovalRequest?: ChildHarnessOptions['onApprovalRequest'];
   onEvent?: HarnessEventHandler;
 };
 
@@ -54,6 +55,7 @@ export class DelegatedRunner {
       agentType: options.mode,
       config: options.config,
       externalTools: options.externalTools,
+      onApprovalRequest: options.onApprovalRequest,
       onEvent: options.onEvent,
     };
     this.harness = options.parentHarness.createChild(childOptions);

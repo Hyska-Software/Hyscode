@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { createInterface, type Interface } from 'node:readline';
 import os from 'node:os';
 import path from 'node:path';
@@ -25,12 +25,13 @@ function successfulResult<T>(response: BridgeResponse): T {
   return response.result as T;
 }
 
-type FixtureBehavior = 'tool' | 'terminal' | 'cancel';
+type FixtureBehavior = 'tool' | 'terminal' | 'external-read' | 'cancel';
 
 type ProviderFixture = {
   baseUrl: string;
   requests: Array<Record<string, unknown>>;
   setBehavior: (behavior: FixtureBehavior) => void;
+  setExternalPath: (filePath: string) => void;
   close: () => Promise<void>;
 };
 
@@ -54,6 +55,7 @@ function finishSse(response: ServerResponse): void {
 async function startProviderFixture(): Promise<ProviderFixture> {
   const requests: Array<Record<string, unknown>> = [];
   let behavior: FixtureBehavior = 'tool';
+  let externalPath = '';
   const server: Server = createServer((request, response) => {
     void (async () => {
       const body = JSON.parse(await readBody(request)) as Record<string, unknown>;
@@ -97,6 +99,43 @@ async function startProviderFixture(): Promise<ProviderFixture> {
               tool_calls: [{
                 index: 0,
                 function: { arguments: JSON.stringify({ command }) },
+              }],
+            },
+            finish_reason: null,
+          }],
+        });
+        writeSse(response, { choices: [{ delta: {}, finish_reason: 'tool_calls' }] });
+        writeSse(response, {
+          choices: [],
+          usage: { prompt_tokens: 10, completion_tokens: 8, total_tokens: 18 },
+        });
+        finishSse(response);
+        return;
+      }
+
+      if (behavior === 'external-read' && requests.length === 1) {
+        writeSse(response, {
+          choices: [{ delta: { content: 'I will read the external fixture.' }, finish_reason: null }],
+        });
+        writeSse(response, {
+          choices: [{
+            delta: {
+              tool_calls: [{
+                index: 0,
+                id: 'fixture-external-read-call',
+                type: 'function',
+                function: { name: 'read_file' },
+              }],
+            },
+            finish_reason: null,
+          }],
+        });
+        writeSse(response, {
+          choices: [{
+            delta: {
+              tool_calls: [{
+                index: 0,
+                function: { arguments: JSON.stringify({ path: externalPath }) },
               }],
             },
             finish_reason: null,
@@ -164,6 +203,8 @@ async function startProviderFixture(): Promise<ProviderFixture> {
           delta: {
             content: behavior === 'terminal'
               ? 'The terminal fixture completed successfully.'
+              : behavior === 'external-read'
+                ? 'The external fixture was read successfully.'
               : 'The fixture file was updated successfully.',
           },
           finish_reason: null,
@@ -188,6 +229,7 @@ async function startProviderFixture(): Promise<ProviderFixture> {
     baseUrl: `http://127.0.0.1:${address.port}/v1`,
     requests,
     setBehavior: (nextBehavior) => { behavior = nextBehavior; },
+    setExternalPath: (filePath) => { externalPath = filePath; },
     close: () => new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve())),
   };
 }
@@ -512,6 +554,74 @@ describe('shared harness bridge protocol', () => {
       expect(session?.messages).toHaveLength(5);
       expect(session?.messages.filter((message) => message.role === 'user')).toHaveLength(1);
       expect(session?.messages.filter((message) => message.role === 'tool')).toHaveLength(1);
+    } finally {
+      registry.unregister('openai');
+      await bridge.handle({ id: 'shutdown', method: 'shutdown', params: {} });
+      await fixture.close();
+    }
+  });
+
+  it('requires explicit external approval in yolo mode and completes the CLI turn', async () => {
+    const directory = await mkdtemp(path.join(os.tmpdir(), 'hyscode-tui-external-read-'));
+    temporaryDirectories.push(directory);
+    const workspace = path.join(directory, 'workspace');
+    const externalFile = path.join(directory, 'external-file.txt');
+    await mkdir(workspace, { recursive: true });
+    await writeFile(externalFile, 'external fixture content', 'utf8');
+    const fixture = await startProviderFixture();
+    fixture.setBehavior('external-read');
+    fixture.setExternalPath(externalFile);
+    const registry = getProviderRegistry();
+    vi.stubEnv('HYSCODE_CONFIG_PATH', path.join(directory, 'settings.json'));
+    vi.stubEnv('HYSCODE_KEYCHAIN_PATH', path.join(directory, 'keychain.json'));
+    vi.stubEnv('HYSCODE_TUI_DATA_PATH', path.join(directory, 'tui-data.json'));
+
+    const events: BridgeEvent[] = [];
+    const bridge = new TuiBridge((message) => {
+      if (message.type === 'event') events.push(message);
+    });
+    try {
+      await bridge.handle({
+        id: 'initialize',
+        method: 'initialize',
+        params: { workspacePath: workspace, projectId: 'external-read-fixture', approvalMode: 'yolo' },
+      });
+      registry.register(new OpenAIProvider('fixture-key', fixture.baseUrl));
+      await bridge.handle({
+        id: 'config',
+        method: 'set_config',
+        params: { providerId: 'openai', modelId: 'gpt-5.4-mini', approvalMode: 'yolo' },
+      });
+
+      const turnPromise = bridge.handle({
+        id: 'external-read-turn',
+        method: 'send_message',
+        params: { message: 'Read the external fixture.' },
+      });
+      const interaction = await waitForEvent(events, (event) => event.event === 'interaction');
+      if (interaction.event !== 'interaction' || interaction.payload.kind !== 'approval') {
+        throw new Error('Expected an external approval interaction.');
+      }
+      expect(interaction.payload.toolCall.toolName).toBe('read_file');
+      expect(interaction.payload.toolCall.externalAccess).toMatchObject({
+        operation: 'read',
+        paths: [externalFile.replace(/\\/g, '/').replace(/^([A-Z]):/, (_, drive: string) => `${drive.toLowerCase()}:`)],
+      });
+
+      const resolved = successfulResult<{ resolved: boolean }>(await bridge.handle({
+        id: 'external-read-approval',
+        method: 'resolve_interaction',
+        params: {
+          requestId: interaction.payload.requestId,
+          approved: true,
+          grant: 'once',
+        },
+      }));
+      expect(resolved.resolved).toBe(true);
+
+      const turn = successfulResult<{ status: string; response: string }>(await turnPromise);
+      expect(turn.status).toBe('complete');
+      expect(turn.response).toContain('external fixture was read successfully');
     } finally {
       registry.unregister('openai');
       await bridge.handle({ id: 'shutdown', method: 'shutdown', params: {} });

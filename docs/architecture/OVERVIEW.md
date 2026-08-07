@@ -206,6 +206,11 @@ cycles agent modes; `Ctrl-T` cycles supported thinking levels; `Tab` changes
 focus outside the command palette; `Esc` closes a palette or clears the draft;
 `F1` opens help. Approval prompts support `y` (allow), `n` (deny), `t`
 (allow and trust the tool), and `a` (approve and switch to session yolo mode).
+External path prompts are mandatory in every mode and instead support `y`
+(allow once), `d` (allow the requested directory for this session), and `n`
+(deny). The NDJSON resolution carries the same decision as `grant: "once"` or
+`grant: "session-directory"`; an external approval without `grant` defaults to
+one call only.
 Question prompts support multiple questions, option selection, free-form text,
 and multiline answers.
 

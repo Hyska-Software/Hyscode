@@ -1,7 +1,9 @@
 const WINDOWS_ABSOLUTE = /^[a-zA-Z]:\//;
 
 function normalize(path: string): string {
-  return path.replace(/\\/g, '/').replace(/\/+$/, '');
+  const normalized = path.replace(/\\/g, '/');
+  if (normalized === '/' || /^[a-zA-Z]:\/$/.test(normalized)) return normalized;
+  return normalized.replace(/\/+$/, '');
 }
 
 function splitAbsolute(path: string): { root: string; segments: string[] } {
@@ -31,6 +33,17 @@ function collapse(root: string, segments: string[]): string {
 
 export type WorkspacePathOptions = { allowExternalAbsolute?: boolean };
 
+/** Resolve a workspace path through the per-call external authorization. */
+export function resolveAuthorizedPath(
+  path: string,
+  workspacePath: string,
+  externalPathAccess?: { resolve(path: string): string },
+): string {
+  return externalPathAccess
+    ? externalPathAccess.resolve(path)
+    : resolveWorkspacePath(path, workspacePath);
+}
+
 /** Resolve a path and enforce workspace containment unless external access is explicit. */
 export function resolveWorkspacePath(
   path: string,
@@ -51,7 +64,8 @@ export function resolveWorkspacePath(
   if (absolute && options.allowExternalAbsolute) return candidate;
   const workspaceKey = workspace.toLowerCase();
   const candidateKey = candidate.toLowerCase();
-  if (candidateKey !== workspaceKey && !candidateKey.startsWith(`${workspaceKey}/`)) {
+  const separator = workspaceKey.endsWith('/') ? '' : '/';
+  if (candidateKey !== workspaceKey && !candidateKey.startsWith(`${workspaceKey}${separator}`)) {
     throw new Error(`Path is outside the workspace: ${path}`);
   }
   return candidate;

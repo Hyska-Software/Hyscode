@@ -27,6 +27,8 @@ import {
   type TerminalSnapshot,
   type ToolHandler,
   type ToolResult,
+  type ApprovalDecision,
+  type ToolApprovalRequest,
 } from '@hyscode/agent-harness';
 import {
   getProviderRegistry,
@@ -314,7 +316,7 @@ export class TuiBridge {
       invoke: (command, args) => this.requireHost().invoke(command, args),
       listen: (event, handler) => this.requireHost().listen(event, handler),
       onEvent: (event) => this.emitHarnessEvent(event),
-      onApprovalRequest: (pending) => this.requestApproval(pending),
+      onApprovalRequest: (pending, signal) => this.requestApproval(pending, signal),
       onModeSwitchRequest: (request) => this.requestModeSwitch(request),
       onUserQuestionRequest: (id, questions, title) => this.requestUserQuestions(id, questions, title),
       terminalRuntime,
@@ -869,6 +871,7 @@ export class TuiBridge {
     const session = this.dataStore.loadSession(id);
     if (session && this.harness) {
       this.resetConversationContext();
+      this.clearSessionPathGrants();
       this.session = session;
       this.harness.setConversationId(session.id);
       this.harness.setAgentType(session.agentType);
@@ -880,6 +883,7 @@ export class TuiBridge {
   private async newSession(): Promise<SessionRecord> {
     const harness = this.requireHarness();
     this.resetConversationContext();
+    this.clearSessionPathGrants();
     this.session = await this.dataStore.createSession(this.workspacePath, harness.getAgentType(), this.currentProviderId(), this.currentModelId());
     harness.setConversationId(this.session.id);
     this.emit({ type: 'event', event: 'session_updated', payload: this.session });
@@ -916,6 +920,10 @@ export class TuiBridge {
     this.harness.getContextManager().clearConversationContext();
     this.attachments.clear();
     this.emitContextUpdated();
+  }
+
+  private clearSessionPathGrants(): void {
+    this.harness?.getToolRouter().clearExternalPathGrants();
   }
 
   private resolveHostResponse(rawParams: Record<string, unknown>): { resolved: boolean } {
@@ -1139,10 +1147,17 @@ export class TuiBridge {
     await this.requireHost().invoke('write_file', { path: planPath, content: `# Implementation Plan\n\n## Specification\n\n${spec}\n\n## Tasks\n\n${taskList}\n` });
   }
 
-  private async requestApproval(pending: Parameters<NonNullable<ConstructorParameters<typeof Harness>[0]['onApprovalRequest']>>[0]): Promise<boolean> {
+  private async requestApproval(
+    pending: ToolApprovalRequest,
+    signal: AbortSignal,
+  ): Promise<ApprovalDecision> {
     const interaction = pendingToolToInteraction(pending);
-    const resolution = await this.waitForInteraction(interaction);
-    return resolution.approved === true;
+    const resolution = await this.waitForInteraction(interaction, signal);
+    if (resolution.approved !== true) return false;
+    if (pending.externalAccess) {
+      return { approved: true, externalGrant: resolution.grant ?? 'once' };
+    }
+    return true;
   }
 
   private async requestModeSwitch(request: { id: string; fromMode: string; toMode: string; reason: string; contextSummary: string }): Promise<boolean> {
@@ -1155,10 +1170,26 @@ export class TuiBridge {
     return resolution.answers ?? [];
   }
 
-  private waitForInteraction(interaction: InteractionRequest): Promise<InteractionResolution> {
+  private waitForInteraction(
+    interaction: InteractionRequest,
+    signal?: AbortSignal,
+  ): Promise<InteractionResolution> {
     this.emit({ type: 'event', event: 'interaction', payload: interaction });
     return new Promise<InteractionResolution>((resolve) => {
-      this.interactions.set(interaction.requestId, { kind: interaction.kind, resolve });
+      let settled = false;
+      const settle = (resolution: InteractionResolution): void => {
+        if (settled) return;
+        settled = true;
+        signal?.removeEventListener('abort', onAbort);
+        resolve(resolution);
+      };
+      const onAbort = (): void => {
+        this.interactions.delete(interaction.requestId);
+        settle({ requestId: interaction.requestId, approved: false });
+      };
+      this.interactions.set(interaction.requestId, { kind: interaction.kind, resolve: settle });
+      if (signal?.aborted) onAbort();
+      else signal?.addEventListener('abort', onAbort, { once: true });
     });
   }
 
@@ -1171,7 +1202,7 @@ export class TuiBridge {
     }
     if (event.type === 'tool_call_pending') {
       const pending = event.pending;
-      this.emit({ type: 'event', event: 'harness_event', payload: { ...event, pending: { id: pending.id, toolName: pending.toolName, input: pending.input, description: pending.description, riskLevel: pending.riskLevel } } as HarnessEvent });
+      this.emit({ type: 'event', event: 'harness_event', payload: { ...event, pending: { id: pending.id, toolName: pending.toolName, input: pending.input, description: pending.description, riskLevel: pending.riskLevel, ...(pending.externalAccess ? { externalAccess: pending.externalAccess } : {}) } } as HarnessEvent });
       return;
     }
     if (event.type === 'file_change_pending') {

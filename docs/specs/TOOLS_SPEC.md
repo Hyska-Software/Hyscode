@@ -19,6 +19,10 @@ interface ToolDefinition {
   };
   category: ToolCategory;
   requiresApproval: boolean;
+  externalPathAccess?: {
+    operation: 'read' | 'write' | 'execute';
+    fields: Array<{ key: string; kind: 'target' | 'directory' }>;
+  };
 }
 
 type ToolCategory = 'filesystem' | 'terminal' | 'git' | 'code' | 'browser' | 'mcp' | 'meta';
@@ -298,7 +302,7 @@ type ToolCategory = 'filesystem' | 'terminal' | 'git' | 'code' | 'browser' | 'mc
 ```json
 {
   "name": "search_code",
-  "description": "Search for text or regex patterns across files in the workspace. Returns matching lines with file paths, line numbers, and optional context lines around each match.",
+  "description": "Search for text or regex patterns across files in the workspace or an explicitly authorized base directory. Returns matching lines with file paths, line numbers, and optional context lines around each match.",
   "inputSchema": {
     "type": "object",
     "properties": {
@@ -313,6 +317,10 @@ type ToolCategory = 'filesystem' | 'terminal' | 'git' | 'code' | 'browser' | 'mc
       "exclude_pattern": {
         "type": "string",
         "description": "Glob pattern to exclude files (e.g., '**/node_modules/**')"
+      },
+      "base_path": {
+        "type": "string",
+        "description": "Directory to search in. Defaults to the workspace root and requires external approval when outside it."
       },
       "is_regex": {
         "type": "boolean",
@@ -668,15 +676,25 @@ protocol option, a non-TTY launcher keeps its readiness-only behavior.
 ```
 Agent returns tool_call
   → Validate input against schema
-  → Check approval requirement
-  → If needs approval: enqueue in pendingToolCalls, wait for user
-  → If auto-approved: proceed
+  → Inspect declared path fields for external absolute paths
+  → If an external path is not covered: enqueue mandatory external approval
+  → Check normal approval requirement and combine it with the external request
+  → If approved: create an authorized per-call path resolver
+  → If denied: return a recoverable error to the agent
   → Route to handler (Tauri command or MCP call)
   → Capture output and timing
   → Log to telemetry (provider, tool, duration)
   → Return ToolResult to agent
   → Agent continues with next step
 ```
+
+External access is operation-specific (`read`, `write`, or `execute`) and is
+mandatory even in Auto-Approve/YOLO, Notify, Session Trust, and custom modes.
+The user may allow the current call or allow the requested directory for the
+current session only. Session grants are shared by parent and child harnesses,
+cleared when a session changes, and never persisted. Write approvals must state
+clearly that external data will be edited. For terminal calls only `cwd` is
+classified; command text is intentionally not parsed.
 
 ---
 

@@ -15,6 +15,8 @@ export type {
   ToolCallRecord,
   ApprovalMode,
   ApprovalConfig,
+  ApprovalDecision,
+  ToolApprovalRequest,
   PendingToolCall,
   ToolRiskLevel,
   ContextPriority,
@@ -121,8 +123,18 @@ export { getAgentDefinition, getAllAgentDefinitions, getAgentTypes } from './age
 
 // ─── Tools ──────────────────────────────────────────────────────────────────
 export { getAllBuiltinTools, invalidateTerminalInput } from './tools';
-export { resolveWorkspacePath } from './path-policy';
+export { resolveAuthorizedPath, resolveWorkspacePath } from './path-policy';
 export type { WorkspacePathOptions } from './path-policy';
+export { ExternalPathAccessRegistry } from './external-path-access';
+export type {
+  ExternalPathAccess,
+  ExternalPathAccessDefinition,
+  ExternalPathAccessRequest,
+  ExternalPathField,
+  ExternalPathFieldKind,
+  ExternalPathGrant,
+  ExternalPathOperation,
+} from './external-path-access';
 
 // ─── Terminal ───────────────────────────────────────────────────────────────
 export { TerminalCommandRunner, stopCommand } from './terminal-command-runner';

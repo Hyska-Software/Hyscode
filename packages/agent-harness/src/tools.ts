@@ -14,7 +14,8 @@ import type {
   TerminalAccess,
 } from './types';
 import { CATEGORY_RISK } from './types';
-import { resolveWorkspacePath } from './path-policy';
+import { resolveAuthorizedPath } from './path-policy';
+import type { ExternalPathField, ExternalPathOperation } from './external-path-access';
 import { normalizeTerminalOutput } from './terminal-protocol';
 import { stopCommand, TerminalCommandRunner } from './terminal-command-runner';
 
@@ -44,8 +45,8 @@ function defineTool(
   };
 }
 
-function resolvePath(path: string, workspacePath: string): string {
-  return resolveWorkspacePath(path, workspacePath);
+function resolvePath(path: string, workspacePath: string, ctx?: ToolExecutionContext): string {
+  return resolveAuthorizedPath(path, workspacePath, ctx?.externalPathAccess);
 }
 
 /** Resolve a path for git commands: enforce workspace containment on the
@@ -126,7 +127,7 @@ export const readFileTool = defineTool(
   false,
   async (input, ctx) => {
     try {
-      const filePath = resolvePath(input.path as string, ctx.workspacePath);
+      const filePath = resolvePath(input.path as string, ctx.workspacePath, ctx);
       const content = await ctx.invoke<string>('read_file', { path: filePath });
       ctx.readCache?.set(filePath, content);
       const lines = content.split('\n');
@@ -166,7 +167,7 @@ export const writeFileTool = defineTool(
   true,
   async (input, ctx) => {
     try {
-      const filePath = resolvePath(input.path as string, ctx.workspacePath);
+      const filePath = resolvePath(input.path as string, ctx.workspacePath, ctx);
       const newContent = input.content as string;
 
       // Capture original content before overwriting (null if file doesn't exist)
@@ -216,7 +217,7 @@ export const editFileTool = defineTool(
   true,
   async (input, ctx) => {
     try {
-      const filePath = resolvePath(input.path as string, ctx.workspacePath);
+      const filePath = resolvePath(input.path as string, ctx.workspacePath, ctx);
       const rawContent = await ctx.invoke<string>('read_file', { path: filePath });
       const oldStr = input.old_string as string;
       const newStr = input.new_string as string;
@@ -301,7 +302,7 @@ export const replaceLinesTool = defineTool(
   true,
   async (input, ctx) => {
     try {
-      const filePath = resolvePath(input.path as string, ctx.workspacePath);
+      const filePath = resolvePath(input.path as string, ctx.workspacePath, ctx);
       const rawContent = await ctx.invoke<string>('read_file', { path: filePath });
       const content = rawContent.replace(/\r\n/g, '\n');
       const lines = content.split('\n');
@@ -369,7 +370,7 @@ export const insertLinesTool = defineTool(
   true,
   async (input, ctx) => {
     try {
-      const filePath = resolvePath(input.path as string, ctx.workspacePath);
+      const filePath = resolvePath(input.path as string, ctx.workspacePath, ctx);
       const rawContent = await ctx.invoke<string>('read_file', { path: filePath });
       const content = rawContent.replace(/\r\n/g, '\n');
       const lines = content.split('\n');
@@ -421,7 +422,7 @@ export const createFileTool = defineTool(
   true,
   async (input, ctx) => {
     try {
-      const filePath = resolvePath(input.path as string, ctx.workspacePath);
+      const filePath = resolvePath(input.path as string, ctx.workspacePath, ctx);
       const newContent = input.content as string;
       await ctx.invoke('create_file', { path: filePath, content: newContent });
 
@@ -465,7 +466,7 @@ export const listDirectoryTool = defineTool(
   false,
   async (input, ctx) => {
     try {
-      const dirPath = resolvePath(input.path as string, ctx.workspacePath);
+      const dirPath = resolvePath(input.path as string, ctx.workspacePath, ctx);
       const recursive = (input.recursive as boolean) ?? false;
       const maxDepth = Math.min((input.max_depth as number) || 3, 10);
       const includeStats = (input.include_stats as boolean) ?? false;
@@ -522,7 +523,7 @@ export const listDirectoryTool = defineTool(
 
 export const searchCodeTool = defineTool(
   'search_code',
-  'Search for text or regex patterns across files in the workspace. Returns matching lines with file paths, line numbers, and optional context lines around each match. Use context_lines to see surrounding code.',
+  'Search for text or regex patterns across files in the workspace or an explicitly authorized base directory. Returns matching lines with file paths, line numbers, and optional context lines around each match. Use context_lines to see surrounding code.',
   {
     pattern: { type: 'string', description: 'Text or regex pattern to search for' },
     include_pattern: {
@@ -532,6 +533,10 @@ export const searchCodeTool = defineTool(
     exclude_pattern: {
       type: 'string',
       description: "Glob pattern to exclude files (e.g., '**/node_modules/**')",
+    },
+    base_path: {
+      type: 'string',
+      description: 'Directory to search in. Defaults to the workspace root.',
     },
     is_regex: { type: 'boolean', description: 'Whether pattern is a regex (default: false)' },
     case_sensitive: { type: 'boolean', description: 'Case-sensitive search (default: false)' },
@@ -566,7 +571,9 @@ export const searchCodeTool = defineTool(
           context_after?: string[];
         }>
       >('search_files', {
-        root: ctx.workspacePath,
+        root: input.base_path
+          ? resolvePath(input.base_path as string, ctx.workspacePath, ctx)
+          : ctx.workspacePath,
         query: input.pattern as string,
         includePattern: (input.include_pattern as string) ?? undefined,
         excludePattern: (input.exclude_pattern as string) ?? undefined,
@@ -1038,7 +1045,7 @@ export const getDiagnosticsTool = defineTool(
   false,
   async (input, ctx) => {
     try {
-      const file = input.file ? resolvePath(input.file as string, ctx.workspacePath) : undefined;
+      const file = input.file ? resolvePath(input.file as string, ctx.workspacePath, ctx) : undefined;
       const diagnostics = await ctx.invoke<
         Array<{
           file: string;
@@ -1410,7 +1417,7 @@ Assign relevance: 0.8-1.0 = files you will modify, 0.5-0.7 = important reference
           error: 'Gathered context is not available in this execution context.',
         };
       }
-      const filePath = resolvePath(input.path as string, ctx.workspacePath);
+      const filePath = resolvePath(input.path as string, ctx.workspacePath, ctx);
       const relevance = Math.max(0, Math.min(1, Number(input.relevance) || 0.5));
       const reason = String(input.reason || 'Agent gathered this file');
 
@@ -1458,7 +1465,7 @@ export const dropContextTool = defineTool(
         error: 'Gathered context is not available in this execution context.',
       };
     }
-    const filePath = resolvePath(input.path as string, ctx.workspacePath);
+    const filePath = resolvePath(input.path as string, ctx.workspacePath, ctx);
     const removed = ctx.gatheredContext.remove(filePath);
     if (removed) {
       const totalTokens = ctx.gatheredContext.getTokens();
@@ -1532,7 +1539,7 @@ Use simple glob patterns: "*.tsx", "**/*.test.ts", "src/**/index.ts".`,
   async (input, ctx) => {
     try {
       const basePath = input.base_path
-        ? resolvePath(input.base_path as string, ctx.workspacePath)
+        ? resolvePath(input.base_path as string, ctx.workspacePath, ctx)
         : ctx.workspacePath;
       const pattern = String(input.pattern);
       const maxResults = Math.min(Number(input.max_results) || 50, 200);
@@ -1795,7 +1802,7 @@ export const deleteFileTool = defineTool(
   true,
   async (input, ctx) => {
     try {
-      const filePath = resolvePath(input.path as string, ctx.workspacePath);
+      const filePath = resolvePath(input.path as string, ctx.workspacePath, ctx);
       let originalContent: string | null = null;
       try {
         originalContent = await ctx.invoke<string>('read_file', { path: filePath });
@@ -1835,8 +1842,8 @@ export const renameFileTool = defineTool(
   true,
   async (input, ctx) => {
     try {
-      const fromPath = resolvePath(input.from as string, ctx.workspacePath);
-      const toPath = resolvePath(input.to as string, ctx.workspacePath);
+      const fromPath = resolvePath(input.from as string, ctx.workspacePath, ctx);
+      const toPath = resolvePath(input.to as string, ctx.workspacePath, ctx);
       let originalContent: string | null = null;
       try {
         originalContent = await ctx.invoke<string>('read_file', { path: fromPath });
@@ -1883,8 +1890,8 @@ export const copyFileTool = defineTool(
   true,
   async (input, ctx) => {
     try {
-      const fromPath = resolvePath(input.from as string, ctx.workspacePath);
-      const toPath = resolvePath(input.to as string, ctx.workspacePath);
+      const fromPath = resolvePath(input.from as string, ctx.workspacePath, ctx);
+      const toPath = resolvePath(input.to as string, ctx.workspacePath, ctx);
       let sourceContent: string | null = null;
       let targetContent: string | null = null;
       try {
@@ -1929,7 +1936,7 @@ export const getFileInfoTool = defineTool(
   false,
   async (input, ctx) => {
     try {
-      const filePath = resolvePath(input.path as string, ctx.workspacePath);
+      const filePath = resolvePath(input.path as string, ctx.workspacePath, ctx);
       const info = await ctx.invoke<{
         path: string;
         is_dir: boolean;
@@ -2294,7 +2301,7 @@ export const readMultipleFilesTool = defineTool(
 
       for (const p of new Set(paths)) {
         try {
-          const filePath = resolvePath(p, ctx.workspacePath);
+          const filePath = resolvePath(p, ctx.workspacePath, ctx);
           const content =
             ctx.readCache?.get(filePath) ?? (await ctx.invoke<string>('read_file', { path: filePath }));
           ctx.readCache?.set(filePath, content);
@@ -2638,6 +2645,37 @@ export const listMemoriesTool = defineTool(
 );
 
 // ─── Export All Tools ───────────────────────────────────────────────────────
+
+function markExternalPathAccess(
+  handler: ToolHandler,
+  operation: ExternalPathOperation,
+  fields: readonly ExternalPathField[],
+): void {
+  handler.externalPathAccess = { operation, fields };
+}
+
+markExternalPathAccess(readFileTool, 'read', [{ key: 'path', kind: 'target' }]);
+markExternalPathAccess(listDirectoryTool, 'read', [{ key: 'path', kind: 'directory' }]);
+markExternalPathAccess(searchCodeTool, 'read', [{ key: 'base_path', kind: 'directory' }]);
+markExternalPathAccess(findFilesTool, 'read', [{ key: 'base_path', kind: 'directory' }]);
+markExternalPathAccess(getFileInfoTool, 'read', [{ key: 'path', kind: 'target' }]);
+markExternalPathAccess(readMultipleFilesTool, 'read', [{ key: 'paths', kind: 'target' }]);
+markExternalPathAccess(gatherContextTool, 'read', [{ key: 'path', kind: 'target' }]);
+markExternalPathAccess(writeFileTool, 'write', [{ key: 'path', kind: 'target' }]);
+markExternalPathAccess(editFileTool, 'write', [{ key: 'path', kind: 'target' }]);
+markExternalPathAccess(replaceLinesTool, 'write', [{ key: 'path', kind: 'target' }]);
+markExternalPathAccess(insertLinesTool, 'write', [{ key: 'path', kind: 'target' }]);
+markExternalPathAccess(createFileTool, 'write', [{ key: 'path', kind: 'target' }]);
+markExternalPathAccess(deleteFileTool, 'write', [{ key: 'path', kind: 'target' }]);
+markExternalPathAccess(renameFileTool, 'write', [
+  { key: 'from', kind: 'target' },
+  { key: 'to', kind: 'target' },
+]);
+markExternalPathAccess(copyFileTool, 'write', [
+  { key: 'from', kind: 'target' },
+  { key: 'to', kind: 'target' },
+]);
+markExternalPathAccess(runTerminalCommandTool, 'execute', [{ key: 'cwd', kind: 'directory' }]);
 
 export function getAllBuiltinTools(): ToolHandler[] {
   return [

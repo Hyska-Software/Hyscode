@@ -28,6 +28,8 @@ import type {
   SddDatabase,
   SddSession,
   RuleDiagnostic,
+  ApprovalDecision,
+  ToolApprovalRequest,
 } from '@hyscode/agent-harness';
 import type { Message, ToolDefinition, MessageContent, TokenUsage } from '@hyscode/ai-providers';
 import { tauriInvoke, tauriInvokeRaw } from './tauri-invoke';
@@ -211,7 +213,7 @@ export class HarnessBridge {
   private readonly isolatedRuntime: boolean;
   private disposed = false;
   private _projectId: string = '';
-  private approvalResolvers = new Map<string, (approved: boolean) => void>();
+  private approvalResolvers = new Map<string, (decision: ApprovalDecision) => void>();
   private modeSwitchResolvers = new Map<string, (approved: boolean) => void>();
   private resolvedModeSwitchIds = new Set<string>();
   private userQuestionResolvers = new Map<
@@ -1245,11 +1247,11 @@ Investigate the error, fix the underlying issue in the affected files, and verif
   }
 
   /** Resolve a pending approval from the UI */
-  resolveApproval(id: string, approved: boolean): void {
+  resolveApproval(id: string, decision: ApprovalDecision): void {
     const useAgentStore = this.agentStore;
     const resolver = this.approvalResolvers.get(id);
     if (resolver) {
-      resolver(approved);
+      resolver(decision);
       this.approvalResolvers.delete(id);
       useAgentStore.getState().removePendingApproval(id);
     }
@@ -1281,6 +1283,14 @@ Investigate the error, fix the underlying issue in the affected files, and verif
     if (this.harness) {
       this.harness.getToolRouter()?.clearSessionTrust?.();
       this.debug('🔒 Session trust cleared');
+    }
+  }
+
+  /** Clear mandatory external path grants when switching sessions. */
+  clearExternalPathGrants(): void {
+    if (this.harness) {
+      this.harness.getToolRouter()?.clearExternalPathGrants?.();
+      this.debug('🔒 External path grants cleared');
     }
   }
 
@@ -1389,6 +1399,7 @@ Investigate the error, fix the underlying issue in the affected files, and verif
     useAgentStore.getState().setConversationId(conversationId);
     // Clear session trust when switching sessions
     this.clearSessionTrust();
+    this.clearExternalPathGrants();
     // Clear context sources so previous session's context doesn't bleed into the new one
     this.clearTabContext();
     this.restoreSddForConversation(conversationId).catch((error) => {
@@ -2384,48 +2395,49 @@ Investigate the error, fix the underlying issue in the affected files, and verif
   }
 
   private async handleApprovalRequest(
-    pending: {
-      id: string;
-      toolName: string;
-      input: Record<string, unknown>;
-      description: string;
-    },
+    pending: ToolApprovalRequest,
     signal: AbortSignal,
-  ): Promise<boolean> {
+  ): Promise<ApprovalDecision> {
     const useAgentStore = this.agentStore;
     const settings = useSettingsStore.getState();
     const mode = settings.approvalMode;
+    const requiresExternalAccess = Boolean(pending.externalAccess);
 
-    // Yolo: auto-approve everything silently
-    if (mode === 'yolo') return true;
+    // External access is always interactive, including yolo/notify and
+    // sub-agent auto-approve. The normal mode shortcuts below intentionally
+    // run only for workspace-contained tool approvals.
+    if (!requiresExternalAccess) {
+      // Yolo: auto-approve everything silently
+      if (mode === 'yolo') return true;
 
-    // Notify: auto-approve but emit a notification event for the UI
-    if (mode === 'notify') {
-      this.debug(`🔔 Notify (auto-approved): ${pending.toolName}`);
-      return true;
-    }
-
-    // Smart: auto-approve safe tools, ask for moderate/destructive.
-    // The safe set is shared with the harness (SAFE_TOOLS) so approval
-    // behavior can never drift from the tool's declared risk.
-    if (mode === 'smart') {
-      if (SAFE_TOOLS.has(pending.toolName)) {
-        this.debug(`✅ Smart auto-approved (safe): ${pending.toolName}`);
+      // Notify: auto-approve but emit a notification event for the UI
+      if (mode === 'notify') {
+        this.debug(`🔔 Notify (auto-approved): ${pending.toolName}`);
         return true;
       }
-      // Fall through to show approval dialog for non-safe tools
-    }
 
-    // Session-trust: auto-approve if tool was previously trusted
-    if (mode === 'session-trust') {
-      const trustedTools = this.harness.getToolRouter()?.getSessionTrustedTools?.() as
-        | Set<string>
-        | undefined;
-      if (trustedTools?.has(pending.toolName)) {
-        this.debug(`✅ Session-trust auto-approved: ${pending.toolName}`);
-        return true;
+      // Smart: auto-approve safe tools, ask for moderate/destructive.
+      // The safe set is shared with the harness (SAFE_TOOLS) so approval
+      // behavior can never drift from the tool's declared risk.
+      if (mode === 'smart') {
+        if (SAFE_TOOLS.has(pending.toolName)) {
+          this.debug(`✅ Smart auto-approved (safe): ${pending.toolName}`);
+          return true;
+        }
+        // Fall through to show approval dialog for non-safe tools
       }
-      // Fall through to show approval dialog
+
+      // Session-trust: auto-approve if tool was previously trusted
+      if (mode === 'session-trust') {
+        const trustedTools = this.harness.getToolRouter()?.getSessionTrustedTools?.() as
+          | Set<string>
+          | undefined;
+        if (trustedTools?.has(pending.toolName)) {
+          this.debug(`✅ Session-trust auto-approved: ${pending.toolName}`);
+          return true;
+        }
+        // Fall through to show approval dialog
+      }
     }
 
     // Push to store for UI rendering (manual, smart-non-safe, session-trust-untrusted, custom)
@@ -2434,18 +2446,26 @@ Investigate the error, fix the underlying issue in the affected files, and verif
       toolName: pending.toolName,
       input: pending.input,
       description: pending.description,
+      ...(pending.externalAccess ? { externalAccess: pending.externalAccess } : {}),
       ownerSubAgentId: this._approvalOwner.get(pending.id),
     };
     useAgentStore.getState().addPendingApproval(approval);
 
     // Wait for UI resolution
-    return new Promise<boolean>((resolve) => {
-      this.approvalResolvers.set(pending.id, resolve);
+    return new Promise<ApprovalDecision>((resolve) => {
+      let settled = false;
       const cancel = () => {
         if (!this.approvalResolvers.delete(pending.id)) return;
         useAgentStore.getState().removePendingApproval(pending.id);
-        resolve(false);
+        finish(false);
       };
+      const finish = (decision: ApprovalDecision): void => {
+        if (settled) return;
+        settled = true;
+        signal.removeEventListener('abort', cancel);
+        resolve(decision);
+      };
+      this.approvalResolvers.set(pending.id, finish);
       if (signal.aborted) cancel();
       else signal.addEventListener('abort', cancel, { once: true });
     });

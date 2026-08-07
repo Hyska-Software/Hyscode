@@ -684,8 +684,13 @@ export class TuiController {
         description: payload.toolCall.description,
         risk: payload.toolCall.riskLevel ?? 'moderate',
         input: payload.toolCall.input,
+        ...(payload.toolCall.externalAccess
+          ? { externalAccess: payload.toolCall.externalAccess }
+          : {}),
       };
-      this.state.status = 'Approval required · y allow · n deny · t trust tool';
+      this.state.status = payload.toolCall.externalAccess
+        ? 'External access required · y allow once · d allow directory · n deny'
+        : 'Approval required · y allow · n deny · t trust tool';
     } else if (payload.kind === 'mode_switch') {
       this.state.interaction = {
         kind: 'mode_switch',
@@ -1624,6 +1629,19 @@ export class TuiController {
     if (interaction.kind === 'approval') {
       if (key.type === 'character' && key.value.length === 1) {
         const value = key.value.toLowerCase();
+        if (interaction.externalAccess) {
+          if (value === 'y') {
+            await this.resolveInteraction(interaction.requestId, { approved: true, grant: 'once' });
+          } else if (value === 'd') {
+            await this.resolveInteraction(interaction.requestId, {
+              approved: true,
+              grant: 'session-directory',
+            });
+          } else if (value === 'n') {
+            await this.resolveInteraction(interaction.requestId, { approved: false });
+          }
+          return;
+        }
         if (value === 'y') await this.resolveInteraction(interaction.requestId, { approved: true });
         else if (value === 'n') await this.resolveInteraction(interaction.requestId, { approved: false });
         else if (value === 't') await this.resolveInteraction(interaction.requestId, { approved: true, trustTool: true, toolName: interaction.toolName });

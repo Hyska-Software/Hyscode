@@ -5,6 +5,8 @@ import type {
   FileChangePending,
   GatheredContextEntry,
   ApprovalMode,
+  ExternalPathAccessRequest,
+  ExternalPathGrant,
   HarnessEvent,
   PendingToolCall,
   SddSession,
@@ -236,6 +238,7 @@ export type InteractionRequest =
         input: Record<string, unknown>;
         description: string;
         riskLevel?: ToolRiskLevel;
+        externalAccess?: ExternalPathAccessRequest;
       };
     }
   | {
@@ -257,6 +260,8 @@ export type InteractionResolution = {
   requestId: string;
   approved?: boolean;
   trustTool?: boolean;
+  /** External path grant chosen by the user; absent means one invocation. */
+  grant?: ExternalPathGrant;
   answers?: AgentQuestionAnswer[];
 };
 
@@ -333,7 +338,10 @@ export type SetConfigParams = {
 };
 
 export function pendingToolToInteraction(
-  pending: Pick<PendingToolCall, 'id' | 'toolName' | 'input' | 'description' | 'riskLevel'>,
+  pending: Pick<
+    PendingToolCall,
+    'id' | 'toolName' | 'input' | 'description' | 'riskLevel' | 'externalAccess'
+  >,
 ): InteractionRequest {
   return {
     kind: 'approval',
@@ -344,6 +352,7 @@ export function pendingToolToInteraction(
       input: pending.input,
       description: pending.description,
       riskLevel: pending.riskLevel,
+      ...(pending.externalAccess ? { externalAccess: pending.externalAccess } : {}),
     },
   };
 }

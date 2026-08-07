@@ -557,6 +557,25 @@ function flowOptions(state: UiState, flow: CommandFlow): string[] {
 
 function interactionLines(interaction: InteractionState, width: number): string[] {
   if (interaction.kind === 'approval') {
+    if (interaction.externalAccess) {
+      const operation = interaction.externalAccess.operation === 'write'
+        ? 'edit external files or directories'
+        : interaction.externalAccess.operation === 'execute'
+          ? 'execute a command with an external working directory'
+          : 'read external files or directories';
+      return [
+        `${WARNING}${BOLD}External access required${RESET}`,
+        `${SOFT}The agent wants to ${operation}.${RESET}`,
+        ...(interaction.externalAccess.operation === 'write'
+          ? [`${ERROR}This action will edit external data.${RESET}`]
+          : []),
+        `${DIM}Tool: ${interaction.toolName} · risk: ${interaction.risk}${RESET}`,
+        `${DIM}Paths:${RESET}`,
+        ...interaction.externalAccess.paths.map((path) => `  ${path}`),
+        `${DIM}Session directories: ${interaction.externalAccess.directories.join(', ')}${RESET}`,
+        `${WARNING}Y allow once   D allow directory for this session   N deny${RESET}`,
+      ].flatMap((line) => wrapText(line, Math.max(20, width - 8)));
+    }
     return [
       `${WARNING}${BOLD}The agent wants to use ${interaction.toolName}${RESET}`,
       ...wrapText(interaction.description, Math.max(20, width - 8)).map((line) => `${SOFT}${line}${RESET}`),

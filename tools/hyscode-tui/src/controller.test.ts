@@ -220,6 +220,40 @@ describe('TUI controller', () => {
     expect(controller.state.interaction).toBeNull();
   });
 
+  it('uses dedicated controls for mandatory external access', async () => {
+    const runtime = new FakeRuntime();
+    const controller = new TuiController({ workspace: 'C:/workspace' }, runtime);
+    await controller.start();
+    controller.handleRuntimeMessage({
+      type: 'event',
+      event: 'interaction',
+      payload: {
+        kind: 'approval',
+        requestId: 'external-1',
+        toolCall: {
+          id: 'external-1',
+          toolName: 'read_file',
+          input: { path: 'C:/external/file.txt' },
+          description: 'read external file',
+          riskLevel: 'safe',
+          externalAccess: {
+            operation: 'read',
+            paths: ['c:/external/file.txt'],
+            directories: ['c:/external'],
+            directoryScopes: [],
+          },
+        },
+      },
+    });
+    await controller.handleKey({ type: 'character', value: 'd' });
+
+    expect(runtime.requests.at(-1)).toMatchObject({
+      method: 'resolve_interaction',
+      params: { requestId: 'external-1', approved: true, grant: 'session-directory' },
+    });
+    expect(controller.state.interaction).toBeNull();
+  });
+
   it('opens the slash palette while typing and completes the selected command with Tab', async () => {
     const runtime = new FakeRuntime();
     const controller = new TuiController({ workspace: 'C:/workspace' }, runtime);

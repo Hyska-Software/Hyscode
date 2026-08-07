@@ -163,6 +163,9 @@ export type InteractionState =
       description: string;
       risk: string;
       input: Record<string, unknown>;
+      externalAccess?: NonNullable<
+        Extract<InteractionRequest, { kind: 'approval' }>['toolCall']['externalAccess']
+      >;
     }
   | {
       kind: 'mode_switch';

@@ -10,6 +10,12 @@ import type {
   TokenUsage,
 } from '@hyscode/ai-providers';
 import type { MemoryManager } from './memory-manager';
+import type {
+  ExternalPathAccess,
+  ExternalPathAccessDefinition,
+  ExternalPathAccessRequest,
+  ExternalPathGrant,
+} from './external-path-access';
 
 // ─── Tool System ────────────────────────────────────────────────────────────
 
@@ -41,6 +47,8 @@ export interface ToolHandler {
   /** When true, multiple calls of this tool may run concurrently in one batch.
    *  Only delegation tools such as spawn_subagent should opt in. */
   parallel?: boolean;
+  /** Declares which input paths may require mandatory external approval. */
+  externalPathAccess?: ExternalPathAccessDefinition;
   execute: (input: Record<string, unknown>, context: ToolExecutionContext) => Promise<ToolResult>;
 }
 
@@ -93,6 +101,8 @@ export interface ToolExecutionContext {
   memoryManager?: MemoryManager;
   /** Reports whether Monaco has unsaved buffers that Git mutations could overwrite. */
   hasDirtyBuffers?: () => boolean;
+  /** Per-call resolver for paths approved outside the workspace. */
+  externalPathAccess?: ExternalPathAccess;
 }
 
 export type TerminalAcquireRequest = {
@@ -293,8 +303,19 @@ export interface PendingToolCall {
   input: Record<string, unknown>;
   description: string;
   riskLevel?: ToolRiskLevel;
-  resolve: (approved: boolean, reason?: string) => void;
+  externalAccess?: ExternalPathAccessRequest;
+  resolve: (decision: ApprovalDecision, reason?: string) => void;
 }
+
+/** Approval result. Boolean callbacks remain supported for compatibility. */
+export type ApprovalDecision =
+  | boolean
+  | {
+      approved: boolean;
+      externalGrant?: ExternalPathGrant;
+    };
+
+export type ToolApprovalRequest = Omit<PendingToolCall, 'resolve'>;
 
 // ─── Context Manager ────────────────────────────────────────────────────────
 

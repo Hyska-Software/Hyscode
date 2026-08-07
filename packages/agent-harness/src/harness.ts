@@ -26,6 +26,8 @@ import {
   type RuleDiagnostic,
   type AgentQuestion,
   type AgentQuestionAnswer,
+  type ApprovalDecision,
+  type ToolApprovalRequest,
   type TurnStatus,
   type TurnOutcome,
   type TurnRequest,
@@ -61,6 +63,7 @@ import { MemoryContextProvider } from './memory-context-provider';
 import { TurnController } from './turn-controller';
 import { selectToolPlan, type ToolSelectionDecision } from './tool-selection';
 import type { ChildHarnessOptions, HarnessEnvironment } from './environment';
+import { ExternalPathAccessRegistry } from './external-path-access';
 import { ReadLoopMiddleware } from './read-loop';
 import {
   RequestPreparation,
@@ -86,9 +89,9 @@ export interface HarnessOptions {
   onEvent?: HarnessEventHandler;
   /** Approval callback */
   onApprovalRequest?: (
-    pending: { id: string; toolName: string; input: Record<string, unknown>; description: string },
+    pending: ToolApprovalRequest,
     signal: AbortSignal,
-  ) => Promise<boolean>;
+  ) => Promise<ApprovalDecision>;
   /** Mode switch callback — returns true if approved, false if denied */
   onModeSwitchRequest?: (
     request: {
@@ -127,6 +130,8 @@ export interface HarnessOptions {
   /** Memory manager — enables persistent cross-session knowledge. */
   memoryManager?: MemoryManager;
   hasDirtyBuffers?: () => boolean;
+  /** Shared session registry for mandatory external path grants. */
+  externalPathAccess?: ExternalPathAccessRegistry;
   /** 0 = main agent (default), >0 = nested delegation depth. Exposed to tools
    *  via ToolExecutionContext.delegationLevel. */
   delegationLevel?: number;
@@ -195,6 +200,7 @@ export class Harness {
   private ownerId: string | null = null;
   private environment: HarnessEnvironment;
   private readCache = new Map<string, string>();
+  private externalPathAccess: ExternalPathAccessRegistry;
 
   constructor(options: HarnessOptions) {
     this.config = { ...DEFAULT_HARNESS_CONFIG, ...options.config };
@@ -209,6 +215,7 @@ export class Harness {
     this.onRulesResolved = options.onRulesResolved;
     this.hasDirtyBuffers = options.hasDirtyBuffers;
     this.delegationLevel = options.delegationLevel ?? 0;
+    this.externalPathAccess = options.externalPathAccess ?? new ExternalPathAccessRegistry();
     this.environment = {
       workspacePath: options.workspacePath,
       projectId: options.projectId,
@@ -225,6 +232,7 @@ export class Harness {
       terminalRuntime: options.terminalRuntime,
       memoryManager: options.memoryManager,
       hasDirtyBuffers: options.hasDirtyBuffers,
+      externalPathAccess: this.externalPathAccess,
     };
 
     // Agent terminal integration
@@ -237,7 +245,7 @@ export class Harness {
     this.contextManager.setCostOptimization(this.config.costOptimization);
 
     // Initialize tool router
-    this.toolRouter = new ToolRouter();
+    this.toolRouter = new ToolRouter(this.externalPathAccess);
     this.toolRouter.setApprovalConfig(this.config.approval);
     if (this.eventHandler) {
       this.toolRouter.setEventHandler((event) => this.emit(event));
@@ -252,6 +260,8 @@ export class Harness {
               toolName: pending.toolName,
               input: pending.input,
               description: pending.description,
+              ...(pending.riskLevel ? { riskLevel: pending.riskLevel } : {}),
+              ...(pending.externalAccess ? { externalAccess: pending.externalAccess } : {}),
             },
             signal,
           );
@@ -345,6 +355,7 @@ export class Harness {
       },
       ruleLoader: this.ruleLoader?.fork(),
       onEvent: options.onEvent,
+      onApprovalRequest: options.onApprovalRequest ?? this.environment.onApprovalRequest,
       delegationLevel: this.delegationLevel + 1,
       sddDb: undefined,
       savePlanFile: undefined,

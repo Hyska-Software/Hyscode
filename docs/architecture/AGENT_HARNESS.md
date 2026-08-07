@@ -340,6 +340,10 @@ interface ToolDefinition {
   inputSchema: JSONSchema;
   category: 'filesystem' | 'terminal' | 'git' | 'code' | 'browser' | 'mcp';
   requiresApproval: boolean; // per settings
+  externalPathAccess?: {
+    operation: 'read' | 'write' | 'execute';
+    fields: Array<{ key: string; kind: 'target' | 'directory' }>;
+  };
   handler: (input: unknown) => Promise<ToolResult>;
 }
 
@@ -379,14 +383,16 @@ Web tools (`web_search`, `web_fetch`) are classified `safe` (`CATEGORY_RISK`), l
 
 ```
 Agent requests tool_call
-  → Tool Router checks tool.requiresApproval
-  → If requires approval:
-      → Add to pendingToolCalls in agentStore
-      → UI shows approval card with tool name, input preview
-      → User clicks Approve or Reject
-      → If approved: execute and return result to agent
-      → If rejected: return rejection reason to agent
-  → If auto-approved:
+  → Tool Router validates declared path fields
+  → If an external path is not covered by a session grant:
+      → Always enqueue an external-access approval, regardless of mode
+  → If the tool also requires normal approval:
+      → Add one combined request to pendingToolCalls in agentStore
+      → UI shows the tool and external path preview
+      → User approves, grants the directory for this session, or rejects
+      → If approved: execute with an authorized per-call path resolver
+      → If rejected: return a recoverable rejection reason to the agent
+  → If no external approval is required and the tool is auto-approved:
       → Execute immediately
       → Show execution card in UI (collapsed by default)
 ```
@@ -397,7 +403,7 @@ Agent requests tool_call
 - `smart`: risk-based approval with automatic safe reads
 - `session-trust`: approve a tool type once per session
 - `notify`: execute without blocking and emit a notification
-- `yolo`: execute without approval
+- `yolo`: execute without normal tool approval; external path access still requires explicit user approval
 - `custom`: tool overrides, then category overrides, then tool defaults
 
 ---
@@ -519,7 +525,7 @@ and the compatibility runtime entrypoint reuse the same serialized request/event
 automation, including `initialize`, `send_message`, approvals, terminal events, cancellation, and
 shutdown.
 
-Workspace-relative paths are normalized and checked by segment containment. External absolute paths are rejected by default and require explicitly authorized adapter policy.
+Workspace-relative paths are normalized and checked by segment containment. Absolute paths outside the workspace are classified before the handler runs and require explicit user approval in every approval mode. `allow once` applies only to the current tool call; `allow directory for this session` stores an operation-specific, non-persistent directory grant. Read grants never authorize writes or terminal execution. The terminal command text is not parsed for paths; only its `cwd` field participates in this gate. If no approval callback exists, external access fails closed.
 
 | Error Type                 | Handling                                                        |
 | -------------------------- | --------------------------------------------------------------- |

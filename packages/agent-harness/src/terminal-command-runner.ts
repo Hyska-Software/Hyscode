@@ -13,7 +13,7 @@ import {
   looksLikeTerminalPrompt,
   parseTerminalFrame,
 } from './terminal-protocol';
-import { resolveWorkspacePath } from './path-policy';
+import { resolveAuthorizedPath } from './path-policy';
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 const DEFAULT_STARTUP_TIMEOUT_MS = 15_000;
@@ -94,7 +94,9 @@ export class TerminalCommandRunner {
     }
 
     const command = input.command;
-    const cwd = input.cwd ? resolveWorkspacePath(input.cwd, ctx.workspacePath) : ctx.workspacePath;
+    const cwd = input.cwd
+      ? resolveAuthorizedPath(input.cwd, ctx.workspacePath, ctx.externalPathAccess)
+      : ctx.workspacePath;
     const background = Boolean(input.background);
     const binding = await adapter.acquire({
       conversationId: ctx.conversationId,

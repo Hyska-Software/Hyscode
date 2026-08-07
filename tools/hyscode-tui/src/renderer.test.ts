@@ -66,6 +66,30 @@ function state(overrides: Partial<UiState> = {}): UiState {
 }
 
 describe('TUI renderer', () => {
+  it('renders the mandatory external access warning and session-scoped actions', () => {
+    const rendered = new TerminalRenderer().render(state({
+      interaction: {
+        kind: 'approval',
+        requestId: 'external-1',
+        toolName: 'write_file',
+        description: 'edit external file',
+        risk: 'destructive',
+        input: { path: 'C:/external/file.txt' },
+        externalAccess: {
+          operation: 'write',
+          paths: ['c:/external/file.txt'],
+          directories: ['c:/external'],
+          directoryScopes: [],
+        },
+      },
+    }));
+
+    expect(rendered).toContain('External access required');
+    expect(rendered).toContain('This action will edit external data');
+    expect(rendered).toContain('D allow directory for this session');
+    expect(rendered).not.toContain('A approve all');
+  });
+
   it('renders the contextual shell with an adaptive sidebar and persistent composer', () => {
     const rendered = new TerminalRenderer().render(state());
 
