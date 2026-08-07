@@ -1,0 +1,24 @@
+{
+  "name": "@hyscode/tui-client",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "vortex": "dist/vortex"
+  },
+  "scripts": {
+    "build": "node ../../scripts/build-vortex.mjs --prepare-native && bun build --compile src/main.ts --outfile dist/vortex",
+    "build:release": "node ../../scripts/build-vortex.mjs --prepare-native && bun build --compile --minify src/main.ts --outfile dist/vortex",
+    "lint": "eslint src/",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@hyscode/tui-runtime": "*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.8.0",
+    "vitest": "^3.2.6"
+  }
+}

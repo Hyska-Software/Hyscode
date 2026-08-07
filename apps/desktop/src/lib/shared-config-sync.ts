@@ -1,7 +1,8 @@
 import { tauriInvokeRaw } from './tauri-invoke';
-import { useSettingsStore, type ModelThinkingConfig } from '@/stores/settings-store';
+import { useSettingsStore, type ModelThinkingConfig, type ThemeId, type UpdateChannel } from '@/stores/settings-store';
 
 type SharedSettingsPayload = {
+  themeId: ThemeId;
   activeProviderId: string | null;
   activeModelId: string | null;
   agentType: string;
@@ -27,12 +28,23 @@ type SharedSettingsPayload = {
   subAgentMaxIterations: number;
   subAgentAutoApprove: boolean;
   subAgentMaxConcurrent: number;
+  updateChannel: UpdateChannel;
+  checkForUpdatesOnStartup: boolean;
+  autoDownload: boolean;
 };
 
 type SharedSettingsImport = {
+  themeId?: ThemeId;
   activeProviderId: string | null;
   activeModelId: string | null;
   thinkingSettings: Record<string, ModelThinkingConfig>;
+  updateChannel?: UpdateChannel;
+  checkForUpdatesOnStartup?: boolean;
+  autoDownload?: boolean;
+};
+
+type PreservedTuiSettings = {
+  sidebarVisible?: boolean;
 };
 
 let writeQueue: Promise<void> = Promise.resolve();
@@ -62,6 +74,10 @@ function isThinkingLevel(value: unknown): value is NonNullable<ModelThinkingConf
     || value === 'default';
 }
 
+function isUpdateChannel(value: unknown): value is UpdateChannel {
+  return value === 'stable' || value === 'pre-release';
+}
+
 function parseThinkingConfig(value: unknown): ModelThinkingConfig | null {
   if (!isRecord(value) || typeof value.enabled !== 'boolean') return null;
   const config: ModelThinkingConfig = { enabled: value.enabled };
@@ -89,15 +105,20 @@ function parseSharedSettings(value: unknown): SharedSettingsImport | null {
     }
   }
   return {
+    ...(typeof value.themeId === 'string' && value.themeId.trim() ? { themeId: value.themeId as ThemeId } : {}),
     activeProviderId: value.activeProviderId,
     activeModelId: value.activeModelId,
     thinkingSettings,
+    ...(isUpdateChannel(value.updateChannel) ? { updateChannel: value.updateChannel } : {}),
+    ...(typeof value.checkForUpdatesOnStartup === 'boolean' ? { checkForUpdatesOnStartup: value.checkForUpdatesOnStartup } : {}),
+    ...(typeof value.autoDownload === 'boolean' ? { autoDownload: value.autoDownload } : {}),
   };
 }
 
 function buildPayload(): SharedSettingsPayload {
   const settings = useSettingsStore.getState();
   return {
+    themeId: settings.themeId,
     activeProviderId: settings.activeProviderId,
     activeModelId: settings.activeModelId,
     agentType: settings.agentType,
@@ -123,15 +144,33 @@ function buildPayload(): SharedSettingsPayload {
     subAgentMaxIterations: settings.subAgentMaxIterations,
     subAgentAutoApprove: settings.subAgentAutoApprove,
     subAgentMaxConcurrent: settings.subAgentMaxConcurrent,
+    updateChannel: settings.updateChannel,
+    checkForUpdatesOnStartup: settings.checkForUpdatesOnStartup,
+    autoDownload: settings.autoDownload,
   };
 }
 
 async function writeSharedSettings(): Promise<void> {
   const homePath = await tauriInvokeRaw<string>('get_home_dir', {});
+  const preservedTuiSettings = await readPreservedTuiSettings(homePath);
   await tauriInvokeRaw('write_file', {
     path: sharedSettingsPath(homePath),
-    content: `${JSON.stringify(buildPayload(), null, 2)}\n`,
+    content: `${JSON.stringify({ ...buildPayload(), ...preservedTuiSettings }, null, 2)}\n`,
   });
+}
+
+async function readPreservedTuiSettings(homePath: string): Promise<PreservedTuiSettings> {
+  try {
+    const content = await tauriInvokeRaw<string>('read_file', {
+      path: sharedSettingsPath(homePath),
+    });
+    const parsed = JSON.parse(content) as unknown;
+    return isRecord(parsed) && typeof parsed.sidebarVisible === 'boolean'
+      ? { sidebarVisible: parsed.sidebarVisible }
+      : {};
+  } catch {
+    return {};
+  }
 }
 
 export async function hydrateSharedSettings(): Promise<boolean> {
@@ -144,12 +183,16 @@ export async function hydrateSharedSettings(): Promise<boolean> {
     if (!imported) return false;
     const current = useSettingsStore.getState();
     useSettingsStore.setState({
+      ...(imported.themeId ? { themeId: imported.themeId } : {}),
       activeProviderId: imported.activeProviderId,
       activeModelId: imported.activeModelId,
       thinkingSettings: {
         ...current.thinkingSettings,
         ...imported.thinkingSettings,
       },
+      ...(imported.updateChannel ? { updateChannel: imported.updateChannel } : {}),
+      ...(imported.checkForUpdatesOnStartup !== undefined ? { checkForUpdatesOnStartup: imported.checkForUpdatesOnStartup } : {}),
+      ...(imported.autoDownload !== undefined ? { autoDownload: imported.autoDownload } : {}),
     });
     return true;
   } catch {

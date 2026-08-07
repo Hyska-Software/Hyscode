@@ -5,14 +5,18 @@ export type {
   ToolHandler,
   ToolExecutionContext,
   TerminalRuntimeAdapter,
+  TerminalAccess,
   TerminalAcquireRequest,
   TerminalBinding,
   TerminalSnapshot,
   TerminalProgress,
   TerminalFrameLanguage,
+  TerminalRole,
   ToolCallRecord,
   ApprovalMode,
   ApprovalConfig,
+  ApprovalDecision,
+  ToolApprovalRequest,
   PendingToolCall,
   ToolRiskLevel,
   ContextPriority,
@@ -87,7 +91,7 @@ export { ReadLoopMiddleware } from './read-loop';
 
 export { ContextManager } from './context-manager';
 export { RequestPreparation, estimateActualCost } from './request-preparation';
-export type { PreparedChatRequest, RequestCostBreakdown } from './request-preparation';
+export type { PreparedChatRequest, PromptCachePlan, RequestCostBreakdown } from './request-preparation';
 export { ToolRouter } from './tool-router';
 export { SkillLoader } from './skill-loader';
 export type { SkillLoaderConfig } from './skill-loader';
@@ -118,9 +122,19 @@ export { verificationMiddleware, LoopDetectionMiddleware, compactToolOutput } fr
 export { getAgentDefinition, getAllAgentDefinitions, getAgentTypes } from './agents';
 
 // ─── Tools ──────────────────────────────────────────────────────────────────
-export { getAllBuiltinTools } from './tools';
-export { resolveWorkspacePath } from './path-policy';
+export { getAllBuiltinTools, invalidateTerminalInput } from './tools';
+export { resolveAuthorizedPath, resolveWorkspacePath } from './path-policy';
 export type { WorkspacePathOptions } from './path-policy';
+export { ExternalPathAccessRegistry } from './external-path-access';
+export type {
+  ExternalPathAccess,
+  ExternalPathAccessDefinition,
+  ExternalPathAccessRequest,
+  ExternalPathField,
+  ExternalPathFieldKind,
+  ExternalPathGrant,
+  ExternalPathOperation,
+} from './external-path-access';
 
 // ─── Terminal ───────────────────────────────────────────────────────────────
 export { TerminalCommandRunner, stopCommand } from './terminal-command-runner';

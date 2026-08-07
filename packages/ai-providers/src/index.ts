@@ -22,6 +22,10 @@ export type {
   ThinkingConfig,
   ProviderCapabilities,
   PromptCacheMode,
+  PromptCacheObservationStatus,
+  PromptCacheObservation,
+  PromptCacheAggregate,
+  PromptCacheOptions,
   ReasoningReplayMode,
   ProviderErrorKind,
   ProviderErrorPhase,
@@ -34,6 +38,12 @@ export {
   classifyProviderErrorKind,
   providerErrorUserMessage,
 } from './types';
+export {
+  createPromptCacheObservation,
+  aggregatePromptCacheObservations,
+  applyPromptCacheAggregate,
+  MIN_CACHEABLE_PREFIX_TOKENS,
+} from './prompt-cache';
 
 // ─── Providers ──────────────────────────────────────────────────────────────
 export { AnthropicProvider } from './providers/anthropic';

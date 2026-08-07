@@ -10,6 +10,7 @@ import {
   type ToolCategory,
   type ApprovalConfig,
   type PendingToolCall,
+  type ApprovalDecision,
   type HarnessEventHandler,
   type ToolRiskLevel,
   SAFE_TOOLS,
@@ -17,14 +18,20 @@ import {
   CATEGORY_RISK,
   GIT_WORKTREE_SWEEPING_TOOLS,
 } from './types';
+import { ExternalPathAccessRegistry } from './external-path-access';
 
 export class ToolRouter {
   private handlers = new Map<string, ToolHandler>();
   private approvalConfig: ApprovalConfig = { mode: 'manual' };
   private eventHandler: HarnessEventHandler | null = null;
+  private readonly externalPathAccess: ExternalPathAccessRegistry;
   private approvalCallback:
-    | ((pending: PendingToolCall, signal: AbortSignal) => Promise<boolean>)
+    | ((pending: PendingToolCall, signal: AbortSignal) => Promise<ApprovalDecision>)
     | null = null;
+
+  constructor(externalPathAccess?: ExternalPathAccessRegistry) {
+    this.externalPathAccess = externalPathAccess ?? new ExternalPathAccessRegistry();
+  }
 
   // ─── Registration ───────────────────────────────────────────────────
 
@@ -59,7 +66,7 @@ export class ToolRouter {
 
   /** Set callback for requesting user approval */
   setApprovalCallback(
-    callback: (pending: PendingToolCall, signal: AbortSignal) => Promise<boolean>,
+    callback: (pending: PendingToolCall, signal: AbortSignal) => Promise<ApprovalDecision>,
   ): void {
     this.approvalCallback = callback;
   }
@@ -182,17 +189,56 @@ export class ToolRouter {
       return record;
     }
 
-    // Check approval
-    const needsApproval = this.needsApproval(toolName, handler);
+    let externalAccessRequest = null;
+    try {
+      externalAccessRequest = handler.externalPathAccess
+        ? this.externalPathAccess.inspect(handler.externalPathAccess, input, context.workspacePath)
+        : null;
+    } catch (err) {
+      const record: ToolCallRecord = {
+        id: toolCallId,
+        toolName,
+        input,
+        output: {
+          success: false,
+          output: '',
+          error: err instanceof Error ? err.message : String(err),
+        },
+        durationMs: Date.now() - startTime,
+        approved: false,
+        timestamp: new Date().toISOString(),
+      };
+      this.emitResult(record);
+      return record;
+    }
 
-    if (needsApproval) {
-      const approved = await this.requestApproval(toolCallId, toolName, input, context.signal);
+    const externalApprovalRequired =
+      externalAccessRequest !== null && !this.externalPathAccess.isCovered(externalAccessRequest);
+
+    // External path approval is mandatory and independent of the configured
+    // tool approval mode. A covered session grant still needs to be attached
+    // to the execution context so the handler cannot escape its authorization.
+    const needsApproval = this.needsApproval(toolName, handler);
+    const approvalRequired = needsApproval || externalApprovalRequired;
+    let approvalDecision: ApprovalDecision = true;
+
+    if (approvalRequired) {
+      approvalDecision = await this.requestApproval(
+        toolCallId,
+        toolName,
+        input,
+        context.signal,
+        externalApprovalRequired ? externalAccessRequest ?? undefined : undefined,
+      );
+      const approved = normalizeApprovalDecision(approvalDecision).approved;
 
       if (!approved) {
         const result: ToolResult = {
           success: false,
           output: '',
-          error: 'Tool call was rejected by the user.',
+          error: externalApprovalRequired
+            ? 'External path access was denied or requires explicit user approval.'
+            : 'Tool call was rejected by the user.',
         };
         const record: ToolCallRecord = {
           id: toolCallId,
@@ -208,6 +254,21 @@ export class ToolRouter {
       }
     }
 
+    if (externalAccessRequest && externalApprovalRequired) {
+      const decision = normalizeApprovalDecision(approvalDecision);
+      this.externalPathAccess.grant(externalAccessRequest, decision.externalGrant ?? 'once');
+    }
+
+    const executionContext = externalAccessRequest
+      ? {
+          ...context,
+          externalPathAccess: this.externalPathAccess.createAccess(
+            externalAccessRequest,
+            context.workspacePath,
+          ),
+        }
+      : context;
+
     if (this.approvalConfig.mode === 'notify') {
       this.eventHandler?.({
         type: 'tool_call_notification',
@@ -222,7 +283,7 @@ export class ToolRouter {
     try {
       result = context.signal.aborted
         ? { success: false, output: '', error: 'Tool call cancelled.' }
-        : await executeWithAbort(handler.execute(input, context), context.signal);
+        : await executeWithAbort(handler.execute(input, executionContext), context.signal);
     } catch (err) {
       result = {
         success: false,
@@ -273,6 +334,11 @@ export class ToolRouter {
   /** Clear all session-trusted tools (e.g. on new session) */
   clearSessionTrust(): void {
     this.approvalConfig.sessionTrustedTools?.clear();
+  }
+
+  /** Clear all external directory grants when a new session becomes active. */
+  clearExternalPathGrants(): void {
+    this.externalPathAccess.clear();
   }
 
   /** Get set of tools trusted in this session */
@@ -335,10 +401,12 @@ export class ToolRouter {
     toolName: string,
     input: Record<string, unknown>,
     signal: AbortSignal,
-  ): Promise<boolean> {
+    externalAccess?: PendingToolCall['externalAccess'],
+  ): Promise<ApprovalDecision> {
     if (!this.approvalCallback) {
-      // No callback set — auto-approve
-      return true;
+      // Existing normal approvals remain compatible with headless callers,
+      // but mandatory external access fails closed without a user callback.
+      return externalAccess ? { approved: false } : true;
     }
 
     const handler = this.handlers.get(toolName);
@@ -346,15 +414,15 @@ export class ToolRouter {
       ? this.getToolRiskLevel(toolName, handler)
       : ('moderate' as ToolRiskLevel);
 
-    return new Promise<boolean>((resolve) => {
+    return new Promise<ApprovalDecision>((resolve) => {
       let resolved = false;
-      const settle = (approved: boolean) => {
+      const settle = (decision: ApprovalDecision) => {
         if (!resolved) {
           resolved = true;
-          resolve(approved);
+          resolve(decision);
         }
       };
-      const onAbort = () => settle(false);
+      const onAbort = () => settle({ approved: false });
       if (signal.aborted) return settle(false);
       signal.addEventListener('abort', onAbort, { once: true });
 
@@ -364,6 +432,7 @@ export class ToolRouter {
         input,
         description: this.describeToolCall(toolName, input),
         riskLevel,
+        ...(externalAccess ? { externalAccess } : {}),
         resolve: settle,
       };
 
@@ -373,8 +442,10 @@ export class ToolRouter {
         pending,
       });
 
-      this.approvalCallback!(pending, signal)
+      void Promise.resolve()
+        .then(() => this.approvalCallback!(pending, signal))
         .then(settle)
+        .catch(() => settle({ approved: false }))
         .finally(() => {
           signal.removeEventListener('abort', onAbort);
         });
@@ -442,6 +513,14 @@ export class ToolRouter {
         return `${toolName}(${Object.keys(input).join(', ')})`;
     }
   }
+}
+
+function normalizeApprovalDecision(decision: ApprovalDecision): {
+  approved: boolean;
+  externalGrant?: 'once' | 'session-directory';
+} {
+  if (typeof decision === 'boolean') return { approved: decision };
+  return decision;
 }
 
 function validateInput(

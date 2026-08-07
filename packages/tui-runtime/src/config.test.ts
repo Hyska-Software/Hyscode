@@ -26,6 +26,8 @@ describe('shared desktop configuration compatibility', () => {
     await writeFile(settingsPath, JSON.stringify({
       activeProviderId: 'openai',
       activeModelId: 'gpt-5',
+      themeId: 'dracula',
+      sidebarVisible: false,
       agentType: 'build',
       approvalMode: 'custom',
       customApprovalRules: { categoryRules: { filesystem: true }, toolRules: { shell: false } },
@@ -46,6 +48,8 @@ describe('shared desktop configuration compatibility', () => {
 
     expect(settings.activeProviderId).toBe('openai');
     expect(settings.activeModelId).toBe('gpt-5');
+    expect(settings.themeId).toBe('dracula');
+    expect(settings.sidebarVisible).toBe(false);
     expect(settings.agentType).toBe('build');
     expect(settings.mcpServers[0]).toMatchObject({
       id: 'docs',
@@ -73,6 +77,26 @@ describe('shared desktop configuration compatibility', () => {
     expect(persisted['hyscode:anthropic_api_key']).toBe('new-key');
     await store.delete('openai_api_key');
     expect(await store.get('openai_api_key')).toBeNull();
+  });
+
+  it('persists update channel and startup download preferences with the shared settings contract', async () => {
+    const directory = await temporaryDirectory();
+    const store = new SharedConfigStore(path.join(directory, 'settings.json'));
+    const initial = await store.load();
+
+    expect(initial.updateChannel).toBe('stable');
+    expect(initial.checkForUpdatesOnStartup).toBe(true);
+    expect(initial.autoDownload).toBe(false);
+
+    await store.save({ updateChannel: 'pre-release', checkForUpdatesOnStartup: false, autoDownload: true });
+    const reloaded = new SharedConfigStore(store.path);
+    await reloaded.load();
+
+    expect(reloaded.current).toMatchObject({
+      updateChannel: 'pre-release',
+      checkForUpdatesOnStartup: false,
+      autoDownload: true,
+    });
   });
 
   it('normalizes the model thinking contract used by the provider registry', async () => {

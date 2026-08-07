@@ -6,6 +6,7 @@ use std::sync::{Arc, Mutex};
 use serde::{Deserialize, Serialize};
 use tauri::{Emitter, State, Window};
 
+use super::db::{self, DbState};
 use super::keychain::KeychainState;
 use super::utils::cmd;
 
@@ -26,6 +27,9 @@ pub struct CodexRequest {
     pub cwd: Option<String>,
     pub reasoning_effort: Option<String>,
     pub sandbox_mode: Option<String>,
+    pub session_id: Option<String>,
+    pub session_fingerprint: Option<String>,
+    pub continuation_prompt: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -43,7 +47,9 @@ pub struct CodexChunk {
     pub input_tokens: Option<i64>,
     pub output_tokens: Option<i64>,
     pub cache_read_tokens: Option<i64>,
+    pub cache_write_tokens: Option<i64>,
     pub reasoning_tokens: Option<i64>,
+    pub thread_id: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -62,7 +68,10 @@ pub struct CodexCliStatus {
 
 /// Tracks live Codex sidecar processes so `codex_cancel` can kill them.
 #[derive(Default)]
-pub struct CodexRequestState(pub Arc<Mutex<HashMap<String, Child>>>);
+pub struct CodexRequestState {
+    pub children: Arc<Mutex<HashMap<String, Child>>>,
+    pub threads: Arc<Mutex<HashMap<String, String>>>,
+}
 
 /// Resolve the sidecar binary path relative to the app executable.
 fn sidecar_path() -> std::path::PathBuf {
@@ -245,8 +254,14 @@ fn parse_sidecar_event(line: &str, request_id: &str) -> Option<CodexChunk> {
         input_tokens: event["inputTokens"].as_i64(),
         output_tokens: event["outputTokens"].as_i64(),
         cache_read_tokens: event["cacheReadTokens"].as_i64(),
+        cache_write_tokens: event["cacheWriteTokens"].as_i64(),
         reasoning_tokens: event["reasoningTokens"].as_i64(),
+        thread_id: event["threadId"].as_str().map(String::from),
     })
+}
+
+fn session_key(session_id: Option<&str>, fingerprint: Option<&str>) -> Option<String> {
+    session_id.map(|id| format!("{}:{}", id, fingerprint.unwrap_or("default")))
 }
 
 #[tauri::command]
@@ -254,9 +269,35 @@ pub async fn codex_run(
     window: Window,
     keychain: State<'_, KeychainState>,
     active_requests: State<'_, CodexRequestState>,
+    db_state: State<'_, DbState>,
     request: CodexRequest,
 ) -> Result<(), String> {
     let request_id = request.request_id.clone();
+    let request_session_key = session_key(
+        request.session_id.as_deref(),
+        request.session_fingerprint.as_deref(),
+    );
+    let remembered_thread = request_session_key.as_ref().and_then(|key| {
+        active_requests
+            .threads
+            .lock()
+            .ok()
+            .and_then(|threads| threads.get(key).cloned())
+    });
+    let persisted_thread = if remembered_thread.is_none() {
+        request.session_id.as_deref().and_then(|session_id| {
+            db::load_codex_thread(
+                &db_state,
+                session_id,
+                request.session_fingerprint.as_deref(),
+            )
+            .ok()
+            .flatten()
+        })
+    } else {
+        None
+    };
+    let thread_id = remembered_thread.or(persisted_thread);
 
     // The Codex API key is optional — without it the bundled CLI uses the
     // ChatGPT login cached in ~/.codex/auth.json. The provider's key (sent
@@ -271,7 +312,9 @@ pub async fn codex_run(
 
     let window_clone = window.clone();
     let req_id = request_id.clone();
-    let requests = active_requests.0.clone();
+    let requests = active_requests.children.clone();
+    let threads = active_requests.threads.clone();
+    let session_key_for_task = request_session_key.clone();
 
     tauri::async_runtime::spawn(async move {
         let emit_error = |error: String| {
@@ -290,7 +333,9 @@ pub async fn codex_run(
                     input_tokens: None,
                     output_tokens: None,
                     cache_read_tokens: None,
+                    cache_write_tokens: None,
                     reasoning_tokens: None,
+                    thread_id: None,
                 },
             );
         };
@@ -304,6 +349,8 @@ pub async fn codex_run(
             "cwd": request.cwd,
             "reasoningEffort": request.reasoning_effort,
             "sandboxMode": request.sandbox_mode,
+            "threadId": thread_id,
+            "continuationPrompt": request.continuation_prompt,
         });
 
         let input_json = match serde_json::to_string(&sidecar_input) {
@@ -387,6 +434,13 @@ pub async fn codex_run(
                     let Some(chunk) = parse_sidecar_event(&line, &req_id) else {
                         continue;
                     };
+                    if let (Some(key), Some(thread_id)) =
+                        (session_key_for_task.as_ref(), chunk.thread_id.as_ref())
+                    {
+                        if let Ok(mut stored_threads) = threads.lock() {
+                            stored_threads.insert(key.clone(), thread_id.clone());
+                        }
+                    }
                     let is_done = chunk.done;
 
                     let _ = window_clone.emit("codex:chunk", chunk);
@@ -421,7 +475,7 @@ pub async fn codex_cancel(
     request_id: String,
 ) -> Result<(), String> {
     {
-        let mut map = active_requests.0.lock().map_err(|e| e.to_string())?;
+        let mut map = active_requests.children.lock().map_err(|e| e.to_string())?;
         if let Some(child) = map.get_mut(&request_id) {
             let _ = child.kill();
         }
@@ -442,10 +496,28 @@ pub async fn codex_cancel(
             input_tokens: None,
             output_tokens: None,
             cache_read_tokens: None,
+            cache_write_tokens: None,
             reasoning_tokens: None,
+            thread_id: None,
         },
     );
     Ok(())
+}
+
+/// Persist the native Codex thread id after the sidecar announces it.
+#[tauri::command]
+pub fn codex_store_thread(
+    active_requests: State<'_, CodexRequestState>,
+    db_state: State<'_, DbState>,
+    session_id: String,
+    fingerprint: Option<String>,
+    thread_id: String,
+) -> Result<(), String> {
+    if let Some(key) = session_key(Some(&session_id), fingerprint.as_deref()) {
+        let mut threads = active_requests.threads.lock().map_err(|e| e.to_string())?;
+        threads.insert(key, thread_id.clone());
+    }
+    db::save_codex_thread(&db_state, &session_id, fingerprint.as_deref(), &thread_id)
 }
 
 /// Start the ChatGPT OAuth browser flow via the user-installed Codex CLI
@@ -559,14 +631,23 @@ mod tests {
     #[test]
     fn parses_usage_event_with_tokens() {
         let c = chunk(
-            r#"{"type":"usage","inputTokens":100,"outputTokens":50,"cacheReadTokens":40,"reasoningTokens":10}"#,
+            r#"{"type":"usage","inputTokens":100,"outputTokens":50,"cacheReadTokens":40,"cacheWriteTokens":20,"reasoningTokens":10}"#,
         )
         .expect("parse");
         assert_eq!(c.chunk_type, "usage");
         assert_eq!(c.input_tokens, Some(100));
         assert_eq!(c.output_tokens, Some(50));
         assert_eq!(c.cache_read_tokens, Some(40));
+        assert_eq!(c.cache_write_tokens, Some(20));
         assert_eq!(c.reasoning_tokens, Some(10));
+    }
+
+    #[test]
+    fn parses_thread_started_event() {
+        let c = chunk(r#"{"type":"thread_started","threadId":"thread-1"}"#).expect("parse");
+        assert_eq!(c.chunk_type, "thread_started");
+        assert_eq!(c.thread_id.as_deref(), Some("thread-1"));
+        assert!(!c.done);
     }
 
     #[test]

@@ -79,9 +79,28 @@ export function ApprovalDialog({ approval }: ApprovalDialogProps) {
   const approvalMode = useSettingsStore((s) => s.approvalMode);
   const risk = inferRiskLevel(approval.toolName);
   const riskDisplay = RISK_DISPLAY[risk];
+  const externalAccess = approval.externalAccess;
+  const isExternal = Boolean(externalAccess);
+  const externalOperation = externalAccess?.operation;
+  const externalOperationLabel =
+    externalOperation === 'write'
+      ? 'edit external files or directories'
+      : externalOperation === 'execute'
+        ? 'execute a command with an external working directory'
+        : 'read external files or directories';
 
   const handleApprove = () => {
-    getActiveAgentBridge().resolveApproval(approval.id, true);
+    getActiveAgentBridge().resolveApproval(
+      approval.id,
+      isExternal ? { approved: true, externalGrant: 'once' } : true,
+    );
+  };
+
+  const handleAllowDirectory = () => {
+    getActiveAgentBridge().resolveApproval(approval.id, {
+      approved: true,
+      externalGrant: 'session-directory',
+    });
   };
 
   const handleApproveAll = () => {
@@ -163,6 +182,34 @@ export function ApprovalDialog({ approval }: ApprovalDialogProps) {
           {approval.description}
         </p>
 
+        {externalAccess && (
+          <div className="mb-3 rounded-md border border-amber-500/30 bg-amber-500/5 p-2.5 text-[11px] leading-relaxed">
+            <p className="font-medium text-amber-300">External access required</p>
+            <p className="mt-1 text-foreground/80">
+              The agent wants to {externalOperationLabel}. This permission is mandatory even when
+              Auto-Approve is enabled.
+            </p>
+            {externalOperation === 'write' && (
+              <p className="mt-1 font-medium text-destructive/90">
+                This action will edit external data. Nothing will be changed until you explicitly
+                allow it.
+              </p>
+            )}
+            <div className="mt-2 text-foreground/70">
+              <span className="font-medium">Paths:</span>
+              <ul className="mt-1 list-inside list-disc space-y-0.5 font-mono text-[10px]">
+                {externalAccess.paths.map((path) => (
+                  <li key={path}>{path}</li>
+                ))}
+              </ul>
+            </div>
+            <p className="mt-2 text-muted-foreground">
+              Directory permission lasts only for this session and is limited to{' '}
+              {externalAccess.directories.join(', ')}.
+            </p>
+          </div>
+        )}
+
         {/* Collapsible details */}
         <button
           onClick={() => setDetailOpen(!detailOpen)}
@@ -192,28 +239,41 @@ export function ApprovalDialog({ approval }: ApprovalDialogProps) {
             className="h-7 gap-1.5 rounded-md bg-green-600 px-3.5 text-[11px] font-medium hover:bg-success transition-colors"
           >
             <Check className="h-3 w-3" />
-            Approve
+            {isExternal ? 'Allow once' : 'Approve'}
           </Button>
 
-          <Button
-            size="sm"
-            variant="ghost"
-            onClick={handleTrustTool}
-            className="h-7 gap-1.5 rounded-md px-3 text-[11px] text-emerald-400/80 hover:bg-emerald-500/10 hover:text-emerald-300 transition-colors"
-          >
-            <ShieldCheck className="h-3 w-3" />
-            Trust this tool
-          </Button>
+          {isExternal ? (
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={handleAllowDirectory}
+              className="h-7 gap-1.5 rounded-md px-3 text-[11px] text-amber-300/90 hover:bg-amber-500/10 hover:text-amber-200 transition-colors"
+            >
+              Allow directory for this session
+            </Button>
+          ) : (
+            <>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={handleTrustTool}
+                className="h-7 gap-1.5 rounded-md px-3 text-[11px] text-emerald-400/80 hover:bg-emerald-500/10 hover:text-emerald-300 transition-colors"
+              >
+                <ShieldCheck className="h-3 w-3" />
+                Trust this tool
+              </Button>
 
-          <Button
-            size="sm"
-            variant="ghost"
-            onClick={handleApproveAll}
-            className="h-7 gap-1.5 rounded-md px-3 text-[11px] text-amber-400/80 hover:bg-amber-500/10 hover:text-amber-300 transition-colors"
-          >
-            <CheckCheck className="h-3 w-3" />
-            Approve all
-          </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={handleApproveAll}
+                className="h-7 gap-1.5 rounded-md px-3 text-[11px] text-amber-400/80 hover:bg-amber-500/10 hover:text-amber-300 transition-colors"
+              >
+                <CheckCheck className="h-3 w-3" />
+                Approve all
+              </Button>
+            </>
+          )}
 
           <Button
             size="sm"

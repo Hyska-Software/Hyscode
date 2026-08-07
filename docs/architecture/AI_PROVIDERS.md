@@ -62,6 +62,11 @@ interface ChatParams {
   systemPrompt?: string;
   signal?: AbortSignal;
   thinking?: ThinkingConfig;
+  cachePrompt?: boolean;
+  promptCacheKey?: string;
+  promptCacheOptions?: PromptCacheOptions;
+  sessionId?: string;
+  sessionFingerprint?: string;
 }
 ```
 
@@ -119,6 +124,17 @@ interface TokenUsage {
   peakEffectiveInputTokens?: number;
   cacheReadTokens?: number;
   cacheWriteTokens?: number;
+  cacheMeasuredReadTokens?: number;
+  cacheEligibleTokens?: number;
+  cacheMeasuredEligibleTokens?: number;
+  cacheHitRequests?: number;
+  cacheObservedRequests?: number;
+  cacheTotalRequests?: number;
+  cacheUnknownRequests?: number;
+  cacheHitRate?: number;
+  cacheInputReadRatio?: number;
+  cacheRequestHitRate?: number;
+  cacheUnknownRate?: number;
 }
 ```
 
@@ -126,6 +142,44 @@ Turn-level `inputTokens`, `outputTokens`, and cache fields are cumulative across
 requests. Context-window indicators must use `peakInputTokens` (with
 `lastInputTokens` as fallback), because cumulative turn input can exceed a model's
 window without any individual request overflowing it.
+
+### Prompt-cache contract
+
+Prompt caching is measured against the stable prefix, not against every input token.
+The harness canonicalizes tool order and object-key order, includes the serializer
+version in the prefix hash, and derives a project-scoped key:
+
+```text
+stablePrefixHash = hash(v2 + systemPrompt + canonicalTools)
+promptCacheKey   = hyscode:v2:provider:model:projectScopeHash:stablePrefixHash
+```
+
+`cacheEligibleTokens` is the estimated system-prompt plus tool-definition prefix.
+Requests below 1,024 eligible tokens are marked `ineligible`; providers that do not
+support prompt caching are marked `unsupported`. A provider response without native
+cache fields is `not-reported`, never an inferred miss.
+
+The primary KPI is the weighted hit rate over provider-observed eligible prefixes:
+
+```text
+cacheHitRate = sum(min(cacheReadTokens, eligiblePrefixTokens)) /
+               sum(eligiblePrefixTokens with native cache telemetry)
+```
+
+`cacheRequestHitRate` is the request-level companion metric. `cacheUnknownRate`
+shows requests whose state could not be measured; it is intentionally excluded from
+the hit denominator. The 96–99% target therefore means **96–99% of measured eligible
+prefix tokens**, not 96–99% of all agent input or all providers combined.
+
+`cacheReadTokens` remains the provider's raw usage value for cost accounting, while
+`cacheMeasuredReadTokens` is the bounded value used by the cache KPI and persistence
+layer. This distinction prevents provider-reported cached history from making the
+stable-prefix rate exceed 100%.
+
+The desktop persists the counters in `turn_records` and `traces`, derives rates on
+read, and displays hit, eligible, and unknown values in the agent usage popover.
+Historical rows with no cache telemetry remain unknown/ineligible rather than being
+rewritten as misses.
 
 ### Frontend Consumption
 
@@ -176,6 +230,11 @@ class AnthropicProvider implements AIProvider {
   // Special: caching (cache_control), extended thinking, PDF/image vision
 }
 ```
+
+Anthropic uses explicit `cache_control: { type: 'ephemeral' }` markers on the
+system prompt and final tool definition. Its `message_start` usage supplies cache
+read/write counts and `message_delta` supplies output counts; the adapter emits one
+consolidated usage chunk per request.
 
 ### OpenAI (GPT)
 
@@ -287,6 +346,8 @@ class CodexProvider implements AIProvider {
   //          plan → workspace-write, build/debug → danger-full-access
   //          (approval_policy stays 'never'; the sidecar has no UI to answer
   //          interactive prompts, so HysCode approvals are the guardrail)
+  // Prompt cache: native Codex thread reuse; the HysCode conversation id and
+  // stable-prefix fingerprint resume the same SDK thread across turns.
 }
 ```
 
@@ -296,6 +357,13 @@ Flow: `CodexProvider.chat()` → `createCodexInvoke()` (desktop transport, liste
 (resolved from PATH / `~/.codex/bin` by the sidecar, passed as
 `codexPathOverride` — the SDK's own `createRequire` resolution does not work
 inside Bun-compiled binaries).
+
+The SDK's `resumeThread(threadId)` is used for subsequent turns. The first turn
+sends the complete HysCode context; resumed turns send only the new user request,
+so the native Codex thread does not receive duplicated history. The thread id and
+prefix fingerprint are persisted with the conversation. Codex usage maps both
+`cached_input_tokens` and `cache_write_input_tokens` into the unified usage
+contract.
 
 The sidecar is a sibling of `claude-agent-sidecar`; the Rust host reuses the
 same spawn/read pattern (`commands/codex.rs`) but with **real cancellation**

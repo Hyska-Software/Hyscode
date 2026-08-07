@@ -178,8 +178,17 @@ function ContextPieButton({
 
   const cacheRead = usage?.cacheReadTokens ?? 0;
   const cacheWrite = usage?.cacheWriteTokens ?? 0;
+  const cacheHitRate = usage?.cacheHitRate;
+  const cacheUnknownRate = usage?.cacheUnknownRate;
+  const cacheEligible = usage?.cacheEligibleTokens ?? 0;
   const effectiveInput = metrics.effectiveInputTokens;
-  const hasCache = cacheRead > 0 || cacheWrite > 0;
+  const hasCache =
+    cacheRead > 0 ||
+    cacheWrite > 0 ||
+    cacheEligible > 0 ||
+    cacheHitRate !== undefined ||
+    cacheUnknownRate !== undefined;
+  const formatRate = (rate: number): string => `${(rate * 100).toFixed(rate >= 0.995 ? 1 : 0)}%`;
 
   return (
     <div ref={ref} className="relative">
@@ -247,6 +256,15 @@ function ContextPieButton({
                         {cacheWrite > 0 && (
                           <StatRow label="Cache write" value={cacheWrite.toLocaleString()} />
                         )}
+                        {cacheHitRate !== undefined && (
+                          <StatRow label="Cache hit" value={formatRate(cacheHitRate)} primary />
+                        )}
+                        {cacheEligible > 0 && (
+                          <StatRow label="Eligible" value={cacheEligible.toLocaleString()} />
+                        )}
+                        {cacheUnknownRate !== undefined && cacheUnknownRate > 0 && (
+                          <StatRow label="Unknown" value={formatRate(cacheUnknownRate)} />
+                        )}
                         <StatRow label="Effect. input" value={effectiveInput.toLocaleString()} />
                       </>
                     )}
@@ -279,6 +297,18 @@ function ContextPieButton({
                     )}
                     {(sessionUsage.cacheWriteTokens ?? 0) > 0 && (
                       <StatRow label="Cache write" value={(sessionUsage.cacheWriteTokens ?? 0).toLocaleString()} />
+                    )}
+                    {sessionUsage.cacheHitRate !== undefined && (
+                      <StatRow label="Cache hit" value={formatRate(sessionUsage.cacheHitRate)} primary />
+                    )}
+                    {(sessionUsage.cacheEligibleTokens ?? 0) > 0 && (
+                      <StatRow
+                        label="Eligible"
+                        value={(sessionUsage.cacheEligibleTokens ?? 0).toLocaleString()}
+                      />
+                    )}
+                    {sessionUsage.cacheUnknownRate !== undefined && sessionUsage.cacheUnknownRate > 0 && (
+                      <StatRow label="Unknown" value={formatRate(sessionUsage.cacheUnknownRate)} />
                     )}
                   </>
                 ) : (

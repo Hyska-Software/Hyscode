@@ -57,25 +57,43 @@ from every owner, keeps per-file details and open-model state, decodes file URIs
 records are normalized, filtered case-insensitively on Windows, deduplicated,
 and sorted before reaching the agent.
 
-## Standalone Rust TUI Client
+## Standalone TypeScript TUI Client
 
-The repository also ships a standalone Ratatui client in `tools/hyscode-tui`.
-The Rust process owns terminal rendering, keyboard input, transcript projection,
-session commands, cancellation, terminal resize, and interactive
-approval/question prompts. It launches `packages/tui-runtime` as a versioned
-NDJSON bridge so the desktop and CLI use the same
+The repository ships a standalone TypeScript client in `tools/hyscode-tui`.
+The client owns terminal rendering, keyboard input, structured transcript
+projection, session/project/tab commands, context attachments, persistent
+terminal interaction, cancellation, resize, recovery, and approval/question
+prompts.
+The interactive shell uses a fullscreen, keyboard-first layout: a contextual
+header and adaptive session sidebar frame the transcript, while the composer
+and action panels stay anchored at the bottom. Typing `/` opens a filtered
+command palette in place; `Tab` completes the selected command and `Enter`
+executes it. `Ctrl-K` opens the same palette without discarding a normal draft.
+The fullscreen path instantiates `TuiBridge` in-process instead of launching a second bridge
+process. This keeps the CLI on the same
 `@hyscode/agent-harness`, `@hyscode/ai-providers`, `@hyscode/mcp-client`, built-in
 skills, rules, agent modes, sub-agent flow, SDD services, and provider streaming
-protocol.
+protocol as HysCode Desktop. Additive protocol capability version 3 exposes
+structured tool cards, terminal progress, file-review state, gathered context,
+SDD phases/tasks, scoped child-agent events, usage telemetry, and connection
+recovery while retaining protocol version 1 for older NDJSON clients.
 
-The production bridge keeps the desktop host contract and forwards terminal
-operations to the Rust `portable-pty` manager. That manager owns native PTY
-creation, input, resize, snapshots, replay buffers, interrupts, exit events,
-and shutdown. The TypeScript layer remains the source of truth for agent
-behavior and projects the Rust-host events into the same terminal runtime used
-by the harness. Filesystem, Git, Docker, web, keychain, memory, SDD, and
-diagnostic commands are exposed through the host adapter; no production tool
-uses fake data or an empty exporter.
+When a workspace is ready, the empty transcript becomes a welcome surface with
+the CLI wordmark, workspace/runtime details, keyboard-first tips, and recent
+sessions from the same TUI data store. `tools/hyscode-tui/src/logo.ts` provides
+the half-block rasterization of `apps/desktop/public/hyscode-logo.svg` and a
+compact fallback for narrow terminals. The logo glyphs use the active theme
+accent at render time, so `/theme` repaints the mark together with the rest of
+the shell.
+
+`@hyscode/tui-runtime` owns the TypeScript host adapter and creates native PTYs
+through `node-pty`. PTY output is sequenced and bounded to the Harness capture limit, supports
+snapshot/replay from a sequence, independent subscribers, resize, interrupt, kill, exit events,
+and shutdown. Agent and manual terminals have separate roles and ownership; agent reuse requires
+the same owner, conversation, and normalized `cwd`. The TUI receives `terminal_updated` projections
+and never owns a PTY. The same host also exposes filesystem, Git, Docker, web, keychain, memory,
+SDD, and diagnostic commands to the harness. There is no Rust UI, Rust agent runtime, or production
+host round trip in the TUI path.
 
 Desktop settings are mirrored from the existing Zustand/local-storage store to
 the platform shared settings file (`%LOCALAPPDATA%/hyscode/settings.json` on
@@ -85,50 +103,170 @@ and traces use an isolated JSON data store so a terminal session cannot mutate
 the desktop SQLite database unexpectedly. The bridge protocol is explicit about
 streaming events, interaction requests, cancellation, host requests, and
 structured errors, leaving room for a future shared SQLite adapter without
-changing the Rust UI.
+changing the TUI presentation layer.
+
+Color themes use the shared `@hyscode/theme` catalog. The seven built-in themes
+are available in the desktop and TUI, and `/theme` opens the same keyboard-first
+selector pattern as the other runtime commands. The runtime returns the active
+theme and catalog in `runtime_ready`, accepts `themeId` through `set_config`,
+repaints the terminal with the selected palette, and persists the choice in the
+shared settings file. Enabled extension themes are read from the same installed
+extension manifests and JSON theme assets used by the desktop
+(`~/.hyscode/extensions`, filtered by `~/.hyscode/extension-state.json`), so an
+extension theme can be selected from either client.
+
+The additive `recentSessions` field in `runtime_ready` carries a bounded list
+for the startup surface; the full `/sessions` command remains the source for
+the interactive session browser.
+
+The same payload carries a `GitSummary` snapshot for the top chat bar. It shows
+the active branch and aggregate `+insertions - deletions` for uncommitted
+tracked changes; the TUI refreshes it periodically through `git_summary` without
+running Git during each render.
+
+The TUI-only `sidebarVisible` preference is persisted in the same settings file
+and can be changed with `/sidebar`, `/sidebar on`, `/sidebar off`, or
+`/sidebar toggle`. Desktop synchronization preserves this field without exposing
+it as a desktop layout setting.
+
+The shared settings file also contains `updateChannel` (`stable` or
+`pre-release`), `checkForUpdatesOnStartup`, and `autoDownload`. Both the desktop
+and VORTEX CLI preserve these fields. The TUI exposes them through `/update`:
+`/update check`, `/update channel stable`, `/update startup off`, and
+`/update auto-download on`.
+
+The runtime exports the reusable NDJSON bridge loop for external protocol clients and tests. The
+packaged launcher preserves the fullscreen experience by default, and `vortex --protocol ndjson`
+selects the official automation surface. It accepts `initialize`, `send_message`, terminal events,
+approval resolutions, cancellation, and shutdown over stdin/stdout. CLI flags such as `--workspace`,
+`--provider`, `--model`, `--mode`, and `--config` provide defaults for the protocol's `initialize`
+request; explicit request fields take precedence.
 
 ### Build and launch
 
-From the repository root on Windows:
+From the repository root on Windows, Linux, or macOS:
 
-```powershell
-npm run build:tui
-tools/hyscode-tui/dist/hyscode-tui.exe .
+```shell
+npm run build:vortex
+npm run install:vortex
 ```
 
-`build:tui` creates `hyscode-tui.exe` and `hyscode-tui-bridge.exe` in the same
-directory. The packaged launcher therefore does not require Bun at runtime.
-For source development, `cargo run --manifest-path tools/hyscode-tui/Cargo.toml
--- .` discovers `packages/tui-runtime/src/main.ts` through Bun. Use
-`HYSCODE_REPO_ROOT` when launching the executable from another directory.
+`build:vortex` builds for the current operating system and architecture. The
+production bundle is written to `tools/hyscode-tui/dist/vortex-production` and
+contains the standalone `vortex` launcher (`vortex.exe` on Windows), the
+matching `codex-sidecar`, and the native `node-pty` assets required for
+persistent terminals. Build the bundle on the target OS/architecture so these
+native assets match the machine where VORTEX will run.
 
-The launcher accepts `--provider`, `--model`, `--mode`, `--config`, and
-`--workspace`. Inside the TUI, the supported commands are:
+The packaged launcher does not require Bun or Node.js at runtime. `install:vortex`
+copies the complete bundle to `%LOCALAPPDATA%\\Vortex\\bin` on Windows, or to
+`$XDG_BIN_HOME` / `~/.local/bin` on Linux and macOS. It updates the user PATH;
+open a new terminal (or source the reported shell configuration file), then
+run `vortex` from any directory. When no workspace argument is supplied, the
+current directory is opened. An explicit workspace can still be passed with
+`vortex /path/to/workspace`.
 
-`/help`, `/mode`, `/model`, `/projects`, `/project`, `/new`, `/sessions`,
-`/load`, `/diagnostics`, `/retry`, `/cancel`, `/quit`.
+The installer updates `.zshrc` for zsh, `.bash_profile`/`.bashrc` for bash,
+`config.fish` for fish, and `.profile` for other POSIX shells. Set
+`VORTEX_BIN_DIR` when a different user-local installation directory is
+required. `--skip-sidecar-build` reuses an existing sidecar, and
+`--output <directory>` writes the bundle somewhere else.
 
-`Ctrl-C` cancels an active turn and quits when the input is empty; `Esc` cancels
-or clears input. Approval prompts support `y` (allow), `n` (deny), and `t`
-(allow and trust the tool). Question prompts accept text followed by Enter.
+For source development, run
+`npm run -w @hyscode/tui-client build` or execute the TypeScript entrypoint with
+Bun. A repository-side executable can use `HYSCODE_REPO_ROOT` as a fallback
+when its sidecar is not next to the executable; production installations do
+not need that variable because the sidecar is bundled beside `vortex`.
+
+The launcher accepts `--provider`, `--model`, `--mode`, `--config`, `--workspace`, and
+`--protocol ndjson`. Inside the TUI, the supported commands are:
+
+`/help`, `/mode`, `/thinking`, `/theme`, `/sidebar`, `/approval`, `/model`, `/models`, `/projects`,
+`/project`, `/new`, `/sessions`, `/load`, `/tab`, `/rename`, `/export`,
+`/attach`, `/context`, `/rules`, `/skills`, `/memory`, `/terminal`, `/diffs`,
+`/sdd`, `/subagents`, `/usage`, `/diagnostics`, `/retry`, `/continue`,
+`/update`, `/cancel`, `/clear`, and `/quit` (with aliases such as `/resume`, `/diag`,
+`/q`, and `/exit`). The palette groups commands by session, context,
+workspace, model, and runtime scope and also exposes command usage inline.
+
+OpenCode-style composer shortcuts are supported for the terminal workflow:
+`@path message` attaches a file/directory and sends the remaining message,
+`!command` writes to a persistent PTY, `/attach image:path` sends a supported
+image on the next model request, `Shift+Enter` inserts a multiline break, and
+bracketed paste preserves newlines. `/diffs` shows bounded textual diffs and
+accept/reject actions for file changes emitted by the shared harness. `/terminal` exposes
+`list`, `open`, `focus`, `read`, `interrupt`, and `kill`; agent terminals appear automatically,
+and a terminal waiting for non-sensitive input switches the composer into guarded terminal-input
+mode. Resize events are forwarded to the active PTY. Chat, review, and plan policies continue to
+deny terminal tools; build and debug keep them enabled and report tool errors through the normal
+TUI activity and result surfaces.
+
+`Ctrl-C` cancels an active turn and quits when the input is empty; `Shift-Tab`
+cycles agent modes; `Ctrl-T` cycles supported thinking levels; `Tab` changes
+focus outside the command palette; `Esc` closes a palette or clears the draft;
+`F1` opens help. Approval prompts support `y` (allow), `n` (deny), `t`
+(allow and trust the tool), and `a` (approve and switch to session yolo mode).
+External path prompts are mandatory in every mode and instead support `y`
+(allow once), `d` (allow the requested directory for this session), and `n`
+(deny). The NDJSON resolution carries the same decision as `grant: "once"` or
+`grant: "session-directory"`; an external approval without `grant` defaults to
+one call only.
+Question prompts support multiple questions, option selection, free-form text,
+and multiline answers.
+
+### Release assets, self-update, and desktop installation
+
+The release workflow builds the VORTEX bundle on the native runner for each
+supported desktop platform and embeds the release version in the executable.
+It publishes both a complete standalone CLI asset and a desktop installer
+variant. VORTEX CLI archives and installers are kept separate from desktop
+assets, and `vortex-cli-manifest-<version>.json` records the exact SHA-256 and
+size for every platform/architecture asset:
+
+| Platform | Standalone CLI | Desktop + optional CLI |
+|---|---|---|
+| Windows x64/arm64 | `Vortex-CLI-Setup-<version>-<arch>.exe` and `vortex-cli-<version>-windows-<arch>.zip` | Desktop installer remains a separate asset |
+| Linux x64/arm64 | `vortex-cli-<version>-linux-<arch>.deb` and `vortex-cli-<version>-linux-<arch>.tar.gz` | Desktop packages remain separate assets |
+| macOS x64/arm64 | `Vortex-CLI-Setup-<version>-macos-<arch>.pkg` and `vortex-cli-<version>-macos-<arch>.tar.gz` | Desktop packages remain separate assets |
+
+The normal Linux AppImage, RPM, macOS DMG, and desktop Windows installer
+remain available as desktop-only assets. The optional component is intentionally
+not injected into the AppImage or DMG because those formats do not expose a
+portable component-selection phase. The standalone CLI packages and archives
+contain the compiled launcher, Codex sidecar, and platform-specific `node-pty`
+assets, so they do not require Bun or Node.js on the target machine.
+
+`vortex update` checks the selected release channel without changing the
+workspace. `vortex update --check` is read-only; `vortex update --yes` is the
+non-interactive confirmation path. A writable user-local installation is
+updated from the archive through a temporary helper and rollback-safe swap.
+Protected or desktop-bundled installations open the official installer or
+direct the user to update HysCode Desktop; VORTEX never invokes `sudo`, UAC,
+or another elevation mechanism silently. Releases without the integrity
+manifest are reported for manual installation and are never installed
+automatically.
 
 ### Configuration and credentials
 
-The default Windows files are:
+The runtime uses native per-user data locations:
 
 | Purpose | Default path | Override |
 |---|---|---|
-| Shared desktop/TUI settings | `%LOCALAPPDATA%\\hyscode\\settings.json` | `HYSCODE_CONFIG_PATH` or `--config` |
-| Shared file-backed credentials | `%LOCALAPPDATA%\\hyscode\\keychain.json` | `HYSCODE_KEYCHAIN_PATH` |
-| TUI sessions, memory, SDD, traces | `%LOCALAPPDATA%\\hyscode\\tui-data.json` | `HYSCODE_TUI_DATA_PATH` |
-| Rust-to-runtime bridge | packaged sibling or source Bun entrypoint | `HYSCODE_TUI_BRIDGE` |
+| Shared desktop/TUI settings | Windows `%LOCALAPPDATA%\\hyscode\\settings.json`; macOS `~/Library/Application Support/hyscode/settings.json`; Linux `$XDG_DATA_HOME/hyscode/settings.json` or `~/.local/share/hyscode/settings.json` | `HYSCODE_CONFIG_PATH` or `--config` |
+| Shared file-backed credentials | Same platform data directory as settings, in `keychain.json` | `HYSCODE_KEYCHAIN_PATH` |
+| Installed extension themes | `~/.hyscode/extensions` and `extension-state.json` | `HYSCODE_EXTENSIONS_PATH`, `HYSCODE_EXTENSION_STATE_PATH` |
+| TUI sessions, memory, SDD, traces | Same platform data directory as settings, in `tui-data.json` | `HYSCODE_TUI_DATA_PATH` |
+| TUI development executable | `tools/hyscode-tui/dist/vortex[.exe]` | `HYSCODE_REPO_ROOT` |
+| TUI production bundle | `tools/hyscode-tui/dist/vortex-production/` | `npm run build:vortex` |
+| Installed VORTEX command | Windows `%LOCALAPPDATA%\\Vortex\\bin\\vortex.exe`; Linux/macOS `$XDG_BIN_HOME/vortex` or `~/.local/bin/vortex` | `npm run install:vortex` |
 | Codex provider sidecar | packaged sibling or repository binary | `HYSCODE_CODEX_SIDECAR` |
 | Repository discovery | current directory | `HYSCODE_REPO_ROOT` |
 
-The desktop sync is one-way while the desktop is running: desktop settings are
-written to the shared JSON file whenever the settings store changes. If both
-clients are open, launch the TUI after the desired desktop settings are saved,
-or pass an explicit `--config` file for an isolated profile. Provider API keys
+The desktop sync is one-way while the desktop is running: desktop settings,
+including `themeId`, are written to the shared JSON file whenever the settings
+store changes. If both clients are open, launch the TUI after the desired desktop
+settings are saved, or pass an explicit `--config` file for an isolated profile.
+Provider API keys
 are resolved from environment variables first and then the shared keychain
 file; the TUI never writes API keys into session history.
 
@@ -141,11 +279,10 @@ for a requested Python file. The result is projected into the transcript with
 file, line, column, severity, and source. Agents can also run project-specific
 linters and tests through the shared persistent terminal tools.
 
-If a provider request fails, the bridge emits a structured error and the TUI
-keeps the session available for `/retry` or a follow-up message. If the bridge
-cannot start, verify that the packaged bridge is beside the launcher, or set
-`HYSCODE_TUI_BRIDGE` to an executable path. If a provider is missing, select a
-configured provider with `/model` or fix the shared settings/keychain files.
+If a provider request fails, the shared runtime emits a structured error and the
+TUI keeps the session available for `/retry` or a follow-up message. If a
+provider is missing, select a configured provider with `/model` or fix the
+shared settings/keychain files.
 MCP connection failures are reported as diagnostics and do not prevent the
 rest of the runtime from starting. The standalone client intentionally does not
 provide Monaco buffers, editor decorations, desktop SQLite sharing, or a GUI

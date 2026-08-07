@@ -7,7 +7,7 @@
     ".": "./src/index.ts"
   },
   "scripts": {
-    "build": "bun build --compile src/main.ts --outfile dist/hyscode-tui-bridge",
+    "build": "tsc -b",
     "lint": "eslint src/",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
@@ -16,7 +16,9 @@
     "@hyscode/agent-harness": "*",
     "@hyscode/ai-providers": "*",
     "@hyscode/mcp-client": "*",
-    "@hyscode/skills": "*"
+    "@hyscode/skills": "*",
+    "@hyscode/theme": "*",
+    "node-pty": "^1.1.0"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

@@ -10,6 +10,8 @@ import type {
   MemoryManager,
   ToolHandler,
   TurnRecord,
+  ApprovalDecision,
+  ToolApprovalRequest,
 } from '@hyscode/agent-harness';
 import type { TokenUsage } from '@hyscode/ai-providers';
 import type { AgentMode, SubAgentState, ToolCallDisplay } from '@/stores/agent-store';
@@ -25,12 +27,7 @@ export interface SubAgentRunnerOptions {
   projectId: string;
   invoke: <T>(cmd: string, args?: Record<string, unknown>) => Promise<T>;
   listen?: (event: string, handler: (payload: unknown) => void) => Promise<() => void>;
-  onApproval: (pending: {
-    id: string;
-    toolName: string;
-    input: Record<string, unknown>;
-    description: string;
-  }, signal: AbortSignal) => Promise<boolean>;
+  onApproval: (pending: ToolApprovalRequest, signal: AbortSignal) => Promise<ApprovalDecision>;
   onUpdate: (patch: Partial<SubAgentState>) => void;
   /** Events that need bridge/store-side handling (file changes, usage, API
    *  accounting) are forwarded here instead of being dropped. */
@@ -140,9 +137,9 @@ export class SubAgentRunner {
     // provider tool-call id (e.g. "call_1"). The bridge learns the owner so
     // trust actions and dialogs route to the correct child.
     const onApproval = async (
-      pending: { id: string; toolName: string; input: Record<string, unknown>; description: string },
+      pending: ToolApprovalRequest,
       signal: AbortSignal,
-    ): Promise<boolean> => {
+    ): Promise<ApprovalDecision> => {
       const uniqueId = `${options.id}:${pending.id}`;
       options.onApprovalOwner?.(uniqueId, options.id);
       return options.onApproval({ ...pending, id: uniqueId }, signal);
@@ -159,6 +156,7 @@ export class SubAgentRunner {
         activeSkills: options.activeSkills,
         activeRules: options.activeRules,
         externalTools: options.externalTools,
+        onApprovalRequest: onApproval,
         onEvent,
       });
       this.harness = this.delegatedRunner.getHarness();

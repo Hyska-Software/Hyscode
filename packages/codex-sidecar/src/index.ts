@@ -25,10 +25,22 @@ interface SidecarRequest {
   cwd?: string;
   reasoningEffort?: 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
   sandboxMode?: 'read-only' | 'workspace-write' | 'danger-full-access';
+  /** Existing Codex SDK thread to resume, when the desktop session has one. */
+  threadId?: string;
+  /** Only the new user turn; used after resuming a native Codex thread. */
+  continuationPrompt?: string;
 }
 
 interface SidecarEvent {
-  type: 'text' | 'tool_use' | 'thinking' | 'message_boundary' | 'usage' | 'done' | 'error';
+  type:
+    | 'thread_started'
+    | 'text'
+    | 'tool_use'
+    | 'thinking'
+    | 'message_boundary'
+    | 'usage'
+    | 'done'
+    | 'error';
   content?: string;
   toolName?: string;
   toolInput?: string;
@@ -37,6 +49,8 @@ interface SidecarEvent {
   outputTokens?: number;
   cacheReadTokens?: number;
   reasoningTokens?: number;
+  cacheWriteTokens?: number;
+  threadId?: string;
   stopReason?: string;
   error?: string;
 }
@@ -139,23 +153,19 @@ async function main(): Promise<void> {
   // ChatGPT/Codex desktop app, or the VS Code extension bundled CLI.
   const cliPath = findCodexCli();
   if (!cliPath) {
+    const checkedLocations = process.platform === 'win32'
+      ? 'system PATH, ~/.codex/bin, %LOCALAPPDATA%\\OpenAI\\Codex\\bin, and the VS Code ChatGPT extension'
+      : 'system PATH and ~/.codex/bin';
     emit({
       type: 'error',
       error:
-        'Codex CLI not found. Checked: system PATH, ~/.codex/bin, ' +
-        '%LOCALAPPDATA%\\OpenAI\\Codex\\bin, VS Code ChatGPT extension. ' +
+        `Codex CLI not found. Checked: ${checkedLocations}. ` +
         'Install it with: npm install -g @openai/codex (or run the official ' +
         'installer — see https://developers.openai.com/codex/cli). ' +
-        'Then restart HysCode.',
+        'Then restart VORTEX.',
     });
     process.exit(1);
   }
-
-  // Prepend the system prompt to the user prompt (Codex has no separate
-  // system-prompt option; it reads AGENTS.md rules from the working dir).
-  const finalPrompt = request.systemPrompt
-    ? `${request.systemPrompt}\n\n${request.prompt}`
-    : request.prompt;
 
   try {
     const codex = new Codex({
@@ -163,7 +173,16 @@ async function main(): Promise<void> {
       ...(request.apiKey ? { apiKey: request.apiKey } : {}),
     });
 
-    const thread = codex.startThread({
+    const thread = request.threadId
+      ? codex.resumeThread(request.threadId, {
+          model: request.model,
+          workingDirectory: request.cwd,
+          skipGitRepoCheck: true,
+          sandboxMode: request.sandboxMode ?? 'danger-full-access',
+          approvalPolicy: 'never',
+          modelReasoningEffort: request.reasoningEffort,
+        })
+      : codex.startThread({
       model: request.model,
       workingDirectory: request.cwd,
       skipGitRepoCheck: true,
@@ -173,7 +192,16 @@ async function main(): Promise<void> {
       sandboxMode: request.sandboxMode ?? 'danger-full-access',
       approvalPolicy: 'never',
       modelReasoningEffort: request.reasoningEffort,
-    });
+        });
+
+    // Codex has no separate system-prompt option. The first turn receives the
+    // complete stable context; resumed turns receive only the new user input,
+    // because the native thread already owns the prior context.
+    const finalPrompt = request.threadId
+      ? request.continuationPrompt ?? request.prompt
+      : request.systemPrompt
+        ? `${request.systemPrompt}\n\n${request.prompt}`
+        : request.prompt;
 
     // A single `runStreamed` call is one agentic turn; the Codex agent
     // executes its own tools (shell, apply_patch, mcp, ...) internally.
@@ -186,6 +214,10 @@ async function main(): Promise<void> {
 
     for await (const event of events) {
       switch (event.type) {
+        case 'thread.started':
+          emit({ type: 'thread_started', threadId: event.thread_id });
+          break;
+
         case 'item.started': {
           const item = event.item;
           if (item.type === 'command_execution') {
@@ -242,6 +274,7 @@ async function main(): Promise<void> {
             inputTokens: event.usage.input_tokens,
             outputTokens: event.usage.output_tokens,
             cacheReadTokens: event.usage.cached_input_tokens,
+            cacheWriteTokens: event.usage.cache_write_input_tokens,
             reasoningTokens: event.usage.reasoning_output_tokens,
           });
           emit({ type: 'done', stopReason: 'end_turn' });

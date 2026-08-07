@@ -141,6 +141,32 @@ describe('CodexProvider chat', () => {
     expect(calls[0].reasoningEffort).toBe('high');
   });
 
+  it('forwards the stable HysCode session and continuation context', async () => {
+    const { calls, invoke } = captureInvoke();
+    const provider = new CodexProvider('key', invoke);
+
+    await consume(
+      provider,
+      {
+        ...params(),
+        sessionId: 'conversation-1',
+        sessionFingerprint: 'prefix-1',
+        messages: [
+          { role: 'user', content: [{ type: 'text', text: 'first request' }] },
+          { role: 'assistant', content: [{ type: 'text', text: 'previous answer' }] },
+          { role: 'user', content: [{ type: 'text', text: 'latest request' }] },
+        ],
+      },
+    );
+
+    expect(calls[0]).toMatchObject({
+      sessionId: 'conversation-1',
+      sessionFingerprint: 'prefix-1',
+      continuationPrompt: 'latest request',
+    });
+    expect(calls[0].prompt).toContain('User:\nfirst request');
+  });
+
   it('omits reasoning effort for non-mapped levels', async () => {
     const { calls, invoke } = captureInvoke();
     const provider = new CodexProvider('key', invoke);

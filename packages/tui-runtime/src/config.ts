@@ -3,13 +3,18 @@ import os from 'node:os';
 import path from 'node:path';
 import type { AgentType, ApprovalMode, ToolCategory } from '@hyscode/agent-harness';
 import type { McpServerConfig } from '@hyscode/mcp-client';
+import { DEFAULT_THEME_ID } from '@hyscode/theme';
 
 export type CustomApprovalRules = {
   categoryRules: Partial<Record<ToolCategory, boolean>>;
   toolRules: Record<string, boolean>;
 };
 
+export type UpdateChannel = 'stable' | 'pre-release';
+
 export type SharedTuiSettings = {
+  themeId: string;
+  sidebarVisible: boolean;
   activeProviderId: string | null;
   activeModelId: string | null;
   agentType: AgentType;
@@ -35,9 +40,14 @@ export type SharedTuiSettings = {
   subAgentMaxIterations: number;
   subAgentAutoApprove: boolean;
   subAgentMaxConcurrent: number;
+  updateChannel: UpdateChannel;
+  checkForUpdatesOnStartup: boolean;
+  autoDownload: boolean;
 };
 
 const DEFAULT_SETTINGS: SharedTuiSettings = {
+  themeId: DEFAULT_THEME_ID,
+  sidebarVisible: true,
   activeProviderId: null,
   activeModelId: null,
   agentType: 'chat',
@@ -63,6 +73,9 @@ const DEFAULT_SETTINGS: SharedTuiSettings = {
   subAgentMaxIterations: 20,
   subAgentAutoApprove: false,
   subAgentMaxConcurrent: 2,
+  updateChannel: 'stable',
+  checkForUpdatesOnStartup: true,
+  autoDownload: false,
 };
 
 type JsonObject = Record<string, unknown>;
@@ -113,6 +126,8 @@ function normalizeSettings(raw: unknown): SharedTuiSettings {
   return {
     ...DEFAULT_SETTINGS,
     ...raw,
+    themeId: typeof raw.themeId === 'string' && raw.themeId.trim() ? raw.themeId : DEFAULT_SETTINGS.themeId,
+    sidebarVisible: raw.sidebarVisible !== false,
     activeProviderId: typeof raw.activeProviderId === 'string' ? raw.activeProviderId : null,
     activeModelId: typeof raw.activeModelId === 'string' ? raw.activeModelId : null,
     agentType,
@@ -145,6 +160,9 @@ function normalizeSettings(raw: unknown): SharedTuiSettings {
     subAgentMaxIterations: numberOrDefault(raw.subAgentMaxIterations, DEFAULT_SETTINGS.subAgentMaxIterations),
     subAgentAutoApprove: raw.subAgentAutoApprove === true,
     subAgentMaxConcurrent: numberOrDefault(raw.subAgentMaxConcurrent, DEFAULT_SETTINGS.subAgentMaxConcurrent),
+    updateChannel: isUpdateChannel(raw.updateChannel) ? raw.updateChannel : DEFAULT_SETTINGS.updateChannel,
+    checkForUpdatesOnStartup: raw.checkForUpdatesOnStartup !== false,
+    autoDownload: raw.autoDownload === true,
   };
 }
 
@@ -180,6 +198,10 @@ function isAgentType(value: unknown): value is AgentType {
 
 function isApprovalMode(value: unknown): value is ApprovalMode {
   return value === 'manual' || value === 'yolo' || value === 'smart' || value === 'notify' || value === 'session-trust' || value === 'custom';
+}
+
+function isUpdateChannel(value: unknown): value is UpdateChannel {
+  return value === 'stable' || value === 'pre-release';
 }
 
 export class SharedConfigStore {

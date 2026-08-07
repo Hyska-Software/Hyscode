@@ -19,6 +19,10 @@ interface ToolDefinition {
   };
   category: ToolCategory;
   requiresApproval: boolean;
+  externalPathAccess?: {
+    operation: 'read' | 'write' | 'execute';
+    fields: Array<{ key: string; kind: 'target' | 'directory' }>;
+  };
 }
 
 type ToolCategory = 'filesystem' | 'terminal' | 'git' | 'code' | 'browser' | 'mcp' | 'meta';
@@ -298,7 +302,7 @@ type ToolCategory = 'filesystem' | 'terminal' | 'git' | 'code' | 'browser' | 'mc
 ```json
 {
   "name": "search_code",
-  "description": "Search for text or regex patterns across files in the workspace. Returns matching lines with file paths, line numbers, and optional context lines around each match.",
+  "description": "Search for text or regex patterns across files in the workspace or an explicitly authorized base directory. Returns matching lines with file paths, line numbers, and optional context lines around each match.",
   "inputSchema": {
     "type": "object",
     "properties": {
@@ -313,6 +317,10 @@ type ToolCategory = 'filesystem' | 'terminal' | 'git' | 'code' | 'browser' | 'mc
       "exclude_pattern": {
         "type": "string",
         "description": "Glob pattern to exclude files (e.g., '**/node_modules/**')"
+      },
+      "base_path": {
+        "type": "string",
+        "description": "Directory to search in. Defaults to the workspace root and requires external approval when outside it."
       },
       "is_regex": {
         "type": "boolean",
@@ -376,10 +384,19 @@ type ToolCategory = 'filesystem' | 'terminal' | 'git' | 'code' | 'browser' | 'mc
 `background`. With `background=true`, the tool uses a dedicated persistent terminal and returns once
 `ready_pattern` matches or observable startup is confirmed.
 
+Agent terminals are distinct from manual TUI terminals. A runtime may reuse an agent PTY only when
+conversation, owner, and normalized `cwd` all match; a manual terminal is never acquired by the
+Harness. Every terminal summary exposes its role, working directory, owner, active tool call,
+awaiting-input state, exit/truncation state, and effective read/write/respond/interrupt/kill/resize
+permissions. Terminal access is checked against conversation, owner, and tool call rather than by
+terminal id alone.
+
 ### 7b. read_terminal_output
 
 Reads buffered output and lifecycle state from a terminal id returned by `run_terminal_command`.
-Supports incremental reads through `after_sequence`. This read-only tool does not require approval.
+Supports incremental reads through `after_sequence`, monotonic sequence reconciliation, and an
+explicit truncation marker when the retained PTY buffer no longer contains the requested history.
+This read-only tool does not require approval, but it remains owner-bound.
 
 ### 7c. stop_terminal_process
 
@@ -391,6 +408,25 @@ terminal mutation requires approval.
 Sends an exact response to a resumable terminal interaction. Each call follows normal terminal
 approval policy and displays the response before execution. Passwords, tokens, MFA codes, CAPTCHA
 answers, and other sensitive values cannot be supplied by the agent and must be entered by the user.
+
+When a terminal is `awaiting_input`, the bridge emits `terminal_updated` and the Harness emits
+`terminal_progress`. The TUI switches to a dedicated input mode only when the terminal is not under
+an active tool owner and approval mode is not `yolo`; typed sensitive values are masked and are not
+written to transcript or model context. `/terminal` supports `list`, `open`, `focus`, `read`,
+`interrupt`, and `kill`. `terminal_resize` forwards the TUI viewport dimensions to the PTY.
+
+### 7e. Terminal bridge protocol
+
+The bridge emits `runtime_ready` with the current terminal summaries and publishes
+`terminal_updated` for `created`, `output`, `state`, and `exit`. Terminal subscriptions use replay:
+the listener is registered before the snapshot, concurrent events are queued, and sequences already
+included in the snapshot are discarded. Exits are emitted once and exited sessions remain readable
+until explicit cleanup or shutdown.
+
+The fullscreen VORTEX client embeds this bridge. `vortex --protocol ndjson` is the supported
+non-interactive automation surface and accepts the same `initialize`, `send_message`, approval,
+terminal-event, cancellation, and shutdown messages over stdin/stdout. Without the explicit
+protocol option, a non-TTY launcher keeps its readiness-only behavior.
 
 ---
 
@@ -640,15 +676,25 @@ answers, and other sensitive values cannot be supplied by the agent and must be 
 ```
 Agent returns tool_call
   → Validate input against schema
-  → Check approval requirement
-  → If needs approval: enqueue in pendingToolCalls, wait for user
-  → If auto-approved: proceed
+  → Inspect declared path fields for external absolute paths
+  → If an external path is not covered: enqueue mandatory external approval
+  → Check normal approval requirement and combine it with the external request
+  → If approved: create an authorized per-call path resolver
+  → If denied: return a recoverable error to the agent
   → Route to handler (Tauri command or MCP call)
   → Capture output and timing
   → Log to telemetry (provider, tool, duration)
   → Return ToolResult to agent
   → Agent continues with next step
 ```
+
+External access is operation-specific (`read`, `write`, or `execute`) and is
+mandatory even in Auto-Approve/YOLO, Notify, Session Trust, and custom modes.
+The user may allow the current call or allow the requested directory for the
+current session only. Session grants are shared by parent and child harnesses,
+cleared when a session changes, and never persisted. Write approvals must state
+clearly that external data will be edited. For terminal calls only `cwd` is
+classified; command text is intentionally not parsed.
 
 ---
 

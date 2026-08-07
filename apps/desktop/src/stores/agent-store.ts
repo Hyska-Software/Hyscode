@@ -7,6 +7,7 @@ import type {
   ModeSwitchRequest,
   AgentQuestion,
   TurnTerminalStatus,
+  ExternalPathAccessRequest,
 } from '@hyscode/agent-harness';
 import type { MessageContent, TokenUsage } from '@hyscode/ai-providers';
 import type { ProviderErrorDetails } from '@hyscode/ai-providers';
@@ -201,6 +202,8 @@ export interface PendingApproval {
   toolName: string;
   input: Record<string, unknown>;
   description: string;
+  /** Mandatory external path access requested by this tool call. */
+  externalAccess?: ExternalPathAccessRequest;
   /** Owning sub-agent id when the approval belongs to a child run. */
   ownerSubAgentId?: string;
 }

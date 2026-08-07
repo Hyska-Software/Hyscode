@@ -6,9 +6,12 @@ import type {
   AgentQuestion,
   AgentQuestionAnswer,
   AgentType,
+  ApprovalDecision,
+  ToolApprovalRequest,
   TerminalRuntimeAdapter,
   ToolHandler,
 } from './types';
+import type { ExternalPathAccessRegistry } from './external-path-access';
 
 /** Shared runtime dependencies used by a parent harness and its child turns. */
 export interface HarnessEnvironment {
@@ -17,9 +20,9 @@ export interface HarnessEnvironment {
   invoke: <T>(cmd: string, args?: Record<string, unknown>) => Promise<T>;
   listen?: (event: string, handler: (payload: unknown) => void) => Promise<() => void>;
   onApprovalRequest?: (
-    pending: { id: string; toolName: string; input: Record<string, unknown>; description: string },
+    pending: ToolApprovalRequest,
     signal: AbortSignal,
-  ) => Promise<boolean>;
+  ) => Promise<ApprovalDecision>;
   onModeSwitchRequest?: (
     request: {
       id: string;
@@ -48,11 +51,13 @@ export interface HarnessEnvironment {
   terminalRuntime?: TerminalRuntimeAdapter;
   memoryManager?: MemoryManager;
   hasDirtyBuffers?: () => boolean;
+  externalPathAccess?: ExternalPathAccessRegistry;
 }
 
 export type ChildHarnessOptions = {
   agentType: AgentType;
   config?: Partial<import('./types').HarnessConfig>;
   onEvent?: import('./types').HarnessEventHandler;
+  onApprovalRequest?: HarnessEnvironment['onApprovalRequest'];
   externalTools?: ToolHandler[];
 };

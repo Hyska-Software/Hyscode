@@ -145,6 +145,9 @@ export type CodexInvoke = (params: {
   cwd?: string;
   reasoningEffort?: CodexReasoningEffort;
   sandboxMode?: CodexSandboxMode;
+  sessionId?: string;
+  sessionFingerprint?: string;
+  continuationPrompt?: string;
   signal?: AbortSignal;
 }) => AsyncIterable<StreamChunk>;
 
@@ -219,6 +222,13 @@ export class CodexProvider implements AIProvider {
       })
       .join('\n\n');
 
+    const latestUserMessage = [...params.messages]
+      .reverse()
+      .find((message) => message.role === 'user')
+      ?.content.filter((content) => content.type === 'text')
+      .map((content) => content.text)
+      .join('\n');
+
     yield* this.invoke({
       apiKey: this.apiKey || undefined,
       model,
@@ -226,6 +236,9 @@ export class CodexProvider implements AIProvider {
       prompt,
       reasoningEffort: resolveReasoningEffort(params.thinking),
       sandboxMode: AGENT_MODE_TO_SANDBOX[params.agentMode ?? ''] ?? 'danger-full-access',
+      sessionId: params.sessionId,
+      sessionFingerprint: params.sessionFingerprint,
+      continuationPrompt: latestUserMessage || undefined,
       signal: params.signal,
     });
   }

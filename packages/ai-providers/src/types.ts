@@ -66,10 +66,85 @@ export interface TokenUsage {
   peakEffectiveInputTokens?: number;
   cacheReadTokens?: number;
   cacheWriteTokens?: number;
+  /** Cache reads attributed only to the measured stable prefix. */
+  cacheMeasuredReadTokens?: number;
+  /** Total prefix tokens eligible for cache accounting in the request/turn. */
+  cacheEligibleTokens?: number;
+  /** Eligible prefix tokens with provider-reported cache telemetry. */
+  cacheMeasuredEligibleTokens?: number;
+  cacheHitRequests?: number;
+  cacheObservedRequests?: number;
+  cacheTotalRequests?: number;
+  cacheUnknownRequests?: number;
+  /** Weighted cache read ratio over the measured eligible prefix. */
+  cacheHitRate?: number;
+  /** Cache reads divided by total input tokens. */
+  cacheInputReadRatio?: number;
+  /** Request-level hit ratio over observed eligible requests. */
+  cacheRequestHitRate?: number;
+  /** Fraction of requests whose cache state could not be observed. */
+  cacheUnknownRate?: number;
   reasoningTokens?: number;
   retryCount?: number;
   estimatedCostUsd?: number;
   possibleDuplicateCharge?: boolean;
+}
+
+/**
+ * The provider-reported state of prompt caching for one API request.
+ * `not-reported` is intentionally distinct from `miss`: several providers
+ * omit cache fields when caching is unsupported or when the adapter cannot
+ * observe the provider's native usage response.
+ */
+export type PromptCacheObservationStatus =
+  | 'hit'
+  | 'miss'
+  | 'ineligible'
+  | 'not-reported'
+  | 'unsupported'
+  | 'unknown';
+
+export interface PromptCacheObservation {
+  status: PromptCacheObservationStatus;
+  eligible: boolean;
+  providerReported: boolean;
+  inputTokens: number;
+  eligiblePrefixTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  prefixHash?: string;
+  promptCacheKeyHash?: string;
+  attempt?: number;
+}
+
+export interface PromptCacheAggregate {
+  totalRequests: number;
+  eligibleRequests: number;
+  observedRequests: number;
+  hitRequests: number;
+  missRequests: number;
+  ineligibleRequests: number;
+  unknownRequests: number;
+  inputTokens: number;
+  eligiblePrefixTokens: number;
+  measuredEligiblePrefixTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  weightedHitRate: number | null;
+  inputCacheReadRatio: number | null;
+  requestHitRate: number | null;
+  unknownRate: number;
+}
+
+export interface PromptCacheOptions {
+  /** Provider request policy. `explicit` disables implicit suffix writes. */
+  mode: 'implicit' | 'explicit';
+  /** Stable routing key understood by providers that support keyed caching. */
+  key?: string;
+  /** Hash of the exact stable prefix represented by the request. */
+  stablePrefixHash?: string;
+  /** Provider-specific breakpoint marker location. */
+  breakpoint?: 'stable-prefix';
 }
 
 export type PromptCacheMode = 'none' | 'automatic' | 'automatic-keyed' | 'explicit-breakpoints';
@@ -80,6 +155,10 @@ export interface ProviderCapabilities {
   reasoningReplay: ReasoningReplayMode;
   nativeTokenCounting: boolean;
   acceptsPromptCacheKey: boolean;
+  /** Optional model-specific override for prompt cache behavior. */
+  promptCacheModeForModel?: (modelId: string) => PromptCacheMode;
+  /** Optional model-specific override for keyed prompt cache support. */
+  acceptsPromptCacheKeyForModel?: (modelId: string) => boolean;
   /**
    * True for agentic sidecar providers (Codex, Claude Agent): tool calls in
    * the stream are executed internally by the provider and are informational
@@ -134,6 +213,11 @@ export interface ChatParams {
   /** Allow providers with prompt-cache support to mark stable prompt prefixes. */
   cachePrompt?: boolean;
   promptCacheKey?: string;
+  promptCacheOptions?: PromptCacheOptions;
+  /** Stable HysCode conversation identity for agentic sidecar sessions. */
+  sessionId?: string;
+  /** Fingerprint of the stable prefix used to fence sidecar session reuse. */
+  sessionFingerprint?: string;
   maxTokens?: number;
   /** Optional provider-native agent turn limit. Omitted means unlimited. */
   maxTurns?: number;

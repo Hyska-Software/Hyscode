@@ -58,6 +58,15 @@ The five runtime modes are Chat, Build, Review, Debug, and Plan. Debug can inspe
 
 The effective policy is resolved once per turn from mode, provider/model limits, and user preferences. Explicit user approval settings take precedence over mode defaults; custom tool rules take precedence over custom category rules.
 
+External absolute paths are a separate mandatory permission boundary. Reads,
+directory discovery, searches, and context gathering outside the workspace
+pause for explicit approval even when the effective mode is Auto-Approve/YOLO.
+External writes display a clear editing warning. The user can allow one call or
+grant the requested directory for the current session; grants are operation-
+specific, shared with child agents, cleared when changing sessions, and never
+persisted. For terminal tools, only an external `cwd` is covered by this
+permission boundary.
+
 Every runtime event is correlated with `turnId`, `conversationId`, `iteration`, and `iterationId`. The UI ignores stale events and prevents closing the tab that owns an active turn.
 
 ### Chat Mode (default)

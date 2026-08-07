@@ -5,19 +5,18 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $repositoryRoot = Split-Path -Parent $PSScriptRoot
-$cargoProfile = if ($Release) { 'release' } else { 'debug' }
-$cargoArguments = @('--manifest-path', 'tools/hyscode-tui/Cargo.toml')
-if ($Release) { $cargoArguments += '--release' }
 
 Push-Location $repositoryRoot
 try {
-    npm run -w @hyscode/tui-runtime build
-    cargo build @cargoArguments
+    $buildScript = if ($Release) { 'build:release' } else { 'build' }
+    npm run -w @hyscode/tui-client $buildScript
 
     $artifactDirectory = Join-Path $repositoryRoot 'tools/hyscode-tui/dist'
     New-Item -ItemType Directory -Force -Path $artifactDirectory | Out-Null
-    Copy-Item -Force (Join-Path $repositoryRoot "tools/hyscode-tui/target/$cargoProfile/hyscode-tui.exe") (Join-Path $artifactDirectory 'hyscode-tui.exe')
-    Copy-Item -Force (Join-Path $repositoryRoot 'packages/tui-runtime/dist/hyscode-tui-bridge.exe') (Join-Path $artifactDirectory 'hyscode-tui-bridge.exe')
+    $launcher = Join-Path $artifactDirectory 'vortex.exe'
+    if (-not (Test-Path -LiteralPath $launcher -PathType Leaf)) {
+        throw "TUI launcher was not produced at $launcher"
+    }
 
     $codexSidecar = Get-ChildItem -LiteralPath (Join-Path $repositoryRoot 'apps/desktop/src-tauri/binaries') -Filter 'codex-sidecar*.exe' -File -ErrorAction SilentlyContinue | Select-Object -First 1
     if ($codexSidecar) {

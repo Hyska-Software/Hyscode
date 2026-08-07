@@ -5,13 +5,16 @@
   "packageManager": "npm@11.12.1",
   "workspaces": [
     "apps/*",
-    "packages/*"
+    "packages/*",
+    "tools/*"
   ],
   "scripts": {
     "dev": "turbo dev",
     "build": "turbo build",
     "build:sidecars": "turbo build --filter=@hyscode/codex-sidecar --filter=@hyscode/claude-agent-sidecar",
     "build:tui": "pwsh -ExecutionPolicy Bypass -File ./scripts/build-tui.ps1",
+    "build:vortex": "node ./scripts/build-vortex.mjs",
+    "install:vortex": "node ./scripts/build-vortex.mjs --install",
     "copy:sidecars": "node scripts/copy-sidecars.mjs",
     "lint": "turbo lint",
     "typecheck": "turbo typecheck",

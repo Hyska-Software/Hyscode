@@ -308,7 +308,10 @@ export class AutoGatherMiddleware implements PostToolHook {
 
     const rawFilePath = String(record.input.path ?? record.input.filePath ?? '');
     const filePath = rawFilePath && ctx.workspacePath
-      ? resolveWorkspacePath(rawFilePath, ctx.workspacePath)
+      // The router has already classified and authorized external paths before
+      // this post-tool hook runs. This hook only stores the canonical path in
+      // working memory; it never grants or performs filesystem access.
+      ? resolveWorkspacePath(rawFilePath, ctx.workspacePath, { allowExternalAbsolute: true })
       : rawFilePath;
     if (
       ['write_file', 'edit_file', 'replace_lines', 'insert_lines', 'delete_file'].includes(toolName)

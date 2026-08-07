@@ -26,11 +26,11 @@ import { DesktopTerminalRuntime } from './terminal-runtime';
 
 const runtime = new DesktopTerminalRuntime();
 
-function seedSession(ptyId = 'pty-1'): string {
+function seedSession(ptyId = 'pty-1', cwd = 'C:/workspace'): string {
   useTerminalStore.setState({ sessions: [], activeSessionId: null, nextIndex: 1 });
   const sessionId = useTerminalStore
     .getState()
-    .createAgentSession({ conversationId: 'conversation-a' });
+    .createAgentSession({ conversationId: 'conversation-a', cwd });
   useTerminalStore.getState().setPtyId(sessionId, ptyId);
   return sessionId;
 }
@@ -174,6 +174,20 @@ describe('DesktopTerminalRuntime', () => {
     it('throws for unknown sessions', async () => {
       await expect(runtime.write('ghost', 'x')).rejects.toThrow('Unknown terminal');
     });
+
+    it('keeps user access bound to the owning conversation while an agent awaits input', () => {
+      const sessionId = seedSession();
+      useTerminalStore.getState().setAwaitingInput(sessionId, true);
+
+      expect(() => runtime.authorize(sessionId, {
+        conversationId: 'conversation-a',
+        source: 'user',
+      })).not.toThrow();
+      expect(() => runtime.authorize(sessionId, {
+        conversationId: 'conversation-b',
+        source: 'user',
+      })).toThrow('another conversation');
+    });
   });
 
   describe('kill / release', () => {
@@ -269,6 +283,8 @@ describe('DesktopTerminalRuntime', () => {
 
       const onExit = vi.fn();
       await runtime.subscribe(sessionId, vi.fn(), onExit);
+      fireExit({ pty_id: 'pty-1', code: 2 });
+      expect(onExit).toHaveBeenCalledTimes(1);
       expect(onExit).toHaveBeenCalledWith(1);
     });
 

@@ -379,11 +379,18 @@ interface TauriCommands {
         cwd?: string;
         reasoning_effort?: string;
         sandbox_mode?: 'read-only' | 'workspace-write' | 'danger-full-access';
+        session_id?: string;
+        session_fingerprint?: string;
+        continuation_prompt?: string;
       };
     };
     ret: void;
   };
   codex_cancel: { args: { requestId: string }; ret: void };
+  codex_store_thread: {
+    args: { sessionId: string; fingerprint?: string; threadId: string };
+    ret: void;
+  };
   codex_login: { args: Record<string, never>; ret: void };
   codex_logout: { args: Record<string, never>; ret: void };
   codex_login_status: {
@@ -585,6 +592,27 @@ interface TauriCommands {
     };
     ret: void;
   };
+  db_get_conversation_token_usage: {
+    args: { conversationId: string };
+    ret: {
+      inputTokens: number;
+      outputTokens: number;
+      totalTokens: number;
+      cacheReadTokens: number;
+      cacheWriteTokens: number;
+      cacheMeasuredReadTokens: number;
+      cacheEligibleTokens: number;
+      cacheMeasuredEligibleTokens: number;
+      cacheHitRequests: number;
+      cacheObservedRequests: number;
+      cacheTotalRequests: number;
+      cacheUnknownRequests: number;
+      cacheHitRate: number | null;
+      cacheInputReadRatio: number | null;
+      cacheRequestHitRate: number | null;
+      cacheUnknownRate: number | null;
+    };
+  };
 
   // Database: Agent SDD
   db_sdd_upsert_session: { args: { sessionJson: string }; ret: void };
@@ -608,6 +636,16 @@ interface TauriCommands {
       iterations: string;
       tokenInput: number;
       tokenOutput: number;
+      tokenTotal?: number;
+      tokenCacheRead?: number;
+      tokenCacheWrite?: number;
+      tokenCacheMeasuredRead?: number;
+      tokenCacheEligible?: number;
+      tokenCacheMeasured?: number;
+      tokenCacheHitRequests?: number;
+      tokenCacheObservedRequests?: number;
+      tokenCacheTotalRequests?: number;
+      tokenCacheUnknownRequests?: number;
       stopReason: string;
       verificationPerformed: boolean;
       verificationForced: boolean;
@@ -631,6 +669,15 @@ interface TauriCommands {
       iterations: string;
       token_input: number;
       token_output: number;
+      token_cache_read: number;
+      token_cache_write: number;
+      token_cache_measured_read: number;
+      token_cache_eligible: number;
+      token_cache_measured: number;
+      token_cache_hit_requests: number;
+      token_cache_observed_requests: number;
+      token_cache_total_requests: number;
+      token_cache_unknown_requests: number;
       stop_reason: string;
       verification_performed: boolean;
       verification_forced: boolean;

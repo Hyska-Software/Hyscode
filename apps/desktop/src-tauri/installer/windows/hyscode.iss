@@ -11,6 +11,7 @@
 
 ; Paths relative to the Inno Setup script location
 #define SourceDir "..\..\target\x86_64-pc-windows-msvc\release"
+#define VortexCliSourceDir "..\..\target\x86_64-pc-windows-msvc\release\vortex-cli"
 #define IconFile "..\..\icons\icon.ico"
 
 [Setup]
@@ -52,6 +53,7 @@ Name: "german"; MessagesFile: "compiler:Languages\German.isl"
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"
 Name: "addtopath"; Description: "Add to PATH (requires restart)"; GroupDescription: "Other:"
+Name: "installvortexcli"; Description: "Install the VORTEX CLI (vortex command)"; GroupDescription: "Other:"; Flags: unchecked
 Name: "addcontextmenu"; Description: "Add ""Open with {#MyAppName}"" action to Windows Explorer context menu"; GroupDescription: "Other:"; Flags: unchecked
 Name: "addcontextmenudir"; Description: "Add ""Open with {#MyAppName}"" action to Windows Explorer directory context menu"; GroupDescription: "Other:"
 Name: "associatewithfiles"; Description: "Register {#MyAppName} as an editor for supported file types"; GroupDescription: "Other:"; Flags: unchecked
@@ -63,8 +65,8 @@ Source: "{#SourceDir}\resources\*"; DestDir: "{app}\resources"; Flags: ignorever
 ; AI agent sidecars (copied next to the exe by scripts/build-windows.ps1)
 Source: "{#SourceDir}\claude-agent.exe"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
 Source: "{#SourceDir}\codex-sidecar.exe"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
-; Note: the Codex CLI itself is NOT bundled — it is installed by the user
-; (npm install -g @openai/codex) and detected at runtime.
+; Optional complete VORTEX CLI bundle, selected by the user in the wizard.
+Source: "{#VortexCliSourceDir}\*"; DestDir: "{app}\vortex-cli"; Flags: ignoreversion recursesubdirs createallsubdirs skipifsourcedoesntexist; Tasks: installvortexcli
 
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
@@ -74,6 +76,7 @@ Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: de
 [Registry]
 ; Add to PATH
 Root: HKCU; Subkey: "Environment"; ValueType: expandsz; ValueName: "Path"; ValueData: "{olddata};{app}"; Tasks: addtopath; Check: NeedsAddPath('{app}')
+Root: HKCU; Subkey: "Environment"; ValueType: expandsz; ValueName: "Path"; ValueData: "{olddata};{app}\vortex-cli"; Tasks: installvortexcli; Check: NeedsAddPath(ExpandConstant('{app}\vortex-cli'))
 
 ; Context menu for files - "Open with HysCode"
 Root: HKCR; Subkey: "*\shell\{#MyAppName}"; ValueType: string; ValueName: ""; ValueData: "Open with {#MyAppName}"; Tasks: addcontextmenu; Flags: uninsdeletekey
@@ -113,15 +116,20 @@ procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 var
   Path: string;
   AppDir: string;
+  VortexCliDir: string;
 begin
   if CurUninstallStep = usPostUninstall then
   begin
     AppDir := ExpandConstant('{app}');
+    VortexCliDir := ExpandConstant('{app}\vortex-cli');
     if RegQueryStringValue(HKEY_CURRENT_USER, 'Environment', 'Path', Path) then
     begin
       StringChangeEx(Path, ';' + AppDir, '', True);
       StringChangeEx(Path, AppDir + ';', '', True);
       StringChangeEx(Path, AppDir, '', True);
+      StringChangeEx(Path, ';' + VortexCliDir, '', True);
+      StringChangeEx(Path, VortexCliDir + ';', '', True);
+      StringChangeEx(Path, VortexCliDir, '', True);
       RegWriteStringValue(HKEY_CURRENT_USER, 'Environment', 'Path', Path);
     end;
   end;

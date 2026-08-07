@@ -27,6 +27,7 @@
     "@hyscode/lsp-client": "*",
     "@hyscode/mcp-client": "*",
     "@hyscode/skills": "*",
+    "@hyscode/theme": "*",
     "@hyscode/ui": "*",
     "@monaco-editor/react": "^4.7.0",
     "@tauri-apps/api": "^2.5.0",

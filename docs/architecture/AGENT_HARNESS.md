@@ -112,6 +112,21 @@ propagated to provider streams, tool execution, approvals, mode switches, and
 agent questions through a shared `AbortSignal`. A harness rejects concurrent
 turns rather than allowing their events to interleave.
 
+### Prompt Cache Observability and Persistence
+
+Prompt-cache measurements travel through the shared `TokenUsage` and `Trace`
+contracts. Providers report raw cache-read and cache-write tokens when the
+provider exposes them; the harness preserves unknown measurements instead of
+turning them into false misses, and derives token-weighted and request-weighted
+hit rates only from eligible observations.
+
+The desktop persists turn-level cache metrics and cumulative session usage in
+SQLite. The standalone TUI uses `CliDataStore` JSON but persists the same raw
+counters, derived session metrics, and trace-level `promptCache` snapshots.
+Codex conversations in the TUI also persist the provider thread id together
+with the stable prompt fingerprint, so a changed system prompt cannot resume a
+thread with incompatible cached context.
+
 ### Thinking Configuration and Client Synchronization
 
 The harness accepts the shared `ThinkingConfig` contract from the provider layer.
@@ -132,6 +147,44 @@ default shared settings file. On desktop startup, shared settings are read befor
 the initial export; active provider, active model, and thinking settings are
 imported while desktop-only settings remain local. Synchronization is launch-based,
 without a live file watcher, and a TUI `--config` path remains isolated.
+
+The TUI also persists its presentation-only `sidebarVisible` preference through
+the same runtime configuration contract. `/sidebar` sends the value through
+`set_config`, updates the renderer immediately, and desktop shared-settings
+writes preserve the field so a desktop settings update cannot reset the TUI
+layout preference.
+
+The same additive `runtime_ready` payload exposes a bounded `recentSessions`
+projection for the TUI startup surface. The renderer uses it for the welcome
+layout while the existing `session_list` request remains authoritative for the
+full session browser.
+
+The payload also exposes a `GitSummary` snapshot for the TUI header. It contains
+the current branch and aggregate insertion/deletion counts from uncommitted
+tracked changes. The standalone client refreshes this additive summary
+periodically through `git_summary`, keeping Git inspection out of the render
+loop while reflecting edits made during an active session.
+
+The runtime also exposes the shared VORTEX update preferences in
+`runtime_ready`. The standalone client owns the update lifecycle: it queries
+the Stable or Pre-release GitHub channel, selects the exact native target from
+the release manifest, verifies size and SHA-256, validates the complete bundle,
+and uses a detached helper for a rollback-safe user-local installation swap.
+The TUI schedules startup checks after rendering becomes available, supports
+`/update`, and never applies an update while an agent turn is active. Protected
+installations use the platform installer and do not receive silent elevation.
+
+### Theme Catalog and Client Synchronization
+
+The `@hyscode/theme` package owns the built-in theme ids and the normalized color
+surface used by both clients. The runtime includes `activeThemeId` and the
+available `ThemeSummary` catalog in `runtime_ready`; `/theme` sends a validated
+`themeId` through `set_config`, updates the TUI renderer immediately, and writes
+the selection to the shared settings file. Desktop hydration imports the same
+field on startup. The TUI discovers enabled extension themes from the installed
+`extension.json` contributions and their JSON assets under `~/.hyscode/extensions`,
+using `extension-state.json` to exclude disabled extensions and rejecting assets
+outside each extension directory.
 
 ---
 
@@ -282,6 +335,41 @@ interface TokenBudget {
 }
 ```
 
+### Prompt-cache preparation and telemetry
+
+Prompt caching is a first-class harness concern and is independent from the other
+cost-optimization switches. Before each provider request, `RequestPreparation`
+canonicalizes the tool definitions, computes a versioned stable-prefix hash, and
+creates a project-scoped key only when the provider/model declares keyed caching.
+The request carries the provider-specific cache policy while the trace records the
+same prefix fingerprint for later diagnosis.
+
+Each API attempt records a `PromptCacheObservation` with one of these states:
+
+| State | Meaning | Hit denominator |
+| --- | --- | --- |
+| `hit` | Native cache read was reported for an eligible prefix | yes |
+| `miss` | Native cache fields were reported but no read occurred | yes |
+| `not-reported` | Provider supports caching but omitted cache usage fields | no |
+| `ineligible` | Stable prefix is below the 1,024-token minimum | no |
+| `unsupported` | Provider/model does not expose prompt caching | no |
+
+The trace and persisted turn record keep both token-weighted and request-weighted
+metrics. The weighted rate is bounded to the eligible prefix, so cached history or
+provider bookkeeping cannot inflate the result above 100%. Unknown telemetry is
+visible and never silently counted as a miss.
+
+The desktop database migration stores raw counters rather than derived floating
+point rates. This keeps historical rows safe and lets the read path derive
+`cacheHitRate`, `cacheRequestHitRate`, `cacheInputReadRatio`, and `cacheUnknownRate`
+consistently after restart.
+
+For the Codex sidecar, `sessionId` and `sessionFingerprint` are propagated through
+the harness. Rust remembers and persists the native SDK thread id; a changed stable
+fingerprint fences reuse and starts a new native thread. This preserves Codex's own
+cache/session semantics without duplicating the complete HysCode history on every
+resumed request.
+
 **Strategy:**
 
 1. Always include complete protocol frames; assistant tool calls and their tool results are atomic
@@ -302,6 +390,10 @@ interface ToolDefinition {
   inputSchema: JSONSchema;
   category: 'filesystem' | 'terminal' | 'git' | 'code' | 'browser' | 'mcp';
   requiresApproval: boolean; // per settings
+  externalPathAccess?: {
+    operation: 'read' | 'write' | 'execute';
+    fields: Array<{ key: string; kind: 'target' | 'directory' }>;
+  };
   handler: (input: unknown) => Promise<ToolResult>;
 }
 
@@ -341,14 +433,16 @@ Web tools (`web_search`, `web_fetch`) are classified `safe` (`CATEGORY_RISK`), l
 
 ```
 Agent requests tool_call
-  → Tool Router checks tool.requiresApproval
-  → If requires approval:
-      → Add to pendingToolCalls in agentStore
-      → UI shows approval card with tool name, input preview
-      → User clicks Approve or Reject
-      → If approved: execute and return result to agent
-      → If rejected: return rejection reason to agent
-  → If auto-approved:
+  → Tool Router validates declared path fields
+  → If an external path is not covered by a session grant:
+      → Always enqueue an external-access approval, regardless of mode
+  → If the tool also requires normal approval:
+      → Add one combined request to pendingToolCalls in agentStore
+      → UI shows the tool and external path preview
+      → User approves, grants the directory for this session, or rejects
+      → If approved: execute with an authorized per-call path resolver
+      → If rejected: return a recoverable rejection reason to the agent
+  → If no external approval is required and the tool is auto-approved:
       → Execute immediately
       → Show execution card in UI (collapsed by default)
 ```
@@ -359,7 +453,7 @@ Agent requests tool_call
 - `smart`: risk-based approval with automatic safe reads
 - `session-trust`: approve a tool type once per session
 - `notify`: execute without blocking and emit a notification
-- `yolo`: execute without approval
+- `yolo`: execute without normal tool approval; external path access still requires explicit user approval
 - `custom`: tool overrides, then category overrides, then tool defaults
 
 ---
@@ -455,11 +549,33 @@ The harness owns provider-native assistant and tool-result blocks. It emits `tra
 Cancellation is cooperative for PTY and provider operations. Native calls without cancellation support are awaited; if one completes after cancellation, the turn ends as `cancelled_partial`.
 
 Terminal execution is delegated through `TerminalRuntimeAdapter`. The harness owns framed command
-capture and the canonical result returned to the model; the desktop adapter owns visible session and
-conversation identity; Rust owns process lifecycle, ordered replay, and exit state. Live
-`terminal_progress` events update the UI but are not persisted as provider transcript blocks.
+capture and the canonical result returned to the model. The adapter owns the runtime boundary and
+must enforce `TerminalAccess` for conversation, owner, tool-call, and source (`agent`/`user`).
+Desktop uses the Rust PTY registry through `DesktopTerminalRuntime`; the standalone CLI uses
+`CliHost/node-pty` through `CliTerminalRuntime`. Both runtimes separate manual terminals from agent
+terminals, reuse only the same owner/conversation/normalized `cwd`, expose resize, and retain an
+inspectable terminal summary after exit until shutdown.
 
-Workspace-relative paths are normalized and checked by segment containment. External absolute paths are rejected by default and require explicitly authorized adapter policy.
+Terminal streams are replay-capable event hubs rather than one mutable listener. A subscriber is
+registered before its snapshot is captured, concurrent PTY data is queued, snapshot sequences are
+applied first, and queued events are drained only when newer. Sequence values are monotonic and exit
+is emitted once. The bridge projects `terminal_updated` (`created`, `output`, `state`, `exit`) and
+includes current terminals in every `runtime_ready`; the TUI consumes these by `terminalId` and
+keeps raw output only for parsing, normalizing ANSI and framing before display. Live
+`terminal_progress` events update tool activity but are not persisted as provider transcript blocks.
+
+An `awaiting_input` terminal is a guarded interaction: the agent can use the approved
+`respond_terminal_input` tool only for its owner and non-sensitive prompts. The TUI may write only
+when no tool is actively controlling the terminal and the approval mode is not `yolo`; sensitive
+input is masked and never added to transcript or model context. Chat, review, and plan policies deny
+terminal tools, while build and debug policies retain them.
+
+The fullscreen TUI embeds the bridge in-process. The packaged `vortex --protocol ndjson` launcher
+and the compatibility runtime entrypoint reuse the same serialized request/event loop for
+automation, including `initialize`, `send_message`, approvals, terminal events, cancellation, and
+shutdown.
+
+Workspace-relative paths are normalized and checked by segment containment. Absolute paths outside the workspace are classified before the handler runs and require explicit user approval in every approval mode. `allow once` applies only to the current tool call; `allow directory for this session` stores an operation-specific, non-persistent directory grant. Read grants never authorize writes or terminal execution. The terminal command text is not parsed for paths; only its `cwd` field participates in this gate. If no approval callback exists, external access fails closed.
 
 | Error Type                 | Handling                                                        |
 | -------------------------- | --------------------------------------------------------------- |

@@ -330,7 +330,7 @@ export function App() {
   }, []);
 
   // Keep the provider, agent, approval, MCP, skills, and retry settings in a
-  // shared JSON contract consumed by the standalone Rust TUI runtime.
+  // shared JSON contract consumed by the standalone TypeScript TUI runtime.
   useEffect(() => startSharedConfigSync(), []);
 
   // Check for updates silently after a short delay (non-blocking)

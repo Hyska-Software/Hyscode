@@ -10,6 +10,12 @@ import type {
   TokenUsage,
 } from '@hyscode/ai-providers';
 import type { MemoryManager } from './memory-manager';
+import type {
+  ExternalPathAccess,
+  ExternalPathAccessDefinition,
+  ExternalPathAccessRequest,
+  ExternalPathGrant,
+} from './external-path-access';
 
 // ─── Tool System ────────────────────────────────────────────────────────────
 
@@ -41,6 +47,8 @@ export interface ToolHandler {
   /** When true, multiple calls of this tool may run concurrently in one batch.
    *  Only delegation tools such as spawn_subagent should opt in. */
   parallel?: boolean;
+  /** Declares which input paths may require mandatory external approval. */
+  externalPathAccess?: ExternalPathAccessDefinition;
   execute: (input: Record<string, unknown>, context: ToolExecutionContext) => Promise<ToolResult>;
 }
 
@@ -93,6 +101,8 @@ export interface ToolExecutionContext {
   memoryManager?: MemoryManager;
   /** Reports whether Monaco has unsaved buffers that Git mutations could overwrite. */
   hasDirtyBuffers?: () => boolean;
+  /** Per-call resolver for paths approved outside the workspace. */
+  externalPathAccess?: ExternalPathAccess;
 }
 
 export type TerminalAcquireRequest = {
@@ -105,6 +115,15 @@ export type TerminalAcquireRequest = {
   /** Owner (sub-agent id) that must own the acquired session. When set, the
    *  runtime must not reuse a session owned by a different owner. */
   ownerId?: string;
+};
+
+export type TerminalRole = 'user' | 'agent';
+
+export type TerminalAccess = {
+  conversationId: string;
+  ownerId?: string;
+  toolCallId?: string;
+  source: TerminalRole;
 };
 
 export type TerminalFrameLanguage = 'bash' | 'powershell';
@@ -132,6 +151,10 @@ export interface TerminalRuntimeAdapter {
   write(terminalId: string, data: string): Promise<void>;
   interrupt(terminalId: string): Promise<void>;
   kill(terminalId: string): Promise<void>;
+  /** Optional access check used by runtimes that expose multiple owners. */
+  authorize?(terminalId: string, access: TerminalAccess): Promise<void> | void;
+  /** Resize the PTY when the backend supports interactive dimensions. */
+  resize?(terminalId: string, cols: number, rows: number): Promise<void>;
   release?(terminalId: string, toolCallId: string): void;
   /** Stream output with replay: the runtime must deliver buffered output that
    *  arrived before the subscription, not just live chunks. */
@@ -280,8 +303,19 @@ export interface PendingToolCall {
   input: Record<string, unknown>;
   description: string;
   riskLevel?: ToolRiskLevel;
-  resolve: (approved: boolean, reason?: string) => void;
+  externalAccess?: ExternalPathAccessRequest;
+  resolve: (decision: ApprovalDecision, reason?: string) => void;
 }
+
+/** Approval result. Boolean callbacks remain supported for compatibility. */
+export type ApprovalDecision =
+  | boolean
+  | {
+      approved: boolean;
+      externalGrant?: ExternalPathGrant;
+    };
+
+export type ToolApprovalRequest = Omit<PendingToolCall, 'resolve'>;
 
 // ─── Context Manager ────────────────────────────────────────────────────────
 
@@ -478,6 +512,8 @@ export interface HarnessConfig {
   thinking?: ThinkingConfig;
   /** Enables eval-gated context and provider cost optimizations. */
   costOptimization: boolean;
+  /** Enables provider-native prompt caching independently of other optimizations. */
+  promptCaching: boolean;
 }
 
 export type TurnTerminalStatus =
@@ -549,6 +585,7 @@ export const DEFAULT_HARNESS_CONFIG: HarnessConfig = {
     mode: 'manual',
   },
   costOptimization: true,
+  promptCaching: true,
 };
 
 // ─── Harness Events ─────────────────────────────────────────────────────────

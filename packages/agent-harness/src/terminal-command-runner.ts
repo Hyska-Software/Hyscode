@@ -1,5 +1,6 @@
 import type {
   TerminalBinding,
+  TerminalAccess,
   TerminalProgress,
   TerminalRuntimeAdapter,
   ToolExecutionContext,
@@ -12,7 +13,7 @@ import {
   looksLikeTerminalPrompt,
   parseTerminalFrame,
 } from './terminal-protocol';
-import { resolveWorkspacePath } from './path-policy';
+import { resolveAuthorizedPath } from './path-policy';
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 const DEFAULT_STARTUP_TIMEOUT_MS = 15_000;
@@ -25,6 +26,8 @@ type SuspendedCommand = {
   command: string;
   cwd: string;
   nonce: string;
+  conversationId: string;
+  ownerId?: string;
 };
 
 export type TerminalCommandInput = {
@@ -61,7 +64,9 @@ function emitProgress(
 export async function stopCommand(
   adapter: TerminalRuntimeAdapter,
   terminalId: string,
+  access?: TerminalAccess,
 ): Promise<void> {
+  await authorizeTerminal(adapter, terminalId, access);
   await adapter.interrupt(terminalId).catch(() => undefined);
   await new Promise((resolve) => setTimeout(resolve, INTERRUPT_GRACE_MS));
   const snapshot = await adapter.snapshot(terminalId).catch(() => null);
@@ -71,17 +76,27 @@ export async function stopCommand(
 export class TerminalCommandRunner {
   private readonly interactiveCommands = new Map<string, SuspendedCommand>();
 
+  invalidateInteractive(terminalId: string, access?: TerminalAccess): boolean {
+    const interactive = this.interactiveCommands.get(terminalId);
+    if (!interactive) return false;
+    if (access && (interactive.conversationId !== access.conversationId || interactive.ownerId !== access.ownerId)) return false;
+    this.interactiveCommands.delete(terminalId);
+    return true;
+  }
+
   async run(input: TerminalCommandInput, ctx: ToolExecutionContext): Promise<ToolResult> {
     const adapter = ctx.terminal;
     if (!adapter) {
       return { success: false, output: '', error: 'Terminal runtime is unavailable.' };
     }
-    if (!ctx.listen) {
+    if (!adapter.subscribe && !ctx.listen) {
       return { success: false, output: '', error: 'Terminal event listener is unavailable.' };
     }
 
     const command = input.command;
-    const cwd = input.cwd ? resolveWorkspacePath(input.cwd, ctx.workspacePath) : ctx.workspacePath;
+    const cwd = input.cwd
+      ? resolveAuthorizedPath(input.cwd, ctx.workspacePath, ctx.externalPathAccess)
+      : ctx.workspacePath;
     const background = Boolean(input.background);
     const binding = await adapter.acquire({
       conversationId: ctx.conversationId,
@@ -92,6 +107,8 @@ export class TerminalCommandRunner {
       background,
       ownerId: ctx.ownerId,
     });
+    const access = terminalAccess(ctx);
+    await authorizeTerminal(adapter, binding.terminalId, access);
     const nonce = crypto.randomUUID().replace(/-/g, '');
     const frame = buildTerminalFrame(command, binding.frameLanguage, nonce);
     const startedAt = Date.now();
@@ -103,9 +120,8 @@ export class TerminalCommandRunner {
     });
     let suspended = false;
     const unsubscribes: Array<() => void> = [];
-    const abort = () => void stopCommand(adapter, binding.terminalId);
+    const abort = () => void stopCommand(adapter, binding.terminalId, access);
     ctx.signal.addEventListener('abort', abort, { once: true });
-    const listen = ctx.listen;
     let lastSnapshotAt = 0;
 
     // Events are the low-latency path, but the PTY snapshot is the authoritative
@@ -114,7 +130,7 @@ export class TerminalCommandRunner {
     const reconcileSnapshot = async (): Promise<void> => {
       try {
         const snapshot = await adapter.snapshot(binding.terminalId);
-        watch.syncSnapshot(snapshot.data, snapshot.toSequence);
+        watch.syncSnapshot(snapshot.data, snapshot.toSequence, snapshot.truncated);
         if (!snapshot.alive) watch.pushExit(snapshot.exitCode);
       } finally {
         lastSnapshotAt = Date.now();
@@ -137,14 +153,16 @@ export class TerminalCommandRunner {
         );
         return;
       }
-      const unlistenData = await listen('pty:data', (payload) => {
+      const fallbackListen = ctx.listen;
+      if (!fallbackListen) throw new Error('Terminal event listener is unavailable.');
+      const unlistenData = await fallbackListen('pty:data', (payload) => {
         const event = payload as PtyData;
         if (event.pty_id !== binding.ptyId) return;
         const sequence = event.sequence ?? watch.sequence + 1;
         watch.pushData(sequence, event.data);
         emitProgress(ctx, binding, 'running', event.data, sequence);
       });
-      const unlistenExit = await listen('pty:exit', (payload) => {
+      const unlistenExit = await fallbackListen('pty:exit', (payload) => {
         const event = payload as PtyExit;
         if (event.pty_id !== binding.ptyId) return;
         watch.pushExit(event.code);
@@ -190,6 +208,8 @@ export class TerminalCommandRunner {
             command,
             cwd,
             nonce,
+            conversationId: ctx.conversationId,
+            ...(ctx.ownerId ? { ownerId: ctx.ownerId } : {}),
           });
           emitProgress(ctx, binding, 'awaiting_input', '', outcome.sequence);
           return {
@@ -234,13 +254,15 @@ export class TerminalCommandRunner {
         return { success: false, output: parsed.output, error: 'Command cancelled.' };
       }
 
-      await stopCommand(adapter, binding.terminalId);
+      await stopCommand(adapter, binding.terminalId, access);
       emitProgress(ctx, binding, 'error');
       ctx.onTerminalCommand?.(command, parsed.output, watch.exitCode);
       return {
         success: false,
         output: parsed.output,
-        error: background
+        error: watch.truncated
+          ? 'Terminal output was truncated before the command frame completed.'
+          : background
           ? `Background process did not become ready within ${Math.round(waitLimit / 1000)}s.`
           : `Command timed out after ${Math.round(waitLimit / 1000)}s.`,
         metadata: { cwd, terminalId: binding.terminalId, timedOut: !watch.hasExited },
@@ -272,9 +294,13 @@ export class TerminalCommandRunner {
     if (!interactive) {
       return { success: false, output: '', error: 'Terminal is not waiting for agent input.' };
     }
-    if (!ctx.listen) {
+    if (!adapter.subscribe && !ctx.listen) {
       return { success: false, output: '', error: 'Terminal event listener is unavailable.' };
     }
+    if (interactive.conversationId !== ctx.conversationId || interactive.ownerId !== ctx.ownerId) {
+      return { success: false, output: '', error: 'Terminal input belongs to another conversation or agent.' };
+    }
+    await authorizeTerminal(adapter, terminalId, terminalAccess(ctx));
 
     const baseline = await adapter.snapshot(terminalId);
     const current = parseTerminalFrame(baseline.data, interactive.nonce);
@@ -297,19 +323,47 @@ export class TerminalCommandRunner {
       readyPattern: null,
       startedAt: Date.now(),
     });
-    watch.syncSnapshot(baseline.data, baseline.toSequence);
+    watch.syncSnapshot(baseline.data, baseline.toSequence, baseline.truncated);
     let lastSequence = baseline.toSequence;
-    const unlistenData = await ctx.listen('pty:data', (payload) => {
-      const event = payload as PtyData;
-      if (event.pty_id !== interactive.binding.ptyId) return;
-      lastSequence = event.sequence ?? lastSequence + 1;
-      emitProgress(ctx, interactive.binding, 'running', event.data, lastSequence);
-    });
-    const unlistenExit = await ctx.listen('pty:exit', (payload) => {
-      const event = payload as PtyExit;
-      if (event.pty_id !== interactive.binding.ptyId) return;
-      watch.pushExit(event.code);
-    });
+    const onData = (data: string, sequence: number): void => {
+      if (sequence <= lastSequence) return;
+      lastSequence = sequence;
+      watch.pushData(sequence, data);
+      emitProgress(ctx, interactive.binding, 'running', data, sequence);
+    };
+    const onExit = (code: number | null): void => watch.pushExit(code);
+    let unsubscribe: (() => void) | null = null;
+    if (adapter.subscribe) {
+      unsubscribe = await adapter.subscribe(terminalId, onData, onExit);
+      if (ctx.listen) {
+        const unlistenExit = await ctx.listen('pty:exit', (payload) => {
+          const event = payload as PtyExit;
+          if (event.pty_id !== interactive.binding.ptyId) return;
+          onExit(event.code);
+        });
+        const adapterUnsubscribe = unsubscribe;
+        unsubscribe = () => {
+          adapterUnsubscribe();
+          unlistenExit();
+        };
+      }
+    } else {
+      const listen = ctx.listen!;
+      const unlistenData = await listen('pty:data', (payload) => {
+        const event = payload as PtyData;
+        if (event.pty_id !== interactive.binding.ptyId) return;
+        onData(event.data, event.sequence ?? lastSequence + 1);
+      });
+      const unlistenExit = await listen('pty:exit', (payload) => {
+        const event = payload as PtyExit;
+        if (event.pty_id !== interactive.binding.ptyId) return;
+        onExit(event.code);
+      });
+      unsubscribe = () => {
+        unlistenData();
+        unlistenExit();
+      };
+    }
 
     try {
       emitProgress(ctx, interactive.binding, 'running', '', lastSequence);
@@ -317,7 +371,7 @@ export class TerminalCommandRunner {
       const startedAt = Date.now();
       while (Date.now() - startedAt < timeoutMs && !ctx.signal.aborted) {
         const snapshot = await adapter.snapshot(terminalId);
-        watch.syncSnapshot(snapshot.data, snapshot.toSequence);
+        watch.syncSnapshot(snapshot.data, snapshot.toSequence, snapshot.truncated);
         const outcome = watch.evaluate(Date.now(), baselineChars);
         if (outcome.kind === 'complete') {
           this.interactiveCommands.delete(terminalId);
@@ -350,8 +404,24 @@ export class TerminalCommandRunner {
         metadata: { terminalId, sequence: lastSequence, awaitingInput: true },
       };
     } finally {
-      unlistenData();
-      unlistenExit();
+      unsubscribe?.();
     }
   }
+}
+
+function terminalAccess(ctx: ToolExecutionContext): TerminalAccess {
+  return {
+    conversationId: ctx.conversationId,
+    ...(ctx.ownerId ? { ownerId: ctx.ownerId } : {}),
+    ...(ctx.toolCallId ? { toolCallId: ctx.toolCallId } : {}),
+    source: 'agent',
+  };
+}
+
+async function authorizeTerminal(
+  adapter: TerminalRuntimeAdapter,
+  terminalId: string,
+  access?: TerminalAccess,
+): Promise<void> {
+  if (access) await adapter.authorize?.(terminalId, access);
 }

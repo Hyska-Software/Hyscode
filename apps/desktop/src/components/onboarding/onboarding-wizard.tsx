@@ -27,6 +27,7 @@ import { tauriInvoke } from '../../lib/tauri-invoke';
 import { reinitProvider } from '../../lib/init-providers';
 import { PROVIDERS } from '../../lib/provider-catalog';
 import type { ThemeId } from '../../stores/settings-store';
+import { BUILTIN_THEMES } from '@hyscode/theme';
 
 // ── Theme options ─────────────────────────────────────────────────────────────
 
@@ -41,78 +42,16 @@ interface ThemeOption {
   muted: string;
 }
 
-const THEME_OPTIONS: ThemeOption[] = [
-  {
-    id: 'hyscode-dark',
-    name: 'Dark',
-    desc: 'Deep editor-matched dark',
-    bg: '#18191d',
-    surface: '#202123',
-    accent: '#10a37f',
-    fg: '#ececf1',
-    muted: '#8e8ea0',
-  },
-  {
-    id: 'aura',
-    name: 'Aura',
-    desc: 'Purple focus with mint controls',
-    bg: '#110f18',
-    surface: '#15141b',
-    accent: '#a277ff',
-    fg: '#edecee',
-    muted: '#adacae',
-  },
-  {
-    id: 'hyscode-light',
-    name: 'Light',
-    desc: 'Editor-matched light',
-    bg: '#f1f2f4',
-    surface: '#ffffff',
-    accent: '#0d8a6c',
-    fg: '#0d0d0f',
-    muted: '#6e6e80',
-  },
-  {
-    id: 'nord',
-    name: 'Nord',
-    desc: 'Editor-matched arctic dark',
-    bg: '#292e39',
-    surface: '#2e3440',
-    accent: '#88c0d0',
-    fg: '#d8dee9',
-    muted: '#a0a8b7',
-  },
-  {
-    id: 'dracula',
-    name: 'Dracula',
-    desc: 'Editor-matched vibrant dark',
-    bg: '#21222c',
-    surface: '#282a36',
-    accent: '#bd93f9',
-    fg: '#f8f8f2',
-    muted: '#a0a4b8',
-  },
-  {
-    id: 'github-dark',
-    name: 'GitHub Dark',
-    desc: 'Editor-matched GitHub dark',
-    bg: '#010409',
-    surface: '#0d1117',
-    accent: '#58a6ff',
-    fg: '#c9d1d9',
-    muted: '#8b949e',
-  },
-  {
-    id: 'monokai',
-    name: 'Monokai',
-    desc: 'Editor-matched warm dark',
-    bg: '#1e1f1c',
-    surface: '#272822',
-    accent: '#f92672',
-    fg: '#f8f8f2',
-    muted: '#8f908a',
-  },
-];
+const THEME_OPTIONS: ThemeOption[] = BUILTIN_THEMES.map((theme) => ({
+  id: theme.id as ThemeId,
+  name: theme.id === 'hyscode-dark' ? 'Dark' : theme.id === 'hyscode-light' ? 'Light' : theme.name,
+  desc: theme.description,
+  bg: theme.colors.bg,
+  surface: theme.colors.surface,
+  accent: theme.colors.accent,
+  fg: theme.colors.fg,
+  muted: theme.colors.muted,
+}));
 
 // ── Font options ──────────────────────────────────────────────────────────────
 

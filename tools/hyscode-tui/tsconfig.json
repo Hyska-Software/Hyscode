@@ -1,0 +1,22 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "composite": true,
+    "outDir": "dist",
+    "rootDir": "src",
+    "baseUrl": ".",
+    "paths": {
+      "@hyscode/tui-runtime": ["../../packages/tui-runtime/src/index.ts"],
+      "@hyscode/agent-harness": ["../../packages/agent-harness/src/index.ts"],
+      "@hyscode/ai-providers": ["../../packages/ai-providers/src/index.ts"],
+      "@hyscode/theme": ["../../packages/theme/src/index.ts"]
+    }
+  },
+  "include": ["src"],
+  "references": [
+    { "path": "../../packages/ai-providers" },
+    { "path": "../../packages/agent-harness" },
+    { "path": "../../packages/tui-runtime" },
+    { "path": "../../packages/theme" }
+  ]
+}
