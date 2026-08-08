@@ -156,6 +156,7 @@ Em caso de dúvida: `docs/WORKFLOW.md` é a fonte de verdade.
 | `npm run build:prod`      | Windows production build (PowerShell)          |
 | `npm run build:prod:nsis` | Windows NSIS installer build                   |
 | `npm run build:prod:inno` | Windows Inno Setup build                       |
+| `npm run release:local` | Local release build, no GitHub: Windows installers, or Linux via WSL (`-Linux`) |
 
 ## Coding Conventions
 
