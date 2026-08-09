@@ -1,11 +1,9 @@
 name: CI
 
+# Automatic CI is disabled to reduce GitHub Actions usage. Run it manually
+# from the Actions tab when a full validation pass is needed.
 on:
-  pull_request:
-    branches: [main]
-    types: [opened, synchronize, reopened]
-  push:
-    branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: read
