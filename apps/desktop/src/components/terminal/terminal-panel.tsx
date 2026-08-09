@@ -39,7 +39,7 @@ export function TerminalPanel() {
   }, []);
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex h-full min-h-0 min-w-0 flex-col">
       {/* Tab bar — session tabs always visible; drag grip only in bottom mode */}
       <div className="flex h-8 shrink-0 items-center justify-between bg-surface-raised">
         <div className="flex items-center gap-0 overflow-x-auto">
@@ -107,7 +107,7 @@ export function TerminalPanel() {
       </div>
 
       {/* Terminal instances */}
-      <div className="relative flex-1 overflow-hidden bg-surface">
+      <div className="relative min-h-0 min-w-0 flex-1 overflow-hidden bg-surface">
         {sessions.map((session) => (
           <TerminalInstance
             key={session.id}

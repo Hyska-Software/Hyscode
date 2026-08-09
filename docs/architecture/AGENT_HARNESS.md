@@ -564,6 +564,15 @@ includes current terminals in every `runtime_ready`; the TUI consumes these by `
 keeps raw output only for parsing, normalizing ANSI and framing before display. Live
 `terminal_progress` events update tool activity but are not persisted as provider transcript blocks.
 
+The TUI is an active, maintained client of this contract. `@hyscode/tui-runtime` remains the PTY
+lifecycle and ownership authority. Its in-process `TerminalHandoff` API is an additive local
+capability for the current conversation's manual user terminal only: it subscribes to raw PTY
+bytes, writes raw keyboard data, forwards validated viewport sizes, and detaches without killing
+the process. The TUI pauses its projected repaint and restores it on `Ctrl-]`, child exit, error,
+or signal. Agent terminals never enter handoff and remain Harness-controlled projections. The
+serialized `--protocol ndjson` loop remains non-interactive and does not transport raw stdin/stdout
+or handoff bytes.
+
 An `awaiting_input` terminal is a guarded interaction: the agent can use the approved
 `respond_terminal_input` tool only for its owner and non-sensitive prompts. The TUI may write only
 when no tool is actively controlling the terminal and the approval mode is not `yolo`; sensitive

@@ -114,6 +114,11 @@ describe('DesktopTerminalRuntime', () => {
       expect(session).toMatchObject({ isAgentSession: true, ownerConversationId: 'conversation-a' });
       expect(binding.terminalId).toBe(session.id);
       expect(binding.ptyId).toBe('pty-fresh');
+      expect(invokeMock).toHaveBeenCalledWith('pty_spawn', expect.objectContaining({
+        cols: 120,
+        rows: 32,
+        interactive: false,
+      }));
     });
 
     it('forces a fresh session when forceNew is set', async () => {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { UiState } from './types';
-import { TerminalRenderer } from './renderer';
+import { TerminalRenderer, terminalCellWidth } from './renderer';
 import { CLI_LOGO } from './logo';
 import { BUILTIN_THEMES } from '@hyscode/tui-runtime';
 
@@ -103,7 +103,7 @@ describe('TUI renderer', () => {
     expect(rendered).toContain('╰');
     expect(rendered).not.toContain('Enter send');
 
-    const plainLines = rendered.replace(/\u001b\[[0-9;]*[A-Za-z]/g, '').split('\n');
+    const plainLines = rendered.replace(/\u001b\[[0-9;]*[A-Za-z]/g, '').replace(/\r/g, '').split('\n');
     const plainComposerIndex = plainLines.findIndex((line) => line.includes('MESSAGE'));
     expect(plainLines[plainComposerIndex - 1]).toBe('');
     expect(plainLines[plainComposerIndex]).toMatch(/^\s{2}╭─ MESSAGE/);
@@ -123,7 +123,7 @@ describe('TUI renderer', () => {
     const rendered = new TerminalRenderer().render(state({
       git: { available: true, branch: 'feature/git-summary', insertions: 1213, deletions: 554, changedFiles: 8 },
     }));
-    const firstLine = rendered.split('\n')[0].replace(/\u001b\[[0-9;]*[A-Za-z]/g, '');
+    const firstLine = rendered.split('\n')[0].replace(/\u001b\[[0-9;]*[A-Za-z]/g, '').replace(/\r/g, '');
 
     expect(firstLine).toContain('anthropic/claude-sonnet');
     expect(firstLine).toContain('feature/git-summary - +1213 - 554');
@@ -148,6 +148,30 @@ describe('TUI renderer', () => {
 
     expect(rendered).toContain('Ready in');
     expect(rendered).not.toContain('SHORTCUTS');
+  });
+
+  it('keeps every rendered row inside the real viewport and clears stale rows', () => {
+    const rendered = new TerminalRenderer().render(state({
+      width: 40,
+      height: 12,
+      sidebarVisible: false,
+      transcript: [{ kind: 'assistant', text: '界界界界界界界界界界 🙂🙂🙂🙂🙂 long output that must be clipped' }],
+    }));
+    const rows = rendered.split('\n').map((row) => row.replace(/\u001b\][^\u0007]*(?:\u0007|\u001b\\)/gu, '').replace(/\u001b\[[0-9;?]*[ -\/]*[@-~]/gu, '').replace(/\r/gu, ''));
+
+    expect(terminalCellWidth('界🙂')).toBe(4);
+    expect(terminalCellWidth('👩‍💻')).toBe(2);
+    expect(terminalCellWidth('e\u0301')).toBe(1);
+    expect(rows.every((row) => terminalCellWidth(row) <= 40)).toBe(true);
+    expect(rendered).toContain('\u001b[2K\r');
+  });
+
+  it('uses a compact welcome layout instead of forcing a wide panel', () => {
+    const rendered = new TerminalRenderer().render(state({ width: 40, height: 12, transcript: [] }));
+    const rows = rendered.split('\n').map((row) => row.replace(/\u001b\][^\u0007]*(?:\u0007|\u001b\\)/gu, '').replace(/\u001b\[[0-9;?]*[ -\/]*[@-~]/gu, '').replace(/\r/gu, ''));
+
+    expect(rows.every((row) => terminalCellWidth(row) <= 40)).toBe(true);
+    expect(rendered).toContain('VORTEX');
   });
 
   it('renders a structured startup welcome with the CLI logo and runtime details', () => {
@@ -200,7 +224,7 @@ describe('TUI renderer', () => {
         ].join('\n'),
       }],
     }));
-    const plain = rendered.replace(/\u001b\[[0-9;]*[A-Za-z]/g, '');
+    const plain = rendered.replace(/\u001b\[[0-9;]*[A-Za-z]/g, '').replace(/\r/g, '');
 
     expect(plain).toContain('◆ Release notes');
     expect(plain).toContain('✓ Renderer shipped');
@@ -241,7 +265,7 @@ describe('TUI renderer', () => {
         expanded: false,
       }],
     }));
-    const plain = rendered.replace(/\u001b\[[0-9;]*[A-Za-z]/g, '');
+    const plain = rendered.replace(/\u001b\[[0-9;]*[A-Za-z]/g, '').replace(/\r/g, '');
 
     expect(plain).not.toContain('ACTIVITY');
     expect(plain).not.toContain('list_directory');
@@ -263,7 +287,7 @@ describe('TUI renderer', () => {
         expanded: false,
       }],
     }));
-    const plain = rendered.replace(/\u001b\[[0-9;]*[A-Za-z]/g, '');
+    const plain = rendered.replace(/\u001b\[[0-9;]*[A-Za-z]/g, '').replace(/\r/g, '');
 
     expect(plain).toContain('npm run build');
     expect(plain).toContain('terminal-agent-1');
@@ -339,7 +363,7 @@ describe('TUI renderer', () => {
 
   it('removes the session sidebar when the persisted setting is disabled', () => {
     const rendered = new TerminalRenderer().render(state({ sidebarVisible: false }));
-    const plain = rendered.replace(/\u001b\[[0-9;]*[A-Za-z]/g, '');
+    const plain = rendered.replace(/\u001b\[[0-9;]*[A-Za-z]/g, '').replace(/\r/g, '');
 
     expect(plain.split('\n').some((line) => line.trim() === 'SESSION')).toBe(false);
     expect(plain).not.toContain('SHORTCUTS');
@@ -356,7 +380,7 @@ describe('TUI renderer', () => {
 
     expect(promptLines.length).toBeGreaterThan(1);
     expect(rendered).not.toContain('Enter send');
-    const plainLines = rendered.replace(/\u001b\[[0-9;]*[A-Za-z]/g, '').split('\n');
+    const plainLines = rendered.replace(/\u001b\[[0-9;]*[A-Za-z]/g, '').replace(/\r/g, '').split('\n');
     const composerHeaderIndex = plainLines.findIndex((line) => line.includes('MESSAGE'));
     const composerBottom = plainLines.slice(composerHeaderIndex).find((line) => line.includes('╰'));
     expect(composerBottom?.startsWith('  ')).toBe(true);
@@ -382,7 +406,7 @@ describe('TUI renderer', () => {
       }],
       activeTerminalId: 'term-1',
     }));
-    const plain = rendered.replace(/\u001b\[[0-9;]*[A-Za-z]/g, '');
+    const plain = rendered.replace(/\u001b\[[0-9;]*[A-Za-z]/g, '').replace(/\r/g, '');
 
     expect(plain).toContain('TERMINAL INPUT');
     expect(plain).toContain('••••••••••••');
@@ -399,7 +423,7 @@ describe('TUI renderer', () => {
         { kind: 'assistant', text: 'I am executing the requested change.' },
       ],
     }));
-    const plainLines = rendered.replace(/\u001b\[[0-9;]*[A-Za-z]/g, '').split('\n');
+    const plainLines = rendered.replace(/\u001b\[[0-9;]*[A-Za-z]/g, '').replace(/\r/g, '').split('\n');
     const workingIndex = plainLines.findIndex((line) => line.includes('Working...'));
     const chatIndex = plainLines.findIndex((line) => line.includes('› you'));
 

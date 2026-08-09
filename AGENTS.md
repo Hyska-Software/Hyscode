@@ -53,6 +53,8 @@ documentado em [`docs/WORKFLOW.md`](docs/WORKFLOW.md) e operacionalizado em
 - **Sempre** atualizar `AGENTS.md` ou `docs/WORKFLOW.md` se a convenção mudar.
 - **Sempre** referenciar este `AGENTS.md` em qualquer resposta sobre workflow.
 - **Always** evaluate and update the TUI when shared contracts or user-facing behavior change.
+- **The TUI is active and maintained**: terminal contracts, renderer behavior, and user-facing
+  terminal changes must keep the fullscreen TUI supported alongside Desktop.
 
 ## Commit & PR — apenas sob pedido explícito
 

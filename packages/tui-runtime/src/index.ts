@@ -3,6 +3,19 @@ export { CliDataStore } from './data-store';
 export { SharedConfigStore, SharedKeyStore } from './config';
 export type { SharedTuiSettings, UpdateChannel } from './config';
 export { CliHost } from './host';
+export {
+  DEFAULT_TERMINAL_VIEWPORT,
+  MAX_TERMINAL_COLS,
+  MAX_TERMINAL_ROWS,
+  normalizeTerminalViewport,
+  sameTerminalViewport,
+} from './terminal-handoff';
+export type {
+  TerminalDataHandler,
+  TerminalExitHandler,
+  TerminalHandoff,
+  TerminalViewport,
+} from './terminal-handoff';
 export { findTheme, loadThemeCatalog, normalizeThemeId } from './themes';
 export {
   CliUpdater,

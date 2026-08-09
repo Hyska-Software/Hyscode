@@ -90,10 +90,12 @@ the shell.
 through `node-pty`. PTY output is sequenced and bounded to the Harness capture limit, supports
 snapshot/replay from a sequence, independent subscribers, resize, interrupt, kill, exit events,
 and shutdown. Agent and manual terminals have separate roles and ownership; agent reuse requires
-the same owner, conversation, and normalized `cwd`. The TUI receives `terminal_updated` projections
-and never owns a PTY. The same host also exposes filesystem, Git, Docker, web, keychain, memory,
-SDD, and diagnostic commands to the harness. There is no Rust UI, Rust agent runtime, or production
-host round trip in the TUI path.
+the same owner, conversation, and normalized `cwd`. The runtime remains the lifecycle authority:
+the TUI normally consumes `terminal_updated` projections, while a manual user terminal may use a
+temporary in-process `TerminalHandoff` for raw stdin/stdout passthrough. Handoff never transfers
+PTY ownership and is denied for agent terminals. The same host also exposes filesystem, Git,
+Docker, web, keychain, memory, SDD, and diagnostic commands to the harness. There is no Rust UI,
+Rust agent runtime, or production host round trip in the TUI path.
 
 Desktop settings are mirrored from the existing Zustand/local-storage store to
 the platform shared settings file (`%LOCALAPPDATA%/hyscode/settings.json` on
@@ -138,9 +140,10 @@ and VORTEX CLI preserve these fields. The TUI exposes them through `/update`:
 The runtime exports the reusable NDJSON bridge loop for external protocol clients and tests. The
 packaged launcher preserves the fullscreen experience by default, and `vortex --protocol ndjson`
 selects the official automation surface. It accepts `initialize`, `send_message`, terminal events,
-approval resolutions, cancellation, and shutdown over stdin/stdout. CLI flags such as `--workspace`,
-`--provider`, `--model`, `--mode`, and `--config` provide defaults for the protocol's `initialize`
-request; explicit request fields take precedence.
+approval resolutions, cancellation, and shutdown over stdin/stdout. NDJSON is deliberately
+non-interactive: it never carries raw PTY bytes and never exposes the TUI handoff's stdin/stdout
+passthrough. CLI flags such as `--workspace`, `--provider`, `--model`, `--mode`, and `--config`
+provide defaults for the protocol's `initialize` request; explicit request fields take precedence.
 
 ### Build and launch
 
@@ -195,11 +198,14 @@ OpenCode-style composer shortcuts are supported for the terminal workflow:
 image on the next model request, `Shift+Enter` inserts a multiline break, and
 bracketed paste preserves newlines. `/diffs` shows bounded textual diffs and
 accept/reject actions for file changes emitted by the shared harness. `/terminal` exposes
-`list`, `open`, `focus`, `read`, `interrupt`, and `kill`; agent terminals appear automatically,
-and a terminal waiting for non-sensitive input switches the composer into guarded terminal-input
-mode. Resize events are forwarded to the active PTY. Chat, review, and plan policies continue to
-deny terminal tools; build and debug keep them enabled and report tool errors through the normal
-TUI activity and result surfaces.
+`list`, `open`, `focus`, `attach`, `read`, `interrupt`, and `kill`; `focus` remains the safe
+projected preview, while `/terminal attach <id>` temporarily gives a manual user terminal raw
+fullscreen I/O for applications such as Pi or OMP. `Ctrl-]` detaches and restores the TUI without
+killing the PTY; the same restoration occurs on child exit, errors, or process signals. Agent
+terminals remain projected and protected by the Harness. Terminals waiting for non-sensitive input
+still use the guarded composer input mode. Resize events are forwarded to the active PTY. Chat,
+review, and plan policies continue to deny terminal tools; build and debug keep them enabled and
+report tool errors through the normal TUI activity and result surfaces.
 
 `Ctrl-C` cancels an active turn and quits when the input is empty; `Shift-Tab`
 cycles agent modes; `Ctrl-T` cycles supported thinking levels; `Tab` changes

@@ -412,8 +412,13 @@ answers, and other sensitive values cannot be supplied by the agent and must be 
 When a terminal is `awaiting_input`, the bridge emits `terminal_updated` and the Harness emits
 `terminal_progress`. The TUI switches to a dedicated input mode only when the terminal is not under
 an active tool owner and approval mode is not `yolo`; typed sensitive values are masked and are not
-written to transcript or model context. `/terminal` supports `list`, `open`, `focus`, `read`,
-`interrupt`, and `kill`. `terminal_resize` forwards the TUI viewport dimensions to the PTY.
+written to transcript or model context. `/terminal` supports `list`, `open`, `focus`, `attach`,
+`read`, `interrupt`, and `kill`. `focus` is a projected preview; `/terminal attach <id>` is the
+supported fullscreen path for Pi, OMP, and other interactive terminal applications, and is
+authorized only for a live manual user terminal in the current conversation. It temporarily
+forwards raw PTY output, stdin bytes, ANSI, alternate-screen, mouse, bracketed-paste, UTF-8, and
+function-key sequences. `Ctrl-]` detaches and restores the TUI while leaving the PTY alive.
+`terminal_resize` forwards the TUI viewport dimensions to the PTY.
 
 ### 7e. Terminal bridge protocol
 
@@ -425,7 +430,9 @@ until explicit cleanup or shutdown.
 
 The fullscreen VORTEX client embeds this bridge. `vortex --protocol ndjson` is the supported
 non-interactive automation surface and accepts the same `initialize`, `send_message`, approval,
-terminal-event, cancellation, and shutdown messages over stdin/stdout. Without the explicit
+terminal-event, cancellation, and shutdown messages over stdin/stdout. NDJSON does not expose
+`TerminalHandoff` and does not transport raw PTY stdin/stdout bytes; applications requiring a
+fullscreen terminal must use the interactive TUI and `/terminal attach`. Without the explicit
 protocol option, a non-TTY launcher keeps its readiness-only behavior.
 
 ---

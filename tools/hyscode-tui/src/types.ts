@@ -205,6 +205,7 @@ export type CommandFlow =
   | { kind: 'context_remove'; selected: number }
   | { kind: 'terminal_attach'; selected: number }
   | { kind: 'terminal_select'; selected: number }
+  | { kind: 'terminal_handoff'; selected: number }
   | { kind: 'diff_file'; action: 'accept' | 'reject'; selected: number }
   | { kind: 'tab_select'; selected: number }
   | { kind: 'session_delete'; selected: number };

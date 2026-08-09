@@ -51,6 +51,7 @@ import {
   type SharedTuiSettings,
 } from './config';
 import { CliHost } from './host';
+import { normalizeTerminalViewport, type TerminalHandoff, type TerminalViewport } from './terminal-handoff';
 import { findTheme, loadThemeCatalog, normalizeThemeId } from './themes';
 import {
   pendingToolToInteraction,
@@ -99,6 +100,8 @@ type CliTerminalEntry = {
   sequence: number;
   outputPreview: string;
   truncated: boolean;
+  handoffActive: boolean;
+  handoffDetach: (() => void) | null;
   observerUnsubscribe: (() => void) | null;
 };
 
@@ -152,6 +155,10 @@ export class TuiBridge {
 
   setOutput(output: BridgeOutput): void {
     this.output = output;
+  }
+
+  async openUserTerminalHandoff(terminalId: string): Promise<TerminalHandoff> {
+    return this.requireTerminalRuntime().openUserTerminalHandoff(terminalId, this.userTerminalAccess());
   }
 
   async handle(request: BridgeRequest): Promise<BridgeResponse> {
@@ -722,10 +729,11 @@ export class TuiBridge {
     const runtime = this.requireTerminalRuntime();
     const terminalId = String(rawParams.terminalId ?? '');
     runtime.authorize(terminalId, this.userTerminalAccess());
+    const viewport = normalizeTerminalViewport(rawParams.cols, rawParams.rows);
     await runtime.resize(
       terminalId,
-      Math.max(1, Math.floor(numberValue(rawParams.cols, 120))),
-      Math.max(1, Math.floor(numberValue(rawParams.rows, 32))),
+      viewport.cols,
+      viewport.rows,
     );
     return { resized: true };
   }
@@ -1615,6 +1623,73 @@ class CliTerminalRuntime implements TerminalRuntimeAdapter {
     await this.write(terminalId, data);
   }
 
+  async openUserTerminalHandoff(terminalId: string, access: TerminalAccess): Promise<TerminalHandoff> {
+    const entry = this.requireEntry(terminalId);
+    this.authorize(terminalId, access);
+    if (entry.role !== 'user') throw new Error('Only manual user terminals can be attached interactively.');
+    if (!entry.alive) throw new Error(`Terminal "${terminalId}" is not alive.`);
+    if (entry.handoffActive) throw new Error(`Terminal "${terminalId}" is already attached.`);
+
+    let detached = false;
+    let subscription: (() => void) | null = null;
+    const clearHandoff = (): void => {
+      subscription?.();
+      subscription = null;
+      entry.handoffDetach = null;
+      if (entry.handoffActive) {
+        entry.handoffActive = false;
+        this.notify(entry, 'state');
+      }
+    };
+
+    entry.handoffActive = true;
+    entry.handoffDetach = clearHandoff;
+    this.notify(entry, 'state');
+
+    const handoff: TerminalHandoff = {
+      terminalId,
+      subscribe: async (onData, onExit) => {
+        if (detached) throw new Error(`Terminal handoff for "${terminalId}" is closed.`);
+        if (subscription) throw new Error(`Terminal handoff for "${terminalId}" already has a subscriber.`);
+        const unsubscribe = await this.subscribe(
+          terminalId,
+          onData,
+          (exitCode) => {
+            detached = true;
+            clearHandoff();
+            onExit(exitCode);
+          },
+        );
+        if (detached) {
+          unsubscribe();
+          throw new Error(`Terminal "${terminalId}" exited before the handoff was attached.`);
+        }
+        subscription = unsubscribe;
+        return () => {
+          if (subscription === unsubscribe) clearHandoff();
+          else unsubscribe();
+        };
+      },
+      write: async (data) => {
+        if (detached || !entry.handoffActive) throw new Error(`Terminal handoff for "${terminalId}" is closed.`);
+        this.authorize(terminalId, access);
+        await this.write(terminalId, data);
+      },
+      resize: async (viewport: TerminalViewport) => {
+        if (detached || !entry.handoffActive) throw new Error(`Terminal handoff for "${terminalId}" is closed.`);
+        this.authorize(terminalId, access);
+        const normalized = normalizeTerminalViewport(viewport.cols, viewport.rows);
+        await this.resize(terminalId, normalized.cols, normalized.rows);
+      },
+      detach: async () => {
+        if (detached) return;
+        detached = true;
+        clearHandoff();
+      },
+    };
+    return handoff;
+  }
+
   async interrupt(terminalId: string): Promise<void> {
     const entry = this.requireEntry(terminalId);
     if (entry.alive) await this.host.invoke('pty_interrupt', { ptyId: entry.binding.ptyId });
@@ -1715,7 +1790,10 @@ class CliTerminalRuntime implements TerminalRuntimeAdapter {
   }
 
   async shutdown(): Promise<void> {
-    for (const entry of this.entries.values()) entry.observerUnsubscribe?.();
+    for (const entry of this.entries.values()) {
+      entry.handoffDetach?.();
+      entry.observerUnsubscribe?.();
+    }
     this.entries.clear();
   }
 
@@ -1736,6 +1814,7 @@ class CliTerminalRuntime implements TerminalRuntimeAdapter {
       cwd: request.cwd,
       cols: 120,
       rows: 32,
+      interactive: request.role === 'user' && process.stdin.isTTY === true && process.stdout.isTTY === true,
     });
     const binding: TerminalBinding = { terminalId, ptyId, persistent: true, frameLanguage: shell.frameLanguage };
     const entry: CliTerminalEntry = {
@@ -1753,6 +1832,8 @@ class CliTerminalRuntime implements TerminalRuntimeAdapter {
       sequence: 0,
       outputPreview: '',
       truncated: false,
+      handoffActive: false,
+      handoffDetach: null,
       observerUnsubscribe: null,
     };
     this.entries.set(terminalId, entry);
@@ -1817,6 +1898,7 @@ class CliTerminalRuntime implements TerminalRuntimeAdapter {
       awaitingInput: entry.awaitingInput,
       exitCode: entry.exitCode,
       truncated: entry.truncated,
+      handoffActive: entry.handoffActive,
       canUserWrite,
       permissions: {
         read: true,

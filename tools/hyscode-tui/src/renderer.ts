@@ -32,8 +32,8 @@ export class TerminalRenderer {
     const previousTheme = activeAnsiTheme;
     activeAnsiTheme = resolveAnsiTheme(state.themeId, state.themes);
     try {
-      const width = Math.max(60, state.width);
-      const height = Math.max(16, state.height);
+      const width = Math.max(1, Math.floor(state.width));
+      const height = Math.max(1, Math.floor(state.height));
       const header = headerLines(state, width);
       const composer = composerLines(state, width);
       const panelBudget = Math.max(0, height - header.length - composer.length - 4);
@@ -44,13 +44,17 @@ export class TerminalRenderer {
       const transcriptHeight = Math.max(1, bodyHeight - executionBanner.length);
       const sidebarWidth = state.sidebarVisible && width >= 100 ? SIDEBAR_WIDTH : 0;
       const mainWidth = sidebarWidth > 0 ? width - sidebarWidth - 1 : width;
-      const transcript = transcriptView(state.transcript, Math.max(20, mainWidth - 2), state);
+      const transcript = transcriptView(state.transcript, Math.max(1, mainWidth - 2), state);
       const start = Math.max(0, transcript.length - transcriptHeight - state.scroll);
       const visibleTranscript = transcript.slice(start, start + transcriptHeight);
       const body = layoutBody([...executionBanner, ...visibleTranscript], state, width, bodyHeight, sidebarWidth);
       const lines = [...header, ...body, ...panel, ...composer];
       while (lines.length < height) lines.push('');
-      return `${activeAnsiTheme.reset}\u001b[2J\u001b[H${lines.slice(0, height).map((line) => fitAnsi(line, width)).join('\n')}${RESET}`;
+      const frame = lines
+        .slice(0, height)
+        .map((line) => `\u001b[2K\r${fitAnsi(line, width)}`)
+        .join('\n');
+      return `${activeAnsiTheme.reset}\u001b[2J\u001b[H${frame}${RESET}`;
     } finally {
       activeAnsiTheme = previousTheme;
     }
@@ -100,7 +104,7 @@ function layoutBody(lines: string[], state: UiState, width: number, height: numb
   const mainWidth = sidebarWidth > 0 ? width - sidebarWidth - 1 : width;
   const paddedMain = [...lines];
   while (paddedMain.length < height) paddedMain.push('');
-  if (sidebarWidth === 0) return paddedMain.slice(0, height).map((line) => `  ${line}`);
+  if (sidebarWidth === 0) return paddedMain.slice(0, height).map((line) => `  ${fitAnsi(line, Math.max(1, width - 2))}`);
 
   const sidebar = sidebarLines(state, sidebarWidth - 1, height);
   return Array.from({ length: height }, (_, index) => {
@@ -175,7 +179,7 @@ function terminalPanel(state: UiState, width: number): string[] {
   return [
     `${ACCENT}${BOLD}TERMINAL · ${shorten(terminal.name, width - 24)}${RESET} ${DIM}${terminal.frameLanguage} · ${terminal.alive ? 'alive' : 'exited'} · seq ${terminal.sequence}${RESET}`,
     ...wrapText(terminal.outputPreview || 'Terminal is ready for input.', Math.max(12, width - 4)).slice(-10).map((line) => `${SOFT}${line}${RESET}`),
-    `${terminal.awaitingInput ? `${WARNING}Input is required${RESET} · type a response and press Enter` : `${DIM}Type !command to send input`}${RESET} · /terminal to focus · /attach terminal:${terminal.terminalId}${RESET}`,
+    `${terminal.awaitingInput ? `${WARNING}Input is required${RESET} · type a response and press Enter` : `${DIM}Type !command to send input`}${RESET} · /terminal focus preview · /terminal attach ${terminal.terminalId} for fullscreen · Ctrl-] detaches${RESET}`,
     '',
   ];
 }
@@ -224,7 +228,7 @@ function activityPanel(state: UiState, width: number): string[] {
       if (command) lines.push(`    ${DIM}$ ${shorten(command, width - 8)}${RESET}`);
       if (tool.liveOutput) lines.push(`    ${shorten(tool.liveOutput.split(/\r?\n/u).at(-1) ?? '', width - 10)}`);
     }
-    lines.push(`${DIM}Use /terminal focus <id> to inspect a terminal.${RESET}`);
+    lines.push(`${DIM}Use /terminal focus <id> to preview, or /terminal attach <id> for a manual fullscreen terminal.${RESET}`);
   }
   if (state.rules.length) {
     lines.push(`${ACCENT}RULES · ${state.rules.length}${RESET}`);
@@ -259,7 +263,16 @@ function changeDiff(original: string | null, next: string, width: number): strin
 }
 
 function emptyTranscript(state: UiState, width: number): string[] {
-  const panelWidth = Math.max(48, width);
+  const panelWidth = Math.max(1, width);
+  if (panelWidth < 48) {
+    const model = state.provider && state.model ? `${state.provider}/${state.model}` : 'model not selected';
+    return [
+      `${ACCENT}${BOLD}VORTEX${RESET} · ${shorten(state.workspace, Math.max(1, panelWidth - 9))}`,
+      `${MUTED}${shorten(state.mode, Math.max(1, panelWidth - 2))}${RESET} · ${shorten(model, Math.max(1, panelWidth - 4))}`,
+      `${DIM}/ commands · ! terminal · @ context${RESET}`,
+      `${MUTED}${shorten(state.status, Math.max(1, panelWidth))}${RESET}`,
+    ].map((line) => fitAnsi(line, panelWidth));
+  }
   const innerWidth = Math.max(44, panelWidth - 2);
   const leftWidth = Math.min(32, Math.max(24, Math.floor((innerWidth - 1) * 0.35)));
   const rightWidth = Math.max(18, innerWidth - leftWidth - 1);
@@ -441,9 +454,17 @@ function appendInputSegment(lines: InputLine[], characters: string[], start: num
   let offset = start;
   while (offset < end) {
     const remaining = characters.slice(offset, end);
-    let length = Math.min(width, remaining.length);
-    if (remaining.length > width) {
-      for (let index = length - 1; index >= Math.floor(width * 0.55); index -= 1) {
+    let length = 0;
+    let usedWidth = 0;
+    while (length < remaining.length) {
+      const characterWidth = characterCellWidth(remaining[length]);
+      if (length > 0 && usedWidth + characterWidth > width) break;
+      usedWidth += characterWidth;
+      length += 1;
+      if (usedWidth >= width) break;
+    }
+    if (length < remaining.length) {
+      for (let index = length - 1; index >= Math.floor(length * 0.55); index -= 1) {
         if (/\s/.test(remaining[index] ?? '')) {
           length = index + 1;
           break;
@@ -652,12 +673,12 @@ function listRange(selected: number, total: number, maxHeight: number, fixedLine
 }
 
 function makePanel(title: string, content: string[], width: number): string[] {
-  const innerWidth = Math.max(24, width - 6);
+  const innerWidth = Math.max(1, width - 6);
   const titleText = ` ${title} `;
   const top = `${PANEL}╭─${titleText}${'─'.repeat(Math.max(0, width - visibleLength(titleText) - 4))}╮${RESET}`;
   const lines = [top];
   for (const contentLine of content) {
-    const wrapped = wrapText(stripAnsi(contentLine), innerWidth);
+    const wrapped = wrapText(contentLine, innerWidth);
     for (const line of wrapped) lines.push(`${PANEL}│${RESET} ${fitAnsi(line, innerWidth)} ${PANEL}│${RESET}`);
   }
   lines.push(`${PANEL}╰${'─'.repeat(Math.max(0, width - 2))}╯${RESET}`);
@@ -665,8 +686,13 @@ function makePanel(title: string, content: string[], width: number): string[] {
 }
 
 function alignColumns(left: string, right: string, width: number): string {
-  const gap = Math.max(1, width - visibleLength(left) - visibleLength(right));
-  return `${left}${' '.repeat(gap)}${right}`;
+  const safeWidth = Math.max(1, width);
+  if (visibleLength(left) + visibleLength(right) + 1 <= safeWidth) {
+    return `${left}${' '.repeat(safeWidth - visibleLength(left) - visibleLength(right))}${right}`;
+  }
+  const rightWidth = Math.max(1, Math.min(visibleLength(right), Math.floor(safeWidth * 0.45)));
+  const leftWidth = Math.max(1, safeWidth - rightWidth - 1);
+  return `${fitAnsi(left, leftWidth)} ${fitAnsi(right, rightWidth)}`;
 }
 
 function padAnsi(value: string, width: number): string {
@@ -683,13 +709,11 @@ function wrapText(text: string, width: number): string[] {
       continue;
     }
     let remaining = segment;
-    while (Array.from(remaining).length > safeWidth) {
-      const characters = Array.from(remaining);
-      let cut = safeWidth;
-      const whitespace = remaining.slice(0, characters.length).lastIndexOf(' ', safeWidth);
-      if (whitespace > Math.floor(safeWidth * 0.55)) cut = whitespace;
-      output.push(characters.slice(0, cut).join('').trimEnd());
-      remaining = characters.slice(cut).join('').trimStart();
+    while (terminalCellWidth(remaining) > safeWidth) {
+      const cut = findWrapCut(remaining, safeWidth);
+      const line = takeAnsiCells(remaining, cut).trimEnd();
+      output.push(line);
+      remaining = dropAnsiCells(remaining, cut).trimStart();
     }
     output.push(remaining);
   }
@@ -697,18 +721,195 @@ function wrapText(text: string, width: number): string[] {
 }
 
 function shorten(value: string, width: number): string {
-  const characters = Array.from(stripAnsi(value));
   if (width <= 0) return '';
-  if (characters.length <= width) return characters.join('');
-  return `${characters.slice(0, Math.max(0, width - 1)).join('')}…`;
+  return fitAnsi(value, width);
+}
+
+export function terminalCellWidth(value: string): number {
+  return cellSegments(stripAnsi(value)).reduce((total, segment) => total + segment.width, 0);
 }
 
 function stripAnsi(value: string): string {
-  return value.replace(/[\u001b\u009b][[\]()#;?]*(?:(?:[a-zA-Z\d]*(?:;[-a-zA-Z\d\/#&.:=?%@~_]+)*)?\u0007|(?:(?:\d{1,4}(?:;\d{0,4})*)?[\dA-PR-TZcf-nq-uy=><~]))/g, '');
+  return tokenizeAnsi(value)
+    .filter((token) => !token.control)
+    .map((token) => token.value)
+    .join('');
 }
 
 function visibleLength(value: string): number {
-  return Array.from(stripAnsi(value)).length;
+  return terminalCellWidth(value);
+}
+
+type AnsiControlToken = { value: string; control: boolean };
+
+function tokenizeAnsi(value: string): AnsiControlToken[] {
+  const tokens: AnsiControlToken[] = [];
+  let textStart = 0;
+  let index = 0;
+  while (index < value.length) {
+    const length = ansiSequenceLength(value, index);
+    if (length === 0) {
+      index += Array.from(value.slice(index, index + 1))[0]?.length ?? 1;
+      continue;
+    }
+    if (textStart < index) tokens.push({ value: value.slice(textStart, index), control: false });
+    tokens.push({ value: value.slice(index, index + length), control: true });
+    index += length;
+    textStart = index;
+  }
+  if (textStart < value.length) tokens.push({ value: value.slice(textStart), control: false });
+  return tokens;
+}
+
+function ansiSequenceLength(value: string, start: number): number {
+  const first = value[start];
+  if (first !== '\u001b' && first !== '\u009b') return 0;
+  if (first === '\u009b') {
+    const final = value.slice(start + 1).search(/[\u0040-\u007e]/u);
+    return final >= 0 ? final + 2 : value.length - start;
+  }
+  const next = value[start + 1];
+  if (next === '[') {
+    const final = value.slice(start + 2).search(/[\u0040-\u007e]/u);
+    return final >= 0 ? final + 3 : value.length - start;
+  }
+  if (next === ']') {
+    const rest = value.slice(start + 2);
+    const bell = rest.indexOf('\u0007');
+    const stringTerminator = rest.indexOf('\u001b\\');
+    if (bell < 0 && stringTerminator < 0) return value.length - start;
+    const end = bell >= 0 && (stringTerminator < 0 || bell < stringTerminator) ? bell + 1 : stringTerminator + 2;
+    return end + 2;
+  }
+  return Math.min(2, value.length - start);
+}
+
+function findWrapCut(value: string, width: number): number {
+  let used = 0;
+  let lastWhitespaceCells = -1;
+  for (const token of tokenizeAnsi(value)) {
+    if (token.control) continue;
+    for (const segment of cellSegments(token.value)) {
+      if (/\s/u.test(segment.value)) lastWhitespaceCells = used + segment.width;
+      if (used + segment.width > width) {
+        if (used === 0) return segment.width;
+        return lastWhitespaceCells > Math.floor(width * 0.55) ? lastWhitespaceCells : used;
+      }
+      used += segment.width;
+    }
+  }
+  return used;
+}
+
+function takeAnsiCells(value: string, width: number): string {
+  let used = 0;
+  let output = '';
+  for (const token of tokenizeAnsi(value)) {
+    if (token.control) {
+      output += token.value;
+      continue;
+    }
+    for (const segment of cellSegments(token.value)) {
+      if (used + segment.width > width) return output;
+      output += segment.value;
+      used += segment.width;
+    }
+  }
+  return output;
+}
+
+function dropAnsiCells(value: string, width: number): string {
+  let used = 0;
+  let output = '';
+  let dropping = true;
+  for (const token of tokenizeAnsi(value)) {
+    if (token.control) {
+      if (!dropping) output += token.value;
+      continue;
+    }
+    for (const segment of cellSegments(token.value)) {
+      if (dropping && used + segment.width <= width) {
+        used += segment.width;
+        continue;
+      }
+      dropping = false;
+      output += segment.value;
+    }
+  }
+  return output;
+}
+
+type CellSegment = { value: string; width: number };
+
+function cellSegments(value: string): CellSegment[] {
+  const segments: CellSegment[] = [];
+  let current = '';
+  let currentWidth = 0;
+  let joinNext = false;
+  const flush = (): void => {
+    if (!current) return;
+    segments.push({ value: current, width: currentWidth });
+    current = '';
+    currentWidth = 0;
+  };
+
+  for (const character of Array.from(value)) {
+    const codePoint = character.codePointAt(0) ?? 0;
+    if (codePoint === 0x200d) {
+      current += character;
+      joinNext = true;
+      continue;
+    }
+    const width = characterCellWidth(character);
+    if (width === 0) {
+      current += character;
+      continue;
+    }
+    if (joinNext) {
+      current += character;
+      currentWidth = Math.max(currentWidth, width);
+      joinNext = false;
+      continue;
+    }
+    flush();
+    current = character;
+    currentWidth = width;
+  }
+  flush();
+  return segments;
+}
+
+function characterCellWidth(character: string): number {
+  const codePoint = character.codePointAt(0) ?? 0;
+  if (codePoint === 0 || codePoint < 32 || (codePoint >= 0x7f && codePoint < 0xa0)) return 0;
+  if (isCombiningCodePoint(codePoint) || codePoint === 0x200d) return 0;
+  if (isWideCodePoint(codePoint)) return 2;
+  return 1;
+}
+
+function isCombiningCodePoint(codePoint: number): boolean {
+  return (codePoint >= 0x0300 && codePoint <= 0x036f)
+    || (codePoint >= 0x0483 && codePoint <= 0x0489)
+    || (codePoint >= 0x1ab0 && codePoint <= 0x1aff)
+    || (codePoint >= 0x1dc0 && codePoint <= 0x1dff)
+    || (codePoint >= 0x20d0 && codePoint <= 0x20ff)
+    || (codePoint >= 0xfe00 && codePoint <= 0xfe0f)
+    || (codePoint >= 0xfe20 && codePoint <= 0xfe2f)
+    || (codePoint >= 0x1f3fb && codePoint <= 0x1f3ff);
+}
+
+function isWideCodePoint(codePoint: number): boolean {
+  return (codePoint >= 0x1100 && codePoint <= 0x115f)
+    || (codePoint >= 0x2329 && codePoint <= 0x232a)
+    || (codePoint >= 0x2e80 && codePoint <= 0xa4cf)
+    || (codePoint >= 0xac00 && codePoint <= 0xd7a3)
+    || (codePoint >= 0xf900 && codePoint <= 0xfaff)
+    || (codePoint >= 0xfe10 && codePoint <= 0xfe19)
+    || (codePoint >= 0xfe30 && codePoint <= 0xfe6f)
+    || (codePoint >= 0xff00 && codePoint <= 0xff60)
+    || (codePoint >= 0xffe0 && codePoint <= 0xffe6)
+    || (codePoint >= 0x1f300 && codePoint <= 0x1faff)
+    || (codePoint >= 0x20000 && codePoint <= 0x3fffd);
 }
 
 function formatValue(value: unknown): string {
@@ -1137,6 +1338,9 @@ function markdownInline(value: string): string {
 }
 
 function fitAnsi(value: string, width: number): string {
-  if (visibleLength(value) <= width) return value;
-  return shorten(value, width);
+  const safeWidth = Math.max(0, width);
+  if (safeWidth === 0) return '';
+  if (visibleLength(value) <= safeWidth) return value;
+  if (safeWidth === 1) return '…';
+  return `${takeAnsiCells(value, safeWidth - 1)}…${RESET}`;
 }

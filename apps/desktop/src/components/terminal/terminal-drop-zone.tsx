@@ -43,7 +43,7 @@ export function TerminalDropZone({ onDrop, label, className, children }: Termina
 
   return (
     <div
-      className={cn('relative', className)}
+      className={cn('relative min-h-0 min-w-0', className)}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}

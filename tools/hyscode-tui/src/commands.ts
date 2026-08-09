@@ -37,7 +37,7 @@ export const COMMANDS: readonly CommandSpec[] = [
   { name: '/rules', aliases: [], category: 'context', description: 'Inspect active project and global rules', usage: '/rules' },
   { name: '/skills', aliases: [], category: 'context', description: 'Inspect loaded and active skills', usage: '/skills' },
   { name: '/memory', aliases: ['/memories'], category: 'context', description: 'Inspect persistent project memories', usage: '/memory' },
-  { name: '/terminal', aliases: ['/term', '/!'], category: 'context', description: 'Choose a persistent-terminal action', usage: '/terminal' },
+  { name: '/terminal', aliases: ['/term', '/!'], category: 'context', description: 'Choose a persistent-terminal action or attach a manual TUI terminal', usage: '/terminal [list|open|focus|attach|read|interrupt|kill] [id]' },
   { name: '/diffs', aliases: ['/changes'], category: 'context', description: 'Choose a file-change review action', usage: '/diffs' },
   { name: '/sdd', aliases: ['/spec'], category: 'runtime', description: 'Choose an SDD action or enter a description', usage: '/sdd' },
   { name: '/retry', aliases: ['/again'], category: 'session', description: 'Retry the last user message', usage: '/retry' },
@@ -89,6 +89,7 @@ const TERMINAL_ACTIONS: readonly SelectionOption[] = [
   { id: 'list', label: 'List terminals' },
   { id: 'open', label: 'Open a new terminal' },
   { id: 'focus', label: 'Choose a terminal to focus' },
+  { id: 'attach', label: 'Attach to a manual terminal' },
   { id: 'read', label: 'Read the active terminal output' },
   { id: 'interrupt', label: 'Interrupt the active terminal' },
   { id: 'kill', label: 'Stop the active terminal' },
@@ -158,6 +159,10 @@ export function selectionOptions(state: UiState, flow: CommandFlow): readonly Se
       return state.terminals.map((terminal) => ({ id: terminal.terminalId, label: `${terminal.name} · ${terminal.alive ? 'running' : 'exited'}` }));
     case 'terminal_select':
       return state.terminals.map((terminal) => ({ id: terminal.terminalId, label: `${terminal.name} · ${terminal.alive ? 'running' : 'exited'}` }));
+    case 'terminal_handoff':
+      return state.terminals
+        .filter((terminal) => terminal.alive && terminal.role !== 'agent')
+        .map((terminal) => ({ id: terminal.terminalId, label: `${terminal.name} · running` }));
     case 'diff_file':
       return state.fileChanges
         .filter((change) => change.status === 'pending')
@@ -182,7 +187,10 @@ function actionOptions(state: UiState, action: SelectionFlowAction): readonly Se
         return true;
       });
     case 'terminal':
-      return TERMINAL_ACTIONS.filter((option) => !['focus', 'read', 'interrupt', 'kill'].includes(option.id) || state.terminals.length > 0);
+      return TERMINAL_ACTIONS.filter((option) => {
+        if (option.id === 'attach') return state.terminals.some((terminal) => terminal.alive && terminal.role !== 'agent');
+        return !['focus', 'read', 'interrupt', 'kill'].includes(option.id) || state.terminals.length > 0;
+      });
     case 'diffs': {
       const hasPendingChanges = state.fileChanges.some((change) => change.status === 'pending');
       return DIFF_ACTIONS.filter((option) => option.id === 'list' || hasPendingChanges);
@@ -240,6 +248,7 @@ export function flowTitle(flow: CommandFlow | null): string {
     case 'action': return ACTION_FLOW_TITLES[flow.action];
     case 'context_remove': return 'REMOVE CONTEXT';
     case 'terminal_select': return 'FOCUS TERMINAL';
+    case 'terminal_handoff': return 'ATTACH TERMINAL';
     case 'terminal_attach': return 'ATTACH TERMINAL';
     case 'diff_file': return `${flow.action.toUpperCase()} FILE CHANGE`;
     case 'tab_select': return 'SELECT TAB';

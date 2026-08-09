@@ -247,17 +247,13 @@ jobs:
               changelog,
             ].join('\n')
 
-            let releaseData
-            try {
-              const existing = await github.rest.repos.getReleaseByTag({
-                owner: context.repo.owner,
-                repo:  context.repo.repo,
-                tag:   tag,
-              })
-              console.log(`Release for ${tag} already exists (id=${existing.data.id}) — reusing it`)
-              releaseData = existing.data
-            } catch (e) {
-              if (e.status !== 404) throw e
+            const releases = await github.paginate(github.rest.repos.listReleases, {
+              owner: context.repo.owner,
+              repo:  context.repo.repo,
+              per_page: 100,
+            })
+            let releaseData = releases.find((release) => release.tag_name === tag)
+            if (!releaseData) {
               const created = await github.rest.repos.createRelease({
                 owner:      context.repo.owner,
                 repo:       context.repo.repo,
@@ -269,6 +265,8 @@ jobs:
               })
               console.log(`✓ Draft release created: ${created.data.html_url}`)
               releaseData = created.data
+            } else {
+              console.log(`Release for ${tag} already exists (id=${releaseData.id}) — reusing it`)
             }
             return releaseData.id
 
@@ -654,10 +652,14 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           TAG: ${{ needs.create-release.outputs.tag_name }}
+          # Draft releases return 404 from GitHub's lookup-by-tag endpoint.
+          # The numeric id remains addressable until the release is published.
+          RELEASE_ID: ${{ needs.create-release.outputs.release_id }}
           VERSION: ${{ needs.create-release.outputs.version }}
         run: |
           node scripts/generate-vortex-update-manifest.mjs \
             --tag "$TAG" \
+            --release-id "$RELEASE_ID" \
             --version "$VERSION" \
             --targets x64 \
             --output "$RUNNER_TEMP/vortex-cli-manifest-$VERSION.json"

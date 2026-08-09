@@ -17,7 +17,7 @@ import type {
   TerminalUpdatedPayload,
   TuiBridge,
 } from '@hyscode/tui-runtime';
-import { BUILTIN_THEMES, CliUpdaterError, DEFAULT_THEME_ID } from '@hyscode/tui-runtime';
+import { BUILTIN_THEMES, CliUpdaterError, DEFAULT_THEME_ID, normalizeTerminalViewport } from '@hyscode/tui-runtime';
 import { MODE_OPTIONS, commandArgument, matchingCommands, parseSlashCommand, resolveCommandName, selectionOptions } from './commands';
 import { AGENT_TYPES } from './types';
 import type { CliOptions, CommandFlow, ContextView, InteractionState, Key, MemoryView, RuleView, RuntimeNotice, SkillView, SubAgentView, ToolView, TranscriptItem, TranscriptKind, UiState } from './types';
@@ -31,6 +31,7 @@ export type RuntimeClient = Pick<TuiBridge, 'handle'>;
 export type TuiControllerOptions = {
   updater?: CliUpdater;
   interactive?: boolean;
+  onTerminalAttach?: (terminalId: string) => Promise<void>;
 };
 
 export class TuiController {
@@ -42,6 +43,7 @@ export class TuiController {
   private gitRefreshInFlight = false;
   private readonly updater: CliUpdater | null;
   private readonly interactive: boolean;
+  private readonly onTerminalAttach: ((terminalId: string) => Promise<void>) | null;
   private startupUpdateTimer: ReturnType<typeof setTimeout> | null = null;
   private downloadedUpdate: DownloadedUpdate | null = null;
   private initialized = false;
@@ -54,6 +56,7 @@ export class TuiController {
   constructor(readonly options: CliOptions, private readonly runtime: RuntimeClient, controllerOptions: TuiControllerOptions = {}) {
     this.updater = controllerOptions.updater ?? null;
     this.interactive = controllerOptions.interactive ?? true;
+    this.onTerminalAttach = controllerOptions.onTerminalAttach ?? null;
     this.state = {
       input: '',
       inputCursor: 0,
@@ -1337,6 +1340,10 @@ export class TuiController {
       this.state.activeTerminalId = commandArgument(tokens[1]);
       await this.request('terminal_snapshot', { terminalId: this.state.activeTerminalId });
       this.state.mainPanel = 'terminal';
+    } else if (action === 'attach') {
+      if (tokens[1]) await this.attachTerminal(commandArgument(tokens[1]));
+      else this.state.commandFlow = { kind: 'terminal_handoff', selected: 0 };
+      return;
     } else if (['read', 'interrupt', 'kill'].includes(action)) {
       if (!this.state.activeTerminalId) {
         this.state.status = 'No active terminal selected';
@@ -1350,6 +1357,37 @@ export class TuiController {
     }
     this.state.mainPanel = 'terminal';
     this.state.status = `${this.state.terminals.length} terminal(s)`;
+  }
+
+  private async attachTerminal(terminalId: string): Promise<void> {
+    const terminal = this.state.terminals.find((candidate) => candidate.terminalId === terminalId);
+    if (!terminal) {
+      this.state.status = `Terminal not found · ${terminalId}`;
+      return;
+    }
+    if (!terminal.alive) {
+      this.state.status = `Terminal has exited · ${terminal.name}`;
+      return;
+    }
+    if (terminal.role === 'agent') {
+      this.state.status = 'Agent terminals remain projected; only manual terminals support attach.';
+      return;
+    }
+    if (!this.onTerminalAttach) {
+      this.state.status = 'Interactive terminal attach is unavailable in this client.';
+      return;
+    }
+    this.state.activeTerminalId = terminalId;
+    this.state.mainPanel = 'terminal';
+    this.state.status = `Attaching terminal · ${terminal.name}`;
+    try {
+      await this.onTerminalAttach(terminalId);
+      this.state.status = `Detached terminal · ${terminal.name}`;
+    } catch (error) {
+      this.state.status = 'Terminal attach failed';
+      this.state.lastError = error instanceof Error ? error.message : String(error);
+      this.append('error', this.state.lastError);
+    }
   }
 
   private async runTerminalCommand(command: string): Promise<void> {
@@ -1841,6 +1879,12 @@ export class TuiController {
       this.closeCommandFlow();
       return;
     }
+    if (flow.kind === 'terminal_handoff') {
+      const option = selectionOptions(this.state, flow)[flow.selected];
+      if (option) await this.attachTerminal(option.id);
+      this.closeCommandFlow();
+      return;
+    }
     if (flow.kind === 'diff_file') {
       const option = selectionOptions(this.state, flow)[flow.selected];
       if (option) {
@@ -1995,6 +2039,10 @@ export class TuiController {
     if (flow.action === 'terminal') {
       if (option.id === 'focus') {
         this.state.commandFlow = { kind: 'terminal_select', selected: 0 };
+        return;
+      }
+      if (option.id === 'attach') {
+        this.state.commandFlow = { kind: 'terminal_handoff', selected: 0 };
         return;
       }
       await this.runTerminalCommandAction(option.id);
@@ -2224,18 +2272,24 @@ export class TuiController {
   }
 
   setViewport(width: number, height: number): void {
-    this.state.width = Math.max(40, width);
-    this.state.height = Math.max(12, height);
+    const viewport = normalizeTerminalViewport(width, height);
+    this.state.width = viewport.cols;
+    this.state.height = viewport.rows;
   }
 
   async resizeActiveTerminal(width: number, height: number): Promise<void> {
     this.setViewport(width, height);
     if (!this.state.activeTerminalId) return;
+    const viewport = normalizeTerminalViewport(width, height);
     await this.request('terminal_resize', {
       terminalId: this.state.activeTerminalId,
-      cols: Math.max(20, width),
-      rows: Math.max(8, height),
-    }).catch(() => undefined);
+      cols: viewport.cols,
+      rows: viewport.rows,
+    }).catch((error: unknown) => {
+      const message = `Terminal resize failed: ${error instanceof Error ? error.message : String(error)}`;
+      this.state.lastError = message;
+      this.state.status = message;
+    });
   }
 
   pendingRequestCount(): number {

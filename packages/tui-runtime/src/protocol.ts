@@ -184,6 +184,7 @@ export type TerminalSummary = {
   awaitingInput?: boolean;
   exitCode?: number | null;
   truncated?: boolean;
+  handoffActive?: boolean;
   canUserWrite?: boolean;
   permissions?: TerminalPermissions;
 };

@@ -5,6 +5,7 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { MAX_CAPTURE_CHARS } from '@hyscode/agent-harness';
 import { spawn as spawnPtyProcess, type IDisposable, type IPty } from './pty';
+import { normalizeTerminalViewport, sameTerminalViewport, type TerminalViewport } from './terminal-handoff';
 import type { CliDataStore } from './data-store';
 import type { SharedKeyStore } from './config';
 import type { GitSummary } from './protocol';
@@ -24,6 +25,7 @@ type PtySession = {
   chunks: PtyChunk[];
   sequence: number;
   outputSize: number;
+  viewport: TerminalViewport;
   alive: boolean;
   exitCode: number | null;
 };
@@ -427,16 +429,20 @@ export class CliHost {
     const id = String(args.id ?? args.ptyId ?? crypto.randomUUID());
     const shell = String(args.shell ?? defaultShell());
     const commandArgs = Array.isArray(args.args) ? args.args.map(String) : [];
+    const viewport = normalizeTerminalViewport(args.cols, args.rows);
+    const environment = terminalEnvironment(isStringRecord(args.env) ? args.env : {});
     const terminal = spawnPtyProcess(shell, commandArgs, {
       cwd: typeof args.cwd === 'string' ? args.cwd : this.workspacePath,
-      env: { ...process.env, ...(isStringRecord(args.env) ? args.env : {}) },
-      cols: numberValue(args.cols, 120),
-      rows: numberValue(args.rows, 32),
-      name: process.platform === 'win32' ? 'xterm-256color' : 'xterm-256color',
-      // Winpty is the stable default for the standalone client on Windows.
-      // ConPTY can be opted into for terminals that need its newer behavior;
-      // keeping it opt-in avoids AttachConsole failures in service/CI hosts.
-      ...(process.platform === 'win32' ? { useConpty: process.env.HYSCODE_TUI_USE_CONPTY === '1' } : {}),
+      env: environment,
+      cols: viewport.cols,
+      rows: viewport.rows,
+      name: 'xterm-256color',
+      ...(process.platform === 'win32'
+        ? {
+            useConpty: environment.HYSCODE_TUI_USE_CONPTY !== '0'
+              && (args.interactive === true || environment.HYSCODE_TUI_USE_CONPTY === '1'),
+          }
+        : {}),
     });
     const session: PtySession = {
       id,
@@ -446,6 +452,7 @@ export class CliHost {
       chunks: [],
       sequence: 0,
       outputSize: 0,
+      viewport,
       alive: true,
       exitCode: null,
     };
@@ -480,7 +487,10 @@ export class CliHost {
   private resizePty(id: string, cols: number, rows: number): void {
     const session = this.ptys.get(id);
     if (!session?.alive) return;
-    session.terminal.resize(Math.max(1, Math.floor(cols)), Math.max(1, Math.floor(rows)));
+    const viewport = normalizeTerminalViewport(cols, rows, session.viewport);
+    if (sameTerminalViewport(session.viewport, viewport)) return;
+    session.terminal.resize(viewport.cols, viewport.rows);
+    session.viewport = viewport;
   }
 
   private async killPty(id: string): Promise<void> {
@@ -806,6 +816,18 @@ function numberValue(value: unknown, fallback: number): number {
 
 function isStringRecord(value: unknown): value is Record<string, string> {
   return typeof value === 'object' && value !== null && Object.values(value).every((item) => typeof item === 'string');
+}
+
+function terminalEnvironment(overrides: Record<string, string>): Record<string, string> {
+  const environment: Record<string, string> = {};
+  for (const [key, value] of Object.entries(process.env)) {
+    if (value !== undefined) environment[key] = value;
+  }
+  Object.assign(environment, overrides);
+  environment.TERM ??= 'xterm-256color';
+  environment.COLORTERM ??= 'truecolor';
+  environment.TERM_PROGRAM ??= 'HysCode';
+  return environment;
 }
 
 function defaultShell(): string {

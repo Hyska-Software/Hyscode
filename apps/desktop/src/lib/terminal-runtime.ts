@@ -9,6 +9,7 @@ import {
   type TerminalSnapshot,
 } from '@hyscode/agent-harness';
 import { useTerminalStore } from '@/stores/terminal-store';
+import { useSettingsStore } from '@/stores/settings-store';
 
 import { detectFrameLanguage, selectAgentSession } from './terminal-session-policy';
 import { tauriInvokeRaw } from './tauri-invoke';
@@ -47,10 +48,14 @@ export class DesktopTerminalRuntime implements TerminalRuntimeAdapter {
       }
     }
     if (!ptyId) {
+      const terminalShell = useSettingsStore.getState().terminalShell.trim();
       ptyId = await tauriInvokeRaw<string>('pty_spawn', {
-        shell: null,
+        shell: terminalShell || null,
         cwd: request.cwd,
         env: null,
+        cols: 120,
+        rows: 32,
+        interactive: false,
       });
       useTerminalStore.getState().setPtyId(session.id, ptyId);
     }

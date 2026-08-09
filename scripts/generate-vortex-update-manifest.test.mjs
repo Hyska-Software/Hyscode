@@ -7,7 +7,7 @@ import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 
-import { X64_TARGETS, buildManifest, parseCliAsset } from './generate-vortex-update-manifest.mjs';
+import { X64_TARGETS, buildManifest, fetchRelease, parseCliAsset } from './generate-vortex-update-manifest.mjs';
 
 const execFileAsync = promisify(execFile);
 const scriptPath = fileURLToPath(new URL('./generate-vortex-update-manifest.mjs', import.meta.url));
@@ -107,4 +107,23 @@ test('rejects duplicate assets for the same platform, architecture, and kind', (
     () => buildManifest(version, [...assets, { ...assets[0], name: 'duplicate-vortex-asset.zip' }], X64_TARGETS),
     /Duplicate VORTEX manifest asset: windows:x64:archive/u,
   );
+});
+
+test('looks up a draft release by its numeric release id', async () => {
+  const requests = [];
+  const fetchImplementation = async (url, init) => {
+    requests.push({ url: String(url), init });
+    return {
+      ok: true,
+      status: 200,
+      async json() {
+        return { id: 367495683, tag_name: 'v0.9.0', draft: true, assets: [] };
+      },
+    };
+  };
+
+  const release = await fetchRelease('Hyska-Software/Hyscode', 'v0.9.0', '367495683', fetchImplementation);
+  assert.equal(release.draft, true);
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].url, 'https://api.github.com/repos/Hyska-Software/Hyscode/releases/367495683');
 });

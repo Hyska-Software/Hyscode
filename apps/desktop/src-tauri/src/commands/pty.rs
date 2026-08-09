@@ -6,6 +6,9 @@ use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter, State};
 
 const MAX_OUTPUT_BYTES: usize = 1024 * 1024;
+const DEFAULT_PTY_COLS: u16 = 80;
+const DEFAULT_PTY_ROWS: u16 = 24;
+const MAX_PTY_DIMENSION: u16 = 4096;
 
 /// Authoritative state for one PTY. The process lifecycle and replay buffer live
 /// here so mounting or unmounting a frontend terminal never owns the process.
@@ -15,6 +18,8 @@ pub(crate) struct PtySession {
     pub(crate) killer: Box<dyn ChildKiller + Send + Sync>,
     pub(crate) alive: bool,
     pub(crate) exit_code: Option<u32>,
+    pub(crate) cols: u16,
+    pub(crate) rows: u16,
     pub(crate) output: OutputBuffer,
 }
 
@@ -107,13 +112,18 @@ pub async fn pty_spawn(
     shell: Option<String>,
     cwd: Option<String>,
     env: Option<HashMap<String, String>>,
+    cols: Option<u16>,
+    rows: Option<u16>,
+    _interactive: Option<bool>,
     app: AppHandle,
     state: State<'_, PtyState>,
 ) -> Result<String, String> {
+    let cols = normalize_dimension(cols, DEFAULT_PTY_COLS);
+    let rows = normalize_dimension(rows, DEFAULT_PTY_ROWS);
     let pair = native_pty_system()
         .openpty(PtySize {
-            rows: 24,
-            cols: 80,
+            rows,
+            cols,
             pixel_width: 0,
             pixel_height: 0,
         })
@@ -124,10 +134,18 @@ pub async fn pty_spawn(
     if let Some(ref directory) = cwd {
         command.cwd(directory);
     }
-    if let Some(ref environment) = env {
-        for (key, value) in environment {
-            command.env(key, value);
-        }
+    let mut environment = env.unwrap_or_default();
+    environment
+        .entry("TERM".to_string())
+        .or_insert_with(|| "xterm-256color".to_string());
+    environment
+        .entry("COLORTERM".to_string())
+        .or_insert_with(|| "truecolor".to_string());
+    environment
+        .entry("TERM_PROGRAM".to_string())
+        .or_insert_with(|| "HysCode".to_string());
+    for (key, value) in &environment {
+        command.env(key, value);
     }
 
     let mut child = pair
@@ -159,6 +177,8 @@ pub async fn pty_spawn(
                 killer,
                 alive: true,
                 exit_code: None,
+                cols,
+                rows,
                 output: OutputBuffer::new(),
             },
         );
@@ -259,8 +279,13 @@ pub async fn pty_resize(
         .lock()
         .map_err(|error| format!("Lock error: {error}"))?;
     let session = sessions
-        .get(&pty_id)
+        .get_mut(&pty_id)
         .ok_or_else(|| format!("PTY session not found: {pty_id}"))?;
+    let cols = normalize_dimension(Some(cols), DEFAULT_PTY_COLS);
+    let rows = normalize_dimension(Some(rows), DEFAULT_PTY_ROWS);
+    if session.cols == cols && session.rows == rows {
+        return Ok(());
+    }
     session
         .master
         .resize(PtySize {
@@ -269,7 +294,14 @@ pub async fn pty_resize(
             pixel_width: 0,
             pixel_height: 0,
         })
-        .map_err(|error| format!("Resize error: {error}"))
+        .map_err(|error| format!("Resize error: {error}"))?;
+    session.cols = cols;
+    session.rows = rows;
+    Ok(())
+}
+
+fn normalize_dimension(value: Option<u16>, fallback: u16) -> u16 {
+    value.unwrap_or(fallback).clamp(1, MAX_PTY_DIMENSION)
 }
 
 #[tauri::command]
@@ -352,6 +384,19 @@ mod tests {
         output.append("x".repeat(MAX_OUTPUT_BYTES));
         assert!(output.output_bytes <= MAX_OUTPUT_BYTES);
         assert_eq!(output.output.len(), 1);
+    }
+
+    #[test]
+    fn terminal_dimensions_are_positive_and_bounded() {
+        assert_eq!(
+            normalize_dimension(None, DEFAULT_PTY_COLS),
+            DEFAULT_PTY_COLS
+        );
+        assert_eq!(normalize_dimension(Some(0), DEFAULT_PTY_COLS), 1);
+        assert_eq!(
+            normalize_dimension(Some(u16::MAX), DEFAULT_PTY_COLS),
+            MAX_PTY_DIMENSION
+        );
     }
 
     #[cfg(target_os = "windows")]

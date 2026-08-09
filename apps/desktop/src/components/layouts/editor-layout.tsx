@@ -21,7 +21,7 @@ export function EditorLayout() {
   const showRightPanel = showAgentChat || terminalInSidebar;
 
   return (
-    <PanelGroup direction="horizontal">
+    <PanelGroup direction="horizontal" className="min-h-0 min-w-0">
       {/* Sidebar */}
       {sidebarVisible && (
         <>
@@ -37,7 +37,7 @@ export function EditorLayout() {
       {/* Editor + (optionally) Terminal stacked */}
       <Panel defaultSize={showRightPanel ? 50 : sidebarVisible ? 84 : 100} minSize={30}>
         {showBottomTerminal ? (
-          <PanelGroup direction="vertical">
+          <PanelGroup direction="vertical" className="min-h-0 min-w-0">
             <Panel defaultSize={65} minSize={25}>
               <div className="h-full rounded-lg bg-surface overflow-hidden">
                 <EditorArea />

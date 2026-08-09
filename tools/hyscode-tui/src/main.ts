@@ -6,6 +6,7 @@ import { parseCliArgs, VORTEX_UPDATE_EXIT_CODES } from './commands';
 import { TuiController } from './controller';
 import { enterAlternateScreen, leaveAlternateScreen, TerminalInput } from './input';
 import { TerminalRenderer } from './renderer';
+import { runTerminalHandoff } from './terminal-handoff';
 import type { CliUpdateOptions } from './types';
 
 declare const __HYSCODE_TUI_VERSION__: string | undefined;
@@ -69,9 +70,63 @@ async function main(): Promise<void> {
     executablePath: currentCliExecutablePath(),
   }) : undefined;
   let controller: TuiController;
+  let input: TerminalInput | null = null;
+  let repaintTimer: ReturnType<typeof setInterval> | null = null;
+  let gitRefreshTimer: ReturnType<typeof setInterval> | null = null;
+  let outerScreenActive = false;
+  let outerLoopActive = false;
   const bridge = new TuiBridge((message) => controller.handleRuntimeMessage(message));
-  controller = new TuiController(parsed.options, bridge, { updater, interactive });
   const renderer = new TerminalRenderer();
+
+  const repaint = (): void => {
+    controller.setViewport(process.stdout.columns ?? 120, process.stdout.rows ?? 32);
+    process.stdout.write(renderer.render(controller.state));
+  };
+  const pauseOuter = (): void => {
+    if (repaintTimer) clearInterval(repaintTimer);
+    if (gitRefreshTimer) clearInterval(gitRefreshTimer);
+    repaintTimer = null;
+    gitRefreshTimer = null;
+    input?.stop();
+    outerLoopActive = false;
+  };
+  const resumeOuter = (): void => {
+    if (!input || outerLoopActive) return;
+    input.start();
+    repaint();
+    repaintTimer = setInterval(repaint, 80);
+    gitRefreshTimer = setInterval(() => { void controller.refreshGitSummary(); }, 2000);
+    outerLoopActive = true;
+    outerScreenActive = true;
+  };
+  const startOuter = (): void => {
+    if (outerScreenActive) return;
+    enterAlternateScreen(process.stdout);
+    outerScreenActive = true;
+    resumeOuter();
+  };
+  const stopOuter = (): void => {
+    pauseOuter();
+    if (outerScreenActive) {
+      leaveAlternateScreen(process.stdout);
+      outerScreenActive = false;
+    }
+  };
+  const attachTerminal = async (terminalId: string): Promise<void> => {
+    if (!interactive) throw new Error('Interactive terminal attach requires a TTY.');
+    const handoff = await bridge.openUserTerminalHandoff(terminalId);
+    await runTerminalHandoff(handoff, {
+      stdin: process.stdin,
+      stdout: process.stdout,
+      pauseOuter,
+      resumeOuter,
+    });
+  };
+  controller = new TuiController(parsed.options, bridge, {
+    updater,
+    interactive,
+    onTerminalAttach: attachTerminal,
+  });
 
   try {
     await controller.start();
@@ -81,29 +136,18 @@ async function main(): Promise<void> {
       return;
     }
 
-    const repaint = (): void => {
-      controller.setViewport(process.stdout.columns ?? 120, process.stdout.rows ?? 32);
-      process.stdout.write(renderer.render(controller.state));
-    };
-    const input = new TerminalInput({
+    input = new TerminalInput({
       stdin: process.stdin,
       stdout: process.stdout,
       onKey: (key) => { void controller.handleKey(key).catch((error: unknown) => process.stderr.write(`${String(error)}\n`)); },
       onResize: (width, height) => { void controller.resizeActiveTerminal(width, height); },
     });
-    enterAlternateScreen(process.stdout);
-    input.start();
-    repaint();
-    const repaintTimer = setInterval(repaint, 80);
-    const gitRefreshTimer = setInterval(() => { void controller.refreshGitSummary(); }, 2000);
+    startOuter();
     while (!controller.state.shouldQuit) await delay(80);
-    clearInterval(repaintTimer);
-    clearInterval(gitRefreshTimer);
-    input.stop();
-    leaveAlternateScreen(process.stdout);
+    stopOuter();
     await controller.shutdown();
   } catch (error) {
-    if (interactive) leaveAlternateScreen(process.stdout);
+    if (interactive) stopOuter();
     process.stderr.write(`${error instanceof Error ? error.stack ?? error.message : String(error)}\n`);
     process.exitCode = 1;
     try {

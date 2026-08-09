@@ -22,6 +22,7 @@ function parseArguments(args) {
   const options = {
     repository: process.env.GITHUB_REPOSITORY ?? DEFAULT_REPOSITORY,
     tag: null,
+    releaseId: process.env.GITHUB_RELEASE_ID ?? null,
     version: null,
     output: null,
     assetDirectory: null,
@@ -29,11 +30,12 @@ function parseArguments(args) {
   };
   for (let index = 0; index < args.length; index += 1) {
     const argument = args[index];
-    if (argument === '--repository' || argument === '--tag' || argument === '--version' || argument === '--output' || argument === '--asset-dir' || argument === '--targets') {
+    if (argument === '--repository' || argument === '--tag' || argument === '--release-id' || argument === '--version' || argument === '--output' || argument === '--asset-dir' || argument === '--targets') {
       const value = args[index + 1];
       if (!value || value.startsWith('-')) throw new Error(argument + ' requires a value.');
       if (argument === '--repository') options.repository = value;
       if (argument === '--tag') options.tag = value;
+      if (argument === '--release-id') options.releaseId = value;
       if (argument === '--version') options.version = value;
       if (argument === '--output') options.output = value;
       if (argument === '--asset-dir') options.assetDirectory = value;
@@ -43,6 +45,7 @@ function parseArguments(args) {
     }
     if (argument.startsWith('--repository=')) options.repository = argument.slice('--repository='.length);
     else if (argument.startsWith('--tag=')) options.tag = argument.slice('--tag='.length);
+    else if (argument.startsWith('--release-id=')) options.releaseId = argument.slice('--release-id='.length);
     else if (argument.startsWith('--version=')) options.version = argument.slice('--version='.length);
     else if (argument.startsWith('--output=')) options.output = argument.slice('--output='.length);
     else if (argument.startsWith('--asset-dir=')) options.assetDirectory = argument.slice('--asset-dir='.length);
@@ -68,6 +71,7 @@ function printHelp() {
     'Options:',
     '  --repository <owner/name> GitHub repository (defaults to GITHUB_REPOSITORY)',
     '  --tag <tag>              Release tag, for example v0.9.0',
+    '  --release-id <id>        Numeric GitHub release id (works for draft releases)',
     '  --version <version>      Release version without the leading v',
     '  --output <file>          Manifest output path',
     '  --asset-dir <directory>  Read local release assets instead of GitHub',
@@ -151,18 +155,24 @@ function hashFile(filePath) {
   return { size: buffer.byteLength, sha256: hashBuffer(buffer) };
 }
 
-async function fetchRelease(repository, tag) {
+async function fetchRelease(repository, tag, releaseId = null, fetchImplementation = fetch) {
   const apiBase = process.env.GITHUB_API_URL ?? 'https://api.github.com';
-  const url = `${apiBase}/repos/${repository}/releases/tags/${encodeURIComponent(tag)}`;
+  const releasePath = releaseId
+    ? `/repos/${repository}/releases/${encodeURIComponent(releaseId)}`
+    : `/repos/${repository}/releases/tags/${encodeURIComponent(tag)}`;
+  const url = `${apiBase}${releasePath}`;
   const headers = {
     Accept: 'application/vnd.github+json',
     'User-Agent': 'VORTEX-CLI-Manifest-Generator',
   };
   if (process.env.GITHUB_TOKEN) headers.Authorization = `Bearer ${process.env.GITHUB_TOKEN}`;
-  const response = await fetch(url, {
+  const response = await fetchImplementation(url, {
     headers,
   });
-  if (!response.ok) throw new Error(`GitHub release lookup failed with HTTP ${response.status}.`);
+  if (!response.ok) {
+    const lookup = releaseId ? `release id ${releaseId}` : `tag ${tag}`;
+    throw new Error(`GitHub release lookup failed with HTTP ${response.status} for ${repository} ${lookup}.`);
+  }
   return response.json();
 }
 
@@ -194,7 +204,7 @@ function buildManifest(version, assets, expectedTargets = ALL_TARGETS) {
 }
 
 async function generateFromRelease(options, version, expectedTargets) {
-  const release = await fetchRelease(options.repository, options.tag);
+  const release = await fetchRelease(options.repository, options.tag, options.releaseId);
   if (!release || !Array.isArray(release.assets)) throw new Error('GitHub returned an invalid release asset list.');
   const selected = [];
   for (const asset of release.assets) {
@@ -236,7 +246,7 @@ async function main() {
     return;
   }
   if (!options.output) throw new Error('--output is required.');
-  if (options.assetDirectory === null && !options.tag) throw new Error('--tag is required unless --asset-dir is used.');
+  if (options.assetDirectory === null && !options.tag && !options.releaseId) throw new Error('--tag or --release-id is required unless --asset-dir is used.');
   const expectedTargets = resolveExpectedTargets(options.targets);
   const version = normalizeVersion(options.version ?? options.tag ?? '');
   const manifest = options.assetDirectory
@@ -257,4 +267,4 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   }
 }
 
-export { ALL_TARGETS, X64_TARGETS, assertCompleteAssetSet, buildManifest, parseCliAsset, resolveExpectedTargets };
+export { ALL_TARGETS, X64_TARGETS, assertCompleteAssetSet, buildManifest, fetchRelease, parseCliAsset, resolveExpectedTargets };

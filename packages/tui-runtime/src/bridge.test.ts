@@ -723,6 +723,7 @@ describe('shared harness bridge protocol', () => {
     vi.stubEnv('HYSCODE_CONFIG_PATH', path.join(directory, 'settings.json'));
     vi.stubEnv('HYSCODE_KEYCHAIN_PATH', path.join(directory, 'keychain.json'));
     vi.stubEnv('HYSCODE_TUI_DATA_PATH', path.join(directory, 'tui-data.json'));
+    vi.stubEnv('HYSCODE_TUI_USE_CONPTY', '0');
 
     const events: BridgeEvent[] = [];
     const bridge = new TuiBridge((message) => {
@@ -745,6 +746,32 @@ describe('shared harness bridge protocol', () => {
       }));
       expect(userTerminal.role).toBe('user');
       expect(userTerminal.cwd).toBe(process.platform === 'win32' ? directory.toLowerCase() : directory);
+
+      const userHandoff = await bridge.openUserTerminalHandoff(userTerminal.terminalId);
+      const unsubscribeHandoff = await userHandoff.subscribe(
+        () => undefined,
+        () => undefined,
+      );
+      await userHandoff.write('\u001b[?1049h\u001b[?1049l');
+      await userHandoff.resize({ cols: 101, rows: 29 });
+      const attachedTerminals = successfulResult<Array<{ terminalId: string; handoffActive?: boolean }>>(await bridge.handle({
+        id: 'attached-terminals',
+        method: 'terminal_list',
+        params: {},
+      }));
+      expect(attachedTerminals).toEqual(expect.arrayContaining([
+        expect.objectContaining({ terminalId: userTerminal.terminalId, handoffActive: true }),
+      ]));
+      await userHandoff.detach();
+      unsubscribeHandoff();
+      const detachedTerminals = successfulResult<Array<{ terminalId: string; handoffActive?: boolean }>>(await bridge.handle({
+        id: 'detached-terminals',
+        method: 'terminal_list',
+        params: {},
+      }));
+      expect(detachedTerminals).toEqual(expect.arrayContaining([
+        expect.objectContaining({ terminalId: userTerminal.terminalId, handoffActive: false }),
+      ]));
 
       await bridge.handle({ id: 'new-session', method: 'session_new', params: {} });
       const deniedSnapshot = await bridge.handle({
@@ -818,6 +845,7 @@ describe('shared harness bridge protocol', () => {
 
       const agentId = agentTerminal?.terminalId;
       if (!agentId) throw new Error('The agent terminal was not listed.');
+      await expect(bridge.openUserTerminalHandoff(agentId)).rejects.toThrow('manual user terminals');
       expect(successfulResult<{ killed: boolean }>(await bridge.handle({
         id: 'kill-agent-terminal',
         method: 'terminal_kill',

@@ -313,7 +313,17 @@ interface TauriCommands {
   github_remove_token: { args: Record<string, never>; ret: void };
 
   // PTY — spawn returns the pty_id; output arrives via 'pty:data' events
-  pty_spawn: { args: { shell?: string; cwd?: string; env?: Record<string, string> }; ret: string };
+  pty_spawn: {
+    args: {
+      shell?: string | null;
+      cwd?: string | null;
+      env?: Record<string, string> | null;
+      cols?: number;
+      rows?: number;
+      interactive?: boolean;
+    };
+    ret: string;
+  };
   pty_write: { args: { ptyId: string; data: string }; ret: void };
   pty_resize: { args: { ptyId: string; cols: number; rows: number }; ret: void };
   pty_kill: { args: { ptyId: string }; ret: void };

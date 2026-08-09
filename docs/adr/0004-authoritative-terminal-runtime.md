@@ -25,12 +25,18 @@ explicit cleanup or runtime shutdown.
 The bridge includes current terminal summaries in every `runtime_ready` payload and emits
 `terminal_updated` events for creation, output, state, and exit. `terminal_resize` follows the same
 protocol. The fullscreen VORTEX client uses the bridge in-process; `vortex --protocol ndjson` and
-the compatibility runtime entrypoint expose the same request/event loop for automation.
+the compatibility runtime entrypoint expose the same request/event loop for automation. The
+in-process VORTEX client may open a temporary `TerminalHandoff` only for a manual user terminal in
+the current conversation. Handoff forwards raw PTY output/input and validated viewport dimensions,
+but the runtime retains lifecycle, ownership, replay, and exit authority. `Ctrl-]` detaches;
+process exit, errors, and signals restore the TUI. NDJSON remains non-interactive and never carries
+raw PTY stdin/stdout bytes.
 
 Interactive prompts suspend the command as a resumable terminal interaction. The agent may continue
 it only through an independently approved terminal-input tool. Sensitive prompts remain user-only.
 Manual xterm input is enabled while a process is waiting when the approval mode is not
-`yolo`; it remains blocked while the harness actively owns the PTY.
+`yolo`; it remains blocked while the harness actively owns the PTY. The fullscreen handoff is a
+separate user-terminal path and never bypasses agent ownership or approval boundaries.
 
 ## Consequences
 

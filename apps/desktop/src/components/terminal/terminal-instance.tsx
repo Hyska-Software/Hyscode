@@ -15,11 +15,20 @@ interface TerminalInstanceProps {
   isActive: boolean;
 }
 
+type TerminalViewport = { cols: number; rows: number };
+
+const DEFAULT_TERMINAL_VIEWPORT: TerminalViewport = { cols: 80, rows: 24 };
+const MAX_TERMINAL_DIMENSION = 4096;
+
 export function TerminalInstance({ sessionId, isActive }: TerminalInstanceProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const xtermRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
   const ptyIdRef = useRef<string | null>(null);
+  const pendingViewportRef = useRef<TerminalViewport | null>(null);
+  const lastResizeRef = useRef<{ ptyId: string; viewport: TerminalViewport } | null>(null);
+  const pendingResizeRef = useRef<{ ptyId: string; viewport: TerminalViewport } | null>(null);
+  const resizingRef = useRef(false);
   /** Tracks what the user is typing so we can log commands on Enter */
   const inputBufferRef = useRef<string>('');
 
@@ -31,12 +40,34 @@ export function TerminalInstance({ sessionId, isActive }: TerminalInstanceProps)
   const session = useTerminalStore.getState().sessions.find((s) => s.id === sessionId);
   const sessionCwd = session?.cwd ?? rootPath;
   const themeId = useSettingsStore((s) => s.themeId);
+  const terminalFontSize = useSettingsStore((s) => s.terminalFontSize);
+  const terminalFontFamily = useSettingsStore((s) => s.terminalFontFamily);
+  const terminalScrollback = useSettingsStore((s) => s.terminalScrollback);
+  const terminalShell = useSettingsStore((s) => s.terminalShell);
+  const terminalCursorStyle = useSettingsStore((s) => s.terminalCursorStyle);
   const extensionThemesVersion = useExtensionStore((s) => s.extensionThemesVersion);
   // Keep a ref so the one-time init effect always reads the latest themeId
   const themeIdRef = useRef(themeId);
   useEffect(() => {
     themeIdRef.current = themeId;
   }, [themeId]);
+
+  const terminalSettingsRef = useRef({
+    fontSize: terminalFontSize,
+    fontFamily: terminalFontFamily,
+    scrollback: terminalScrollback,
+    shell: terminalShell,
+    cursorStyle: terminalCursorStyle,
+  });
+  useEffect(() => {
+    terminalSettingsRef.current = {
+      fontSize: terminalFontSize,
+      fontFamily: terminalFontFamily,
+      scrollback: terminalScrollback,
+      shell: terminalShell,
+      cursorStyle: terminalCursorStyle,
+    };
+  }, [terminalCursorStyle, terminalFontFamily, terminalFontSize, terminalScrollback, terminalShell]);
 
   // Update xterm theme whenever the theme setting or extension themes change
   useEffect(() => {
@@ -45,21 +76,63 @@ export function TerminalInstance({ sessionId, isActive }: TerminalInstanceProps)
     term.options.theme = getXtermTheme(themeId);
   }, [themeId, extensionThemesVersion]);
 
-  const handleResize = useCallback(() => {
+  const measureViewport = useCallback((): TerminalViewport | null => {
     const container = containerRef.current;
-    if (!fitAddonRef.current || !ptyIdRef.current || !xtermRef.current) return;
-    if (!container || container.offsetWidth === 0 || container.offsetHeight === 0) return;
+    if (!fitAddonRef.current || !xtermRef.current) return null;
+    if (!container || container.offsetWidth === 0 || container.offsetHeight === 0) return null;
     try {
       fitAddonRef.current.fit();
-      invoke('pty_resize', {
-        ptyId: ptyIdRef.current,
-        cols: xtermRef.current.cols,
-        rows: xtermRef.current.rows,
-      }).catch(() => {});
+      const cols = Math.min(MAX_TERMINAL_DIMENSION, Math.max(1, xtermRef.current.cols));
+      const rows = Math.min(MAX_TERMINAL_DIMENSION, Math.max(1, xtermRef.current.rows));
+      return { cols, rows };
     } catch {
-      // ignore fit errors when container is invisible
+      return null;
     }
   }, []);
+
+  const queueResize = useCallback((ptyId: string, viewport: TerminalViewport): void => {
+    const previous = lastResizeRef.current;
+    if (previous?.ptyId === ptyId && previous.viewport.cols === viewport.cols && previous.viewport.rows === viewport.rows) return;
+    lastResizeRef.current = { ptyId, viewport };
+    pendingResizeRef.current = { ptyId, viewport };
+    if (resizingRef.current) return;
+    resizingRef.current = true;
+    void (async () => {
+      while (pendingResizeRef.current) {
+        const next = pendingResizeRef.current;
+        pendingResizeRef.current = null;
+        if (ptyIdRef.current !== next.ptyId) continue;
+        try {
+          await invoke('pty_resize', { ptyId: next.ptyId, cols: next.viewport.cols, rows: next.viewport.rows });
+        } catch (error: unknown) {
+          console.error('[Terminal] PTY resize failed', {
+            ptyId: next.ptyId,
+            cols: next.viewport.cols,
+            rows: next.viewport.rows,
+            error,
+          });
+        }
+      }
+      resizingRef.current = false;
+    })();
+  }, []);
+
+  const handleResize = useCallback(() => {
+    const viewport = measureViewport();
+    if (!viewport) return;
+    pendingViewportRef.current = viewport;
+    if (ptyIdRef.current) queueResize(ptyIdRef.current, viewport);
+  }, [measureViewport, queueResize]);
+
+  useEffect(() => {
+    const term = xtermRef.current;
+    if (!term) return;
+    term.options.fontSize = terminalFontSize;
+    term.options.fontFamily = terminalFontFamily || 'Geist Mono, Cascadia Code, Consolas, monospace';
+    term.options.scrollback = terminalScrollback;
+    term.options.cursorStyle = terminalCursorStyle;
+    requestAnimationFrame(handleResize);
+  }, [handleResize, terminalCursorStyle, terminalFontFamily, terminalFontSize, terminalScrollback]);
 
   // Initialize xterm + PTY. Uses a `cancelled` flag to handle React StrictMode's
   // double-invocation: if the cleanup fires before the async PTY spawn completes,
@@ -71,12 +144,14 @@ export function TerminalInstance({ sessionId, isActive }: TerminalInstanceProps)
     let cancelled = false;
     const unlistenFns: UnlistenFn[] = [];
 
+    const terminalSettings = terminalSettingsRef.current;
     const term = new Terminal({
       cursorBlink: true,
-      cursorStyle: 'bar',
-      fontSize: 13,
-      fontFamily: "'Geist Mono', 'Cascadia Code', 'Consolas', monospace",
-      lineHeight: 1.4,
+      cursorStyle: terminalSettings.cursorStyle,
+      fontSize: terminalSettings.fontSize,
+      fontFamily: terminalSettings.fontFamily || 'Geist Mono, Cascadia Code, Consolas, monospace',
+      scrollback: terminalSettings.scrollback,
+      lineHeight: 1,
       theme: getXtermTheme(themeIdRef.current),
     });
 
@@ -139,12 +214,9 @@ export function TerminalInstance({ sessionId, isActive }: TerminalInstanceProps)
     let rafId: number;
     rafId = requestAnimationFrame(async () => {
       if (cancelled) return;
-
-      try {
-        fitAddon.fit();
-      } catch {
-        /* not yet visible */
-      }
+      const measuredViewport = measureViewport();
+      const initialViewport = measuredViewport ?? pendingViewportRef.current ?? DEFAULT_TERMINAL_VIEWPORT;
+      pendingViewportRef.current = initialViewport;
 
       try {
         // Check if a PTY was already spawned (e.g., by the harness bridge for agent sessions)
@@ -157,9 +229,12 @@ export function TerminalInstance({ sessionId, isActive }: TerminalInstanceProps)
           ptyId = existingSession.ptyId;
         } else {
           ptyId = await invoke<string>('pty_spawn', {
-            shell: null,
+            shell: terminalSettingsRef.current.shell.trim() || null,
             cwd: sessionCwd ?? null,
             env: null,
+            cols: initialViewport.cols,
+            rows: initialViewport.rows,
+            interactive: !isAgentSession,
           });
 
           if (cancelled) {
@@ -171,6 +246,7 @@ export function TerminalInstance({ sessionId, isActive }: TerminalInstanceProps)
         }
 
         ptyIdRef.current = ptyId;
+        lastResizeRef.current = null;
 
         const unsubscribe = await desktopTerminalRuntime.subscribe(
           sessionId,
@@ -189,9 +265,7 @@ export function TerminalInstance({ sessionId, isActive }: TerminalInstanceProps)
         );
         unlistenFns.push(unsubscribe);
 
-        if (!cancelled && term.cols && term.rows) {
-          await invoke('pty_resize', { ptyId, cols: term.cols, rows: term.rows });
-        }
+        if (!cancelled) queueResize(ptyId, pendingViewportRef.current ?? initialViewport);
       } catch (err) {
         if (!cancelled) {
           term.writeln(`\x1b[31mFailed to spawn terminal: ${err}\x1b[0m`);
@@ -234,6 +308,8 @@ export function TerminalInstance({ sessionId, isActive }: TerminalInstanceProps)
         inset: 0,
         display: isActive ? 'block' : 'none',
         overflow: 'hidden',
+        minWidth: 0,
+        minHeight: 0,
       }}
     />
   );

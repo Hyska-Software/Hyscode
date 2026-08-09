@@ -496,4 +496,27 @@ describe('TUI controller', () => {
     expect(runtime.requests.at(-1)).toMatchObject({ method: 'context_attach', params: { kind: 'terminal', terminalId: 'term-1' } });
     expect(controller.state.commandFlow).toBeNull();
   });
+
+  it('hands off only live manual terminals and keeps agent terminals projected', async () => {
+    const runtime = new FakeRuntime();
+    let attachedTerminalId: string | null = null;
+    const controller = new TuiController({ workspace: 'C:/workspace' }, runtime, {
+      onTerminalAttach: async (terminalId) => { attachedTerminalId = terminalId; },
+    });
+    await controller.start();
+    controller.state.terminals = [
+      { terminalId: 'manual-terminal', ptyId: 'pty-manual', name: 'PowerShell', alive: true, sequence: 0, outputPreview: '', frameLanguage: 'powershell', role: 'user' },
+      { terminalId: 'agent-terminal', ptyId: 'pty-agent', name: 'Agent', alive: true, sequence: 0, outputPreview: '', frameLanguage: 'powershell', role: 'agent' },
+    ];
+
+    await controller.handleKey({ type: 'character', value: '/terminal attach manual-terminal' });
+    await controller.handleKey({ type: 'enter' });
+    expect(attachedTerminalId).toBe('manual-terminal');
+    expect(controller.state.status).toContain('Detached terminal');
+
+    await controller.handleKey({ type: 'character', value: '/terminal attach agent-terminal' });
+    await controller.handleKey({ type: 'enter' });
+    expect(attachedTerminalId).toBe('manual-terminal');
+    expect(controller.state.status).toContain('Agent terminals remain projected');
+  });
 });
