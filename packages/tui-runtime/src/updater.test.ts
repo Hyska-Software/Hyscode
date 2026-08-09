@@ -122,6 +122,18 @@ describe('VORTEX updater', () => {
       kind: 'archive',
       name: 'vortex-cli-0.9.0-windows-x64.zip',
     });
+
+    const arm64Updater = new CliUpdater({
+      version: '0.8.2',
+      executablePath: path.join(installRoot, 'vortex.exe'),
+      platform: 'linux',
+      architecture: 'arm64',
+      fetchImpl: async (url) => url === manifestUrl
+        ? jsonResponse(manifest, url)
+        : jsonResponse(release, 'https://api.github.com/repos/Hyska-Software/Hyscode/releases/latest'),
+    });
+
+    expect(await arm64Updater.check('stable')).toBeNull();
   });
 
   it('requires manual installation when a release has no integrity manifest', async () => {

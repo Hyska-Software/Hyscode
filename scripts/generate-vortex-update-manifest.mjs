@@ -4,10 +4,11 @@ import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
+import { fileURLToPath } from 'node:url';
 
 const DEFAULT_REPOSITORY = 'Hyska-Software/Hyscode';
 const MAX_ASSET_BYTES = 512 * 1024 * 1024;
-const EXPECTED_TARGETS = [
+const ALL_TARGETS = [
   ['windows', 'x64'],
   ['windows', 'arm64'],
   ['linux', 'x64'],
@@ -15,6 +16,7 @@ const EXPECTED_TARGETS = [
   ['macos', 'x64'],
   ['macos', 'arm64'],
 ];
+const X64_TARGETS = ALL_TARGETS.filter(([, architecture]) => architecture === 'x64');
 
 function parseArguments(args) {
   const options = {
@@ -23,10 +25,11 @@ function parseArguments(args) {
     version: null,
     output: null,
     assetDirectory: null,
+    targets: 'all',
   };
   for (let index = 0; index < args.length; index += 1) {
     const argument = args[index];
-    if (argument === '--repository' || argument === '--tag' || argument === '--version' || argument === '--output' || argument === '--asset-dir') {
+    if (argument === '--repository' || argument === '--tag' || argument === '--version' || argument === '--output' || argument === '--asset-dir' || argument === '--targets') {
       const value = args[index + 1];
       if (!value || value.startsWith('-')) throw new Error(argument + ' requires a value.');
       if (argument === '--repository') options.repository = value;
@@ -34,6 +37,7 @@ function parseArguments(args) {
       if (argument === '--version') options.version = value;
       if (argument === '--output') options.output = value;
       if (argument === '--asset-dir') options.assetDirectory = value;
+      if (argument === '--targets') options.targets = value.toLowerCase();
       index += 1;
       continue;
     }
@@ -42,6 +46,7 @@ function parseArguments(args) {
     else if (argument.startsWith('--version=')) options.version = argument.slice('--version='.length);
     else if (argument.startsWith('--output=')) options.output = argument.slice('--output='.length);
     else if (argument.startsWith('--asset-dir=')) options.assetDirectory = argument.slice('--asset-dir='.length);
+    else if (argument.startsWith('--targets=')) options.targets = argument.slice('--targets='.length).toLowerCase();
     else if (argument === '--help' || argument === '-h') options.help = true;
     else throw new Error('Unknown option: ' + argument);
   }
@@ -55,8 +60,10 @@ function printHelp() {
     'Usage: node scripts/generate-vortex-update-manifest.mjs --tag <tag> --output <file>',
     '',
     'The release mode reads the GitHub release assets, downloads every standalone',
-    'VORTEX asset, calculates SHA-256, and writes a manifest that requires all six',
-    'platform/architecture targets. --asset-dir is available for local validation.',
+    'VORTEX asset, calculates SHA-256, and writes a manifest. By default it requires',
+    'all twelve assets (archive + installer for x64 and arm64); --targets x64 limits',
+    'the manifest to the six x64 assets used by the automatic release workflow.',
+    '--asset-dir is available for local validation.',
     '',
     'Options:',
     '  --repository <owner/name> GitHub repository (defaults to GITHUB_REPOSITORY)',
@@ -64,6 +71,7 @@ function printHelp() {
     '  --version <version>      Release version without the leading v',
     '  --output <file>          Manifest output path',
     '  --asset-dir <directory>  Read local release assets instead of GitHub',
+    '  --targets <all|x64>      Required architecture set (defaults to all)',
     '  -h, --help               Show this help',
     '',
   ].join('\n'));
@@ -110,8 +118,14 @@ function assertAssetSize(size, name) {
   }
 }
 
-function assertCompleteAssetSet(assets) {
-  const expected = new Set(EXPECTED_TARGETS.map(([platform, architecture]) => `${platform}:${architecture}`));
+function resolveExpectedTargets(mode) {
+  if (mode === 'all') return ALL_TARGETS;
+  if (mode === 'x64') return X64_TARGETS;
+  throw new Error(`Unsupported VORTEX manifest target set: ${mode}. Use all or x64.`);
+}
+
+function assertCompleteAssetSet(assets, expectedTargets = ALL_TARGETS) {
+  const expected = new Set(expectedTargets.map(([platform, architecture]) => `${platform}:${architecture}`));
   const actual = new Set();
   for (const asset of assets) {
     const key = `${asset.platform}:${asset.architecture}`;
@@ -120,7 +134,7 @@ function assertCompleteAssetSet(assets) {
     if (actual.has(identity)) throw new Error('Duplicate VORTEX manifest asset: ' + identity);
     actual.add(identity);
   }
-  for (const [platform, architecture] of EXPECTED_TARGETS) {
+  for (const [platform, architecture] of expectedTargets) {
     for (const kind of ['archive', 'installer']) {
       const identity = `${platform}:${architecture}:${kind}`;
       if (!actual.has(identity)) throw new Error('Release is missing VORTEX asset ' + identity + '.');
@@ -166,8 +180,8 @@ async function downloadAsset(asset) {
   return { size: buffer.byteLength, sha256: hashBuffer(buffer) };
 }
 
-function buildManifest(version, assets) {
-  assertCompleteAssetSet(assets);
+function buildManifest(version, assets, expectedTargets = ALL_TARGETS) {
+  assertCompleteAssetSet(assets, expectedTargets);
   return {
     schemaVersion: 1,
     version,
@@ -179,7 +193,7 @@ function buildManifest(version, assets) {
   };
 }
 
-async function generateFromRelease(options, version) {
+async function generateFromRelease(options, version, expectedTargets) {
   const release = await fetchRelease(options.repository, options.tag);
   if (!release || !Array.isArray(release.assets)) throw new Error('GitHub returned an invalid release asset list.');
   const selected = [];
@@ -192,10 +206,10 @@ async function generateFromRelease(options, version) {
     const digest = await downloadAsset(asset);
     selected.push({ ...parsed, name: asset.name, size: digest.size, sha256: digest.sha256 });
   }
-  return buildManifest(version, selected);
+  return buildManifest(version, selected, expectedTargets);
 }
 
-function generateFromDirectory(options, version) {
+function generateFromDirectory(options, version, expectedTargets) {
   const directory = path.resolve(process.cwd(), options.assetDirectory);
   const selected = [];
   for (const name of readFileNames(directory)) {
@@ -206,7 +220,7 @@ function generateFromDirectory(options, version) {
     assertAssetSize(digest.size, name);
     selected.push({ ...parsed, name, size: digest.size, sha256: digest.sha256 });
   }
-  return buildManifest(version, selected);
+  return buildManifest(version, selected, expectedTargets);
 }
 
 function readFileNames(directory) {
@@ -223,19 +237,24 @@ async function main() {
   }
   if (!options.output) throw new Error('--output is required.');
   if (options.assetDirectory === null && !options.tag) throw new Error('--tag is required unless --asset-dir is used.');
+  const expectedTargets = resolveExpectedTargets(options.targets);
   const version = normalizeVersion(options.version ?? options.tag ?? '');
   const manifest = options.assetDirectory
-    ? generateFromDirectory(options, version)
-    : await generateFromRelease(options, version);
+    ? generateFromDirectory(options, version, expectedTargets)
+    : await generateFromRelease(options, version, expectedTargets);
   const outputPath = path.resolve(process.cwd(), options.output);
   mkdirSync(path.dirname(outputPath), { recursive: true });
   writeFileSync(outputPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf8');
   process.stdout.write(`VORTEX update manifest written to ${outputPath}.\n`);
 }
 
-try {
-  await main();
-} catch (error) {
-  process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
-  process.exitCode = 1;
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  try {
+    await main();
+  } catch (error) {
+    process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
+    process.exitCode = 1;
+  }
 }
+
+export { ALL_TARGETS, X64_TARGETS, assertCompleteAssetSet, buildManifest, parseCliAsset, resolveExpectedTargets };

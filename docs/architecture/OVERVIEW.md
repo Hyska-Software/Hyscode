@@ -216,18 +216,21 @@ and multiline answers.
 
 ### Release assets, self-update, and desktop installation
 
-The release workflow builds the VORTEX bundle on the native runner for each
-supported desktop platform and embeds the release version in the executable.
+The release workflow builds the VORTEX bundle on native x64 runners for each
+automatic CLI target and embeds the release version in the executable.
 It publishes both a complete standalone CLI asset and a desktop installer
 variant. VORTEX CLI archives and installers are kept separate from desktop
 assets, and `vortex-cli-manifest-<version>.json` records the exact SHA-256 and
-size for every platform/architecture asset:
+size for every VORTEX asset published by the workflow. The automatic release
+flow publishes VORTEX only for x64 to keep CI lightweight; desktop macOS still
+ships both x64 and arm64 installers:
 
 | Platform | Standalone CLI | Desktop + optional CLI |
 |---|---|---|
-| Windows x64/arm64 | `Vortex-CLI-Setup-<version>-<arch>.exe` and `vortex-cli-<version>-windows-<arch>.zip` | Desktop installer remains a separate asset |
-| Linux x64/arm64 | `vortex-cli-<version>-linux-<arch>.deb` and `vortex-cli-<version>-linux-<arch>.tar.gz` | Desktop packages remain separate assets |
-| macOS x64/arm64 | `Vortex-CLI-Setup-<version>-macos-<arch>.pkg` and `vortex-cli-<version>-macos-<arch>.tar.gz` | Desktop packages remain separate assets |
+| Windows x64 | `Vortex-CLI-Setup-<version>-x64.exe` and `vortex-cli-<version>-windows-x64.zip` | Desktop installer remains a separate asset |
+| Linux x64 | `vortex-cli-<version>-linux-x64.deb` and `vortex-cli-<version>-linux-x64.tar.gz` | Desktop packages remain separate assets |
+| macOS x64 | `Vortex-CLI-Setup-<version>-macos-x64.pkg` and `vortex-cli-<version>-macos-x64.tar.gz` | Desktop packages remain separate assets |
+| macOS arm64 | — | Desktop package remains available; VORTEX is not included in the automatic release |
 
 The normal Linux AppImage, RPM, macOS DMG, and desktop Windows installer
 remain available as desktop-only assets. The optional component is intentionally

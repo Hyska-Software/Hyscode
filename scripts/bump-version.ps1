@@ -5,16 +5,16 @@
     Bumps the HysCode application version across all source files.
 
 .DESCRIPTION
-    Updates the application version in the four files tracked by the
-    release workflow:
-      1. package.json                       (root — used as build base)
-      2. apps/desktop/package.json          (Tauri app package)
+    Updates the application version in the package and runtime metadata tracked
+    by the release workflow, including both lockfiles:
+      1. package.json and package-lock.json (root — used as build base)
+      2. apps/desktop/package.json and its package-lock entry
       3. apps/desktop/src-tauri/tauri.conf.json
-      4. apps/desktop/src-tauri/Cargo.toml
+      4. apps/desktop/src-tauri/Cargo.toml and the hyscode package in Cargo.lock
 
     The next push to main will append "-build.<run_number>" to the
-    three CI-managed files via .github/workflows/release.yml.
-    This script only writes the clean X.Y.Z base.
+    desktop/runtime files via .github/workflows/release.yml while retaining
+    the clean root package version as the build base.
 
     Run with no arguments for an interactive menu.
 
@@ -30,6 +30,11 @@
 
 .PARAMETER Force
     Skip the confirmation prompt.
+
+.PARAMETER SkipRoot
+    CI build mode. Keep the root package.json version and its package-lock
+    metadata at the clean base version while updating the desktop/runtime files
+    to the generated build version.
 
 .EXAMPLE
     .\scripts\bump-version.ps1              # interactive menu
@@ -47,7 +52,9 @@ param(
 
     [switch]$DryRun,
 
-    [switch]$Force
+    [switch]$Force,
+
+    [switch]$SkipRoot
 )
 
 $ErrorActionPreference = 'Stop'
@@ -58,9 +65,11 @@ $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 # File targets
 # ─────────────────────────────────────────────────────────────────────────────
 $RootPkg          = Join-Path $RepoRoot 'package.json'
+$PackageLock      = Join-Path $RepoRoot 'package-lock.json'
 $DesktopPkg       = Join-Path $RepoRoot 'apps/desktop/package.json'
 $TauriConf        = Join-Path $RepoRoot 'apps/desktop/src-tauri/tauri.conf.json'
 $CargoToml        = Join-Path $RepoRoot 'apps/desktop/src-tauri/Cargo.toml'
+$CargoLock        = Join-Path $RepoRoot 'apps/desktop/src-tauri/Cargo.lock'
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Helpers
@@ -68,6 +77,139 @@ $CargoToml        = Join-Path $RepoRoot 'apps/desktop/src-tauri/Cargo.toml'
 function Read-RootVersion {
     $pkg = [System.IO.File]::ReadAllText($RootPkg) | ConvertFrom-Json
     return $pkg.version
+}
+
+function Read-JsonVersion {
+    param([Parameter(Mandatory)][string]$Path)
+
+    $json = [System.IO.File]::ReadAllText($Path) | ConvertFrom-Json
+    if (-not $json.version) {
+        throw "Could not find a top-level version in $Path."
+    }
+    return [string]$json.version
+}
+
+function Read-PackageLockVersions {
+    $lock = [System.IO.File]::ReadAllText($PackageLock) | ConvertFrom-Json -AsHashtable
+    $rootEntry = $lock.packages['']
+    $desktopEntry = $lock.packages['apps/desktop']
+    if (-not $rootEntry -or -not $desktopEntry) {
+        throw "package-lock.json is missing the root or apps/desktop package entry."
+    }
+    return [pscustomobject]@{
+        TopLevel = [string]$lock.version
+        Root     = [string]$rootEntry.version
+        Desktop  = [string]$desktopEntry.version
+    }
+}
+
+function Read-CargoLockVersion {
+    $text = [System.IO.File]::ReadAllText($CargoLock)
+    $regex = [regex]'(?ms)^\[\[package\]\]\s*\r?\n(?:(?!^\[\[package\]\]).)*?^name\s*=\s*"hyscode"\s*$\r?\n^version\s*=\s*"(?<version>[^"]+)"'
+    $match = $regex.Match($text)
+    if (-not $match.Success) {
+        throw "Could not find the hyscode package in $CargoLock."
+    }
+    return $match.Groups['version'].Value
+}
+
+function Read-CargoTomlVersion {
+    $text = [System.IO.File]::ReadAllText($CargoToml)
+    $regex = [regex]'(?ms)^\[package\].*?^version\s*=\s*"(?<version>[^"]+)"'
+    $match = $regex.Match($text)
+    if (-not $match.Success) {
+        throw "Could not find the [package] version in $CargoToml."
+    }
+    return $match.Groups['version'].Value
+}
+
+function Replace-RequiredVersion {
+    param(
+        [Parameter(Mandatory)][string]$Text,
+        [Parameter(Mandatory)][regex]$Regex,
+        [Parameter(Mandatory)][string]$Replacement,
+        [Parameter(Mandatory)][string]$Description
+    )
+
+    if (-not $Regex.IsMatch($Text)) {
+        throw "Failed to update $Description."
+    }
+    return $Regex.Replace($Text, $Replacement, 1)
+}
+
+function Update-PackageLock {
+    param([Parameter(Mandatory)][string]$TargetVersion)
+
+    $text = [System.IO.File]::ReadAllText($PackageLock)
+
+    if (-not $SkipRoot) {
+        $text = Replace-RequiredVersion `
+            -Text $text `
+            -Regex ([regex]'(?m)^  "version"\s*:\s*"[^"]*"') `
+            -Replacement ('  "version": "' + $TargetVersion + '"') `
+            -Description 'the package-lock.json top-level version'
+
+        $text = Replace-RequiredVersion `
+            -Text $text `
+            -Regex ([regex]'(?ms)(^    ""\s*:\s*\{\s*\r?\n(?:(?!^    "[^"\r\n]+"\s*:).)*?^      "version"\s*:\s*)"[^"]*"') `
+            -Replacement ('$1"' + $TargetVersion + '"') `
+            -Description 'the root package entry in package-lock.json'
+    }
+
+    $text = Replace-RequiredVersion `
+        -Text $text `
+        -Regex ([regex]'(?ms)(^    "apps/desktop"\s*:\s*\{\s*\r?\n(?:(?!^    "[^"\r\n]+"\s*:).)*?^      "version"\s*:\s*)"[^"]*"') `
+        -Replacement ('$1"' + $TargetVersion + '"') `
+        -Description 'the apps/desktop package entry in package-lock.json'
+
+    [System.IO.File]::WriteAllText($PackageLock, $text)
+}
+
+function Update-CargoLock {
+    param([Parameter(Mandatory)][string]$TargetVersion)
+
+    $text = [System.IO.File]::ReadAllText($CargoLock)
+    $regex = [regex]'(?ms)(^\[\[package\]\]\s*\r?\n(?:(?!^\[\[package\]\]).)*?^name\s*=\s*"hyscode"\s*$\r?\n^version\s*=\s*)"[^"]+"'
+    $updated = Replace-RequiredVersion `
+        -Text $text `
+        -Regex $regex `
+        -Replacement ('$1"' + $TargetVersion + '"') `
+        -Description 'the hyscode package version in Cargo.lock'
+    [System.IO.File]::WriteAllText($CargoLock, $updated)
+}
+
+function Assert-SynchronizedVersions {
+    param(
+        [Parameter(Mandatory)][string]$TargetVersion,
+        [Parameter(Mandatory)][string]$ExpectedRootVersion
+    )
+
+    $actualRoot = Read-RootVersion
+    $desktop = Read-JsonVersion -Path $DesktopPkg
+    $tauri = Read-JsonVersion -Path $TauriConf
+    $lock = Read-PackageLockVersions
+    $cargoToml = Read-CargoTomlVersion
+    $cargoLock = Read-CargoLockVersion
+
+    $mismatches = @()
+    if ($SkipRoot) {
+        if ($actualRoot -ne $ExpectedRootVersion) { $mismatches += "package.json=$actualRoot (expected unchanged $ExpectedRootVersion)" }
+        if ($lock.TopLevel -ne $ExpectedRootVersion) { $mismatches += "package-lock.json top-level=$($lock.TopLevel) (expected unchanged $ExpectedRootVersion)" }
+        if ($lock.Root -ne $ExpectedRootVersion) { $mismatches += "package-lock.json root=$($lock.Root) (expected unchanged $ExpectedRootVersion)" }
+    } else {
+        if ($actualRoot -ne $TargetVersion) { $mismatches += "package.json=$actualRoot" }
+        if ($lock.TopLevel -ne $TargetVersion) { $mismatches += "package-lock.json top-level=$($lock.TopLevel)" }
+        if ($lock.Root -ne $TargetVersion) { $mismatches += "package-lock.json root=$($lock.Root)" }
+    }
+    if ($desktop -ne $TargetVersion) { $mismatches += "apps/desktop/package.json=$desktop" }
+    if ($lock.Desktop -ne $TargetVersion) { $mismatches += "package-lock.json apps/desktop=$($lock.Desktop)" }
+    if ($tauri -ne $TargetVersion) { $mismatches += "tauri.conf.json=$tauri" }
+    if ($cargoToml -ne $TargetVersion) { $mismatches += "Cargo.toml=$cargoToml" }
+    if ($cargoLock -ne $TargetVersion) { $mismatches += "Cargo.lock hyscode=$cargoLock" }
+
+    if ($mismatches.Count -gt 0) {
+        throw "Version metadata is not synchronized: $($mismatches -join '; ')"
+    }
 }
 
 function Split-Semver {
@@ -231,31 +373,17 @@ $targetRaw = Format-Semver -Semver $target
 # ─────────────────────────────────────────────────────────────────────────────
 # Build the change plan
 # ─────────────────────────────────────────────────────────────────────────────
-$changes = @(
-    @{ File = $RootPkg;    Current = $currentRaw;     Next = $targetRaw }
-    @{ File = $DesktopPkg; Current = $null;           Next = $targetRaw }
-    @{ File = $TauriConf;  Current = $null;           Next = $targetRaw }
-    @{ File = $CargoToml;  Current = $null;           Next = $targetRaw }
-)
-
-# Read actual current values for the 3 non-root files for an accurate diff
-foreach ($c in $changes[1..3]) {
-    $normalized = $c.File -replace '\\', '/'
-    switch -Wildcard ($normalized) {
-        '*/Cargo.toml' {
-            $line = (Select-String -LiteralPath $c.File -Pattern '^version\s*=\s*".*"' | Select-Object -First 1).Line
-            $c.Current = ($line -replace '^version\s*=\s*"?', '' -replace '"$', '').Trim()
-        }
-        '*/tauri.conf.json' {
-            $json = [System.IO.File]::ReadAllText($c.File) | ConvertFrom-Json
-            $c.Current = $json.version
-        }
-        '*/package.json' {
-            $json = [System.IO.File]::ReadAllText($c.File) | ConvertFrom-Json
-            $c.Current = $json.version
-        }
-    }
+$lockVersions = Read-PackageLockVersions
+$changes = @()
+if (-not $SkipRoot) {
+    $changes += @{ File = $RootPkg; Current = $currentRaw; Next = $targetRaw }
+    $changes += @{ File = $PackageLock; Current = "top-level=$($lockVersions.TopLevel), root=$($lockVersions.Root)"; Next = $targetRaw }
 }
+$changes += @{ File = $DesktopPkg; Current = (Read-JsonVersion -Path $DesktopPkg); Next = $targetRaw }
+$changes += @{ File = $PackageLock; Current = "apps/desktop=$($lockVersions.Desktop)"; Next = $targetRaw }
+$changes += @{ File = $TauriConf; Current = (Read-JsonVersion -Path $TauriConf); Next = $targetRaw }
+$changes += @{ File = $CargoToml; Current = (Select-String -LiteralPath $CargoToml -Pattern '^version\s*=\s*".*"' | Select-Object -First 1).Line -replace '^version\s*=\s*"?', '' -replace '"$', ''; Next = $targetRaw }
+$changes += @{ File = $CargoLock; Current = (Read-CargoLockVersion); Next = $targetRaw }
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Report
@@ -295,11 +423,13 @@ if (-not $Force) {
 # ─────────────────────────────────────────────────────────────────────────────
 # Apply changes
 # ─────────────────────────────────────────────────────────────────────────────
-# 1) Root package.json — re-format preserving style (2-space indent, trailing newline)
-$rootJson = [System.IO.File]::ReadAllText($RootPkg) | ConvertFrom-Json
-$rootJson.version = $targetRaw
-$rootOut = (($rootJson | ConvertTo-Json -Depth 100) -replace "`r?`n", "`n") + "`n"
-[System.IO.File]::WriteAllText($RootPkg, $rootOut)
+# 1) Root package.json — only manual releases update the clean build base.
+if (-not $SkipRoot) {
+    $rootJson = [System.IO.File]::ReadAllText($RootPkg) | ConvertFrom-Json
+    $rootJson.version = $targetRaw
+    $rootOut = (($rootJson | ConvertTo-Json -Depth 100) -replace "`r?`n", "`n") + "`n"
+    [System.IO.File]::WriteAllText($RootPkg, $rootOut)
+}
 
 # 2) apps/desktop/package.json
 $deskJson = [System.IO.File]::ReadAllText($DesktopPkg) | ConvertFrom-Json
@@ -324,6 +454,15 @@ if (-not $cargoRegex.IsMatch($cargoText)) {
 $cargoNew = $cargoRegex.Replace($cargoText, ('$1"' + $targetRaw + '"'), 1)
 [System.IO.File]::WriteAllText($CargoToml, $cargoNew)
 
+# 5) Lockfiles — update only the exact package metadata that carries the
+# application version, preserving the rest of each generated lockfile.
+Update-PackageLock -TargetVersion $targetRaw
+Update-CargoLock -TargetVersion $targetRaw
+
+# The release workflow commits immediately after this script returns. Fail
+# before that commit if any runtime version is inconsistent.
+Assert-SynchronizedVersions -TargetVersion $targetRaw -ExpectedRootVersion $currentRaw
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Done
 # ─────────────────────────────────────────────────────────────────────────────
@@ -331,7 +470,7 @@ Write-Host ''
 Write-Host "✓ Bumped to $targetRaw" -ForegroundColor Green
 Write-Host ''
 Write-Host 'Next steps:' -ForegroundColor Cyan
-Write-Host "  git add package.json apps/desktop/package.json apps/desktop/src-tauri/tauri.conf.json apps/desktop/src-tauri/Cargo.toml"
+Write-Host "  git add package.json package-lock.json apps/desktop/package.json apps/desktop/src-tauri/tauri.conf.json apps/desktop/src-tauri/Cargo.toml apps/desktop/src-tauri/Cargo.lock"
 Write-Host "  git commit -m 'chore: bump version to $targetRaw'"
-Write-Host "  git push   # triggers Release workflow → v$targetRaw-build.<run_number>"
+Write-Host "  git push   # triggers the Release workflow using the clean root base"
 Write-Host ''
