@@ -528,13 +528,12 @@ fn save_git_sources(sources: &ExtensionGitSources) -> Result<(), String> {
 
 /// Run a git CLI command and return stdout, or an error with stderr.
 fn run_git(args: &[&str], cwd: Option<&PathBuf>) -> Result<String, String> {
-    use std::process::Command;
-    let mut cmd = Command::new("git");
-    cmd.args(args);
+    let mut command = super::utils::cmd("git");
+    command.args(args);
     if let Some(dir) = cwd {
-        cmd.current_dir(dir);
+        command.current_dir(dir);
     }
-    let output = cmd
+    let output = command
         .output()
         .map_err(|e| format!("Failed to run git: {}", e))?;
 
