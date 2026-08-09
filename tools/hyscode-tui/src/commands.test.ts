@@ -38,6 +38,14 @@ describe('TUI command and CLI parsing', () => {
     expect(() => parseCliArgs(['--protocol', 'json'])).toThrow('Unsupported protocol');
   });
 
+  it('resolves POSIX paths without interpreting them as Windows paths', () => {
+    if (process.platform === 'win32') return;
+    expect(parseCliArgs(['--workspace', '/tmp/hyscode-workspace'], '/home/runner/workspace')).toMatchObject({
+      kind: 'run',
+      options: { workspace: '/tmp/hyscode-workspace' },
+    });
+  });
+
   it('parses quoted slash command arguments and filters the visual palette', () => {
     expect(parseSlashCommand('/project "C:/A Project"')).toEqual({ name: '/project', args: '"C:/A Project"' });
     expect(matchingCommands('/diag').map((command) => command.name)).toEqual(['/diagnostics']);

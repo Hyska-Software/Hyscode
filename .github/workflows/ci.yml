@@ -264,6 +264,11 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # npm 11 can leave native install scripts pending; explicitly rebuild
+      # node-pty so Linux receives pty.node and spawn-helper before bundling.
+      - name: Prepare node-pty native assets
+        run: npm rebuild node-pty --foreground-scripts
+
       - name: Build production bundle
         run: npm run build:vortex
 

@@ -220,6 +220,15 @@ export function commandArgument(args: string): string {
   return args.trim().replace(/^['"]|['"]$/g, '');
 }
 
+const WINDOWS_ABSOLUTE_PATH = /^(?:[A-Za-z]:[\\/]|\\\\|\/\/)/u;
+
+function resolveCliPath(cwd: string, value: string): string {
+  if (WINDOWS_ABSOLUTE_PATH.test(cwd) || WINDOWS_ABSOLUTE_PATH.test(value)) {
+    return path.win32.resolve(cwd, value);
+  }
+  return path.resolve(cwd, value);
+}
+
 export function flowTitle(flow: CommandFlow | null): string {
   switch (flow?.kind) {
     case 'mode': return 'MODE';
@@ -245,7 +254,7 @@ export function parseCliArgs(args: readonly string[], cwd = process.cwd(), versi
   if (args[0] === '--apply-update') {
     const statePath = args[1];
     if (!statePath || args.length !== 2) throw new Error('--apply-update requires exactly one state file path.');
-    return { kind: 'apply-update', statePath: path.resolve(cwd, statePath) };
+    return { kind: 'apply-update', statePath: resolveCliPath(cwd, statePath) };
   }
   let workspace: string | undefined;
   let provider: string | undefined;
@@ -309,11 +318,11 @@ export function parseCliArgs(args: readonly string[], cwd = process.cwd(), versi
   return {
     kind: 'run',
     options: {
-      workspace: path.resolve(cwd, workspace ?? process.env.HYSCODE_WORKSPACE ?? '.'),
+      workspace: resolveCliPath(cwd, workspace ?? process.env.HYSCODE_WORKSPACE ?? '.'),
       ...(provider ? { provider } : {}),
       ...(model ? { model } : {}),
       ...(mode ? { mode } : {}),
-      ...(configPath ? { configPath: path.resolve(cwd, configPath) } : {}),
+      ...(configPath ? { configPath: resolveCliPath(cwd, configPath) } : {}),
       ...(protocol ? { protocol } : {}),
     },
   };
@@ -390,14 +399,14 @@ function parseUpdateArgs(args: readonly string[], cwd: string): CliParseResult {
     if (argument === '--config') {
       const value = args[index + 1];
       if (!value || value.startsWith('-')) throw new Error('--config requires a path.');
-      configPath = path.resolve(cwd, value);
+      configPath = resolveCliPath(cwd, value);
       index += 1;
       continue;
     }
     if (argument.startsWith('--config=')) {
       const value = argument.slice('--config='.length);
       if (!value) throw new Error('--config requires a path.');
-      configPath = path.resolve(cwd, value);
+      configPath = resolveCliPath(cwd, value);
       continue;
     }
     if (argument === '--help' || argument === '-h') return { kind: 'help', text: helpText() };

@@ -184,7 +184,9 @@ function resolveNodePtyNativeDirectory() {
 
   const requiredNames = platform === 'win32'
     ? ['pty.node', 'conpty.node', 'conpty_console_list.node']
-    : ['pty.node', 'spawn-helper'];
+    : platform === 'darwin'
+      ? ['pty.node', 'spawn-helper']
+      : ['pty.node'];
   for (const name of requiredNames) {
     if (!existsSync(path.join(prebuildDirectory, name))) {
       throw new Error(`node-pty is missing ${name} for ${platformArchitecture}. Reinstall dependencies on the target platform.`);
@@ -206,7 +208,9 @@ function stageNodePtyAssets(sourceDirectory, outputDirectory) {
   mkdirSync(stagedDirectory, { recursive: true });
   const stagedNames = platform === 'win32'
     ? ['pty.node', 'conpty.node', 'conpty_console_list.node']
-    : ['pty.node', 'spawn-helper'];
+    : platform === 'darwin'
+      ? ['pty.node', 'spawn-helper']
+      : ['pty.node'];
   for (const name of stagedNames) {
     if (!copyIfPresent(path.join(sourceDirectory, name), path.join(stagedDirectory, name))) {
       throw new Error(`Could not stage node-pty asset ${name}.`);

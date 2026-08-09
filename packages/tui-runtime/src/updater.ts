@@ -681,7 +681,9 @@ async function validateBundle(
   const nativeDirectory = path.join(bundlePath, 'node-pty-assets', `${nativePlatform}-${architecture}`);
   const nativeFiles = platform === 'windows'
     ? ['pty.node', 'conpty.node', 'conpty_console_list.node']
-    : ['pty.node', 'spawn-helper'];
+    : platform === 'macos'
+      ? ['pty.node', 'spawn-helper']
+      : ['pty.node'];
   const requiredPaths = [
     { label: executableName, path: path.join(bundlePath, executableName) },
     { label: sidecarName, path: path.join(bundlePath, sidecarName) },

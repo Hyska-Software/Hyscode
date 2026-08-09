@@ -30,7 +30,6 @@ async function temporaryPosixBundle(directory: string, version: string): Promise
   await chmod(path.join(bundle, 'vortex'), 0o755);
   await writeFile(path.join(bundle, 'codex-sidecar'), 'sidecar', 'utf8');
   await writeFile(path.join(bundle, 'node-pty-assets', 'linux-x64', 'pty.node'), 'pty', 'utf8');
-  await writeFile(path.join(bundle, 'node-pty-assets', 'linux-x64', 'spawn-helper'), 'helper', 'utf8');
   return bundle;
 }
 

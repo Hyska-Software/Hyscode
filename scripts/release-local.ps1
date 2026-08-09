@@ -29,11 +29,19 @@
 .PARAMETER SkipSidecarBuild
     Skip the explicit AI sidecar build step and reuse existing binaries.
 
+.PARAMETER SkipDeps
+    (Linux mode) Skip the npm ci step inside WSL and reuse the existing
+    node_modules. Useful for iterative builds — run 'npm ci' once after a
+    fresh checkout.
+
 .PARAMETER Linux
     Build the Linux (x64) release artifacts inside WSL instead of the Windows
     ones. Requires a WSL2 distro with Rust, Node, npm, and Bun installed;
     system packages are installed via apt when missing. Assumes the standard
-    /mnt/<drive> automount for the repository and output paths.
+    /mnt/<drive> automount for the repository and output paths. For
+    non-interactive sudo (missing apt packages), set the environment variable
+    HYCODE_WSL_SUDO_PASSWORD; it is forwarded to WSL via WSLENV and never
+    written to disk.
 
 .PARAMETER OutputDirectory
     Directory that receives the produced installers and archives. Defaults to
@@ -60,6 +68,7 @@ param(
     [string]$Version,
     [switch]$NoBump,
     [switch]$SkipSidecarBuild,
+    [switch]$SkipDeps,
     [switch]$Linux,
     [string]$OutputDirectory,
     [switch]$GenerateManifest,
@@ -214,11 +223,22 @@ if ($Linux) {
         throw "WSL did not respond ($wslCheck). Install a Linux distribution first: wsl --install -d Ubuntu"
     }
 
+    # Forward HYCODE_WSL_SUDO_PASSWORD into the WSL session (used by
+    # release-local-linux.sh for non-interactive sudo) without ever storing
+    # the value in a file.
+    if ($env:HYCODE_WSL_SUDO_PASSWORD) {
+        $wslEnvKey = 'HYCODE_WSL_SUDO_PASSWORD'
+        if (-not (($env:WSLENV -split ';') -contains $wslEnvKey)) {
+            $env:WSLENV = (@($env:WSLENV -split ';' | Where-Object { $_ }) + $wslEnvKey) -join ';'
+        }
+    }
+
     $wslScript = ConvertTo-WslPath (Join-Path $PSScriptRoot 'release-local-linux.sh')
     $wslOutput = ConvertTo-WslPath $OutputDirectory
 
     $shArgs = @('bash', $wslScript, '--version', $Version, '--output', $wslOutput)
     if ($SkipSidecarBuild) { $shArgs += '--skip-sidecar-build' }
+    if ($SkipDeps) { $shArgs += '--skip-deps' }
 
     Write-Host ''
     Write-Host "  Delegating to WSL: $wslScript" -ForegroundColor Yellow

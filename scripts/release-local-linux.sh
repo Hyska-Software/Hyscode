@@ -26,6 +26,7 @@ BUNDLE_DIR="$TAURI_DIR/target/release/bundle"
 VERSION=""
 OUTPUT_DIR=""
 SKIP_SIDECAR_BUILD=0
+SKIP_DEPS=0
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -35,6 +36,8 @@ while [[ $# -gt 0 ]]; do
             OUTPUT_DIR="$2"; shift 2 ;;
         --skip-sidecar-build)
             SKIP_SIDECAR_BUILD=1; shift ;;
+        --skip-deps)
+            SKIP_DEPS=1; shift ;;
         *)
             echo "Unknown option: $1" >&2
             exit 1 ;;
@@ -42,13 +45,17 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ -z "$VERSION" || -z "$OUTPUT_DIR" ]]; then
-    echo "Usage: release-local-linux.sh --version <ver> --output <dir> [--skip-sidecar-build]" >&2
+    echo "Usage: release-local-linux.sh --version <ver> --output <dir> [--skip-sidecar-build] [--skip-deps]" >&2
     exit 1
 fi
 if [[ ! -f "$TAURI_DIR/tauri.conf.json" ]]; then
     echo "ERROR: could not locate the repository from $ROOT" >&2
     exit 1
 fi
+
+# Non-interactive shells do not source ~/.profile: put the user-local
+# toolchain bins (rustup, bun) on PATH so the prerequisite checks pass.
+export PATH="$HOME/.cargo/bin:$HOME/.bun/bin:$HOME/.local/bin:$PATH"
 
 if [[ "$(uname -m)" != "x86_64" ]]; then
     echo "ERROR: this script produces x86_64 artifacts only (detected: $(uname -m))" >&2
@@ -63,6 +70,10 @@ fi
 run_as_root() {
     if [[ "$(id -u)" -eq 0 ]]; then
         "$@"
+    elif [[ -n "${HYCODE_WSL_SUDO_PASSWORD:-}" ]]; then
+        # Non-interactive sudo: password comes from the environment
+        # (forwarded from Windows via WSLENV) — never hardcoded.
+        echo "$HYCODE_WSL_SUDO_PASSWORD" | sudo -S -p '' "$@"
     else
         sudo "$@"
     fi
@@ -153,11 +164,17 @@ chmod +x "$HOME/.cache/tauri/linuxdeploy-x86_64.AppImage"
 echo "  ✓ AppImage tooling ready"
 
 # ── Step 3: Install dependencies ─────────────────────────────────────────────
-echo ""
-echo "[3/8] Installing Node dependencies..."
-cd "$ROOT"
-npm ci || npm install
-echo "  ✓ Dependencies installed"
+if [[ $SKIP_DEPS -eq 1 ]]; then
+    echo ""
+    echo "[3/8] Skip dependency install (--skip-deps)"
+    echo "  Reusing the existing node_modules (run 'npm ci' after a checkout)"
+else
+    echo ""
+    echo "[3/8] Installing Node dependencies..."
+    cd "$ROOT"
+    npm ci || npm install
+    echo "  ✓ Dependencies installed"
+fi
 
 # ── Step 4: Build AI sidecars ────────────────────────────────────────────────
 if [[ $SKIP_SIDECAR_BUILD -eq 1 ]]; then
