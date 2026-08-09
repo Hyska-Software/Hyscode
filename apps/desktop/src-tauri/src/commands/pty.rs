@@ -274,7 +274,7 @@ pub async fn pty_resize(
     rows: u16,
     state: State<'_, PtyState>,
 ) -> Result<(), String> {
-    let sessions = state
+    let mut sessions = state
         .0
         .lock()
         .map_err(|error| format!("Lock error: {error}"))?;

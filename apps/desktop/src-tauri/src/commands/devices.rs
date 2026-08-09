@@ -2,6 +2,9 @@ use super::utils::cmd;
 use serde::{Deserialize, Serialize};
 use tauri::Emitter;
 
+const DEVICE_PTY_COLS: u16 = 120;
+const DEVICE_PTY_ROWS: u16 = 24;
+
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 /// A connected physical device or running emulator.
@@ -564,6 +567,8 @@ pub async fn run_on_device(
                 killer,
                 alive: true,
                 exit_code: None,
+                cols: DEVICE_PTY_COLS,
+                rows: DEVICE_PTY_ROWS,
                 output: super::pty::OutputBuffer::new(),
             },
         );
@@ -627,8 +632,8 @@ fn pty_system_open() -> Result<portable_pty::PtyPair, String> {
     use portable_pty::{native_pty_system, PtySize};
     native_pty_system()
         .openpty(PtySize {
-            rows: 24,
-            cols: 120,
+            rows: DEVICE_PTY_ROWS,
+            cols: DEVICE_PTY_COLS,
             pixel_width: 0,
             pixel_height: 0,
         })
