@@ -1,6 +1,7 @@
 import { useSettingsStore } from '../../../stores';
 import type { TerminalCursorStyle } from '../../../stores/settings-store';
 import { SettingRow, SettingSection, SettingSelect, SettingSlider, SettingTextInput } from '../controls';
+import { resolveTerminalFontFamily } from '../../terminal/terminal-font';
 
 export function TerminalTab() {
   const store = useSettingsStore();
@@ -12,7 +13,7 @@ export function TerminalTab() {
           <SettingTextInput
             value={store.terminalFontFamily}
             onChange={(v) => store.set('terminalFontFamily', v)}
-            placeholder="Geist Mono"
+            placeholder="Cascadia Mono"
           />
         </SettingRow>
         <SettingRow label="Font Size">
@@ -60,7 +61,7 @@ export function TerminalTab() {
         <div
           className="overflow-hidden rounded-lg bg-background p-3"
           style={{
-            fontFamily: store.terminalFontFamily || 'Geist Mono',
+            fontFamily: resolveTerminalFontFamily(store.terminalFontFamily),
             fontSize: `${store.terminalFontSize}px`,
           }}
         >

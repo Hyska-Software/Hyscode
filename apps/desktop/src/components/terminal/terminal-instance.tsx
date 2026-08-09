@@ -9,6 +9,7 @@ import { useSettingsStore } from '../../stores/settings-store';
 import { useExtensionStore } from '../../stores/extension-store';
 import { getXtermTheme } from '../../lib/monaco-themes';
 import { desktopTerminalRuntime } from '../../lib/terminal-runtime';
+import { resolveTerminalFontFamily } from './terminal-font';
 
 interface TerminalInstanceProps {
   sessionId: string;
@@ -128,9 +129,10 @@ export function TerminalInstance({ sessionId, isActive }: TerminalInstanceProps)
     const term = xtermRef.current;
     if (!term) return;
     term.options.fontSize = terminalFontSize;
-    term.options.fontFamily = terminalFontFamily || 'Geist Mono, Cascadia Code, Consolas, monospace';
+    term.options.fontFamily = resolveTerminalFontFamily(terminalFontFamily);
     term.options.scrollback = terminalScrollback;
     term.options.cursorStyle = terminalCursorStyle;
+    term.options.letterSpacing = 0;
     requestAnimationFrame(handleResize);
   }, [handleResize, terminalCursorStyle, terminalFontFamily, terminalFontSize, terminalScrollback]);
 
@@ -149,8 +151,9 @@ export function TerminalInstance({ sessionId, isActive }: TerminalInstanceProps)
       cursorBlink: true,
       cursorStyle: terminalSettings.cursorStyle,
       fontSize: terminalSettings.fontSize,
-      fontFamily: terminalSettings.fontFamily || 'Geist Mono, Cascadia Code, Consolas, monospace',
+      fontFamily: resolveTerminalFontFamily(terminalSettings.fontFamily),
       scrollback: terminalSettings.scrollback,
+      letterSpacing: 0,
       lineHeight: 1,
       theme: getXtermTheme(themeIdRef.current),
     });

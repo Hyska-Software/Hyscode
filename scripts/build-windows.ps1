@@ -21,7 +21,8 @@ $TAURI_DIR = Join-Path $DESKTOP "src-tauri"
 $RELEASE_DIR = Join-Path $TAURI_DIR "target" "release"
 $BUNDLE_DIR = Join-Path $RELEASE_DIR "bundle"
 $TARGET_BUNDLE_DIR = Join-Path $TAURI_DIR "target" $Target "release" "bundle"
-$VERSION = "0.2.1"
+$desktopPackage = Get-Content -LiteralPath (Join-Path $DESKTOP "package.json") -Raw | ConvertFrom-Json
+$VERSION = [string]$desktopPackage.version
 
 Write-Host ""
 Write-Host "============================================" -ForegroundColor Cyan
@@ -170,7 +171,7 @@ if (-not $SkipInnoSetup -and -not $NsisOnly) {
             New-Item -ItemType Directory -Path $innoOutDir -Force | Out-Null
         }
 
-        & $iscc $issFile
+        & $iscc "/DMyAppVersion=$VERSION" $issFile
         
         if ($LASTEXITCODE -ne 0) {
             Write-Error "Inno Setup build failed!"

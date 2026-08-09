@@ -42,7 +42,7 @@ export const SETTINGS_DEFAULTS = {
 
   // ─ Terminal ─
   terminalFontSize: 13,
-  terminalFontFamily: 'Geist Mono',
+  terminalFontFamily: 'Cascadia Mono',
   terminalScrollback: 1000,
   terminalShell: '',
   terminalCursorStyle: 'block',

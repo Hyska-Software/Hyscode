@@ -111,6 +111,11 @@ describe('TerminalInstance', () => {
     mocks.subscribe.mockClear();
     mocks.terminals.length = 0;
     mocks.errors.length = 0;
+    mocks.settings.terminalFontSize = 15;
+    mocks.settings.terminalFontFamily = 'Test Mono';
+    mocks.settings.terminalScrollback = 2400;
+    mocks.settings.terminalShell = 'pwsh.exe';
+    mocks.settings.terminalCursorStyle = 'underline';
     mocks.terminalState.sessions = [{
       id: 'session-1',
       ptyId: null,
@@ -157,10 +162,26 @@ describe('TerminalInstance', () => {
 
     expect(mocks.terminals[0]?.options).toMatchObject({
       fontSize: 15,
-      fontFamily: 'Test Mono',
+      fontFamily: "Test Mono, 'Cascadia Mono', Consolas, 'Courier New', monospace",
       scrollback: 2400,
       cursorStyle: 'underline',
+      letterSpacing: 0,
       lineHeight: 1,
     });
+  });
+
+  it('applies font changes to an already mounted terminal', async () => {
+    const view = render(<TerminalInstance sessionId="session-1" isActive />);
+
+    await waitFor(() => expect(mocks.subscribe).toHaveBeenCalled());
+
+    mocks.settings.terminalFontFamily = 'Cascadia Mono';
+    mocks.settings.terminalFontSize = 18;
+    view.rerender(<TerminalInstance sessionId="session-1" isActive />);
+
+    await waitFor(() => expect(mocks.terminals[0]?.options).toMatchObject({
+      fontFamily: "Cascadia Mono, Consolas, 'Courier New', monospace",
+      fontSize: 18,
+    }));
   });
 });

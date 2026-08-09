@@ -3,7 +3,9 @@
 ; Requires Inno Setup 6+ (https://jrsoftware.org/isinfo.php)
 
 #define MyAppName "HysCode"
-#define MyAppVersion "0.1.0"
+#ifndef MyAppVersion
+#define MyAppVersion "0.0.0"
+#endif
 #define MyAppPublisher "HysCode"
 #define MyAppURL "https://github.com/Hyska-Software/Hyscode"
 #define MyAppExeName "HysCode.exe"
