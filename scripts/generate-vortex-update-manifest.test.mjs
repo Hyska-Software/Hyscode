@@ -7,7 +7,7 @@ import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 
-import { X64_TARGETS, buildManifest, fetchRelease, parseCliAsset } from './generate-vortex-update-manifest.mjs';
+import { X64_TARGETS, buildManifest, downloadAsset, fetchRelease, parseCliAsset } from './generate-vortex-update-manifest.mjs';
 
 const execFileAsync = promisify(execFile);
 const scriptPath = fileURLToPath(new URL('./generate-vortex-update-manifest.mjs', import.meta.url));
@@ -126,4 +126,30 @@ test('looks up a draft release by its numeric release id', async () => {
   assert.equal(release.draft, true);
   assert.equal(requests.length, 1);
   assert.equal(requests[0].url, 'https://api.github.com/repos/Hyska-Software/Hyscode/releases/367495683');
+});
+
+test('downloads draft assets through the authenticated release asset endpoint', async () => {
+  const payload = Buffer.from('draft-vortex-asset', 'utf8');
+  const requests = [];
+  const fetchImplementation = async (url, init) => {
+    requests.push({ url: String(url), init });
+    return {
+      ok: true,
+      status: 200,
+      async arrayBuffer() {
+        return payload.buffer.slice(payload.byteOffset, payload.byteOffset + payload.byteLength);
+      },
+    };
+  };
+
+  const digest = await downloadAsset(
+    'Hyska-Software/Hyscode',
+    { id: 507771226, name: 'vortex-cli-0.8.2-build.92-linux-x64.deb', size: payload.byteLength },
+    fetchImplementation,
+  );
+
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].url, 'https://api.github.com/repos/Hyska-Software/Hyscode/releases/assets/507771226');
+  assert.equal(requests[0].init.headers.Accept, 'application/octet-stream');
+  assert.deepEqual(digest, { size: payload.byteLength, sha256: '0996a5ab24a58035994aa13dceb85edb123cb594ba53bc2719495f8c67080f1b' });
 });

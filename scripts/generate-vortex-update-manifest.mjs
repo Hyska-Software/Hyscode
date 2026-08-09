@@ -176,10 +176,18 @@ async function fetchRelease(repository, tag, releaseId = null, fetchImplementati
   return response.json();
 }
 
-async function downloadAsset(asset) {
-  const headers = { 'User-Agent': 'VORTEX-CLI-Manifest-Generator' };
+async function downloadAsset(repository, asset, fetchImplementation = fetch) {
+  // Draft releases expose an untagged browser URL that returns 404 until the
+  // release is published. The authenticated asset endpoint works in both
+  // draft and published states.
+  const apiBase = process.env.GITHUB_API_URL ?? 'https://api.github.com';
+  const url = `${apiBase}/repos/${repository}/releases/assets/${encodeURIComponent(asset.id)}`;
+  const headers = {
+    Accept: 'application/octet-stream',
+    'User-Agent': 'VORTEX-CLI-Manifest-Generator',
+  };
   if (process.env.GITHUB_TOKEN) headers.Authorization = `Bearer ${process.env.GITHUB_TOKEN}`;
-  const response = await fetch(asset.browser_download_url, {
+  const response = await fetchImplementation(url, {
     headers,
   });
   if (!response.ok) throw new Error(`Could not download ${asset.name}: HTTP ${response.status}.`);
@@ -208,12 +216,13 @@ async function generateFromRelease(options, version, expectedTargets) {
   if (!release || !Array.isArray(release.assets)) throw new Error('GitHub returned an invalid release asset list.');
   const selected = [];
   for (const asset of release.assets) {
-    if (!asset || typeof asset.name !== 'string' || typeof asset.browser_download_url !== 'string') continue;
+    if (!asset || typeof asset.name !== 'string') continue;
     const parsed = parseCliAsset(asset.name, version);
     if (!parsed) continue;
+    if (!Number.isSafeInteger(asset.id)) throw new Error(`GitHub release asset ${asset.name} has an invalid numeric id.`);
     assertAssetSize(asset.size, asset.name);
     process.stdout.write(`Hashing ${asset.name}...\n`);
-    const digest = await downloadAsset(asset);
+    const digest = await downloadAsset(options.repository, asset);
     selected.push({ ...parsed, name: asset.name, size: digest.size, sha256: digest.sha256 });
   }
   return buildManifest(version, selected, expectedTargets);
@@ -267,4 +276,4 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   }
 }
 
-export { ALL_TARGETS, X64_TARGETS, assertCompleteAssetSet, buildManifest, fetchRelease, parseCliAsset, resolveExpectedTargets };
+export { ALL_TARGETS, X64_TARGETS, assertCompleteAssetSet, buildManifest, downloadAsset, fetchRelease, parseCliAsset, resolveExpectedTargets };
