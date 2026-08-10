@@ -68,6 +68,22 @@ function normalizePrefs(prefs: AgentRightTabPrefs | undefined): AgentRightTabPre
   return { order, visible };
 }
 
+function findFallbackRightTab(
+  order: RightTab[],
+  visible: Record<RightTab, boolean>,
+  closedTab: RightTab,
+): RightTab | null {
+  const closedIndex = order.indexOf(closedTab);
+  const afterClosed = closedIndex >= 0 ? order.slice(closedIndex + 1) : order;
+  const beforeClosed = closedIndex >= 0 ? order.slice(0, closedIndex).reverse() : [];
+
+  return (
+    afterClosed.find((tabId) => visible[tabId]) ??
+    beforeClosed.find((tabId) => visible[tabId]) ??
+    null
+  );
+}
+
 /** Builtin sidebar views exposed in ActivityBar and View menu */
 export type AgentChangesFilter = 'session' | 'last-turn' | 'staged' | 'working' | 'branch';
 
@@ -94,8 +110,8 @@ interface LayoutState {
   terminalVisible: boolean;
   /** Which tab is active when terminal is in sidebar mode */
   sidebarActiveTab: 'chat' | 'terminal';
-  /** Which tab is active in the agent-mode right panel */
-  agentRightTab: RightTab;
+  /** Which tab is active in the agent-mode right panel, or null for the open-surface grid */
+  agentRightTab: RightTab | null;
   /** Per-project order + visibility for the agent right panel tabs, keyed by project root path */
   agentRightTabPrefs: Record<string, AgentRightTabPrefs>;
   /** File path to preview in agent-mode right panel */
@@ -119,11 +135,14 @@ interface LayoutState {
   setTerminalLocation: (location: TerminalLocation) => void;
   setTerminalVisible: (visible: boolean) => void;
   setSidebarActiveTab: (tab: 'chat' | 'terminal') => void;
-  setAgentRightTab: (tab: RightTab) => void;
+  /** Compatibility selection action; opening a tab also makes it visible. */
+  setAgentRightTab: (tab: RightTab | null) => void;
+  /** Open and activate a right-panel tab for the current project. */
+  openAgentRightTab: (tab: RightTab) => void;
+  /** Close a right-panel tab and select a deterministic fallback when needed. */
+  closeAgentRightTab: (tab: RightTab) => void;
   /** Reorder the agent right panel tabs for the current project */
   reorderAgentRightTabs: (fromIndex: number, toIndex: number) => void;
-  /** Show/hide an agent right panel tab for the current project (min 1 visible) */
-  setAgentRightTabVisible: (id: RightTab, visible: boolean) => void;
   /** Reset the current project's agent right panel tab order + visibility to defaults */
   resetAgentRightTabs: () => void;
   setAgentPreviewFile: (filePath: string | null) => void;
@@ -145,7 +164,7 @@ interface LayoutState {
 
 export const useLayoutStore = create<LayoutState>()(
   persist(
-    (set) => ({
+    (set, get) => ({
       workspaceMode: 'editor',
       terminalLocation: 'bottom',
       terminalVisible: true,
@@ -165,7 +184,50 @@ export const useLayoutStore = create<LayoutState>()(
       setTerminalLocation: (location) => set({ terminalLocation: location }),
       setTerminalVisible: (visible) => set({ terminalVisible: visible }),
       setSidebarActiveTab: (tab) => set({ sidebarActiveTab: tab }),
-      setAgentRightTab: (tab) => set({ agentRightTab: tab }),
+      setAgentRightTab: (tab) => {
+        if (tab === null) {
+          set({ agentRightTab: null });
+          return;
+        }
+        get().openAgentRightTab(tab);
+      },
+
+      openAgentRightTab: (id) =>
+        set((state) => {
+          const key = getProjectKey();
+          const prefs = normalizePrefs(state.agentRightTabPrefs[key]);
+          return {
+            agentRightTab: id,
+            agentRightTabPrefs: {
+              ...state.agentRightTabPrefs,
+              [key]: {
+                ...prefs,
+                visible: { ...prefs.visible, [id]: true },
+              },
+            },
+          };
+        }),
+
+      closeAgentRightTab: (id) =>
+        set((state) => {
+          const key = getProjectKey();
+          const prefs = normalizePrefs(state.agentRightTabPrefs[key]);
+          const nextVisible: Record<RightTab, boolean> = { ...prefs.visible, [id]: false };
+          const activeTab =
+            state.agentRightTab !== id &&
+            state.agentRightTab !== null &&
+            nextVisible[state.agentRightTab]
+              ? state.agentRightTab
+              : findFallbackRightTab(prefs.order, nextVisible, id);
+
+          return {
+            agentRightTab: activeTab,
+            agentRightTabPrefs: {
+              ...state.agentRightTabPrefs,
+              [key]: { ...prefs, visible: nextVisible },
+            },
+          };
+        }),
 
       reorderAgentRightTabs: (fromIndex, toIndex) =>
         set((state) => {
@@ -191,47 +253,21 @@ export const useLayoutStore = create<LayoutState>()(
           };
         }),
 
-      setAgentRightTabVisible: (id, visible) =>
-        set((state) => {
-          const key = getProjectKey();
-          const prefs = normalizePrefs(state.agentRightTabPrefs[key]);
-          // Prevent hiding the last visible tab
-          if (!visible) {
-            const visibleCount = prefs.order.filter((tabId) => prefs.visible[tabId]).length;
-            if (visibleCount <= 1 && prefs.visible[id]) {
-              return {};
-            }
-          }
-          const nextVisible: Record<RightTab, boolean> = { ...prefs.visible, [id]: visible };
-          // If the active tab was hidden, switch to the first visible tab in order
-          let agentRightTab = state.agentRightTab;
-          if (!visible && agentRightTab === id) {
-            const firstVisible = prefs.order.find((tabId) => nextVisible[tabId]);
-            if (firstVisible) agentRightTab = firstVisible;
-          }
-          return {
-            agentRightTab,
-            agentRightTabPrefs: {
-              ...state.agentRightTabPrefs,
-              [key]: { ...prefs, visible: nextVisible },
-            },
-          };
-        }),
-
       resetAgentRightTabs: () =>
         set((state) => {
           const key = getProjectKey();
           const rest = { ...state.agentRightTabPrefs };
           delete rest[key];
-          const agentRightTab = DEFAULT_RIGHT_TAB_ORDER.includes(state.agentRightTab)
-            ? state.agentRightTab
-            : DEFAULT_RIGHT_TAB_ORDER[0];
-          return { agentRightTab, agentRightTabPrefs: rest };
+          return { agentRightTab: DEFAULT_RIGHT_TAB_ORDER[0], agentRightTabPrefs: rest };
         }),
-      setAgentPreviewFile: (filePath) =>
-        set({ agentPreviewFile: filePath, agentRightTab: 'preview' }),
-      setAgentSelectedChangeFile: (filePath) =>
-        set({ agentSelectedChangeFile: filePath, agentRightTab: 'changes' }),
+      setAgentPreviewFile: (filePath) => {
+        set({ agentPreviewFile: filePath });
+        get().openAgentRightTab('preview');
+      },
+      setAgentSelectedChangeFile: (filePath) => {
+        set({ agentSelectedChangeFile: filePath });
+        get().openAgentRightTab('changes');
+      },
       setAgentChangesFilter: (filter) => set({ agentChangesFilter: filter }),
       setRulesPanelOpen: (open) => set({ rulesPanelOpen: open }),
       setSidebarVisible: (visible) => set({ sidebarVisible: visible }),

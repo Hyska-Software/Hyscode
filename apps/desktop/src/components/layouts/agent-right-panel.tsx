@@ -1,6 +1,5 @@
 import { Suspense, lazy, useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import {
-  Terminal,
   GitCompare,
   GitBranch,
   Eye,
@@ -11,9 +10,6 @@ import {
   RefreshCw,
   ChevronDown,
   ChevronRight,
-  PanelRightClose,
-  Folder,
-  Layers,
 } from 'lucide-react';
 import { MarkdownViewer } from '../editor/viewers/markdown-viewer';
 import { TerminalPanel } from '../terminal';
@@ -38,6 +34,8 @@ import { cn, getViewerType } from '@/lib/utils';
 import { TabBadge } from '../ui/tab-badge';
 import { RightTabContextMenu } from './right-tab-context-menu';
 import { ContextTab } from './context-tab';
+import { OpenSurfaceGrid } from './open-surface-grid';
+import { RightTabStrip } from './right-tab-strip';
 import {
   buildSessionChanges,
   loadGitChangeCount,
@@ -916,17 +914,11 @@ function LoadingSpinner() {
 
 // ─── Main Component ─────────────────────────────────────────────────────────
 
-const TAB_META: Record<RightTab, { label: string; icon: React.ElementType }> = {
-  changes: { label: 'Changes', icon: GitCompare },
-  context: { label: 'Context', icon: Layers },
-  files: { label: 'Files', icon: Folder },
-  preview: { label: 'Preview', icon: Eye },
-  terminal: { label: 'Terminal', icon: Terminal },
-};
-
 export function AgentRightPanel() {
   const activeTab = useLayoutStore((s) => s.agentRightTab);
   const setActiveTab = useLayoutStore((s) => s.setAgentRightTab);
+  const openAgentRightTab = useLayoutStore((s) => s.openAgentRightTab);
+  const closeAgentRightTab = useLayoutStore((s) => s.closeAgentRightTab);
   const setRightCollapsed = useLayoutStore((s) => s.setAgentRightCollapsed);
   const reorderAgentRightTabs = useLayoutStore((s) => s.reorderAgentRightTabs);
   const tabPrefsMap = useLayoutStore((s) => s.agentRightTabPrefs);
@@ -940,74 +932,16 @@ export function AgentRightPanel() {
 
   const visibleTabs = useMemo(() => order.filter((id) => visible[id]), [order, visible]);
 
-  // Ensure the active tab is visible; otherwise fall back to the first visible tab
+  // Keep legacy or partially hydrated state from pointing at an unavailable surface.
   useEffect(() => {
-    if (visibleTabs.length > 0 && !visibleTabs.includes(activeTab)) {
+    if (visibleTabs.length === 0) {
+      if (activeTab !== null) setActiveTab(null);
+      return;
+    }
+    if (activeTab === null || !visibleTabs.includes(activeTab)) {
       setActiveTab(visibleTabs[0]);
     }
   }, [visibleTabs, activeTab, setActiveTab]);
-
-  // ── Drag-and-drop reorder (native HTML5) ───────────────────────────────────
-  const [dragIndex, setDragIndex] = useState<number | null>(null);
-  const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
-  const dragCounterRef = useRef(0);
-
-  const handleDragStart = useCallback((e: React.DragEvent, index: number) => {
-    setDragIndex(index);
-    e.dataTransfer.effectAllowed = 'move';
-    e.dataTransfer.setData('text/plain', String(index));
-    if (e.currentTarget instanceof HTMLElement) {
-      e.currentTarget.style.opacity = '0.5';
-    }
-  }, []);
-
-  const handleDragEnd = useCallback((e: React.DragEvent) => {
-    if (e.currentTarget instanceof HTMLElement) {
-      e.currentTarget.style.opacity = '1';
-    }
-    setDragIndex(null);
-    setDragOverIndex(null);
-    dragCounterRef.current = 0;
-  }, []);
-
-  const handleDragEnter = useCallback((e: React.DragEvent, index: number) => {
-    e.preventDefault();
-    dragCounterRef.current++;
-    setDragOverIndex(index);
-  }, []);
-
-  const handleDragLeave = useCallback(() => {
-    dragCounterRef.current--;
-    if (dragCounterRef.current <= 0) {
-      setDragOverIndex(null);
-      dragCounterRef.current = 0;
-    }
-  }, []);
-
-  const handleDragOver = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    e.dataTransfer.dropEffect = 'move';
-  }, []);
-
-  const handleDrop = useCallback(
-    (e: React.DragEvent, toVisibleIndex: number) => {
-      e.preventDefault();
-      const fromVisibleIndex = dragIndex;
-      setDragIndex(null);
-      setDragOverIndex(null);
-      dragCounterRef.current = 0;
-      if (fromVisibleIndex === null || fromVisibleIndex === toVisibleIndex) return;
-      // Map visible indices back to indices within the full order array
-      const fromId = visibleTabs[fromVisibleIndex];
-      const toId = visibleTabs[toVisibleIndex];
-      const fromIndex = order.indexOf(fromId);
-      const toIndex = order.indexOf(toId);
-      if (fromIndex !== -1 && toIndex !== -1) {
-        reorderAgentRightTabs(fromIndex, toIndex);
-      }
-    },
-    [dragIndex, visibleTabs, order, reorderAgentRightTabs],
-  );
 
   // ── Context menu (right-click) ─────────────────────────────────────────────
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
@@ -1015,6 +949,23 @@ export function AgentRightPanel() {
     e.preventDefault();
     setContextMenu({ x: e.clientX, y: e.clientY });
   }, []);
+
+  const handleOpenMenu = useCallback((event: React.MouseEvent<HTMLButtonElement>) => {
+    event.stopPropagation();
+    const rect = event.currentTarget.getBoundingClientRect();
+    setContextMenu({ x: rect.left, y: rect.bottom + 4 });
+  }, []);
+
+  const handleReorder = useCallback(
+    (fromTab: RightTab, toTab: RightTab) => {
+      const fromIndex = order.indexOf(fromTab);
+      const toIndex = order.indexOf(toTab);
+      if (fromIndex !== -1 && toIndex !== -1) {
+        reorderAgentRightTabs(fromIndex, toIndex);
+      }
+    },
+    [order, reorderAgentRightTabs],
+  );
 
   // Badge: count of pending changes
   const pendingCount = useAgentStore(
@@ -1030,57 +981,19 @@ export function AgentRightPanel() {
 
   return (
     <div className="flex h-full flex-col">
-      {/* Header / tab bar */}
-      <div
+      <RightTabStrip
+        visibleTabs={visibleTabs}
+        activeTab={activeTab}
+        pendingCount={pendingCount}
+        terminalActive={terminalActive}
+        menuOpen={contextMenu !== null}
+        onSelect={openAgentRightTab}
+        onClose={closeAgentRightTab}
+        onCollapse={() => setRightCollapsed(true)}
+        onOpenMenu={handleOpenMenu}
         onContextMenu={handleContextMenu}
-        className="flex h-8 shrink-0 items-center gap-1 border-b border-border/30 bg-surface-raised px-2"
-      >
-        <button
-          onClick={() => setRightCollapsed(true)}
-          title="Collapse panel"
-          aria-label="Collapse panel"
-          className="rounded-md p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-        >
-          <PanelRightClose className="h-3.5 w-3.5" />
-        </button>
-        {visibleTabs.map((id, index) => {
-          const { label, icon: Icon } = TAB_META[id];
-          return (
-            <button
-              key={id}
-              draggable
-              onDragStart={(e) => handleDragStart(e, index)}
-              onDragEnd={handleDragEnd}
-              onDragEnter={(e) => handleDragEnter(e, index)}
-              onDragLeave={handleDragLeave}
-              onDragOver={handleDragOver}
-              onDrop={(e) => handleDrop(e, index)}
-              onClick={() => setActiveTab(id)}
-              className={cn(
-                'flex h-8 items-center gap-1.5 px-3 text-[11px] font-medium transition-colors',
-                activeTab === id
-                  ? 'bg-surface text-foreground'
-                  : 'text-muted-foreground hover:text-foreground hover:bg-muted',
-                dragOverIndex === index && dragIndex !== index && 'border-l-2 border-primary',
-              )}
-            >
-              <Icon className="h-3 w-3 shrink-0" />
-              {label}
-              {id === 'changes' && pendingCount > 0 && (
-                <span className="rounded-full bg-primary/20 px-1.5 text-[9px] font-medium text-primary tabular-nums">
-                  {pendingCount}
-                </span>
-              )}
-              {id === 'terminal' && terminalActive && (
-                <span className="relative flex h-2 w-2">
-                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-green-400 opacity-75" />
-                  <span className="relative inline-flex h-2 w-2 rounded-full bg-success" />
-                </span>
-              )}
-            </button>
-          );
-        })}
-      </div>
+        onReorder={handleReorder}
+      />
 
       {contextMenu && (
         <RightTabContextMenu
@@ -1088,13 +1001,17 @@ export function AgentRightPanel() {
           y={contextMenu.y}
           order={order}
           visible={visible}
-          tabMeta={TAB_META}
           onClose={() => setContextMenu(null)}
         />
       )}
 
       {/* Tab content */}
       <div className="relative flex-1 overflow-hidden">
+        {visibleTabs.length === 0 && (
+          <div className="absolute inset-0 z-20">
+            <OpenSurfaceGrid tabs={order} onOpen={openAgentRightTab} />
+          </div>
+        )}
         <div className={cn('absolute inset-0', activeTab === 'changes' ? 'z-10' : 'z-0 invisible')}>
           <ChangesTab />
         </div>

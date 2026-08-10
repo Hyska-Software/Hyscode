@@ -1,13 +1,13 @@
 import { useEffect, useRef } from 'react';
 import { Check, RotateCcw } from 'lucide-react';
 import { useLayoutStore, type RightTab } from '../../stores/layout-store';
+import { RIGHT_TAB_DESCRIPTORS } from './right-tab-model';
 
 interface RightTabContextMenuProps {
   x: number;
   y: number;
   order: RightTab[];
   visible: Record<RightTab, boolean>;
-  tabMeta: Record<RightTab, { label: string; icon: React.ElementType }>;
   onClose: () => void;
 }
 
@@ -20,14 +20,12 @@ export function RightTabContextMenu({
   y,
   order,
   visible,
-  tabMeta,
   onClose,
 }: RightTabContextMenuProps) {
   const menuRef = useRef<HTMLDivElement>(null);
-  const setAgentRightTabVisible = useLayoutStore((s) => s.setAgentRightTabVisible);
+  const openAgentRightTab = useLayoutStore((s) => s.openAgentRightTab);
+  const closeAgentRightTab = useLayoutStore((s) => s.closeAgentRightTab);
   const resetAgentRightTabs = useLayoutStore((s) => s.resetAgentRightTabs);
-
-  const visibleCount = order.filter((id) => visible[id]).length;
 
   // Close menu on outside click, scroll, or Escape
   useEffect(() => {
@@ -78,23 +76,21 @@ export function RightTabContextMenu({
       className="min-w-[200px] rounded-lg border border-border bg-surface p-1 shadow-lg"
     >
       <div className="px-2 py-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-        Tabs
+        Surfaces
       </div>
       {order.map((id) => {
-        const meta = tabMeta[id];
+        const meta = RIGHT_TAB_DESCRIPTORS[id];
         const isVisible = visible[id];
-        const isLastVisible = isVisible && visibleCount <= 1;
         const Icon = meta.icon;
         return (
           <button
             key={id}
-            onClick={() => setAgentRightTabVisible(id, !isVisible)}
-            disabled={isLastVisible}
-            className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-[11px] transition-colors ${
-              isLastVisible
-                ? 'cursor-not-allowed text-muted-foreground/50'
-                : 'text-foreground hover:bg-surface-raised'
-            }`}
+            onClick={() => {
+              if (isVisible) closeAgentRightTab(id);
+              else openAgentRightTab(id);
+              onClose();
+            }}
+            className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-[11px] text-foreground transition-colors hover:bg-surface-raised focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
             <span className="flex h-3.5 w-3.5 shrink-0 items-center justify-center">
               {isVisible && <Check className="h-3.5 w-3.5" />}
@@ -112,10 +108,10 @@ export function RightTabContextMenu({
           resetAgentRightTabs();
           onClose();
         }}
-        className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-[11px] text-foreground transition-colors hover:bg-surface-raised"
+        className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-[11px] text-foreground transition-colors hover:bg-surface-raised focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       >
         <RotateCcw className="h-3.5 w-3.5 shrink-0" />
-        <span className="flex-1 text-left">Restaurar padrão</span>
+        <span className="flex-1 text-left">Restore defaults</span>
       </button>
     </div>
   );

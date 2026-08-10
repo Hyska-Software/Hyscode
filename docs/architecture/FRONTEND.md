@@ -36,8 +36,22 @@ The frontend is a React 19 SPA running inside Tauri's WebView. It uses shadcn/ui
 
 - All panels are **resizable** via drag handles (react-resizable-panels)
 - All panels are **collapsible** (toggle via keyboard shortcut or button)
-- Panel layout state persisted in `settingsStore`
+- Panel layout state persisted in `layoutStore`
 - Default ratios: File Tree 15% | Editor 50% | Agent 35%
+
+### VORTEX Right Surface Tabs
+
+VORTEX uses `AgentRightPanel` for project-aware right-side surfaces: Changes,
+Context, Files, Preview, and Terminal. `layoutStore.agentRightTabPrefs` owns
+the order and visibility of these surfaces, persisted by project root path so
+one VORTEX project cannot overwrite another project's presentation state.
+
+Each visible surface can be closed independently. The active surface is held in
+`layoutStore.agentRightTab`; it is `null` when every surface is closed. In that
+state the panel renders an open-surface grid that lists every supported surface
+and opens the selected one through the same store action used by the tab strip
+and surface menu. Programmatic Preview and Changes navigation also reopens and
+activates the corresponding surface.
 
 ---
 

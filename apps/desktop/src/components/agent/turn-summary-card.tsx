@@ -126,7 +126,7 @@ export function TurnSummaryCard({ summary }: { summary: TurnSummary }) {
     [liveSummary.files],
   );
   const hasPending = liveSummary.files.some((file) => file.resolution === 'pending');
-  const openReview = (): void => useLayoutStore.getState().setAgentRightTab('changes');
+  const openReview = (): void => useLayoutStore.getState().openAgentRightTab('changes');
 
   return (
     <section className="mt-3 overflow-hidden rounded-lg border border-border/50 bg-card shadow-sm">
