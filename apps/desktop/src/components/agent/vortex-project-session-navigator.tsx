@@ -580,7 +580,12 @@ function VortexProjectGroup({
   const runtimesByKey = new Map(runtimes.map((runtime) => [runtime.key, runtime]));
   return (
     <div className="rounded-md">
-      <div className={cn('group flex items-center gap-1 rounded-md px-1 py-1', isActiveProject && 'bg-primary/10')}>
+      <div
+        className={cn(
+          'group flex items-center gap-1 rounded-md px-1 py-1 transition-colors hover:bg-surface-raised',
+          isActiveProject && 'bg-surface-raised',
+        )}
+      >
         <button
           onClick={onToggle}
           aria-label={`${collapsed ? 'Expand' : 'Collapse'} ${project.name}`}
@@ -721,7 +726,7 @@ function VortexSessionRow({
       }}
       className={cn(
         'group flex min-w-0 items-start gap-2 rounded-md px-2 py-1.5 text-left transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring',
-        isActive ? 'bg-primary/15 text-foreground' : 'text-muted-foreground hover:bg-surface-raised hover:text-foreground',
+        isActive ? 'bg-surface-raised text-foreground' : 'text-muted-foreground hover:bg-surface-raised hover:text-foreground',
         busy && 'pointer-events-none opacity-60',
       )}
       title={statusLabel ? `${session.title} · ${statusLabel}` : session.title}
