@@ -6,7 +6,7 @@ export type TerminalLocation = 'bottom' | 'sidebar';
 export type WorkspaceMode = 'editor' | 'agent';
 
 /** Tabs available in the agent-mode right panel */
-export type RightTab = 'changes' | 'preview' | 'terminal' | 'files';
+export type RightTab = 'changes' | 'preview' | 'terminal' | 'files' | 'context';
 
 /** Per-project preferences for the agent right panel tabs */
 export interface AgentRightTabPrefs {
@@ -15,14 +15,21 @@ export interface AgentRightTabPrefs {
 }
 
 /** Default order for the agent right panel tabs */
-export const DEFAULT_RIGHT_TAB_ORDER: RightTab[] = ['changes', 'files', 'preview', 'terminal'];
+export const DEFAULT_RIGHT_TAB_ORDER: RightTab[] = [
+  'changes',
+  'context',
+  'files',
+  'preview',
+  'terminal',
+];
 
-/** Default visibility for the agent right panel tabs (all visible) */
+/** Default visibility for the agent right panel tabs (Context is opt-in) */
 export const DEFAULT_RIGHT_TAB_VISIBILITY: Record<RightTab, boolean> = {
   changes: true,
   files: true,
   preview: true,
   terminal: true,
+  context: false,
 };
 
 /** Fallback key used when no project is currently open */

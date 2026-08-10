@@ -4,7 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "tauri dev",
+    "dev": "node ../../scripts/tauri-dev.mjs",
+    "dev:tauri": "tauri dev",
     "frontend:dev": "vite",
     "build": "tsc -b && vite build",
     "build:sidecars": "turbo build --filter=@hyscode/codex-sidecar --filter=@hyscode/claude-agent-sidecar",

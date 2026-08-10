@@ -13,6 +13,7 @@ import {
   ChevronRight,
   PanelRightClose,
   Folder,
+  Layers,
 } from 'lucide-react';
 import { MarkdownViewer } from '../editor/viewers/markdown-viewer';
 import { TerminalPanel } from '../terminal';
@@ -36,6 +37,7 @@ import { defineAllMonacoThemes, getMonacoThemeName } from '@/lib/monaco-themes';
 import { cn, getViewerType } from '@/lib/utils';
 import { TabBadge } from '../ui/tab-badge';
 import { RightTabContextMenu } from './right-tab-context-menu';
+import { ContextTab } from './context-tab';
 import {
   buildSessionChanges,
   loadGitChangeCount,
@@ -916,6 +918,7 @@ function LoadingSpinner() {
 
 const TAB_META: Record<RightTab, { label: string; icon: React.ElementType }> = {
   changes: { label: 'Changes', icon: GitCompare },
+  context: { label: 'Context', icon: Layers },
   files: { label: 'Files', icon: Folder },
   preview: { label: 'Preview', icon: Eye },
   terminal: { label: 'Terminal', icon: Terminal },
@@ -1094,6 +1097,9 @@ export function AgentRightPanel() {
       <div className="relative flex-1 overflow-hidden">
         <div className={cn('absolute inset-0', activeTab === 'changes' ? 'z-10' : 'z-0 invisible')}>
           <ChangesTab />
+        </div>
+        <div className={cn('absolute inset-0', activeTab === 'context' ? 'z-10' : 'z-0 invisible')}>
+          <ContextTab />
         </div>
         <div className={cn('absolute inset-0', activeTab === 'files' ? 'z-10' : 'z-0 invisible')}>
           <div className="h-full overflow-auto px-2">
