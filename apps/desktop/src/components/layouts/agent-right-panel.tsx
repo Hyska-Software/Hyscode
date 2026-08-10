@@ -170,7 +170,9 @@ function ChangesTab() {
           <AgentChangesContent />
         </div>
         <div className={cn('absolute inset-0', subTab === 'git' ? 'z-10' : 'z-0 invisible')}>
-          <GitView />
+          <div className="mx-auto h-full w-full max-w-xl">
+            <GitView />
+          </div>
         </div>
       </div>
     </div>
