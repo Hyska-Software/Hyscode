@@ -11,6 +11,11 @@ import {
   ChevronDown,
   ChevronRight,
 } from 'lucide-react';
+import {
+  detectLanguage,
+  disableNativeTypeScriptValidation,
+  registerAllLanguages,
+} from '@hyscode/lsp-client';
 import { MarkdownViewer } from '../editor/viewers/markdown-viewer';
 import { TerminalPanel } from '../terminal';
 import { GitView } from '../sidebar/views/git-view-new';
@@ -31,11 +36,13 @@ import { getActiveAgentBridge } from '@/lib/active-agent-bridge';
 import { tauriFs } from '@/lib/tauri-fs';
 import { defineAllMonacoThemes, getMonacoThemeName } from '@/lib/monaco-themes';
 import { cn, getViewerType } from '@/lib/utils';
+import { useGitDecorations } from '@/hooks/use-git-decorations';
 import { TabBadge } from '../ui/tab-badge';
 import { RightTabContextMenu } from './right-tab-context-menu';
 import { ContextTab } from './context-tab';
 import { OpenSurfaceGrid } from './open-surface-grid';
 import { RightTabStrip } from './right-tab-strip';
+import { detectPreviewLanguage } from './preview-language';
 import {
   buildSessionChanges,
   loadGitChangeCount,
@@ -51,31 +58,7 @@ import {
 
 const MonacoEditor = lazy(() => import('@monaco-editor/react'));
 import { DiffViewer } from '@/components/diff-viewer';
-
-// ─── Language detection ─────────────────────────────────────────────────────
-
-const LANG_MAP: Record<string, string> = {
-  ts: 'typescript',
-  tsx: 'typescriptreact',
-  js: 'javascript',
-  jsx: 'javascriptreact',
-  json: 'json',
-  md: 'markdown',
-  css: 'css',
-  html: 'html',
-  rs: 'rust',
-  py: 'python',
-  toml: 'toml',
-  yaml: 'yaml',
-  yml: 'yaml',
-  sql: 'sql',
-  sh: 'shell',
-};
-
-function detectLang(filePath: string): string {
-  const ext = filePath.split('.').pop()?.toLowerCase() ?? '';
-  return LANG_MAP[ext] || 'plaintext';
-}
+import type * as monacoEditor from 'monaco-editor';
 
 // ─── Changes Tab (with Agent + Git sub-tabs) ───────────────────────────────
 
@@ -276,7 +259,7 @@ function useDiffContent(
       })
       .catch(() => {
         if (!cancelled)
-          setContent({ original: '', modified: '', language: detectLang(entry.filePath) });
+          setContent({ original: '', modified: '', language: detectLanguage(entry.filePath) });
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -776,6 +759,22 @@ function PreviewTab() {
   const [error, setError] = useState<string | null>(null);
   const [mdMode, setMdMode] = useState<MarkdownViewMode>('preview');
   const [splitRatio, setSplitRatio] = useState(50);
+  const previewEditorRef = useRef<monacoEditor.editor.IStandaloneCodeEditor | null>(null);
+  const previewMonacoRef = useRef<typeof monacoEditor | null>(null);
+  const [previewEditorVersion, setPreviewEditorVersion] = useState(0);
+  const handlePreviewEditorMount = useCallback(
+    (
+      editor: monacoEditor.editor.IStandaloneCodeEditor | null,
+      monaco: typeof monacoEditor | null,
+    ) => {
+      previewEditorRef.current = editor;
+      previewMonacoRef.current = monaco;
+      setPreviewEditorVersion((version) => version + 1);
+    },
+    [],
+  );
+
+  useGitDecorations(previewEditorRef, previewMonacoRef, previewFile, previewEditorVersion);
 
   // Reset markdown mode when file changes
   useEffect(() => {
@@ -854,7 +853,7 @@ function PreviewTab() {
             id: path,
             filePath: path,
             fileName,
-            language: detectLang(path),
+            language: detectLanguage(path),
             viewerType: getViewerType(fileName),
             markdownAnchor: anchor ?? undefined,
           });
@@ -865,6 +864,7 @@ function PreviewTab() {
         rootPath={rootPath}
         readOnly
         splitRatio={splitRatio}
+        onEditorMount={handlePreviewEditorMount}
       />
     );
   }
@@ -876,16 +876,22 @@ function PreviewTab() {
         <FileCode2 className="h-3 w-3 text-muted-foreground" />
         <span className="truncate text-[11px] text-foreground">{fileName}</span>
         <span className="text-[9px] text-muted-foreground uppercase">
-          {detectLang(previewFile)}
+          {detectPreviewLanguage(previewFile)}
         </span>
       </div>
       <div className="flex-1 overflow-hidden">
         <Suspense fallback={<LoadingSpinner />}>
           <MonacoEditor
-            language={detectLang(previewFile)}
+            key={previewFile}
+            language={detectPreviewLanguage(previewFile)}
             value={content ?? ''}
             theme={monacoTheme}
-            beforeMount={defineAllMonacoThemes}
+            onMount={handlePreviewEditorMount}
+            beforeMount={(monaco) => {
+              defineAllMonacoThemes(monaco);
+              registerAllLanguages(monaco);
+              disableNativeTypeScriptValidation(monaco);
+            }}
             options={{
               fontFamily: "'Geist Mono', 'JetBrains Mono', 'Fira Code', monospace",
               fontSize: 13,
@@ -895,6 +901,10 @@ function PreviewTab() {
               smoothScrolling: true,
               minimap: { enabled: false },
               padding: { top: 8 },
+              overviewRulerLanes: 3,
+              overviewRulerBorder: false,
+              lineDecorationsWidth: 12,
+              glyphMargin: true,
               wordWrap: 'on',
             }}
           />
