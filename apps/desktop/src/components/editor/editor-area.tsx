@@ -106,20 +106,14 @@ export function EditorArea() {
   const autoSaveDelay = useSettingsStore((s) => s.autoSaveDelay);
   const themeId = useSettingsStore((s) => s.themeId);
   const inlineCompletionEnabled = useSettingsStore((s) => s.inlineCompletionEnabled);
+  const inlineCompletionDelay = useSettingsStore((s) => s.inlineCompletionDelay);
   const inlineCompletionMaxTokens = useSettingsStore((s) => s.inlineCompletionMaxTokens);
   const inlineCompletionTemperature = useSettingsStore((s) => s.inlineCompletionTemperature);
   const inlineCompletionProviderId = useSettingsStore((s) => s.inlineCompletionProviderId);
   const inlineCompletionModelId = useSettingsStore((s) => s.inlineCompletionModelId);
-
-  useEffect(() => {
-    console.log('[EditorArea] inline completion settings:', {
-      enabled: inlineCompletionEnabled,
-      providerId: inlineCompletionProviderId,
-      modelId: inlineCompletionModelId,
-      maxTokens: inlineCompletionMaxTokens,
-      temperature: inlineCompletionTemperature,
-    });
-  }, [inlineCompletionEnabled, inlineCompletionProviderId, inlineCompletionModelId, inlineCompletionMaxTokens, inlineCompletionTemperature]);
+  const activeProviderId = useSettingsStore((s) => s.activeProviderId);
+  const activeModelId = useSettingsStore((s) => s.activeModelId);
+  const openSettingsOnTab = useSettingsStore((s) => s.openSettingsOnTab);
 
   const monacoTheme = getMonacoThemeName(themeId);
   const extensionThemesVersion = useExtensionStore((s) => s.extensionThemesVersion);
@@ -279,17 +273,20 @@ export function EditorArea() {
   useDiagnosticsSync(monacoInstanceRef, editorVersion);
 
   // AI-powered inline completion (ghost text)
-  useInlineCompletion({
+  const inlineCompletionState = useInlineCompletion({
     editorRef: editorInstanceRef,
     monacoRef: monacoInstanceRef,
     filePath: activeTab?.type === 'file' ? (activeTab?.filePath ?? null) : null,
     language: activeTab?.type === 'file' ? (activeTab?.language ?? null) : null,
     enabled: inlineCompletionEnabled && activeTab?.type === 'file' && activeTab?.viewerType === 'code',
     editorVersion,
+    delay: inlineCompletionDelay,
     maxTokens: inlineCompletionMaxTokens,
     temperature: inlineCompletionTemperature,
     providerId: inlineCompletionProviderId,
     modelId: inlineCompletionModelId,
+    activeProviderId,
+    activeModelId,
   });
 
   // Push agent edit content to the Monaco model without remounting
@@ -523,6 +520,21 @@ export function EditorArea() {
     <div className="flex h-full flex-col">
       {hasOpenTabs && <EditorTabs />}
       <LspMissingBanner />
+      {activeTab?.type === 'file' &&
+        activeTab.viewerType === 'code' &&
+        (inlineCompletionState.status.kind === 'unavailable' ||
+          inlineCompletionState.status.kind === 'error') && (
+          <div className="flex items-center justify-between gap-3 border-b border-sky-500/30 bg-sky-500/10 px-3 py-1.5 text-xs text-sky-100">
+            <span>{inlineCompletionState.status.message}</span>
+            <button
+              type="button"
+              className="shrink-0 font-medium text-sky-200 underline underline-offset-2 hover:text-white"
+              onClick={() => openSettingsOnTab('ai')}
+            >
+              Open AI settings
+            </button>
+          </div>
+        )}
       {hasExternalConflict && (
         <div className="border-b border-amber-500/40 bg-amber-500/10 px-3 py-1.5 text-xs text-amber-200">
           This file changed on disk while the editor buffer has unsaved changes. Save or revert the buffer before reloading.
@@ -698,7 +710,7 @@ export function EditorArea() {
                       inlineSuggest: {
                         enabled: inlineCompletionEnabled,
                         mode: 'subwordSmart',
-                        showToolbar: 'always',
+                        showToolbar: 'onHover',
                         suppressSuggestions: false,
                       },
                       padding: { top: 8 },

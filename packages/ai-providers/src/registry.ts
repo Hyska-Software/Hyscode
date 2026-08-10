@@ -113,7 +113,7 @@ export class ProviderRegistry {
       onRetryStart?: (attempt: number) => void;
     },
   ): AsyncIterable<StreamChunk> {
-    const { providerId, onRetry, onRetryStart, ...chatParams } = params;
+    const { providerId, onRetry, onRetryStart, retry, ...chatParams } = params;
 
     let provider: AIProvider;
     let model = chatParams.model;
@@ -164,6 +164,7 @@ export class ProviderRegistry {
       },
       {
         ...this.retryConfig,
+        ...retry,
         signal: chatParams.signal,
         onRetry: (attempt, error, delayMs) => {
           retryCount++;

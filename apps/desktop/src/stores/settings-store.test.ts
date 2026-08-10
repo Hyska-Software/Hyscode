@@ -94,6 +94,28 @@ describe('agent interaction limit settings', () => {
   });
 });
 
+describe('inline completion settings', () => {
+  it('is opt-in for new installations', () => {
+    expect(SETTINGS_DEFAULTS.inlineCompletionEnabled).toBe(false);
+    expect(SETTINGS_DEFAULTS.inlineCompletionDelay).toBe(300);
+  });
+
+  it('updates the inline provider and model as one target', () => {
+    useSettingsStore.getState().setInlineCompletionTarget('openai', 'completion-model');
+
+    expect(useSettingsStore.getState()).toMatchObject({
+      inlineCompletionProviderId: 'openai',
+      inlineCompletionModelId: 'completion-model',
+    });
+
+    useSettingsStore.getState().setInlineCompletionTarget(null, null);
+    expect(useSettingsStore.getState()).toMatchObject({
+      inlineCompletionProviderId: null,
+      inlineCompletionModelId: null,
+    });
+  });
+});
+
 describe('activity bar settings', () => {
   beforeEach(() => {
     useSettingsStore.setState({

@@ -1,12 +1,15 @@
-// ─── useInlineCompletion ────────────────────────────────────────────────────
-// Registers a Monaco inline-completion provider backed by the AI provider registry.
-// Uses a request-id strategy instead of AbortController to avoid cancelling
-// in-flight requests when the user types quickly.
-// Supports debounce, cancellation, and custom provider/model selection.
-
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type * as monacoEditor from 'monaco-editor';
+import { ProviderError } from '@hyscode/ai-providers';
+import {
+  buildInlineCompletionContext,
+  type InlineCompletionContext,
+} from '@/lib/inline-completion-context';
 import { fetchInlineCompletion } from '@/lib/inline-completion-service';
+import {
+  isCurrentInlineCompletionSnapshot,
+  waitForInlineCompletionDelay,
+} from '@/lib/inline-completion-controller';
 
 interface UseInlineCompletionProps {
   editorRef: React.MutableRefObject<monacoEditor.editor.IStandaloneCodeEditor | null>;
@@ -15,11 +18,31 @@ interface UseInlineCompletionProps {
   language: string | null;
   enabled: boolean;
   editorVersion: number;
+  delay: number;
   maxTokens: number;
   temperature: number;
   providerId: string | null;
   modelId: string | null;
+  activeProviderId: string | null;
+  activeModelId: string | null;
 }
+
+export type InlineCompletionStatus =
+  | { kind: 'disabled' | 'idle' | 'ready' | 'suppressed' }
+  | { kind: 'unavailable' | 'error'; message: string };
+
+type InlineCompletionConfig = {
+  filePath: string | null;
+  language: string | null;
+  enabled: boolean;
+  delay: number;
+  maxTokens: number;
+  temperature: number;
+  providerId: string | null;
+  modelId: string | null;
+  activeProviderId: string | null;
+  activeModelId: string | null;
+};
 
 export function useInlineCompletion({
   editorRef,
@@ -28,154 +51,219 @@ export function useInlineCompletion({
   language,
   enabled,
   editorVersion,
+  delay,
   maxTokens,
   temperature,
   providerId,
   modelId,
-}: UseInlineCompletionProps) {
+  activeProviderId,
+  activeModelId,
+}: UseInlineCompletionProps): { status: InlineCompletionStatus } {
+  const [status, setStatus] = useState<InlineCompletionStatus>(
+    enabled ? { kind: 'idle' } : { kind: 'disabled' },
+  );
   const latestRequestIdRef = useRef(0);
+  const activeControllerRef = useRef<AbortController | null>(null);
+  const configRef = useRef<InlineCompletionConfig>({
+    filePath,
+    language,
+    enabled,
+    delay,
+    maxTokens,
+    temperature,
+    providerId,
+    modelId,
+    activeProviderId,
+    activeModelId,
+  });
+
+  configRef.current = {
+    filePath,
+    language,
+    enabled,
+    delay,
+    maxTokens,
+    temperature,
+    providerId,
+    modelId,
+    activeProviderId,
+    activeModelId,
+  };
+
+  useEffect(() => {
+    setStatus(enabled ? { kind: 'idle' } : { kind: 'disabled' });
+    if (!enabled) {
+      latestRequestIdRef.current += 1;
+      activeControllerRef.current?.abort();
+      activeControllerRef.current = null;
+    }
+  }, [
+    enabled,
+    filePath,
+    language,
+    delay,
+    maxTokens,
+    temperature,
+    providerId,
+    modelId,
+    activeProviderId,
+    activeModelId,
+  ]);
 
   useEffect(() => {
     const monaco = monacoRef.current;
-    if (!monaco || !enabled) {
-      console.log('[InlineCompletion] hook skipped — monaco or enabled false', { monaco: !!monaco, enabled });
-      return;
-    }
+    if (!monaco || !enabled) return undefined;
 
-    console.log('[InlineCompletion] registering provider for', filePath, 'language:', language, 'config:', { providerId, modelId, maxTokens, temperature, enabled });
-
-    const disposable = monaco.languages.registerInlineCompletionsProvider('*', {
-      provideInlineCompletions: async (model, position, context, token) => {
-        console.log('[InlineCompletion] provideInlineCompletions called at', position.lineNumber, ':', position.column, 'triggerKind:', context.triggerKind);
-
-        if (!enabled || !filePath) {
-          console.log('[InlineCompletion] skipped — enabled=', enabled, 'filePath=', filePath);
+    const disposable = monaco.languages.registerInlineCompletionsProvider(language ?? 'plaintext', {
+      provideInlineCompletions: async (model, position, _context, token) => {
+        const config = configRef.current;
+        const editor = editorRef.current;
+        if (!config.enabled || !config.filePath || !editor || editor.getModel() !== model) {
           return { items: [] };
         }
+        if (token.isCancellationRequested) return { items: [] };
 
+        const versionId = model.getVersionId();
         const text = model.getValue();
         const offset = model.getOffsetAt(position);
-        const prefix = text.slice(0, offset);
-        const suffix = text.slice(offset);
-
-        console.log('[InlineCompletion] prefix length:', prefix.length, 'suffix length:', suffix.length);
-
-        const requestId = ++latestRequestIdRef.current;
-        const controller = new AbortController();
-
-        token.onCancellationRequested(() => {
-          console.log('[InlineCompletion] Monaco cancellation requested for request', requestId, '— aborting fetch');
-          controller.abort();
+        const contextResult = buildInlineCompletionContext({
+          text,
+          offset,
+          language: config.language,
+          filePath: config.filePath,
         });
 
-        try {
-          const result = await fetchInlineCompletion(
-            {
-              prefix,
-              suffix,
-              language: language ?? 'plaintext',
-              filePath,
-            },
-            {
-              providerId,
-              modelId,
-              maxTokens,
-              temperature,
-              signal: controller.signal,
-            },
-          );
-
-          // If this request is not the latest one, ignore its result
-          if (requestId !== latestRequestIdRef.current) {
-            console.log('[InlineCompletion] request', requestId, 'is stale (latest=', latestRequestIdRef.current, '), ignoring result');
-            return { items: [] };
-          }
-
-          if (!result.text) {
-            console.log('[InlineCompletion] empty result from provider');
-            return { items: [] };
-          }
-
-          const item: monacoEditor.languages.InlineCompletion = {
-            insertText: result.text,
-            // No range = insert at current cursor position
-            // This avoids Monaco discarding the result when the cursor moved
-            // while the request was in-flight.
-          };
-
-          console.log('[InlineCompletion] returning item for request', requestId, ':', JSON.stringify(item));
-          return { items: [item] };
-        } catch (err) {
-          console.error('[InlineCompletion] error in provider:', err);
+        if (contextResult.status === 'suppressed') {
+          setStatus({ kind: 'suppressed' });
           return { items: [] };
         }
+
+        const context: InlineCompletionContext = contextResult.context;
+        const requestId = ++latestRequestIdRef.current;
+        activeControllerRef.current?.abort();
+        const controller = new AbortController();
+        activeControllerRef.current = controller;
+        const cancellation = token.onCancellationRequested(() => controller.abort());
+
+        try {
+          const shouldRequest = await waitForInlineCompletionDelay(config.delay, token, controller.signal);
+          if (!shouldRequest || requestId !== latestRequestIdRef.current) return { items: [] };
+          if (!isCurrentInlineCompletionSnapshot(editor, model, versionId, position.lineNumber, position.column)) {
+            return { items: [] };
+          }
+
+          const result = await fetchInlineCompletion(context, {
+            providerId: config.providerId,
+            modelId: config.modelId,
+            activeProviderId: config.activeProviderId,
+            activeModelId: config.activeModelId,
+            maxTokens: config.maxTokens,
+            temperature: config.temperature,
+            signal: controller.signal,
+          });
+
+          if (result.status === 'cancelled' || controller.signal.aborted) return { items: [] };
+          if (requestId !== latestRequestIdRef.current) return { items: [] };
+          if (!isCurrentInlineCompletionSnapshot(editor, model, versionId, position.lineNumber, position.column)) {
+            return { items: [] };
+          }
+
+          if (result.status === 'unavailable') {
+            setStatus({ kind: 'unavailable', message: result.message ?? 'AI providers are unavailable.' });
+            return { items: [] };
+          }
+          if (!result.text) return { items: [] };
+
+          setStatus({ kind: 'ready' });
+          return {
+            items: [
+              {
+                insertText: result.text,
+                range: new monaco.Range(
+                  position.lineNumber,
+                  position.column,
+                  position.lineNumber,
+                  position.column,
+                ),
+              },
+            ],
+          };
+        } catch (error) {
+          if (controller.signal.aborted || token.isCancellationRequested) return { items: [] };
+          const message =
+            error instanceof ProviderError
+              ? error.userMessage
+              : 'AI inline completion failed. Check Settings → AI and try again.';
+          setStatus({ kind: 'error', message });
+          return { items: [] };
+        } finally {
+          cancellation.dispose();
+          if (activeControllerRef.current === controller) activeControllerRef.current = null;
+        }
       },
-      disposeInlineCompletions: () => {
-        // No-op
-      },
+      disposeInlineCompletions: () => undefined,
     });
 
-    console.log('[InlineCompletion] provider registered');
-
     return () => {
-      console.log('[InlineCompletion] disposing provider');
       disposable.dispose();
+      latestRequestIdRef.current += 1;
+      activeControllerRef.current?.abort();
+      activeControllerRef.current = null;
     };
-  }, [monacoRef, enabled, filePath, language, maxTokens, temperature, providerId, modelId, editorVersion]);
+  }, [editorRef, monacoRef, language, enabled, editorVersion]);
 
-  // Enable/disable Monaco's built-in inline suggest UI
   useEffect(() => {
     const editor = editorRef.current;
     if (!editor) return;
-    console.log('[InlineCompletion] updating editor inlineSuggest.enabled to', enabled);
+
     editor.updateOptions({
       inlineSuggest: {
-        enabled: enabled,
+        enabled,
         mode: 'subwordSmart',
-        showToolbar: 'always',
+        showToolbar: 'onHover',
         suppressSuggestions: false,
       },
     });
-  }, [editorRef, enabled]);
+  }, [editorRef, enabled, editorVersion]);
 
-  // Monaco only auto-triggers provideInlineCompletions when the user types a word character.
-  // Empty lines (navigated to or created via Enter) never get the automatic trigger.
-  // This effect bridges the gap: fire an explicit trigger after the cursor settles on an
-  // empty or whitespace-only line.
   useEffect(() => {
     const editor = editorRef.current;
-    if (!editor || !enabled) return;
+    if (!editor || !enabled) return undefined;
 
     let timer: ReturnType<typeof setTimeout> | null = null;
 
-    const disposable = editor.onDidChangeCursorPosition(() => {
-      if (timer) {
-        clearTimeout(timer);
-        timer = null;
-      }
+    const scheduleEmptyLineTrigger = (): void => {
+      if (timer) clearTimeout(timer);
+      timer = null;
 
       const model = editor.getModel();
       const position = editor.getPosition();
-      if (!model || !position) return;
-
-      // Only schedule when the cursor is on an empty / whitespace-only line.
-      if (model.getLineContent(position.lineNumber).trim() !== '') return;
+      if (!model || !position || model.getLineContent(position.lineNumber).trim() !== '') return;
 
       timer = setTimeout(() => {
         timer = null;
-        // Re-verify the cursor is still on an empty line before triggering.
-        const pos = editor.getPosition();
-        const currentLine = pos ? (editor.getModel()?.getLineContent(pos.lineNumber) ?? '') : '';
-        if (currentLine.trim() !== '') return;
-
-        console.log('[InlineCompletion] cursor on empty line — firing explicit trigger');
+        const currentModel = editor.getModel();
+        const currentPosition = editor.getPosition();
+        if (
+          !currentModel ||
+          !currentPosition ||
+          currentModel.getLineContent(currentPosition.lineNumber).trim() !== ''
+        ) {
+          return;
+        }
         editor.trigger('inline-completion', 'editor.action.inlineSuggest.trigger', {});
-      }, 500);
-    });
+      }, Math.max(0, delay));
+    };
+
+    const cursorDisposable = editor.onDidChangeCursorPosition(scheduleEmptyLineTrigger);
+    const contentDisposable = editor.onDidChangeModelContent(scheduleEmptyLineTrigger);
 
     return () => {
-      disposable.dispose();
+      cursorDisposable.dispose();
+      contentDisposable.dispose();
       if (timer) clearTimeout(timer);
     };
-  }, [editorRef, enabled, editorVersion]);
+  }, [editorRef, enabled, delay, editorVersion]);
+
+  return { status };
 }

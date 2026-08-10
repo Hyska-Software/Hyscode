@@ -271,6 +271,7 @@ interface SettingsState {
   setThemeId: (id: ThemeId) => void;
   setIconThemeId: (id: string) => void;
   setActiveProvider: (providerId: string, modelId: string) => void;
+  setInlineCompletionTarget: (providerId: string | null, modelId: string | null) => void;
   openSettings: () => void;
   openSettingsOnTab: (tab: string) => void;
   closeSettings: () => void;
@@ -358,6 +359,7 @@ export const useSettingsStore = create<SettingsState>()(
         | 'setThemeId'
         | 'setIconThemeId'
         | 'setActiveProvider'
+        | 'setInlineCompletionTarget'
         | 'openSettings'
         | 'openSettingsOnTab'
         | 'closeSettings'
@@ -441,6 +443,12 @@ export const useSettingsStore = create<SettingsState>()(
         set((state) => {
           state.activeProviderId = providerId;
           state.activeModelId = modelId;
+        }),
+
+      setInlineCompletionTarget: (providerId, modelId) =>
+        set((state) => {
+          state.inlineCompletionProviderId = providerId;
+          state.inlineCompletionModelId = modelId;
         }),
 
       openSettings: () =>

@@ -42,6 +42,8 @@ function getActiveModelInfo(providerId: string | null, modelId: string | null): 
   return provider.models.find((m) => m.id === modelId) ?? null;
 }
 
+const INLINE_COMPLETION_PROVIDERS = PROVIDERS.filter((provider) => provider.id !== 'codex');
+
 export function AiTab() {
   const store = useSettingsStore();
   const [showingMcpForm, setShowingMcpForm] = useState(false);
@@ -51,6 +53,9 @@ export function AiTab() {
 
   const enabledForProvider = (providerId: string): ModelInfo[] =>
     getEnabledModelsForProvider(providerId, store.enabledModels, store.customModels);
+  const inlineActiveModelCompatible =
+    store.inlineCompletionProviderId === null ||
+    store.inlineCompletionProviderId === store.activeProviderId;
 
   const handleToggleModel = (provider: ProviderInfo, modelId: string) => {
     const all = getProviderModels(provider, store.customModels);
@@ -543,7 +548,7 @@ export function AiTab() {
       <SettingSection title="Inline Completion">
         <SettingRow
           label="Enable AI autocomplete"
-          description="Show ghost-text suggestions powered by AI while typing"
+          description="Show ghost-text suggestions powered by AI while typing. Code context is sent to the selected provider."
         >
           <SettingToggle
             checked={store.inlineCompletionEnabled}
@@ -557,22 +562,34 @@ export function AiTab() {
               <SettingSelect
                 value={store.inlineCompletionProviderId ?? '__active__'}
                 onChange={(v) =>
-                  store.set('inlineCompletionProviderId', v === '__active__' ? null : v)
+                  store.setInlineCompletionTarget(v === '__active__' ? null : v, null)
                 }
                 options={[
                   { value: '__active__', label: 'Active provider' },
-                  ...PROVIDERS.map((p) => ({ value: p.id, label: p.name })),
+                  ...INLINE_COMPLETION_PROVIDERS.map((p) => ({ value: p.id, label: p.name })),
                 ]}
               />
             </SettingRow>
 
-            <SettingRow label="Model" description="Leave on Active to use the model selected above">
+            <SettingRow
+              label="Model"
+              description={
+                inlineActiveModelCompatible
+                  ? 'Leave on Active to use the model selected above'
+                  : 'Choose a model from the selected provider'
+              }
+            >
               {store.inlineCompletionProviderId === 'openrouter' ? (
                 <div className="flex items-center gap-1.5">
                   <input
                     type="text"
                     value={store.inlineCompletionModelId ?? ''}
-                    onChange={(e) => store.set('inlineCompletionModelId', e.target.value || null)}
+                    onChange={(e) =>
+                      store.setInlineCompletionTarget(
+                        store.inlineCompletionProviderId,
+                        e.target.value || null,
+                      )
+                    }
                     placeholder="provider/model-name"
                     className="h-7 w-52 rounded-md bg-muted px-2 text-[11px] text-foreground outline-none placeholder:text-muted-foreground/50"
                   />
@@ -581,10 +598,16 @@ export function AiTab() {
                 <SettingSelect
                   value={store.inlineCompletionModelId ?? '__active__'}
                   onChange={(v) =>
-                    store.set('inlineCompletionModelId', v === '__active__' ? null : v)
+                    store.setInlineCompletionTarget(
+                      store.inlineCompletionProviderId,
+                      v === '__active__' ? null : v,
+                    )
                   }
                   options={[
-                    { value: '__active__', label: 'Active model' },
+                    {
+                      value: '__active__',
+                      label: inlineActiveModelCompatible ? 'Active model' : 'Choose a model',
+                    },
                     ...(store.inlineCompletionProviderId
                       ? enabledForProvider(store.inlineCompletionProviderId).map((m) => ({
                           value: m.id,

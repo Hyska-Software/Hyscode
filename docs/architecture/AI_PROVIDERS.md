@@ -58,6 +58,7 @@ interface ChatParams {
   temperature?: number;
   maxTokens?: number;
   maxTurns?: number;
+  retry?: Partial<RetryConfig>;
   stopSequences?: string[];
   systemPrompt?: string;
   signal?: AbortSignal;
@@ -69,6 +70,26 @@ interface ChatParams {
   sessionFingerprint?: string;
 }
 ```
+
+---
+
+## Inline Completion Request Policy
+
+The desktop editor's inline completion path is a latency-sensitive, non-agentic
+consumer of `ProviderRegistry`. It resolves an explicit provider/model pair or
+the exact active pair from settings; it never falls back to the registry's first
+configured provider. Providers marked with `capabilities.agenticToolExecution`
+are not eligible for inline completion.
+
+Inline requests must pass the completion policy through `systemPrompt`, use a
+single turn, disable thinking, and provide only a bounded prefix/suffix window
+around the editor cursor. The editor discards results whose model, version,
+position, or target changed while the request was in flight. Raw source context,
+stream chunks, and completion text must not be logged.
+
+The optional per-request `retry` override exists for this policy. Inline
+completion sets `maxRetries: 0` and uses a short request timeout so a stale
+suggestion cannot occupy the normal agent retry/timeout budget.
 
 ---
 

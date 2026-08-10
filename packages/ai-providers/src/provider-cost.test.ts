@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { OpenAIProvider } from './providers/openai';
 import { GeminiProvider } from './providers/gemini';
+import { AnthropicProvider } from './providers/anthropic';
 import type { StreamChunk } from './types';
 
 function sseResponse(payload: unknown): Response {
@@ -17,6 +18,57 @@ async function collect(stream: AsyncIterable<StreamChunk>): Promise<StreamChunk[
 }
 
 describe('provider cost metadata', () => {
+  it('keeps Anthropic system instructions separate from user messages', async () => {
+    let body: Record<string, unknown> = {};
+    const fetchMock = vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
+      body = JSON.parse(String(init?.body));
+      return sseResponse({
+        type: 'content_block_delta',
+        delta: { type: 'text_delta', text: '42' },
+      });
+    });
+    const provider = new AnthropicProvider('key', undefined, fetchMock);
+
+    await collect(
+      provider.chat({
+        model: 'claude-haiku-4-5',
+        systemPrompt: 'Return raw code only.',
+        messages: [{ role: 'user', content: [{ type: 'text', text: 'complete this' }] }],
+        thinking: { enabled: false },
+      }),
+    );
+
+    expect(body.system).toBe('Return raw code only.');
+    expect(body.messages).toEqual([
+      { role: 'user', content: [{ type: 'text', text: 'complete this' }] },
+    ]);
+    expect(body.thinking).toBeUndefined();
+  });
+
+  it('keeps Gemini system instructions separate and does not expose thinking', async () => {
+    let body: Record<string, unknown> = {};
+    const fetchMock = vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
+      body = JSON.parse(String(init?.body));
+      return sseResponse({
+        candidates: [{ content: { parts: [{ text: '42' }] }, finishReason: 'STOP' }],
+      });
+    });
+    const provider = new GeminiProvider('key', undefined, fetchMock);
+
+    await collect(
+      provider.chat({
+        model: 'gemini-3.1-flash',
+        systemPrompt: 'Return raw code only.',
+        messages: [{ role: 'user', content: [{ type: 'text', text: 'complete this' }] }],
+        thinking: { enabled: false },
+      }),
+    );
+
+    expect(body.systemInstruction).toEqual({ parts: [{ text: 'Return raw code only.' }] });
+    expect(body.contents).toEqual([{ role: 'user', parts: [{ text: 'complete this' }] }]);
+    expect(body.thinkingConfig).toBeUndefined();
+  });
+
   it('sends OpenAI cache keys and captures cached/reasoning tokens', async () => {
     let body: Record<string, unknown> = {};
     const fetchMock = vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {

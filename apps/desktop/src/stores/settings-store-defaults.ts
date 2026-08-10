@@ -85,7 +85,7 @@ export const SETTINGS_DEFAULTS = {
   agentStreamIdleTimeoutMs: 90_000,
 
   // ─ Inline Completion ─
-  inlineCompletionEnabled: true,
+  inlineCompletionEnabled: false,
   inlineCompletionProviderId: null,
   inlineCompletionModelId: null,
   inlineCompletionDelay: 300,

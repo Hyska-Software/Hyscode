@@ -221,6 +221,8 @@ export interface ChatParams {
   maxTokens?: number;
   /** Optional provider-native agent turn limit. Omitted means unlimited. */
   maxTurns?: number;
+  /** Optional per-request retry override for latency-sensitive callers. */
+  retry?: Partial<RetryConfig>;
   temperature?: number;
   topP?: number;
   stopSequences?: string[];
