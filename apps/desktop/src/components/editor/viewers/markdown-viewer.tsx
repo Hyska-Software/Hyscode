@@ -6,6 +6,7 @@ import type { MarkdownViewMode } from '../../../stores/editor-store';
 import { defineAllMonacoThemes, getMonacoThemeName } from '../../../lib/monaco-themes';
 import { registerAllLanguages, disableNativeTypeScriptValidation } from '@hyscode/lsp-client';
 import { LspBridge } from '../../../lib/lsp-bridge';
+import { GIT_GUTTER_WIDTH } from '../../../hooks/use-git-decorations';
 import { MarkdownDocumentPreview } from './markdown-document-preview';
 import type * as monacoEditor from 'monaco-editor';
 
@@ -144,8 +145,8 @@ function MarkdownCodeEditor({
           padding: { top: 8 },
           overviewRulerLanes: 3,
           overviewRulerBorder: false,
-          lineDecorationsWidth: 12,
-          glyphMargin: true,
+          lineDecorationsWidth: GIT_GUTTER_WIDTH,
+          glyphMargin: false,
         }}
       />
     </Suspense>

@@ -29,7 +29,7 @@ import { useAgentStore } from '../../stores/agent-store';
 import { useExtensionStore } from '../../stores/extension-store';
 import { tauriFs } from '../../lib/tauri-fs';
 import { saveFileDialog } from '../../lib/tauri-dialog';
-import { useGitDecorations } from '../../hooks/use-git-decorations';
+import { GIT_GUTTER_WIDTH, useGitDecorations } from '../../hooks/use-git-decorations';
 import { useGitBlameDecorations } from '../../hooks/use-git-blame-decorations';
 import { useAgentDecorations } from '../../hooks/use-agent-decorations';
 import { useDiagnosticsSync } from '../../hooks/use-diagnostics-sync';
@@ -704,8 +704,8 @@ export function EditorArea() {
                       padding: { top: 8 },
                       overviewRulerLanes: 3,
                       overviewRulerBorder: false,
-                      lineDecorationsWidth: 12,
-                      glyphMargin: true,
+                      lineDecorationsWidth: GIT_GUTTER_WIDTH,
+                      glyphMargin: false,
                     }}
                   />
                 </Suspense>

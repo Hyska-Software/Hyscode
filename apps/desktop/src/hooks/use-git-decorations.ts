@@ -17,6 +17,9 @@ interface DiffHunkInfo {
 type IEditor = monacoEditor.editor.IStandaloneCodeEditor;
 type IMonaco = typeof monacoEditor;
 
+/** Width needed for the shared Git/agent change bar in Monaco's margin. */
+export const GIT_GUTTER_WIDTH = 4;
+
 // ── One-time CSS injection ────────────────────────────────────────────────────
 
 let cssInjected = false;

@@ -36,7 +36,7 @@ import { getActiveAgentBridge } from '@/lib/active-agent-bridge';
 import { tauriFs } from '@/lib/tauri-fs';
 import { defineAllMonacoThemes, getMonacoThemeName } from '@/lib/monaco-themes';
 import { cn, getViewerType } from '@/lib/utils';
-import { useGitDecorations } from '@/hooks/use-git-decorations';
+import { GIT_GUTTER_WIDTH, useGitDecorations } from '@/hooks/use-git-decorations';
 import { TabBadge } from '../ui/tab-badge';
 import { RightTabContextMenu } from './right-tab-context-menu';
 import { ContextTab } from './context-tab';
@@ -903,8 +903,8 @@ function PreviewTab() {
               padding: { top: 8 },
               overviewRulerLanes: 3,
               overviewRulerBorder: false,
-              lineDecorationsWidth: 12,
-              glyphMargin: true,
+              lineDecorationsWidth: GIT_GUTTER_WIDTH,
+              glyphMargin: false,
               wordWrap: 'on',
             }}
           />
