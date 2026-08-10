@@ -1,5 +1,12 @@
 import { PanelRightClose, Plus, X } from 'lucide-react';
-import { useCallback, useRef, useState, type DragEvent, type MouseEvent } from 'react';
+import {
+  useCallback,
+  useRef,
+  useState,
+  type DragEvent,
+  type KeyboardEvent,
+  type MouseEvent,
+} from 'react';
 import type { RightTab } from '@/stores/layout-store';
 import { cn } from '@/lib/utils';
 import { TabBadge } from '../ui/tab-badge';
@@ -77,19 +84,32 @@ export function RightTabStrip({
     [draggedTab, handleDragEnd, onReorder],
   );
 
+  const handleTabKeyDown = useCallback(
+    (event: KeyboardEvent<HTMLDivElement>, tab: RightTab) => {
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        onSelect(tab);
+      } else if (event.key === 'Delete' || event.key === 'Backspace') {
+        event.preventDefault();
+        onClose(tab);
+      }
+    },
+    [onClose, onSelect],
+  );
+
   return (
     <div
       onContextMenu={onContextMenu}
       role="toolbar"
       aria-label="Right panel surfaces"
-      className="flex h-8 shrink-0 items-center gap-1 border-b border-border/30 bg-surface-raised px-2"
+      className="flex h-8 shrink-0 items-center gap-0.5 border-b border-border/30 bg-surface px-2"
     >
       <button
         type="button"
         onClick={onCollapse}
         title="Collapse panel"
         aria-label="Collapse panel"
-        className="shrink-0 rounded-md p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       >
         <PanelRightClose className="h-3.5 w-3.5" />
       </button>
@@ -97,7 +117,7 @@ export function RightTabStrip({
       <div
         role="tablist"
         aria-label="Right panel surfaces"
-        className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto scrollbar-hide"
+        className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto scrollbar-hide"
       >
         {visibleTabs.map((id) => {
           const descriptor = RIGHT_TAB_DESCRIPTORS[id];
@@ -109,54 +129,52 @@ export function RightTabStrip({
             <div
               key={id}
               draggable
+              role="tab"
+              aria-selected={isActive}
+              aria-label={descriptor.label}
+              tabIndex={isActive ? 0 : -1}
               onDragStart={(event) => handleDragStart(event, id)}
               onDragEnd={handleDragEnd}
               onDragEnter={(event) => handleDragEnter(event, id)}
               onDragLeave={handleDragLeave}
               onDragOver={handleDragOver}
               onDrop={(event) => handleDrop(event, id)}
+              onClick={() => onSelect(id)}
+              onKeyDown={(event) => handleTabKeyDown(event, id)}
+              onMouseDown={(event) => {
+                if (event.button === 1) {
+                  event.preventDefault();
+                  onClose(id);
+                }
+              }}
               className={cn(
-                'group flex h-8 shrink-0 items-center transition-opacity',
+                'group flex shrink-0 cursor-grab select-none items-center gap-1.5 rounded-md px-2.5 py-1 text-[11px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                isActive
+                  ? 'bg-muted text-foreground'
+                  : 'text-muted-foreground hover:bg-surface-raised hover:text-foreground',
                 draggedTab === id && 'opacity-50',
                 isDraggedOver && 'border-l-2 border-primary',
               )}
             >
-              <button
-                type="button"
-                role="tab"
-                aria-selected={isActive}
-                onClick={() => onSelect(id)}
-                className={cn(
-                  'flex h-8 min-w-0 items-center gap-1.5 px-2.5 text-[11px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring',
-                  isActive
-                    ? 'bg-surface text-foreground'
-                    : 'text-muted-foreground hover:bg-muted hover:text-foreground',
-                )}
-              >
-                <Icon className="h-3 w-3 shrink-0" />
-                <span className="max-w-[120px] truncate">{descriptor.label}</span>
-                {id === 'changes' && <TabBadge count={pendingCount} />}
-                {id === 'terminal' && terminalActive && (
-                  <span className="relative flex h-2 w-2" aria-label="Terminal is active">
-                    <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-success opacity-75" />
-                    <span className="relative inline-flex h-2 w-2 rounded-full bg-success" />
-                  </span>
-                )}
-              </button>
+              <Icon className="h-3 w-3 shrink-0" />
+              <span className="max-w-[120px] truncate">{descriptor.label}</span>
+              {id === 'changes' && <TabBadge count={pendingCount} />}
+              {id === 'terminal' && terminalActive && (
+                <span className="relative flex h-2 w-2" aria-label="Terminal is active">
+                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-success opacity-75" />
+                  <span className="relative inline-flex h-2 w-2 rounded-full bg-success" />
+                </span>
+              )}
               <button
                 type="button"
                 onClick={(event) => {
                   event.stopPropagation();
                   onClose(id);
                 }}
+                tabIndex={-1}
                 aria-label={`Close ${descriptor.label} tab`}
                 title={`Close ${descriptor.label}`}
-                className={cn(
-                  'flex h-5 w-5 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-                  isActive
-                    ? 'opacity-100'
-                    : 'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100',
-                )}
+                className="-ml-1.5 flex h-4 w-0 shrink-0 items-center justify-center overflow-hidden rounded-sm text-muted-foreground opacity-0 transition-opacity hover:bg-muted hover:text-foreground group-hover:ml-0 group-hover:w-4 group-hover:opacity-100"
               >
                 <X className="h-3 w-3" />
               </button>
@@ -172,7 +190,7 @@ export function RightTabStrip({
         aria-label="Open a surface"
         aria-expanded={menuOpen}
         className={cn(
-          'shrink-0 rounded-md p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+          'flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
           menuOpen && 'bg-muted text-foreground',
         )}
       >

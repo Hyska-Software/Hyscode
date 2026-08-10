@@ -39,10 +39,16 @@ describe('RightTabStrip', () => {
   it('renders semantic tabs with a close action for each visible surface', () => {
     renderStrip();
 
+    const toolbar = screen.getByRole('toolbar', { name: 'Right panel surfaces' });
+    expect(toolbar.className).toContain('bg-surface');
+    expect(toolbar.className).not.toContain('bg-surface-raised');
     expect(screen.getAllByRole('tab')).toHaveLength(3);
     expect(screen.getByRole('button', { name: 'Close Changes tab' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Close Files tab' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Close Terminal tab' })).toBeTruthy();
+    const closeButton = screen.getByRole('button', { name: 'Close Changes tab' });
+    expect(closeButton.className).toContain('w-0');
+    expect(closeButton.className).toContain('group-hover:w-4');
     expect(screen.getByText('2')).toBeTruthy();
   });
 
