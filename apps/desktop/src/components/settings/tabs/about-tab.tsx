@@ -1,4 +1,4 @@
-import { ExternalLink, Github, Heart, RefreshCw, Loader2, CheckCircle, ArrowUpCircle } from 'lucide-react';
+import { Coffee, ExternalLink, Github, Heart, RefreshCw, Loader2, CheckCircle, ArrowUpCircle } from 'lucide-react';
 import { useUpdateStore } from '../../../stores/update-store';
 import { BrandMark } from '../../brand-mark';
 import { SettingInfoRow, SettingSection } from '../controls';
@@ -9,6 +9,7 @@ const APP_IDENTIFIER = 'com.hyscode.app';
 const APP_DESCRIPTION =
   'A modern, AI-powered code editor built with Tauri, React, and Monaco. Designed for developers who want an intelligent, fast, and extensible coding experience.';
 const REPO_URL = 'https://github.com/Hyska-Software/Hyscode';
+const KO_FI_URL = 'https://ko-fi.com/hyscode';
 
 export function AboutTab() {
   const updateStatus = useUpdateStore((s) => s.status);
@@ -34,6 +35,17 @@ export function AboutTab() {
         <p className="max-w-sm text-center text-[11px] leading-relaxed text-muted-foreground">
           {APP_DESCRIPTION}
         </p>
+
+        {/* Donate button */}
+        <a
+          href={KO_FI_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="mt-2 flex items-center gap-2 rounded-md bg-primary px-6 py-2.5 text-[13px] font-medium text-primary-foreground transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+        >
+          <Coffee className="h-4 w-4" />
+          Buy us a coffee
+        </a>
 
         {/* Update check button */}
         <div className="mt-2 flex flex-col items-center gap-1.5">

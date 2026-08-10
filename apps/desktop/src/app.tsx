@@ -38,6 +38,7 @@ import { LspBridge } from './lib/lsp-bridge';
 import { startExtensionLspSync } from './lib/extension-lsp-bridge';
 import { getViewerType } from './lib/utils';
 import { UpdateDialog } from './components/updater/update-dialog';
+import { StartupNotification } from './components/notifications/startup-notification';
 import {
   areSameProjectPath,
   closeProjectWorkspace,
@@ -1023,6 +1024,7 @@ export function App() {
     <TooltipProvider>
       {!hasCompletedOnboarding && <OnboardingWizard />}
       {!rootPath ? <WelcomePage /> : <IDE />}
+      <StartupNotification />
       <CloneRepositoryDialog open={cloneDialogOpen} onClose={closeCloneDialog} />
       <PublishRepositoryDialog open={publishDialogOpen} onClose={closePublishDialog} />
       <DialogProvider />
