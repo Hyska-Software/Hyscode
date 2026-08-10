@@ -211,7 +211,9 @@ export function EditorTabs() {
               <Circle className="h-2 w-2 shrink-0 fill-primary text-primary" />
             )}
             <button
-              className="ml-0.5 flex h-4 w-4 items-center justify-center rounded-sm opacity-0 group-hover:opacity-100 hover:bg-muted transition-all"
+              type="button"
+              tabIndex={-1}
+              className="-ml-1.5 flex h-4 w-0 shrink-0 items-center justify-center overflow-hidden rounded-sm text-muted-foreground opacity-0 transition-opacity hover:bg-muted hover:text-foreground group-hover:ml-0 group-hover:w-4 group-hover:opacity-100"
               onClick={(e) => {
                 e.stopPropagation();
                 closeTab(tab.id);
