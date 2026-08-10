@@ -41,7 +41,7 @@ import {
   PlusCircle,
   Link2,
 } from 'lucide-react';
-import { useGitStore, useEditorStore } from '../../../stores';
+import { useGitStore, useEditorStore, useLayoutStore } from '../../../stores';
 import { useGithubStore } from '../../../stores/github-store';
 import { useSettingsStore } from '../../../stores/settings-store';
 import { getViewerType } from '../../../lib/utils';
@@ -62,6 +62,7 @@ import {
   isRepositoryOperationInProgress,
   shouldConfirmGitDiscard,
 } from '../../../lib/git-workflow';
+import { canOpenGitFileInPreview } from './git-preview-action';
 
 type PanelMode = 'changes' | 'log' | 'graph';
 type CommitAction = 'commit' | 'amend' | 'push' | 'sync';
@@ -129,6 +130,9 @@ export function GitView() {
   const setSettings = useSettingsStore((s) => s.set);
 
   const openTab = useEditorStore((s) => s.openTab);
+  const workspaceMode = useLayoutStore((s) => s.workspaceMode);
+  const setAgentPreviewFile = useLayoutStore((s) => s.setAgentPreviewFile);
+  const openAgentRightTab = useLayoutStore((s) => s.openAgentRightTab);
 
   const [panelMode, setPanelMode] = useState<PanelMode>('changes');
   const [showMenu, setShowMenu] = useState(false);
@@ -634,6 +638,14 @@ export function GitView() {
     [openTab],
   );
 
+  const openPreviewFile = useCallback(
+    (file: GitFile) => {
+      setAgentPreviewFile(file.absolute_path);
+      openAgentRightTab('preview');
+    },
+    [openAgentRightTab, setAgentPreviewFile],
+  );
+
   if (repositoryState === 'no-workspace') {
     return (
       <div className="flex flex-col items-center justify-center py-12 text-center text-muted-foreground">
@@ -969,6 +981,11 @@ export function GitView() {
                 onStage={() => void runOp('Mark Conflict Resolved', () => stageFiles([f.path]))}
                 onOpenDiff={() => openDiffTab(f, 'conflict')}
                 onOpenFile={f.status === 'D' ? undefined : () => openFileTab(f)}
+                onOpenPreview={
+                  canOpenGitFileInPreview(workspaceMode, f.status)
+                    ? () => openPreviewFile(f)
+                    : undefined
+                }
               />
             ))}
           </FileSection>
@@ -999,6 +1016,11 @@ export function GitView() {
                 onUnstage={() => void runOp('Unstage', () => unstageFiles([f.path]))}
                 onOpenDiff={() => openDiffTab(f, 'staged')}
                 onOpenFile={f.status === 'D' ? undefined : () => openFileTab(f)}
+                onOpenPreview={
+                  canOpenGitFileInPreview(workspaceMode, f.status)
+                    ? () => openPreviewFile(f)
+                    : undefined
+                }
               />
             ))}
           </FileSection>
@@ -1030,6 +1052,11 @@ export function GitView() {
                 onDiscard={() => void handleDiscardFiles([f])}
                 onOpenDiff={f.status !== '?' ? () => openDiffTab(f, 'unstaged') : undefined}
                 onOpenFile={f.status === 'D' ? undefined : () => openFileTab(f)}
+                onOpenPreview={
+                  canOpenGitFileInPreview(workspaceMode, f.status)
+                    ? () => openPreviewFile(f)
+                    : undefined
+                }
               />
             ))}
           </FileSection>

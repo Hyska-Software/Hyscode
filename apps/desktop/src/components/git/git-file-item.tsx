@@ -8,6 +8,7 @@ import {
   RotateCcw,
   GitCompare,
   Trash2,
+  Eye,
 } from 'lucide-react';
 import type { GitFile } from '../../stores/git-store';
 
@@ -52,6 +53,7 @@ interface GitFileItemProps {
   onDiscard?: () => void;
   onOpenDiff?: () => void;
   onOpenFile?: () => void;
+  onOpenPreview?: () => void;
 }
 
 export function GitFileItem({
@@ -62,6 +64,7 @@ export function GitFileItem({
   onDiscard,
   onOpenDiff,
   onOpenFile,
+  onOpenPreview,
 }: GitFileItemProps) {
   const [showContext, setShowContext] = useState(false);
   const [contextPos, setContextPos] = useState({ x: 0, y: 0 });
@@ -126,6 +129,16 @@ export function GitFileItem({
               onClick={(e) => {
                 e.stopPropagation();
                 onOpenDiff();
+              }}
+            />
+          )}
+          {onOpenPreview && (
+            <ActionButton
+              icon={Eye}
+              title="Open in Preview"
+              onClick={(e) => {
+                e.stopPropagation();
+                onOpenPreview();
               }}
             />
           )}
@@ -196,6 +209,15 @@ export function GitFileItem({
               }}
             />
           )}
+          {onOpenPreview && (
+            <CtxItem
+              label="Open in Preview"
+              onClick={() => {
+                setShowContext(false);
+                onOpenPreview();
+              }}
+            />
+          )}
           {onOpenFile && (
             <CtxItem
               label="Open File"
@@ -236,6 +258,7 @@ function ActionButton({
   return (
     <button
       onClick={onClick}
+      aria-label={title}
       className="flex h-4 w-4 items-center justify-center rounded-sm text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
       title={title}
     >
