@@ -1582,9 +1582,27 @@ export class Harness {
       finalResponse =
         'Cancellation was requested, but one native operation completed before stopping.';
     const terminalError = ['error', 'recoverable_error'].includes(terminalStatus as string);
+    const turnRecord = this.buildTurnRecord(stopReason, iteration, turnStart);
+    turnRecord.tokenUsage = tokenUsage;
+    turnRecord.verificationForced = verificationForced;
+
+    // Finalize the trace before publishing turn_end so the terminal event
+    // contains the complete token usage, including prompt-cache telemetry.
+    const trace = this.traceRecorder.finalizeTrace(
+      stopReason,
+      turnRecord.tokenUsage,
+      turnRecord.filesModified,
+      turnRecord.verificationPerformed,
+      verificationForced,
+    );
+    if (trace?.promptCache) {
+      applyPromptCacheAggregate(turnRecord.tokenUsage, trace.promptCache);
+    }
+    turnRecord.trace = trace ?? undefined;
+
     this.finishTurn(
       terminalStatus,
-      tokenUsage,
+      turnRecord.tokenUsage,
       terminalStatus === 'loop_detected'
         ? 'Stuck in loop: repeated identical tool calls'
         : terminalError
@@ -1592,10 +1610,6 @@ export class Harness {
           : undefined,
       terminalError ? (iterationErrorDetails ?? undefined) : undefined,
     );
-
-    const turnRecord = this.buildTurnRecord(stopReason, iteration, turnStart);
-    turnRecord.tokenUsage = tokenUsage;
-    turnRecord.verificationForced = verificationForced;
 
     // ── Post-turn memory extraction (async, non-blocking) ──
     // Run after the turn so it never delays the response to the user.
@@ -1620,19 +1634,6 @@ export class Harness {
           // Non-critical — never surface memory failures
         });
     }
-
-    // Finalize trace and attach to turn record
-    const trace = this.traceRecorder.finalizeTrace(
-      stopReason,
-      turnRecord.tokenUsage,
-      turnRecord.filesModified,
-      turnRecord.verificationPerformed,
-      verificationForced,
-    );
-    if (trace?.promptCache) {
-      applyPromptCacheAggregate(turnRecord.tokenUsage, trace.promptCache);
-    }
-    turnRecord.trace = trace ?? undefined;
 
     return {
       turnId: activeTurn.turnId,
@@ -1930,7 +1931,16 @@ export class Harness {
     errorDetails?: ProviderErrorDetails,
   ): void {
     if (!this.turnController.finish(status)) return;
-    this.emit({ type: 'turn_end', reason: status, error, errorDetails, tokenUsage });
+    // Event consumers may persist this object through Immer, which freezes
+    // assigned values. Keep that snapshot separate from the harness-owned
+    // record so later finalization cannot mutate UI state by reference.
+    this.emit({
+      type: 'turn_end',
+      reason: status,
+      error,
+      errorDetails,
+      tokenUsage: { ...tokenUsage },
+    });
   }
 
   // ─── Turn Record Builder ────────────────────────────────────────────

@@ -4,6 +4,7 @@ import {
   type AIProvider,
   type ChatParams,
   type StreamChunk,
+  type TokenUsage,
 } from '@hyscode/ai-providers';
 import { Harness } from './harness';
 
@@ -21,6 +22,64 @@ const model = {
 afterEach(() => getProviderRegistry().unregister('cache-e2e-provider'));
 
 describe('Harness prompt-cache E2E', () => {
+  it('keeps finalization working when the turn_end usage snapshot is frozen', async () => {
+    const completedUsages: TokenUsage[] = [];
+    const provider: AIProvider = {
+      id: 'cache-e2e-provider',
+      name: 'Cache E2E Provider',
+      models: [model],
+      isConfigured: () => true,
+      listModels: async () => [model],
+      async *chat(): AsyncIterable<StreamChunk> {
+        yield {
+          type: 'usage',
+          usage: { inputTokens: 12, outputTokens: 4, totalTokens: 16 },
+        };
+        yield { type: 'text_delta', text: 'finalized safely' };
+        yield { type: 'done', stopReason: 'end_turn' };
+      },
+    };
+    getProviderRegistry().register(provider);
+
+    const harness = new Harness({
+      workspacePath: 'C:/cache-e2e-workspace',
+      projectId: 'cache-e2e-project',
+      invoke: async () => undefined as never,
+      onEvent: (event) => {
+        if (event.type !== 'turn_end') return;
+        completedUsages.push(event.tokenUsage);
+        Object.freeze(event.tokenUsage);
+      },
+      config: {
+        providerId: provider.id,
+        modelId: model.id,
+        approval: { mode: 'yolo' },
+        costOptimization: false,
+        promptCaching: true,
+      },
+    });
+    harness.setAgentType('chat');
+    harness.setConversationId('cache-e2e-frozen-conversation');
+
+    const result = await harness.run('finish this turn', []);
+
+    expect(result.status).toBe('complete');
+    expect(result.response).toBe('finalized safely');
+    expect(result.turnRecord.trace?.promptCache).toBeDefined();
+    expect(result.turnRecord.tokenUsage.cacheMeasuredReadTokens).toBe(0);
+    expect(completedUsages).toHaveLength(1);
+    expect(completedUsages[0]?.cacheMeasuredReadTokens).toBe(0);
+    expect(completedUsages[0]).not.toBe(result.turnRecord.tokenUsage);
+
+    const nextResult = await harness.run('finish the next turn', []);
+
+    expect(nextResult.status).toBe('complete');
+    expect(nextResult.response).toBe('finalized safely');
+    expect(completedUsages).toHaveLength(2);
+    expect(completedUsages[1]?.cacheMeasuredReadTokens).toBe(0);
+    expect(completedUsages[1]).not.toBe(nextResult.turnRecord.tokenUsage);
+  });
+
   it('preserves the stable key while user turns vary and records measured hits', async () => {
     const requests: ChatParams[] = [];
     let call = 0;
