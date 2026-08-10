@@ -510,7 +510,7 @@ export function AgentInput() {
               }
             }}
             onPaste={handlePaste}
-            placeholder={`${currentCap.placeholder} (Enter para enviar, Shift+Enter para nova linha)`}
+            placeholder={`${currentCap.placeholder} (Enter to send, Shift+Enter for a new line)`}
             className="max-h-40 min-h-[52px] w-full resize-none border-0 bg-transparent px-0 py-1.5 text-[13px] leading-[1.6] text-foreground/90 placeholder:text-muted-foreground/50 focus-visible:ring-0 focus-visible:ring-offset-0 dark:bg-transparent"
             onKeyDown={(e) => {
               if (

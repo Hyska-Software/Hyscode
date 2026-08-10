@@ -644,7 +644,7 @@ export class HarnessBridge {
       useAgentStore.getState().addDebugLine(line);
     };
 
-    dbg(`Iniciando com provider="${providerId || '(default)'}" model="${modelId || '(default)'}"`);
+    dbg(`Starting with provider="${providerId || '(default)'}" model="${modelId || '(default)'}"`);
 
     // Reset per-turn credit counter
     useAgentStore.getState().resetApiRequestCount();
@@ -657,7 +657,7 @@ export class HarnessBridge {
     // SDD phases are driven by the explicit start/approve/resume methods. Chat
     // messages in a build tab must still execute as normal agent turns.
     this.harness.setMode(harnessMode);
-    dbg(`Modo: ${harnessMode} (agent: ${store.mode})`);
+    dbg(`Mode: ${harnessMode} (agent: ${store.mode})`);
 
     if (this.isolatedRuntime) this.syncSharedAgentPreferences();
 
@@ -744,7 +744,7 @@ export class HarnessBridge {
               metadata: { filePath, fileName: dirName, isDirectory: true },
             });
           } catch (dirErr) {
-            dbg(`Erro ao ler contexto ${filePath}: ${dirErr}`);
+            dbg(`Error reading context ${filePath}: ${dirErr}`);
           }
         }
       }
@@ -860,7 +860,7 @@ export class HarnessBridge {
       // Analyze user message for file references and provide hints to the agent
       await this.injectContextHints(userMessage);
 
-      dbg(`Enviando para LLM (${history.length} msgs no histórico)...`);
+      dbg(`Sending to LLM (${history.length} msgs in history)...`);
 
       const { turnId, response, turnRecord, status } = await this.harness.run({
         userMessage,
@@ -876,7 +876,7 @@ export class HarnessBridge {
             : 'error';
 
       dbg(
-        `Resposta recebida (${response.length} chars, ${turnRecord.iterations} iterações, ${turnRecord.toolCalls.length} tool calls)`,
+        `Response received (${response.length} chars, ${turnRecord.iterations} iterations, ${turnRecord.toolCalls.length} tool calls)`,
       );
 
       // Flush any remaining streaming text
@@ -900,7 +900,7 @@ export class HarnessBridge {
     } catch (err) {
       const rawMsg = err instanceof Error ? err.message : 'Unknown error';
       const friendlyMsg = parseProviderError(rawMsg);
-      dbg(`ERRO: ${rawMsg}`);
+      dbg(`ERROR: ${rawMsg}`);
       useAgentStore.getState().updateLastAssistantError(friendlyMsg);
     } finally {
       useAgentStore.getState().setStreaming(false);
@@ -1240,8 +1240,8 @@ Investigate the error, fix the underlying issue in the affected files, and verif
     store.setPendingModeSwitch(null);
     this.debug(
       approved
-        ? `Delegação aprovada: ${req.fromMode} → ${req.toMode}`
-        : `Delegação rejeitada: ${req.fromMode} → ${req.toMode}`,
+        ? `Delegation approved: ${req.fromMode} → ${req.toMode}`
+        : `Delegation rejected: ${req.fromMode} → ${req.toMode}`,
     );
     resolver(approved);
   }
@@ -1876,7 +1876,7 @@ Investigate the error, fix the underlying issue in the affected files, and verif
 
     switch (event.type) {
       case 'turn_start': {
-        this.debug(`Iteração ${event.iteration} — aguardando LLM...`);
+        this.debug(`Iteration ${event.iteration} — waiting for LLM...`);
 
         // Each iteration gets its own assistant row. Structured blocks arrive
         // directly from the harness through transcript_message.
@@ -1975,7 +1975,7 @@ Investigate the error, fix the underlying issue in the affected files, and verif
       }
 
       case 'tool_call_start': {
-        this.debug(`Ferramenta: ${event.toolName}`);
+        this.debug(`Tool: ${event.toolName}`);
         const tc: ToolCallDisplay = {
           id: event.toolCallId,
           name: event.toolName,
@@ -2120,7 +2120,7 @@ Investigate the error, fix the underlying issue in the affected files, and verif
         if (event.reason === 'error' && event.error) {
           const technical = event.errorDetails?.technicalMessage;
           this.debug(
-            `ERRO na iteração: ${event.error}${technical && technical !== event.error ? ` → ${technical}` : ''}`,
+            `Error in iteration: ${event.error}${technical && technical !== event.error ? ` → ${technical}` : ''}`,
           );
           if (!useAgentStore.getState().recoverableError) {
             store.setRecoverableError({
@@ -2139,7 +2139,7 @@ Investigate the error, fix the underlying issue in the affected files, and verif
             });
           }
         } else {
-          this.debug(`Turno encerrado: ${event.reason}`);
+          this.debug(`Turn ended: ${event.reason}`);
         }
         // Authoritative reconciliation: the harness's final tokenUsage is the
         // source of truth. Overwrite any per-iteration accumulation in the
@@ -2197,9 +2197,9 @@ Investigate the error, fix the underlying issue in the affected files, and verif
         }
         store.resolveModeSwitch(req, event.approved);
         if (event.approved) {
-          this.debug(`Delegação resolvida: aprovada → ${req.toMode}`);
+          this.debug(`Delegation resolved: approved → ${req.toMode}`);
         } else {
-          this.debug(`Delegação resolvida: rejeitada (${req.fromMode} → ${req.toMode})`);
+          this.debug(`Delegation resolved: rejected (${req.fromMode} → ${req.toMode})`);
         }
         break;
       }
@@ -2486,7 +2486,7 @@ Investigate the error, fix the underlying issue in the affected files, and verif
     signal: AbortSignal,
   ): Promise<boolean> {
     const useAgentStore = this.agentStore;
-    this.debug(`Delegação solicitada: ${request.fromMode} → ${request.toMode} (${request.reason})`);
+    this.debug(`Delegation requested: ${request.fromMode} → ${request.toMode} (${request.reason})`);
 
     // Push to store so ModeSwitchDialog renders
     const store = useAgentStore.getState();

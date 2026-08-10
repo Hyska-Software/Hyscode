@@ -133,7 +133,7 @@ async function insertLines(lines: string[]): Promise<void> {
   if (lines.length === 0) return;
   const editor = getActiveCodeEditor();
   if (!editor) {
-    notify('warning', 'Abra um arquivo Spectra para inserir o trecho.');
+    notify('warning', 'Open a Spectra file to insert the snippet.');
     return;
   }
 
@@ -153,7 +153,7 @@ async function insertLines(lines: string[]): Promise<void> {
     }
     editor.focus();
   } catch (err) {
-    notify('error', `Falha ao inserir: ${String(err)}`);
+    notify('error', `Failed to insert: ${String(err)}`);
   }
 }
 
@@ -162,45 +162,45 @@ async function insertLines(lines: string[]): Promise<void> {
 async function cmdRun(): Promise<void> {
   const file = activeFile();
   if (!file) {
-    notify('warning', 'Abra um arquivo .spectra para executar.');
+    notify('warning', 'Open a .spectra file to run.');
     return;
   }
   try {
     await runInTerminal(getCliPath(), ['run', file]);
   } catch (err) {
-    notify('error', `Falha ao executar: ${String(err)}`);
+    notify('error', `Failed to run: ${String(err)}`);
   }
 }
 
 async function cmdCheck(): Promise<void> {
   const file = activeFile();
   if (!file) {
-    notify('warning', 'Abra um arquivo .spectra para checar.');
+    notify('warning', 'Open a .spectra file to check.');
     return;
   }
   const result = await runCli(getCliPath(), ['check', file], activeFileDir());
   if (result.error) {
     notify('error', `spectra check: ${result.error}`);
   } else if (result.exitCode === 0) {
-    notify('info', 'Check concluído sem erros.');
+    notify('info', 'Check completed with no errors.');
   } else {
-    notify('error', `spectra check encontrou erros (código ${result.exitCode}).`);
+    notify('error', `spectra check found errors (code ${result.exitCode}).`);
   }
 }
 
 async function cmdCompile(): Promise<void> {
   const file = activeFile();
   if (!file) {
-    notify('warning', 'Abra um arquivo .spectra para compilar.');
+    notify('warning', 'Open a .spectra file to compile.');
     return;
   }
   const result = await runCli(getCliPath(), ['compile', file], activeFileDir());
   if (result.error) {
     notify('error', `spectra compile: ${result.error}`);
   } else if (result.exitCode === 0) {
-    notify('info', 'Compilado com sucesso.');
+    notify('info', 'Compiled successfully.');
   } else {
-    notify('error', `spectra compile falhou (código ${result.exitCode}).`);
+    notify('error', `spectra compile failed (code ${result.exitCode}).`);
   }
 }
 
@@ -210,41 +210,41 @@ async function cmdLint(): Promise<void> {
   if (result.error) {
     notify('error', `spectra lint: ${result.error}`);
   } else if (result.exitCode === 0) {
-    notify('info', 'Lint concluído sem problemas.');
+    notify('info', 'Lint completed with no issues.');
   } else {
-    notify('error', `spectra lint encontrou problemas (código ${result.exitCode}).`);
+    notify('error', `spectra lint found issues (code ${result.exitCode}).`);
   }
 }
 
 async function cmdFormat(): Promise<void> {
   const file = activeFile();
   if (!file) {
-    notify('warning', 'Abra um arquivo .spectra para formatar.');
+    notify('warning', 'Open a .spectra file to format.');
     return;
   }
   try {
     const result = await runCli(getCliPath(), ['fmt', file], activeFileDir());
     if (result.exitCode === 0) {
-      notify('info', 'Arquivo formatado.');
+      notify('info', 'File formatted.');
     } else {
-      notify('error', `spectra fmt falhou (código ${result.exitCode}).`);
+      notify('error', `spectra fmt failed (code ${result.exitCode}).`);
     }
   } catch (err) {
-    notify('error', `Falha ao formatar: ${String(err)}`);
+    notify('error', `Failed to format: ${String(err)}`);
   }
 }
 
 async function cmdNewProject(): Promise<void> {
   const name = await useExtensionUiStore.getState().showInputBox({
-    title: 'Novo Projeto Spectra',
-    prompt: 'Nome do projeto',
-    placeholder: 'meu-projeto',
+    title: 'New Spectra Project',
+    prompt: 'Project name',
+    placeholder: 'my-project',
     value: '',
   });
   if (!name) return;
   const cleanName = name.trim();
   if (!/^[a-zA-Z0-9_-]+$/.test(cleanName)) {
-    notify('error', 'Use apenas letras, números, hífens e underscores.');
+    notify('error', 'Use only letters, numbers, hyphens, and underscores.');
     return;
   }
 
@@ -253,9 +253,9 @@ async function cmdNewProject(): Promise<void> {
   if (result.error) {
     notify('error', `spectra new: ${result.error}`);
   } else if (result.exitCode === 0) {
-    notify('info', `Projeto '${cleanName}' criado em ${cwd}.`);
+    notify('info', `Project '${cleanName}' created in ${cwd}.`);
   } else {
-    notify('error', `Falha ao criar projeto (código ${result.exitCode}).`);
+    notify('error', `Failed to create project (code ${result.exitCode}).`);
   }
 }
 
@@ -272,7 +272,7 @@ async function cmdCompilerActions(): Promise<void> {
   ];
   const selected = await useExtensionUiStore.getState().showQuickPick(items, {
     title: 'Spectra: Compiler Actions',
-    placeholder: 'Escolha uma ação',
+    placeholder: 'Choose an action',
   });
   if (selected?.value) await execute(selected.value);
 }
@@ -308,7 +308,7 @@ async function cmdApiActions(): Promise<void> {
 
   const selected = await useExtensionUiStore.getState().showQuickPick(items, {
     title: 'Spectra: API Actions',
-    placeholder: 'Escolha uma ação suportada pela superfície atual',
+    placeholder: 'Choose an action supported by the current surface',
   });
 
   switch (selected?.value) {

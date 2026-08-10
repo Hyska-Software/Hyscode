@@ -15,9 +15,9 @@ interface Plan {
 }
 
 const PLANS: Plan[] = [
-  { name: 'Free',       price: 'grátis',    requests: 50    },
-  { name: 'Pro',        price: '$10/mês',   requests: 300   },
-  { name: 'Pro+',       price: '$39/mês',   requests: 1_500 },
+  { name: 'Free',       price: 'free',      requests: 50    },
+  { name: 'Pro',        price: '$10/mo',    requests: 300   },
+  { name: 'Pro+',       price: '$39/mo',    requests: 1_500 },
   { name: 'Business',   price: '$19/seat',  requests: 300   },
   { name: 'Enterprise', price: '$39/seat',  requests: 1_000 },
 ];
@@ -52,7 +52,7 @@ const MODEL_TIERS: ModelTier[] = [
   {
     label: 'Claude Opus 4.7',
     multiplier: 7.5,
-    note: 'Promoção até 30 abr/2026',
+    note: 'Promotion until Apr 30, 2026',
   },
   {
     label: 'Claude Opus 4.6 (fast mode)',
@@ -78,7 +78,7 @@ function multiplierColor(multiplier: number): string {
 }
 
 function multiplierLabel(multiplier: number): string {
-  if (multiplier === 0) return 'GRÁTIS';
+  if (multiplier === 0) return 'FREE';
   return `${multiplier}×`;
 }
 
@@ -96,7 +96,7 @@ export function CopilotBillingInfo() {
       >
         <Info className="h-3 w-3 shrink-0 text-amber-500" />
         <span className="flex-1 text-[10px] text-muted-foreground">
-          Usa <span className="text-amber-500 font-medium">premium requests</span> — alguns modelos consomem mais do que outros
+          Uses <span className="text-amber-500 font-medium">premium requests</span> — some models consume more than others
         </span>
         {open
           ? <ChevronDown className="h-3 w-3 shrink-0 text-muted-foreground" />
@@ -111,7 +111,7 @@ export function CopilotBillingInfo() {
           {/* Plan allowances */}
           <div>
             <p className="text-[10px] font-medium text-foreground mb-1.5">
-              Requests inclusos por plano (por mês)
+              Requests included per plan (per month)
             </p>
             <div className="grid grid-cols-5 gap-1">
               {PLANS.map((plan) => (
@@ -121,22 +121,22 @@ export function CopilotBillingInfo() {
                 >
                   <span className="text-[9px] font-medium text-foreground">{plan.name}</span>
                   <span className="text-[12px] font-bold text-foreground tabular-nums">
-                    {plan.requests.toLocaleString('pt-BR')}
+                    {plan.requests.toLocaleString('en-US')}
                   </span>
                   <span className="text-[8px] text-muted-foreground">{plan.price}</span>
                 </div>
               ))}
             </div>
             <p className="text-[9px] text-muted-foreground mt-1.5">
-              Requests extras além do plano:{' '}
-              <span className="text-foreground font-medium">$0,04 cada</span>
+              Extra requests beyond the plan:{' '}
+              <span className="text-foreground font-medium">$0.04 each</span>
             </p>
           </div>
 
           {/* Model cost table */}
           <div>
             <p className="text-[10px] font-medium text-foreground mb-1.5">
-              Custo por conversa · exemplo com plano Pro (300 req/mês)
+              Cost per conversation · example with Pro plan (300 req/mo)
             </p>
             <div className="flex flex-col divide-y divide-border/40">
               {MODEL_TIERS.map((tier) => (
@@ -185,7 +185,7 @@ export function CopilotBillingInfo() {
             className="flex items-center gap-1 text-[9px] text-primary hover:underline w-fit"
           >
             <ExternalLink className="h-2.5 w-2.5" />
-            Tabela completa de multiplicadores no GitHub Docs
+            Full multiplier table in GitHub Docs
           </a>
         </div>
       )}

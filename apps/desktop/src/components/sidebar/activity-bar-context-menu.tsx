@@ -129,7 +129,7 @@ export function ActivityBarContextMenu({
         className="flex w-full shrink-0 cursor-default select-none items-center gap-1.5 rounded-md px-1.5 py-1 text-sm outline-hidden transition-colors hover:bg-muted focus:bg-muted focus:text-foreground"
       >
         <RotateCcw className="size-4 shrink-0 text-muted-foreground" />
-        <span className="flex-1 text-left">Restaurar padrão</span>
+        <span className="flex-1 text-left">Restore default</span>
       </button>
     </div>
   );
