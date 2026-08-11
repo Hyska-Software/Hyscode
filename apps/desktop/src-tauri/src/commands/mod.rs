@@ -13,6 +13,7 @@ pub mod git_backend;
 pub mod github_oauth;
 pub mod github_pr;
 pub mod github_repos;
+pub mod kanban;
 pub mod keychain;
 pub mod lsp;
 pub mod notifications;

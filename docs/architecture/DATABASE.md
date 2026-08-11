@@ -2,7 +2,10 @@
 
 ## Overview
 
-HysCode uses **SQLite** as its local database, accessed from the Tauri Rust backend via **sqlx**. The database stores conversations, project metadata, settings, SDD sessions, and telemetry data.
+HysCode uses **SQLite** as its local database, accessed from the Tauri Rust
+backend via **rusqlite**. Embedded SQL migrations are applied by the Desktop
+startup path. The database stores conversations, project metadata, settings,
+SDD sessions, telemetry data, and the Desktop Kanban domain.
 
 ---
 
@@ -186,6 +189,27 @@ CREATE INDEX idx_telemetry_provider ON telemetry(provider, created_at DESC);
 
 ---
 
+### Desktop Kanban
+
+Migration `016_kanban.sql` adds the project-scoped `kanban_boards`,
+`kanban_columns`, `kanban_tasks`, `kanban_labels`, `kanban_task_labels`,
+`kanban_task_runs`, and append-only `kanban_task_activity` tables. The default
+board seeds `backlog`, `todo`, `in_progress`, `blocked`, and `done` columns when
+the project is first opened. Task versions protect concurrent edits and board
+revisions identify live change-event order. Agent runs retain provider/model
+snapshots and nullable conversation/turn links so task history survives
+conversation cleanup.
+
+Archiving is a soft task state, while permanent deletion is a version-checked
+transaction that rejects active runs, resequences the source column, and lets
+the task-owned run, label-link, and activity foreign keys cascade. The Rust
+command emits a revisioned `task_deleted` event after commit so Desktop read
+models remove the deleted task without inventing a replacement snapshot.
+
+Frontend code accesses this domain only through typed Tauri commands in
+`tauri-invoke.ts` and the `KanbanService`; Zustand is a projection/cache and
+never executes SQL.
+
 ## Migration Strategy
 
 ### Embedded Migrations
@@ -193,7 +217,7 @@ CREATE INDEX idx_telemetry_provider ON telemetry(provider, created_at DESC);
 Migrations are SQL files embedded in the Rust binary at compile time:
 
 ```
-src-tauri/src/db/migrations/
+apps/desktop/src-tauri/migrations/
 ├── 001_initial.sql
 ├── 002_add_sdd_tables.sql
 ├── 003_add_telemetry.sql
@@ -201,23 +225,19 @@ src-tauri/src/db/migrations/
 ```
 
 ```rust
-// Run migrations on app startup
-async fn run_migrations(pool: &SqlitePool) -> Result<()> {
-    sqlx::migrate!("./src/db/migrations")
-        .run(pool)
-        .await?;
-    Ok(())
-}
+// The current Desktop startup path executes include_str!(...) migrations
+// through rusqlite::Connection::execute_batch.
 ```
 
 ### Migration Rules
 
 1. Migrations are **append-only** — never modify existing migration files
-2. Each migration is wrapped in a transaction
+2. Startup applies migrations in append-only order; commands use explicit
+   rusqlite transactions for multi-row mutations
 3. Destructive changes (DROP TABLE, DROP COLUMN) require a 2-step migration:
    - Step 1: create new table, copy data
    - Step 2: drop old table (in next release)
-4. Version tracked in `_sqlx_migrations` table (auto-managed by sqlx)
+4. The embedded migration sequence is tracked by the application source order
 
 ---
 
@@ -238,17 +258,12 @@ const conversations = await invoke<Conversation[]>('db_query', {
 ### From Rust Backend
 
 ```rust
-// Direct sqlx queries in command handlers
+// Direct rusqlite queries in command handlers
 #[tauri::command]
-async fn get_conversations(state: State<'_, AppState>, project_id: String) -> Result<Vec<Conversation>, Error> {
-    let conversations = sqlx::query_as!(
-        Conversation,
-        "SELECT * FROM conversations WHERE project_id = ? ORDER BY updated_at DESC LIMIT 20",
-        project_id
-    )
-    .fetch_all(&state.db)
-    .await?;
-    Ok(conversations)
+fn get_conversations(state: State<'_, DbState>, project_id: String) -> Result<Vec<Conversation>, String> {
+    let connection = state.0.lock().map_err(|error| error.to_string())?;
+    // Prepare/query rows and map database errors into the Tauri command result.
+    query_conversations(&connection, &project_id)
 }
 ```
 

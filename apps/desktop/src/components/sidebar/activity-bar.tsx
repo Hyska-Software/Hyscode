@@ -13,6 +13,7 @@ import {
   Search,
   Settings,
   Smartphone,
+  KanbanSquare,
   type LucideIcon,
 } from 'lucide-react';
 import { useSettingsStore } from '../../stores';
@@ -52,6 +53,7 @@ const BUILTIN_ICON_MAP: Record<SidebarViewId, LucideIcon> = {
   extensions: Blocks,
   agent: Bot,
   memories: BrainCircuit,
+  tasks: KanbanSquare,
   devices: Smartphone,
   docker: Container,
 };

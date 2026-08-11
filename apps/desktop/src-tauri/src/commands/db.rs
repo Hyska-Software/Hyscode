@@ -32,6 +32,8 @@ pub fn open_database(app_dir: &std::path::Path) -> Connection {
         .expect("failed to run migration 008");
     conn.execute_batch(include_str!("../../migrations/009_agent_sdd.sql"))
         .expect("failed to run migration 009");
+    conn.execute_batch(include_str!("../../migrations/016_kanban.sql"))
+        .expect("failed to run migration 016");
     apply_migration_010(&conn);
     apply_migration_011(&conn);
     apply_migration_012(&conn);

@@ -30,6 +30,7 @@ import type {
   RuleDiagnostic,
   ApprovalDecision,
   ToolApprovalRequest,
+  AgentTaskContext,
 } from '@hyscode/agent-harness';
 import type { Message, ToolDefinition, MessageContent, TokenUsage } from '@hyscode/ai-providers';
 import { tauriInvoke, tauriInvokeRaw } from './tauri-invoke';
@@ -66,6 +67,12 @@ import {
   isPlaceholderVortexSessionTitle,
   resolveVortexSessionTitle,
 } from './vortex-session-titles';
+import {
+  desktopKanbanHarnessIntegration,
+  kanbanTaskExecutionCoordinator,
+  type TaskExecutionRequest,
+  type TaskExecutionTarget,
+} from './task-execution-coordinator';
 
 // ─── Error Parser ────────────────────────────────────────────────────────────
 // Converts raw technical error messages into friendly user-facing text.
@@ -240,6 +247,9 @@ export class HarnessBridge {
   private activeTurnTabId: string | null = null;
   private activeTurnConversationId: string | null = null;
   private activeTurnId: string | null = null;
+  private lastCompletedTurnId: string | null = null;
+  private activeTaskContext: AgentTaskContext | null = null;
+  private taskTargetUnregister: (() => void) | null = null;
 
   // ─── Agent Terminal Integration ───────────────────────────────────
   /** Last terminal command, isolated by conversation for deterministic context injection. */
@@ -442,6 +452,7 @@ export class HarnessBridge {
         this.recordTerminalCommand(command, output, exitCode),
       skillLoader,
       ruleLoader,
+      taskIntegration: desktopKanbanHarnessIntegration,
       onRulesResolved: (rules, diagnostics) => {
         if (this.disposed) return;
         this.ruleDiagnostics = diagnostics;
@@ -590,14 +601,21 @@ export class HarnessBridge {
 
   async sendMessage(
     userMessage: string,
-    options: { hidden?: boolean; excludeLastAssistantFromHistory?: boolean } = {},
+    options: {
+      hidden?: boolean;
+      excludeLastAssistantFromHistory?: boolean;
+      providerId?: string;
+      modelId?: string;
+      taskContext?: AgentTaskContext;
+    } = {},
   ): Promise<void> {
     const useAgentStore = this.agentStore;
     const store = useAgentStore.getState();
     const settings = useSettingsStore.getState();
 
-    const providerId = settings.activeProviderId ?? '';
-    const modelId = settings.activeModelId ?? '';
+    const providerId = options.providerId ?? settings.activeProviderId ?? '';
+    const modelId = options.modelId ?? settings.activeModelId ?? '';
+    this.activeTaskContext = options.taskContext ?? null;
 
     const customApproval = {
       categoryOverrides: Object.fromEntries(
@@ -691,12 +709,13 @@ export class HarnessBridge {
     } else {
       this.harness.setConversationId(store.conversationId);
     }
+    this.bindTaskExecutionTarget(this.harness.getConversationId());
 
     // Start indexing immediately, but do not hold back the local message and
     // working state while SQLite responds. The agent run still awaits this
     // promise before contacting the provider, so VORTEX sees the session as
     // soon as the user submits while persistence remains ordered.
-    const conversationReady = this.ensureConversationExists(userMessage).catch((error) => {
+    const conversationReady = this.ensureConversationExists(userMessage, providerId, modelId).catch((error) => {
       dbg(
         `Could not index the conversation before the turn: ${error instanceof Error ? error.message : String(error)}`,
       );
@@ -822,6 +841,7 @@ export class HarnessBridge {
     this.activeTurnTabId = useAgentStore.getState().activeTabId;
     this.activeTurnConversationId = useAgentStore.getState().conversationId;
     this.activeTurnId = null;
+    this.lastCompletedTurnId = null;
 
     // Create the first assistant row and bind streaming updates to its identity.
     const assistantMsgId = crypto.randomUUID();
@@ -867,7 +887,9 @@ export class HarnessBridge {
         history,
         images: imageContent.length > 0 ? imageContent : undefined,
         ruleTargetPaths,
+        taskContext: options.taskContext,
       });
+      this.lastCompletedTurnId = turnId;
       notificationOutcome =
         status === 'complete'
           ? 'success'
@@ -894,7 +916,7 @@ export class HarnessBridge {
         useAgentStore.getState().agentEditSessions,
       );
       useAgentStore.getState().setTurnSummary(turnId, summary);
-      await this.commitTurn(userMessage, turnRecord);
+      await this.commitTurn(userMessage, turnRecord, providerId, modelId);
       await this.persistTurnRecord(turnRecord, true);
       await this.refreshSessionUsage();
     } catch (err) {
@@ -910,6 +932,7 @@ export class HarnessBridge {
       this.activeTurnTabId = null;
       this.activeTurnConversationId = null;
       this.activeTurnId = null;
+      this.activeTaskContext = null;
       // OS notification when the app is in the background
       if (document.hidden) {
         try {
@@ -958,6 +981,91 @@ export class HarnessBridge {
     );
   }
 
+  private bindTaskExecutionTarget(conversationId: string): void {
+    this.taskTargetUnregister?.();
+    let taskTurnActive = false;
+    const target: TaskExecutionTarget = {
+      prepare: async (request, context) => {
+        if (context.signal.aborted) throw new Error('Task execution was cancelled.');
+        await this.ensureConversationPersisted(
+          `Task: ${request.task.title}`,
+          context.providerId,
+          context.modelId,
+        );
+      },
+      run: async (request: TaskExecutionRequest, context) => {
+        if (context.signal.aborted) throw new Error('Task execution was cancelled.');
+        await this.waitForTurnIdle(context.signal);
+        if (this.disposed) throw new Error('The Desktop agent runtime is unavailable.');
+        if (context.signal.aborted) throw new Error('Task execution was cancelled.');
+        taskTurnActive = true;
+        try {
+          await this.sendMessage(request.instructions, {
+            providerId: context.providerId,
+            modelId: context.modelId,
+            taskContext: context.taskContext,
+          });
+        } finally {
+          taskTurnActive = false;
+        }
+        return {
+          conversationId: this.agentStore.getState().conversationId,
+          turnId: this.lastCompletedTurnId,
+          summary: `Task completed: ${request.task.title}`,
+        };
+      },
+      cancel: () => {
+        if (taskTurnActive) this.cancel();
+      },
+    };
+    this.taskTargetUnregister = kanbanTaskExecutionCoordinator.registerTarget(
+      conversationId,
+      target,
+    );
+  }
+
+  getLastCompletedTurnId(): string | null {
+    return this.lastCompletedTurnId;
+  }
+
+  async ensureConversationPersisted(
+    titleSource: string,
+    providerId?: string,
+    modelId?: string,
+  ): Promise<void> {
+    await this.ensureConversationExists(titleSource, providerId, modelId);
+  }
+
+  private updateActiveTaskRunState(stateName: 'waiting' | 'running'): void {
+    const taskContext = this.activeTaskContext;
+    if (!taskContext || !this._projectId) return;
+    void kanbanTaskExecutionCoordinator
+      .updateTaskRunState(this._projectId, taskContext.taskRunId, stateName)
+      .catch((error: unknown) => {
+        console.warn('[kanban] Failed to update task waiting state:', error);
+      });
+  }
+
+  private waitForTurnIdle(signal: AbortSignal): Promise<void> {
+    if (signal.aborted) return Promise.reject(new Error('Task execution was cancelled.'));
+    if (!this.agentStore.getState().isStreaming) return Promise.resolve();
+    return new Promise<void>((resolve, reject) => {
+      let unsubscribe: () => void = () => undefined;
+      const finish = (error?: Error) => {
+        unsubscribe();
+        signal.removeEventListener('abort', onAbort);
+        if (error) reject(error);
+        else resolve();
+      };
+      const onAbort = () => finish(new Error('Task execution was cancelled.'));
+      unsubscribe = this.agentStore.subscribe((state) => {
+        if (!state.isStreaming) finish();
+      });
+      signal.addEventListener('abort', onAbort, { once: true });
+      if (!this.agentStore.getState().isStreaming) finish();
+    });
+  }
+
   cancel(): void {
     const useAgentStore = this.agentStore;
     useAgentStore.setState((draft) => {
@@ -981,6 +1089,8 @@ export class HarnessBridge {
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
+    this.taskTargetUnregister?.();
+    this.taskTargetUnregister = null;
     this.cancel();
   }
 
@@ -2450,6 +2560,7 @@ Investigate the error, fix the underlying issue in the affected files, and verif
       ownerSubAgentId: this._approvalOwner.get(pending.id),
     };
     useAgentStore.getState().addPendingApproval(approval);
+    this.updateActiveTaskRunState('waiting');
 
     // Wait for UI resolution
     return new Promise<ApprovalDecision>((resolve) => {
@@ -2463,6 +2574,7 @@ Investigate the error, fix the underlying issue in the affected files, and verif
         if (settled) return;
         settled = true;
         signal.removeEventListener('abort', cancel);
+        if (decision) this.updateActiveTaskRunState('running');
         resolve(decision);
       };
       this.approvalResolvers.set(pending.id, finish);
@@ -2523,6 +2635,7 @@ Investigate the error, fix the underlying issue in the affected files, and verif
     // Push to store so AgentQuestionCard renders
     const store = useAgentStore.getState();
     store.setPendingUserQuestion({ id, title, questions });
+    this.updateActiveTaskRunState('waiting');
 
     // Wait for UI resolution
     return new Promise<import('@hyscode/agent-harness').AgentQuestionAnswer[]>((resolve) => {
@@ -2547,6 +2660,7 @@ Investigate the error, fix the underlying issue in the affected files, and verif
     if (resolver) {
       this.userQuestionResolvers.delete(id);
       useAgentStore.getState().setPendingUserQuestion(null);
+      this.updateActiveTaskRunState('running');
       resolver(answers);
     }
   }
@@ -2985,7 +3099,12 @@ ${hints.map((h) => `- ${h}`).join('\n')}
     });
   }
 
-  private async commitTurn(titleSource: string, record: TurnRecord): Promise<void> {
+  private async commitTurn(
+    titleSource: string,
+    record: TurnRecord,
+    providerId?: string,
+    modelId?: string,
+  ): Promise<void> {
     const useAgentStore = this.agentStore;
     const store = useAgentStore.getState();
     const settings = useSettingsStore.getState();
@@ -2998,8 +3117,8 @@ ${hints.map((h) => `- ${h}`).join('\n')}
       conversationId,
       title,
       mode: store.mode,
-      modelId: settings.activeModelId ?? null,
-      providerId: settings.activeProviderId ?? null,
+      modelId: modelId ?? settings.activeModelId ?? null,
+      providerId: providerId ?? settings.activeProviderId ?? null,
       messagesJson: JSON.stringify(
         store.messages.map((message) => ({
           id: message.id,
@@ -3037,7 +3156,11 @@ ${hints.map((h) => `- ${h}`).join('\n')}
     notifyVortexProjectSessionIndexUpdated();
   }
 
-  private async ensureConversationExists(titleSource: string): Promise<void> {
+  private async ensureConversationExists(
+    titleSource: string,
+    providerId?: string,
+    modelId?: string,
+  ): Promise<void> {
     const useAgentStore = this.agentStore;
     const store = useAgentStore.getState();
     const conversationId = store.conversationId;
@@ -3049,8 +3172,8 @@ ${hints.map((h) => `- ${h}`).join('\n')}
       projectId: this._projectId,
       title,
       mode: store.mode,
-      modelId: useSettingsStore.getState().activeModelId ?? null,
-      providerId: useSettingsStore.getState().activeProviderId ?? null,
+      modelId: modelId ?? useSettingsStore.getState().activeModelId ?? null,
+      providerId: providerId ?? useSettingsStore.getState().activeProviderId ?? null,
     });
     notifyVortexProjectSessionIndexUpdated();
   }

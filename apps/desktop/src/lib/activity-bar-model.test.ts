@@ -52,6 +52,7 @@ describe('activity bar model', () => {
       'extensions',
       'agent',
       'memories',
+      'tasks',
       'devices',
       'docker',
     ]);

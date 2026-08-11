@@ -21,6 +21,7 @@ export const BUILTIN_SIDEBAR_VIEWS: readonly SidebarViewDescriptor[] = [
   { id: 'extensions', label: 'Extensions', kind: 'builtin' },
   { id: 'agent', label: 'Agent', kind: 'builtin' },
   { id: 'memories', label: 'Memories', kind: 'builtin' },
+  { id: 'tasks', label: 'Tasks', kind: 'builtin' },
   { id: 'devices', label: 'Devices', kind: 'builtin' },
   { id: 'docker', label: 'Docker', kind: 'builtin' },
 ] as const;

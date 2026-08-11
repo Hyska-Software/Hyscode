@@ -11,6 +11,7 @@ import {
   DockerView,
   MemoriesView,
 } from './views';
+import { TasksView } from './views/tasks-view';
 import { ExtensionViewPanel } from './views/extension-view-panel';
 
 interface SidebarContentProps {
@@ -37,6 +38,8 @@ export function SidebarContent({ view }: SidebarContentProps) {
       return <AgentSidebarView />;
     case 'memories':
       return <MemoriesView />;
+    case 'tasks':
+      return <TasksView />;
     case 'devices':
       return <DevicesView />;
     case 'docker':

@@ -19,6 +19,7 @@ import { useFileStore } from '@/stores/file-store';
 import { useGitStore } from '@/stores/git-store';
 import { useLspStore } from '@/stores/lsp-store';
 import { useMemoryStore } from '@/stores/memory-store';
+import { useKanbanStore } from '@/stores/kanban-store';
 import { useProjectStore } from '@/stores/project-store';
 import { useRulesStore } from '@/stores/rules-store';
 import { useSchemaDiagramStore } from '@/stores/schema-diagram-store';
@@ -392,6 +393,7 @@ export async function clearAllProjectState(
   useGitStore.getState().resetForProjectSwitch();
   useLspStore.getState().clearAll();
   useMemoryStore.getState().resetProjectState();
+  useKanbanStore.getState().reset();
   useRulesStore.getState().resetProjectState();
   useSchemaDiagramStore.getState().reset();
   useSkillsStore.getState().resetProjectState();
@@ -476,6 +478,9 @@ async function performProjectOpen(
     await tauriInvoke('db_ensure_project', { id: rootPath, path: rootPath }).catch((error) => {
       console.warn('[project-persistence] Failed to register project in the database:', error);
     });
+    if (switchId !== projectSwitchGeneration) return;
+
+    await useKanbanStore.getState().loadProject(rootPath);
     if (switchId !== projectSwitchGeneration) return;
 
     const snapshot = loadProjectState(rootPath);

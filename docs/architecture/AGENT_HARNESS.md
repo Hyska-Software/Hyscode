@@ -69,6 +69,22 @@ conversation ID so memory provenance, terminal ownership, and observability
 remain attached to the real conversation. Their records and traces may carry a
 `parent_turn_id` for querying delegated work independently.
 
+### Optional Desktop Kanban integration
+
+Desktop may construct a Harness with the additive `taskIntegration` option.
+That option registers the namespaced `kanban_*` tools and carries an optional
+`AgentTaskContext` through `TurnRequest`, `ToolExecutionContext`, and lifecycle
+events. Read-only task listing is safe; task mutations, permanent deletion, and
+delegation remain approval-gated. A child Harness receives the task context but does not inherit
+the persistent Kanban mutation/delegation tools, preventing recursive task
+creation.
+
+The Desktop task service owns SQLite persistence and revisioned
+`kanban:changed` events. `TaskExecutionCoordinator` uses the existing
+`HarnessBridge` and provider registry rather than dispatching to a provider
+directly. Harnesses created without `taskIntegration`, including the TUI
+runtime, retain their existing tool surface and do not expose Kanban.
+
 ### Read Reuse Policy
 
 Large reviews commonly read separate line ranges from the same source file.

@@ -4,6 +4,7 @@ import { ViewMenu } from './view-menu';
 import { ModeSelector } from './mode-selector';
 import { UpdateIndicator } from './update-indicator';
 import { WindowControls } from './window-controls';
+import { KanbanButton } from './kanban-button';
 import { BrandMark } from '../brand-mark';
 import { useLayoutStore } from '../../stores/layout-store';
 import { useSettingsStore } from '../../stores';
@@ -36,6 +37,7 @@ export function TitleBar() {
         </div>
         <FileMenu />
         <ViewMenu />
+        <KanbanButton />
       </div>
 
       {/* Center spacer for visual balance */}

@@ -39,6 +39,7 @@ import { startExtensionLspSync } from './lib/extension-lsp-bridge';
 import { getViewerType } from './lib/utils';
 import { UpdateDialog } from './components/updater/update-dialog';
 import { StartupNotification } from './components/notifications/startup-notification';
+import { TaskBoardSurface } from './components/tasks/task-board-surface';
 import {
   areSameProjectPath,
   closeProjectWorkspace,
@@ -182,6 +183,8 @@ function IDE() {
   const extSyncRef = useRef<(() => void) | null>(null);
 
   const workspaceMode = useLayoutStore((s) => s.workspaceMode);
+  const kanbanOpen = useLayoutStore((s) => s.kanbanOpen);
+  const setKanbanOpen = useLayoutStore((s) => s.setKanbanOpen);
 
   useThemeEffect();
   useRoundedBordersEffect();
@@ -293,6 +296,7 @@ function IDE() {
       </div>
 
       <StatusBar />
+      <TaskBoardSurface open={kanbanOpen} onClose={() => setKanbanOpen(false)} />
       <SettingsModal />
       <ExtensionOverlays />
       <CommandPalette />
@@ -453,6 +457,15 @@ export function App() {
         useLayoutStore.getState().toggleSidebar();
       },
       { category: 'View', key: 'ctrl+b' },
+    );
+
+    builtin(
+      'workbench.action.toggleKanban',
+      'Toggle Kanban',
+      () => {
+        useLayoutStore.getState().toggleKanban();
+      },
+      { category: 'View' },
     );
 
     builtin(

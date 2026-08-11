@@ -22,6 +22,12 @@ import {
   isPlaceholderVortexSessionTitle,
   resolveVortexSessionTitle,
 } from './vortex-session-titles';
+import {
+  kanbanTaskExecutionCoordinator,
+  type TaskExecutionRequest,
+  type TaskExecutionResult,
+} from './task-execution-coordinator';
+import { kanbanService } from './kanban-service';
 
 interface VortexRuntimeRegistryState {
   snapshots: Record<string, VortexRuntimeSnapshot>;
@@ -39,6 +45,9 @@ type RuntimeRecord = {
   projectName: string;
   conversationId: string;
   title: string;
+  taskId: string | null;
+  taskRunId: string | null;
+  taskTitle: string | null;
   mode: AgentMode;
   status: VortexRuntimeStatus;
   startedAt: number;
@@ -54,6 +63,9 @@ type RuntimeRecord = {
 type EnsureRuntimeOptions = {
   initialData?: Partial<AgentState>;
   title?: string;
+  taskId?: string;
+  taskRunId?: string;
+  taskTitle?: string;
   mode?: AgentMode;
   allowMissing?: boolean;
 };
@@ -127,6 +139,7 @@ function lastAssistantError(state: AgentState): string | null {
 
 export class VortexSessionRuntimeManager {
   private readonly records = new Map<string, RuntimeRecord>();
+  private readonly taskRunKeys = new Map<string, string>();
   private readonly initialization = new Map<string, Promise<RuntimeRecord>>();
   private focusedKey: string | null = null;
   private focusGeneration = 0;
@@ -135,6 +148,20 @@ export class VortexSessionRuntimeManager {
   private syncingFromUi = false;
 
   constructor() {
+    kanbanTaskExecutionCoordinator.setDedicatedRunner((request, context) =>
+      this.runDedicatedTask(request, context),
+    );
+    kanbanTaskExecutionCoordinator.setDedicatedCancelHandler((runId) => {
+      const key = this.taskRunKeys.get(runId);
+      if (!key) return;
+      const record = this.records.get(key);
+      if (!record) return;
+      record.cancelRequested = true;
+      record.status = 'cancelling';
+      record.updatedAt = Date.now();
+      this.publish(record);
+      record.bridge?.cancel();
+    });
     useAgentStore.subscribe((state) => {
       if (this.projecting || this.projectionSuspended || !this.focusedKey) return;
       const record = this.records.get(this.focusedKey);
@@ -143,6 +170,66 @@ export class VortexSessionRuntimeManager {
       record.agentStore.setState(extractAgentStateData(state));
       this.syncingFromUi = false;
     });
+  }
+
+  private async runDedicatedTask(
+    request: TaskExecutionRequest,
+    context: import('@hyscode/agent-harness').KanbanTaskToolContext,
+  ): Promise<TaskExecutionResult> {
+    const projectPath = normalizeProjectPath(context.projectId);
+    const conversationId = crypto.randomUUID();
+    const record = await this.ensureRuntime(projectPath, conversationId, {
+      allowMissing: true,
+      mode: 'build',
+      title: `Task: ${request.task.title}`,
+      taskId: request.task.id,
+      taskRunId: request.run.id,
+      taskTitle: request.task.title,
+    });
+    if (!record.bridge) throw new Error('The dedicated task runtime is not ready.');
+
+    record.hasRun = true;
+    record.cancelRequested = false;
+    record.status = 'queued';
+    record.error = null;
+    record.updatedAt = Date.now();
+    this.taskRunKeys.set(request.run.id, record.key);
+    this.publish(record);
+
+    try {
+      const providerId = request.run.providerId ?? context.providerId;
+      const modelId = request.run.modelId ?? context.modelId;
+      await record.bridge.ensureConversationPersisted(
+        `Task: ${request.task.title}`,
+        providerId,
+        modelId,
+      );
+      await kanbanService.updateTaskRun({
+        projectId: context.projectId,
+        runId: request.run.id,
+        stateName: 'running',
+        conversationId,
+      });
+      await record.bridge.sendMessage(request.instructions, {
+        providerId,
+        modelId,
+        taskContext: context.taskContext,
+      });
+      this.finishRun(record);
+      return {
+        conversationId,
+        turnId: record.bridge.getLastCompletedTurnId(),
+        summary: `Task completed: ${request.task.title}`,
+      };
+    } catch (error) {
+      record.status = 'error';
+      record.error = error instanceof Error ? error.message : String(error);
+      record.updatedAt = Date.now();
+      this.publish(record);
+      throw error;
+    } finally {
+      this.taskRunKeys.delete(request.run.id);
+    }
   }
 
   getFocusedBridge(): HarnessBridge | null {
@@ -431,6 +518,9 @@ export class VortexSessionRuntimeManager {
       projectName: projectNameFromPath(projectPath),
       conversationId,
       title,
+      taskId: options.taskId ?? null,
+      taskRunId: options.taskRunId ?? null,
+      taskTitle: options.taskTitle ?? null,
       mode,
       status: 'starting',
       startedAt: now,
@@ -531,6 +621,9 @@ export class VortexSessionRuntimeManager {
       projectName: record.projectName,
       conversationId: record.conversationId,
       title: record.title,
+      taskId: record.taskId,
+      taskRunId: record.taskRunId,
+      taskTitle: record.taskTitle,
       mode: record.mode,
       status: record.status,
       messageCount: state.messages.length,
@@ -544,6 +637,9 @@ export class VortexSessionRuntimeManager {
     if (
       current &&
       current.title === next.title &&
+      current.taskId === next.taskId &&
+      current.taskRunId === next.taskRunId &&
+      current.taskTitle === next.taskTitle &&
       current.mode === next.mode &&
       current.status === next.status &&
       current.messageCount === next.messageCount &&

@@ -12,6 +12,7 @@ import type {
   ToolHandler,
 } from './types';
 import type { ExternalPathAccessRegistry } from './external-path-access';
+import type { KanbanTaskIntegration } from './task-integration';
 
 /** Shared runtime dependencies used by a parent harness and its child turns. */
 export interface HarnessEnvironment {
@@ -52,6 +53,8 @@ export interface HarnessEnvironment {
   memoryManager?: MemoryManager;
   hasDirtyBuffers?: () => boolean;
   externalPathAccess?: ExternalPathAccessRegistry;
+  /** Optional Desktop-only persistent Kanban integration. */
+  taskIntegration?: KanbanTaskIntegration;
 }
 
 export type ChildHarnessOptions = {

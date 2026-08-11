@@ -149,6 +149,7 @@ export const SETTINGS_DEFAULTS = {
     devices: true,
     docker: true,
     memories: true,
+    tasks: true,
   },
   sidebarViewOrder: [
     'files',
@@ -158,6 +159,7 @@ export const SETTINGS_DEFAULTS = {
     'extensions',
     'agent',
     'memories',
+    'tasks',
     'devices',
     'docker',
   ],

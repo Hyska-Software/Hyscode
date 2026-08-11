@@ -1,6 +1,12 @@
 /* @vitest-environment jsdom */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type {
+  KanbanTask,
+  KanbanTaskDelegateResult,
+  KanbanTaskRunSummary,
+  KanbanTaskToolContext,
+} from '@hyscode/agent-harness';
 import { useAgentStore, type AgentStoreApi } from '@/stores/agent-store';
 import { useProjectStore } from '@/stores/project-store';
 
@@ -29,12 +35,24 @@ type DatabaseMessageFixture = {
   created_at: string;
 };
 
-const { createSessionMock, pendingRuns, createdBridges, databaseConversations, databaseMessages } = vi.hoisted(() => ({
+const {
+  createSessionMock,
+  pendingRuns,
+  createdBridges,
+  databaseConversations,
+  databaseMessages,
+  delegateTaskMock,
+  updateTaskRunMock,
+  runtimeEvents,
+} = vi.hoisted(() => ({
   createSessionMock: vi.fn(),
   pendingRuns: new Map<string, PendingRun>(),
   createdBridges: [] as FakeHarnessBridge[],
   databaseConversations: new Map<string, DatabaseConversationFixture>(),
   databaseMessages: new Map<string, DatabaseMessageFixture[]>(),
+  delegateTaskMock: vi.fn(),
+  updateTaskRunMock: vi.fn(),
+  runtimeEvents: [] as string[],
 }));
 
 class FakeHarnessBridge {
@@ -53,6 +71,10 @@ class FakeHarnessBridge {
 
   async registerMcpTools(): Promise<void> {}
 
+  async ensureConversationPersisted(titleSource: string): Promise<void> {
+    runtimeEvents.push(`ensure:${titleSource}`);
+  }
+
   restoreSession(conversationId: string): void {
     this.store.getState().setConversationId(conversationId);
   }
@@ -63,6 +85,7 @@ class FakeHarnessBridge {
 
   async sendMessage(message: string): Promise<void> {
     this.currentMessage = message;
+    runtimeEvents.push(`send:${message}`);
     this.cancelled = false;
     this.store.getState().addMessage({
       id: `${message}-user`,
@@ -82,6 +105,10 @@ class FakeHarnessBridge {
     await this.sendMessage('retry');
   }
 
+  getLastCompletedTurnId(): string | null {
+    return this.currentMessage ? 'turn-1' : null;
+  }
+
   cancel(): void {
     this.cancelled = true;
     this.store.getState().setStreaming(false);
@@ -97,6 +124,13 @@ vi.mock('@/lib/harness-bridge', () => ({
   HarnessBridge: {
     createSession: createSessionMock,
   },
+}));
+vi.mock('./kanban-service', () => ({
+  kanbanService: {
+    delegateTask: delegateTaskMock,
+    updateTaskRun: updateTaskRunMock,
+  },
+  mapKanbanRun: vi.fn(),
 }));
 vi.mock('@/lib/tauri-invoke', () => ({
   tauriInvoke: vi.fn(async (command: string, args?: Record<string, unknown>) => {
@@ -116,6 +150,7 @@ import {
   useVortexRuntimeStore,
   VortexSessionRuntimeManager,
 } from './vortex-session-runtime';
+import { kanbanTaskExecutionCoordinator } from './task-execution-coordinator';
 
 function release(message: string): void {
   pendingRuns.get(message)?.release();
@@ -130,9 +165,84 @@ describe('VortexSessionRuntimeManager', () => {
     createdBridges.length = 0;
     databaseConversations.clear();
     databaseMessages.clear();
+    delegateTaskMock.mockReset();
+    updateTaskRunMock.mockReset();
+    updateTaskRunMock.mockImplementation(async (input: { conversationId?: string }) => {
+      if (input.conversationId) runtimeEvents.push(`link:${input.conversationId}`);
+    });
+    runtimeEvents.length = 0;
     useAgentStore.getState().resetProjectState();
     useProjectStore.setState({ rootPath: 'C:/project-a', isLoading: false });
     useVortexRuntimeStore.setState({ snapshots: {}, focusedKey: null });
+  });
+
+  it('persists a dedicated VORTEX conversation before linking the task run', async () => {
+    const task: KanbanTask = {
+      id: 'task-1',
+      projectId: 'C:/project-a',
+      boardId: 'board-1',
+      columnId: 'column-todo',
+      columnKey: 'todo',
+      title: 'Run the task',
+      description: 'Run the task in VORTEX.',
+      priority: 'medium',
+      position: 0,
+      dueDate: null,
+      autoTransition: true,
+      archivedAt: null,
+      labels: [],
+      version: 1,
+      createdBy: 'user',
+      createdAt: '2026-08-10T00:00:00.000Z',
+      updatedAt: '2026-08-10T00:00:00.000Z',
+      activeRun: null,
+      latestRun: null,
+    };
+    const run: KanbanTaskRunSummary = {
+      id: 'run-1',
+      state: 'queued',
+      mode: 'dedicated_session',
+      conversationId: null,
+      turnId: null,
+      providerId: 'provider-1',
+      modelId: 'model-1',
+      error: null,
+      instructions: 'Run the task',
+      summary: null,
+      startedAt: null,
+      completedAt: null,
+    };
+    const delegated: KanbanTaskDelegateResult = { boardRevision: 1, task, run };
+    delegateTaskMock.mockResolvedValue(delegated);
+    const context: KanbanTaskToolContext = {
+      projectId: 'C:/project-a',
+      conversationId: 'parent-conversation',
+      toolCallId: 'call-1',
+      delegationLevel: 0,
+      signal: new AbortController().signal,
+      providerId: 'provider-1',
+      modelId: 'model-1',
+      actor: 'user',
+    };
+
+    new VortexSessionRuntimeManager();
+    await kanbanTaskExecutionCoordinator.delegateTask(
+      { projectId: 'C:/project-a', taskId: 'task-1', mode: 'dedicated_session', instructions: 'Run the task' },
+      context,
+    );
+
+    await vi.waitFor(() => expect(pendingRuns.has('Run the task')).toBe(true));
+    const conversationIndex = runtimeEvents.findIndex((event) => event.startsWith('ensure:'));
+    const linkIndex = runtimeEvents.findIndex((event) => event.startsWith('link:'));
+    expect(conversationIndex).toBeGreaterThanOrEqual(0);
+    expect(linkIndex).toBeGreaterThan(conversationIndex);
+
+    release('Run the task');
+    await vi.waitFor(() =>
+      expect(updateTaskRunMock).toHaveBeenCalledWith(
+        expect.objectContaining({ stateName: 'completed', turnId: 'turn-1' }),
+      ),
+    );
   });
 
   it('runs two sessions concurrently in the same project with isolated stores', async () => {

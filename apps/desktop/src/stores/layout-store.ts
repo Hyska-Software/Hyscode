@@ -96,7 +96,8 @@ export type SidebarViewId =
   | 'agent'
   | 'devices'
   | 'docker'
-  | 'memories';
+  | 'memories'
+  | 'tasks';
 
 /** Full sidebar view type including extension-contributed views */
 export type SidebarView = SidebarViewId | (string & {});
@@ -130,6 +131,8 @@ interface LayoutState {
   agentLeftCollapsed: boolean;
   /** Whether the agent right panel is collapsed */
   agentRightCollapsed: boolean;
+  /** Whether the shared Desktop Kanban surface is open. */
+  kanbanOpen: boolean;
 
   setWorkspaceMode: (mode: WorkspaceMode) => void;
   setTerminalLocation: (location: TerminalLocation) => void;
@@ -153,6 +156,8 @@ interface LayoutState {
   setSidebarActiveView: (view: SidebarView) => void;
   setAgentLeftCollapsed: (collapsed: boolean) => void;
   setAgentRightCollapsed: (collapsed: boolean) => void;
+  setKanbanOpen: (open: boolean) => void;
+  toggleKanban: () => void;
   /** Reset transient layout state before another project becomes active. */
   resetProjectState: () => void;
   toggleTerminal: () => void;
@@ -179,6 +184,7 @@ export const useLayoutStore = create<LayoutState>()(
       sidebarActiveView: 'files',
       agentLeftCollapsed: false,
       agentRightCollapsed: false,
+      kanbanOpen: false,
 
       setWorkspaceMode: (mode) => set({ workspaceMode: mode }),
       setTerminalLocation: (location) => set({ terminalLocation: location }),
@@ -274,6 +280,8 @@ export const useLayoutStore = create<LayoutState>()(
       setSidebarActiveView: (view) => set({ sidebarActiveView: view }),
       setAgentLeftCollapsed: (collapsed) => set({ agentLeftCollapsed: collapsed }),
       setAgentRightCollapsed: (collapsed) => set({ agentRightCollapsed: collapsed }),
+      setKanbanOpen: (open) => set({ kanbanOpen: open }),
+      toggleKanban: () => set((state) => ({ kanbanOpen: !state.kanbanOpen })),
 
       resetProjectState: () =>
         set({
@@ -290,6 +298,7 @@ export const useLayoutStore = create<LayoutState>()(
           sidebarActiveView: 'files',
           agentLeftCollapsed: false,
           agentRightCollapsed: false,
+          kanbanOpen: false,
         }),
 
       toggleTerminal: () => set((state) => ({ terminalVisible: !state.terminalVisible })),

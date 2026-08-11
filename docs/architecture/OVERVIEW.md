@@ -35,6 +35,21 @@ HysCode is a **desktop-native agentic IDE** built on Tauri v2 where AI agents wr
 └──────────────────────────────────────────────────────────────────┘
 ```
 
+## Desktop Kanban boundary
+
+The Desktop includes a project-scoped Kanban domain backed by SQLite migration
+016 and typed Tauri commands. React board surfaces and optional Desktop Harness
+tools write through `KanbanService`; Rust owns task/run/activity truth and emits
+revisioned `kanban:changed` events after committed mutations. Delegated tasks
+are executed by `TaskExecutionCoordinator` through the existing
+`HarnessBridge`, `VortexSessionRuntimeManager`, `Harness`, and
+`ProviderRegistry` path.
+
+The Editor sidebar, VORTEX workspace, top bar button, and agent chat are
+projections of that same Desktop domain. `manage_tasks` remains a turn-local
+checklist. The TUI is intentionally not a Kanban host and does not register the
+optional integration.
+
 ## Desktop diagnostics contract
 
 The desktop agent's `get_diagnostics` tool is backed by the registered Tauri
