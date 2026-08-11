@@ -668,7 +668,7 @@ pub fn db_list_messages(
             "SELECT id, role, content, tool_calls, blocks, turn_summary, token_input, token_output, created_at
              FROM messages
              WHERE conversation_id = ?1
-             ORDER BY created_at ASC",
+             ORDER BY created_at ASC, rowid ASC",
         )
         .map_err(|e| e.to_string())?;
     let rows = stmt

@@ -27,7 +27,7 @@ type DatabaseConversationFixture = {
 
 type DatabaseMessageFixture = {
   id: string;
-  role: 'user' | 'assistant';
+  role: 'user' | 'assistant' | 'tool';
   content: string;
   tool_calls: string | null;
   blocks: string | null;
@@ -318,6 +318,52 @@ describe('VortexSessionRuntimeManager', () => {
       'The persisted session is available.',
     ]);
     expect(manager.getFocusedSnapshot()?.title).toBe('Investigate the existing VORTEX session');
+  });
+
+  it('restores persisted tool results without converting them to user messages', async () => {
+    databaseConversations.set('session-tools', {
+      id: 'session-tools',
+      title: 'Tool session',
+      mode: 'build',
+      model_id: null,
+      provider_id: null,
+      project_id: 'C:/project-a',
+      created_at: '2026-08-04 10:00:00',
+      updated_at: '2026-08-04 10:01:00',
+    });
+    databaseMessages.set('session-tools', [
+      {
+        id: 'tool-assistant',
+        role: 'assistant',
+        content: '',
+        tool_calls: JSON.stringify([{ id: 'call-1', name: 'read_file', input: {} }]),
+        blocks: JSON.stringify([
+          { type: 'tool_call', id: 'call-1', name: 'read_file', input: {} },
+        ]),
+        turn_summary: null,
+        created_at: '2026-08-04 10:00:00',
+      },
+      {
+        id: 'tool-result',
+        role: 'tool',
+        content: '',
+        tool_calls: null,
+        blocks: JSON.stringify([{ type: 'tool_result', toolCallId: 'call-1', output: 'ok' }]),
+        turn_summary: null,
+        created_at: '2026-08-04 10:00:00',
+      },
+    ]);
+
+    const manager = new VortexSessionRuntimeManager();
+    await manager.focusSession('C:/project-a', 'session-tools');
+
+    expect(useAgentStore.getState().messages.map((message) => message.role)).toEqual([
+      'assistant',
+      'tool',
+    ]);
+    expect(useAgentStore.getState().messages[1]?.blocks).toEqual([
+      { type: 'tool_result', toolCallId: 'call-1', output: 'ok' },
+    ]);
   });
 
   it('keeps the latest focus request when an older runtime hydrates later', async () => {

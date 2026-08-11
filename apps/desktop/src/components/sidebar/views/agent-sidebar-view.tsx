@@ -27,6 +27,7 @@ import { useAgentStore } from '../../../stores';
 import { useSettingsStore } from '../../../stores/settings-store';
 import { useProjectStore } from '../../../stores/project-store';
 import { getActiveAgentBridge } from '../../../lib/active-agent-bridge';
+import { mapPersistedAgentMessage } from '../../../lib/agent-message-persistence';
 import { McpBridge } from '../../../lib/mcp-bridge';
 import { tauriInvoke } from '../../../lib/tauri-invoke';
 import { cn } from '../../../lib/utils';
@@ -110,14 +111,9 @@ async function loadSessions(projectId: string): Promise<void> {
 async function restoreSession(conversationId: string): Promise<void> {
   try {
     const rows = await tauriInvoke('db_list_messages', { conversationId });
-    const messages: ChatMessage[] = rows.map((r) => ({
-      id: r.id,
-      role: r.role as 'user' | 'assistant',
-      content: r.content,
-      toolCalls: r.tool_calls ? JSON.parse(r.tool_calls) : undefined,
-      blocks: r.blocks ? JSON.parse(r.blocks) : undefined,
-      timestamp: new Date(r.created_at).getTime(),
-    }));
+    const messages: ChatMessage[] = rows
+      .map(mapPersistedAgentMessage)
+      .filter((message): message is ChatMessage => message !== null);
     const store = useAgentStore.getState();
     store.clearConversation();
     store.setConversationId(conversationId);

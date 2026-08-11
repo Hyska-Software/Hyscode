@@ -27,6 +27,7 @@ import {
   Save,
   Search,
   Trash2,
+  X,
   XCircle,
 } from 'lucide-react';
 import {
@@ -169,6 +170,8 @@ function TaskCard({
         onClick={onSelect}
         className={cn(
           'group relative cursor-grab overflow-hidden rounded-lg border bg-surface-raised/75 p-2.5 shadow-none transition-[border-color,background-color,box-shadow,transform] duration-150 active:cursor-grabbing active:scale-[0.995]',
+          'motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-1 motion-safe:duration-200 motion-safe:ease-out',
+          'motion-reduce:animate-none motion-reduce:transition-none',
           'border-border/70 hover:border-primary/45 hover:bg-surface-raised hover:shadow-sm',
           selected && 'border-primary/65 bg-primary/10 shadow-sm ring-1 ring-primary/25',
         )}
@@ -586,8 +589,8 @@ function TaskDetails({
 
   if (!task) {
     return (
-      <div className="flex h-full min-h-48 flex-col bg-surface">
-        <div className="flex shrink-0 items-center justify-between border-b border-border/60 bg-surface-raised/60 px-3 py-2.5">
+      <div className="flex h-full min-h-48 flex-col bg-surface motion-safe:animate-in motion-safe:fade-in motion-safe:duration-200 motion-reduce:animate-none">
+        <div className="flex shrink-0 items-center justify-between border-b border-border/60 bg-surface-raised/60 px-3 py-2.5 transition-colors duration-200 hover:bg-surface-raised/80 motion-reduce:transition-none">
           <div>
             <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
               Inspector
@@ -607,7 +610,7 @@ function TaskDetails({
           </AuroraButton>
         </div>
         <div className="flex min-h-0 flex-1 items-center justify-center p-4">
-          <div className="flex max-w-[230px] flex-col items-center gap-3 rounded-xl border border-dashed border-border/70 bg-background/20 px-5 py-7 text-center">
+          <div className="flex max-w-[230px] flex-col items-center gap-3 rounded-xl border border-dashed border-border/70 bg-background/20 px-5 py-7 text-center motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-1 motion-safe:duration-300 motion-safe:ease-out motion-reduce:animate-none">
             <div className="flex size-10 items-center justify-center rounded-xl border border-primary/20 bg-primary/10 text-primary">
               <MousePointerClick className="size-4" />
             </div>
@@ -626,10 +629,10 @@ function TaskDetails({
   const displayRun = task.activeRun ?? task.latestRun;
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-surface">
-      <div className="flex shrink-0 items-center justify-between border-b border-border/60 bg-surface-raised/60 px-3 py-2.5">
+    <div className="flex h-full min-h-0 flex-col bg-surface transition-colors duration-200 motion-reduce:transition-none">
+      <div className="group flex shrink-0 items-center justify-between border-b border-border/60 bg-surface-raised/60 px-3 py-2.5 transition-colors duration-200 hover:bg-surface-raised/80 motion-reduce:transition-none">
         <div className="flex min-w-0 items-center gap-2">
-          <div className="flex size-7 shrink-0 items-center justify-center rounded-lg border border-primary/20 bg-primary/10 text-primary">
+          <div className="flex size-7 shrink-0 items-center justify-center rounded-lg border border-primary/20 bg-primary/10 text-primary transition-transform duration-200 ease-out group-hover:scale-105 group-hover:rotate-[-3deg] motion-reduce:transition-none">
             <Pencil className="size-3.5" />
           </div>
           <div className="min-w-0">
@@ -657,7 +660,7 @@ function TaskDetails({
         </div>
       </div>
       <ScrollArea className="min-h-0 flex-1">
-        <div className="space-y-4 p-3">
+        <div className="space-y-4 p-3 motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-right-1 motion-safe:duration-300 motion-safe:ease-out motion-reduce:animate-none">
           <Field
             label={<span className="text-[10px] font-medium text-muted-foreground">Title</span>}
           >
@@ -792,7 +795,7 @@ function TaskDetails({
             </AuroraButton>
           </div>
 
-          <section className="border-t border-border/60 pt-4">
+          <section className="border-t border-border/60 pt-4 transition-colors duration-200 motion-reduce:transition-none">
             <div className="flex items-start gap-2">
               <div className="flex size-7 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary">
                 <Play className="size-3.5" />
@@ -865,8 +868,9 @@ function TaskDetails({
               )}
             </div>
             {displayRun && (
-              <div className="mt-2 rounded-md border border-primary/25 bg-primary/5 p-2.5 text-[10px]">
+                <div className="mt-2 rounded-md border border-primary/25 bg-primary/5 p-2.5 text-[10px]">
                 <div className="flex items-center gap-1.5 font-medium text-primary">
+                  <span className="size-1.5 rounded-full bg-current motion-safe:animate-pulse motion-reduce:animate-none" aria-hidden="true" />
                   <Clock3 className="h-3 w-3" />
                   {runLabel(displayRun)} · {displayRun?.mode === 'dedicated_session' ? 'VORTEX' : 'current chat'}
                 </div>
@@ -876,7 +880,7 @@ function TaskDetails({
             )}
           </section>
 
-          <section className="border-t border-border/60 pt-4">
+          <section className="border-t border-border/60 pt-4 transition-colors duration-200 motion-reduce:transition-none">
             <div className="flex items-center gap-2">
               <MessageCircle className="h-3.5 w-3.5 text-primary" />
               <h2 className="text-[11px] font-semibold text-foreground">Activity</h2>
@@ -911,7 +915,10 @@ function TaskDetails({
             </form>
             <div className="mt-2 space-y-1.5">
               {activities.slice(-8).map((activity) => (
-                <div key={activity.id} className="rounded-md border border-border/50 bg-muted/30 px-2.5 py-2 text-[10px]">
+                <div
+                  key={activity.id}
+                  className="rounded-md border border-border/50 bg-muted/30 px-2.5 py-2 text-[10px] transition-[border-color,background-color,transform] duration-150 hover:translate-x-0.5 hover:border-primary/30 hover:bg-surface-raised/70 motion-reduce:transition-none motion-reduce:hover:translate-x-0"
+                >
                   <div className="flex items-center justify-between gap-2 text-[9px] text-muted-foreground">
                     <span>{activity.actor}</span>
                     <span>{new Date(activity.created_at).toLocaleString()}</span>
@@ -955,15 +962,15 @@ function TaskBoardSkeleton({ compact }: { compact: boolean }) {
             )}
           >
             <div className="flex items-center justify-between">
-              <div className="h-3 w-20 animate-pulse rounded bg-muted/80" />
-              <div className="size-5 animate-pulse rounded-full bg-muted/80" />
+              <div className="h-3 w-20 animate-pulse rounded bg-muted/80 motion-reduce:animate-none" />
+              <div className="size-5 animate-pulse rounded-full bg-muted/80 motion-reduce:animate-none" />
             </div>
             <div className="mt-3 space-y-2">
               {Array.from({ length: compact ? 2 : 3 }, (_, index) => (
                 <div key={index} className="rounded-lg border border-border/50 bg-surface-raised/70 p-2.5">
-                  <div className="h-3 w-4/5 animate-pulse rounded bg-muted/80" />
-                  <div className="mt-2 h-2.5 w-full animate-pulse rounded bg-muted/70" />
-                  <div className="mt-2 h-2.5 w-2/5 animate-pulse rounded bg-muted/70" />
+                  <div className="h-3 w-4/5 animate-pulse rounded bg-muted/80 motion-reduce:animate-none" />
+                  <div className="mt-2 h-2.5 w-full animate-pulse rounded bg-muted/70 motion-reduce:animate-none" />
+                  <div className="mt-2 h-2.5 w-2/5 animate-pulse rounded bg-muted/70 motion-reduce:animate-none" />
                 </div>
               ))}
             </div>
@@ -976,7 +983,7 @@ function TaskBoardSkeleton({ compact }: { compact: boolean }) {
 
 function TaskColumnEmptyState({ filtered }: { filtered: boolean }) {
   return (
-    <div className="flex min-h-36 flex-1 flex-col items-center justify-center rounded-lg border border-dashed border-border/70 bg-background/20 px-2 py-5 text-center transition-colors group-hover:border-primary/30">
+    <div className="flex min-h-36 flex-1 flex-col items-center justify-center rounded-lg border border-dashed border-border/70 bg-background/20 px-2 py-5 text-center transition-colors group-hover:border-primary/30 motion-safe:animate-in motion-safe:fade-in motion-safe:duration-200 motion-reduce:animate-none motion-reduce:transition-none">
       {filtered ? (
         <Search className="size-4 text-muted-foreground/70" />
       ) : (
@@ -994,9 +1001,9 @@ function TaskColumnEmptyState({ filtered }: { filtered: boolean }) {
 
 function NoProjectState() {
   return (
-    <div className="flex min-h-0 flex-1 items-center justify-center bg-background/30 p-6">
-      <div className="flex max-w-sm flex-col items-center gap-3 rounded-xl border border-dashed border-border/70 bg-surface px-6 py-8 text-center">
-        <div className="flex size-11 items-center justify-center rounded-xl border border-primary/20 bg-primary/10 text-primary">
+    <div className="flex min-h-0 flex-1 items-center justify-center bg-background/30 p-6 motion-safe:animate-in motion-safe:fade-in motion-safe:duration-200 motion-reduce:animate-none">
+      <div className="group flex max-w-sm flex-col items-center gap-3 rounded-xl border border-dashed border-border/70 bg-surface px-6 py-8 text-center transition-[border-color,background-color,transform] duration-200 hover:-translate-y-0.5 hover:border-primary/30 hover:bg-surface-raised motion-reduce:transition-none motion-reduce:hover:translate-y-0">
+        <div className="flex size-11 items-center justify-center rounded-xl border border-primary/20 bg-primary/10 text-primary transition-transform duration-200 ease-out group-hover:scale-105 motion-reduce:transition-none">
           <Inbox className="size-5" />
         </div>
         <div>
@@ -1010,7 +1017,7 @@ function NoProjectState() {
   );
 }
 
-export function KanbanBoard({ compact = false }: { compact?: boolean }) {
+export function KanbanBoard({ compact = false, onClose }: { compact?: boolean; onClose?: () => void }) {
   const projectId = useProjectStore((state) => state.rootPath);
   const tasks = useKanbanStore((state) => state.tasks);
   const selectedTaskId = useKanbanStore((state) => state.selectedTaskId);
@@ -1030,6 +1037,7 @@ export function KanbanBoard({ compact = false }: { compact?: boolean }) {
   const [keyboardAnnouncement, setKeyboardAnnouncement] = useState('');
   const [pendingTaskId, setPendingTaskId] = useState<string | null>(null);
   const [detailsCollapsed, setDetailsCollapsed] = useState(false);
+  const [detailsDragging, setDetailsDragging] = useState(false);
   const detailsPanelRef = useRef<ImperativePanelHandle>(null);
 
   useEffect(() => {
@@ -1232,19 +1240,20 @@ export function KanbanBoard({ compact = false }: { compact?: boolean }) {
       <ScrollArea className="h-full">
         <div className="min-w-[980px] p-3">
           <div className="grid grid-cols-5 gap-2.5">
-            {KANBAN_COLUMNS.map((column) => {
+            {KANBAN_COLUMNS.map((column, columnIndex) => {
               const columnTasks = tasksForColumn(column.key);
               return (
                 <section
                   key={column.key}
+                  style={{ animationDelay: `${columnIndex * 45}ms` }}
                   onDragOver={(event) => event.preventDefault()}
                   onDrop={(event) => void handleDrop(column.key, event)}
                   className={cn(
-                    'group flex min-h-[280px] flex-col overflow-hidden rounded-xl border border-border/60 border-t-2 bg-surface',
+                    'group flex min-h-[280px] flex-col overflow-hidden rounded-xl border border-border/60 border-t-2 bg-surface transition-[border-color,background-color,box-shadow] duration-200 ease-out hover:border-primary/30 hover:bg-surface-raised/70 hover:shadow-sm motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-1 motion-safe:duration-300 motion-safe:ease-out motion-reduce:animate-none motion-reduce:transition-none',
                     column.accentClass,
                   )}
                 >
-                  <div className="flex items-center justify-between border-b border-border/60 bg-surface-raised/45 px-2.5 py-2.5">
+                  <div className="flex items-center justify-between border-b border-border/60 bg-surface-raised/45 px-2.5 py-2.5 transition-colors duration-200 hover:bg-surface-raised/80 motion-reduce:transition-none">
                     <div className="flex items-center gap-1.5">
                       <span className={cn('size-1.5 rounded-full', column.dotClass)} aria-hidden="true" />
                       <span className="text-[10px] font-semibold uppercase tracking-[0.1em] text-foreground/80">
@@ -1285,10 +1294,10 @@ export function KanbanBoard({ compact = false }: { compact?: boolean }) {
   );
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-background">
-      <header className="relative flex shrink-0 flex-wrap items-center gap-3 border-b border-border/70 bg-surface px-3 py-2.5">
+    <div className="flex h-full min-h-0 flex-col bg-background transition-colors duration-200 motion-reduce:transition-none">
+      <header className="relative flex shrink-0 flex-wrap items-center gap-3 border-b border-border/70 bg-surface px-3 py-2.5 transition-colors duration-200 motion-reduce:transition-none">
         <div className="flex min-w-0 items-center gap-2.5">
-          <div className="flex size-8 shrink-0 items-center justify-center rounded-xl border border-primary/20 bg-primary/10 text-primary">
+          <div className="flex size-8 shrink-0 items-center justify-center rounded-xl border border-primary/20 bg-primary/10 text-primary transition-transform duration-200 ease-out hover:scale-105 hover:rotate-[-3deg] motion-reduce:transition-none">
             <CheckCircle2 className="size-4" />
           </div>
           <div className="min-w-0">
@@ -1303,7 +1312,7 @@ export function KanbanBoard({ compact = false }: { compact?: boolean }) {
             </p>
           </div>
           {runningTaskCount > 0 && (
-            <AuroraBadge variant="primary" size="sm" dot className="hidden h-5 px-1.5 text-[9px] sm:inline-flex">
+            <AuroraBadge variant="primary" size="sm" dot className="hidden h-5 px-1.5 text-[9px] motion-safe:animate-pulse motion-reduce:animate-none sm:inline-flex">
               <Play className="h-2.5 w-2.5 fill-current" />
               {runningTaskCount} active
             </AuroraBadge>
@@ -1346,6 +1355,19 @@ export function KanbanBoard({ compact = false }: { compact?: boolean }) {
             </AuroraButton>
           )}
           <NewTaskForm compact={compact} onCreated={handleCreated} disabled={!projectId} />
+          {onClose && (
+            <AuroraButton
+              type="button"
+              onClick={onClose}
+              variant="ghost"
+              size="icon"
+              className="size-7"
+              aria-label="Close Kanban"
+              title="Close Kanban"
+            >
+              <X className="size-3.5" />
+            </AuroraButton>
+          )}
         </div>
         {actionError && (
           <div role="alert" className="basis-full flex items-start gap-1.5 rounded-md border border-destructive/30 bg-destructive/10 px-2.5 py-2 text-[10px] text-destructive">
@@ -1374,7 +1396,7 @@ export function KanbanBoard({ compact = false }: { compact?: boolean }) {
               <div className="min-h-[280px] min-w-0 flex-1 overflow-hidden bg-background/30">{boardColumns}</div>
               {!detailsCollapsed && (
                 <aside className="min-h-0 max-h-[58%] border-t border-border/70 bg-surface">
-                  <TaskDetails task={selectedTask} onToggleDetails={toggleDetails} />
+                  <TaskDetails key={selectedTask?.id ?? 'empty'} task={selectedTask} onToggleDetails={toggleDetails} />
                 </aside>
               )}
             </>
@@ -1385,12 +1407,17 @@ export function KanbanBoard({ compact = false }: { compact?: boolean }) {
               onLayout={handleDetailsLayout}
               className="min-h-0 min-w-0 flex-1"
             >
-              <Panel defaultSize={68} minSize={48}>
+              <Panel
+                defaultSize={68}
+                minSize={48}
+                style={detailsDragging ? undefined : { transition: 'flex-grow 220ms cubic-bezier(0.16, 1, 0.3, 1)' }}
+              >
                 {boardColumns}
               </Panel>
               {!detailsCollapsed && (
                 <PanelResizeHandle
                   aria-label="Resize task details panel"
+                  onDragging={setDetailsDragging}
                   className="group relative z-10 w-2 shrink-0 cursor-col-resize bg-transparent outline-none transition-colors focus-visible:bg-primary/10"
                 >
                   <span className="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-border transition-colors group-hover:bg-primary/60 group-focus-visible:bg-primary" />
@@ -1406,9 +1433,10 @@ export function KanbanBoard({ compact = false }: { compact?: boolean }) {
                 collapsedSize={0}
                 onCollapse={() => setDetailsCollapsed(true)}
                 onExpand={() => setDetailsCollapsed(false)}
+                style={detailsDragging ? undefined : { transition: 'flex-grow 220ms cubic-bezier(0.16, 1, 0.3, 1)' }}
               >
                 <aside className="h-full min-h-0 min-w-0 overflow-hidden bg-surface">
-                  <TaskDetails task={selectedTask} onToggleDetails={toggleDetails} />
+                  <TaskDetails key={selectedTask?.id ?? 'empty'} task={selectedTask} onToggleDetails={toggleDetails} />
                 </aside>
               </Panel>
             </PanelGroup>

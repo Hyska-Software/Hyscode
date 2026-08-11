@@ -8,7 +8,6 @@ import {
   type AgentMode,
   type AgentState,
   type AgentStoreApi,
-  type ChatMessage,
 } from '@/stores/agent-store';
 import { useAgentStore } from '@/stores/agent-store';
 import { useMemoryStore } from '@/stores/memory-store';
@@ -28,6 +27,7 @@ import {
   type TaskExecutionResult,
 } from './task-execution-coordinator';
 import { kanbanService } from './kanban-service';
+import { mapPersistedAgentMessage } from './agent-message-persistence';
 
 interface VortexRuntimeRegistryState {
   snapshots: Record<string, VortexRuntimeSnapshot>;
@@ -77,42 +77,10 @@ type DatabaseConversation = {
   project_id: string | null;
 };
 
-type DatabaseMessage = {
-  id: string;
-  role: string;
-  content: string;
-  tool_calls: string | null;
-  blocks: string | null;
-  turn_summary: string | null;
-  created_at: string;
-};
-
 const AGENT_MODES: readonly AgentMode[] = ['chat', 'build', 'review', 'debug', 'plan'];
 
 function toAgentMode(mode: string | undefined): AgentMode {
   return AGENT_MODES.includes(mode as AgentMode) ? (mode as AgentMode) : 'chat';
-}
-
-function parseJson<T>(value: string | null): T | undefined {
-  if (!value) return undefined;
-  try {
-    return JSON.parse(value) as T;
-  } catch {
-    return undefined;
-  }
-}
-
-function mapDatabaseMessage(row: DatabaseMessage): ChatMessage | null {
-  if (row.role === 'system' || (row.role !== 'user' && row.role !== 'assistant')) return null;
-  return {
-    id: row.id,
-    role: row.role,
-    content: row.content,
-    toolCalls: parseJson<ChatMessage['toolCalls']>(row.tool_calls),
-    blocks: parseJson<NonNullable<ChatMessage['blocks']>>(row.blocks),
-    turnSummary: parseJson<ChatMessage['turnSummary']>(row.turn_summary),
-    timestamp: Date.parse(row.created_at),
-  };
 }
 
 function projectNameFromPath(path: string): string {
@@ -576,7 +544,7 @@ export class VortexSessionRuntimeManager {
     store.getState().updateTabTitle(store.getState().activeTabId, conversation.title || 'Conversation');
     const rows = await tauriInvoke('db_list_messages', { conversationId });
     for (const row of rows) {
-      const message = mapDatabaseMessage(row);
+      const message = mapPersistedAgentMessage(row);
       if (!message) continue;
       store.getState().addMessage(message);
       if (message.turnSummary) store.getState().hydrateTurnSummary(message.turnSummary);

@@ -33,6 +33,7 @@ import { useEffect, useRef, useCallback } from 'react';
 import { pickFolder, pickFile } from './lib/tauri-dialog';
 import { initProviders } from './lib/init-providers';
 import { HarnessBridge } from './lib/harness-bridge';
+import { mapPersistedAgentMessage } from './lib/agent-message-persistence';
 import { startSharedConfigSync } from './lib/shared-config-sync';
 import { LspBridge } from './lib/lsp-bridge';
 import { startExtensionLspSync } from './lib/extension-lsp-bridge';
@@ -78,14 +79,9 @@ async function restoreOpenTabs(projectId: string): Promise<void> {
             const msgRows = await tauriInvoke('db_list_messages', {
               conversationId: row.conversation_id,
             });
-            messages = msgRows.map((m) => ({
-              id: m.id,
-              role: m.role as 'user' | 'assistant',
-              content: m.content,
-              toolCalls: m.tool_calls ? JSON.parse(m.tool_calls) : undefined,
-              blocks: m.blocks ? JSON.parse(m.blocks) : undefined,
-              timestamp: new Date(m.created_at).getTime(),
-            }));
+            messages = msgRows
+              .map(mapPersistedAgentMessage)
+              .filter((message): message is ChatMessage => message !== null);
           } catch {
             // Messages may have been deleted
           }

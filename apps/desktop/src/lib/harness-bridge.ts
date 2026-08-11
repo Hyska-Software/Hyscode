@@ -73,6 +73,7 @@ import {
   type TaskExecutionRequest,
   type TaskExecutionTarget,
 } from './task-execution-coordinator';
+import { normalizeAgentHistory } from './agent-history';
 
 // ─── Error Parser ────────────────────────────────────────────────────────────
 // Converts raw technical error messages into friendly user-facing text.
@@ -864,7 +865,7 @@ export class HarnessBridge {
       ) {
         historyMessages.pop();
       }
-      const history = this.buildHistory(historyMessages);
+      const history = normalizeAgentHistory(this.buildHistory(historyMessages));
 
       await conversationReady;
 
@@ -1507,6 +1508,11 @@ Investigate the error, fix the underlying issue in the affected files, and verif
     const useAgentStore = this.agentStore;
     this.harness.setConversationId(conversationId);
     useAgentStore.getState().setConversationId(conversationId);
+    // A restored chat must be available as a Kanban current-chat target even
+    // before the user sends another message. `sendMessage` also binds this
+    // target, but relying on it makes existing sessions look unavailable to
+    // tasks delegated from the board.
+    this.bindTaskExecutionTarget(conversationId);
     // Clear session trust when switching sessions
     this.clearSessionTrust();
     this.clearExternalPathGrants();
@@ -1575,6 +1581,10 @@ Investigate the error, fix the underlying issue in the affected files, and verif
     // Point the harness at the new tab's conversation
     if (state.conversationId) {
       this.harness.setConversationId(state.conversationId);
+      // Keep the current-chat delegation target aligned with the active tab.
+      // Without this, a tab switch leaves the coordinator registered against
+      // the previous conversation until the new tab sends a message.
+      this.bindTaskExecutionTarget(state.conversationId);
       // Refresh cumulative token usage for the new active tab from the DB.
       useAgentStore.getState().setSessionTokenUsage(null);
       void this.refreshSessionUsage();

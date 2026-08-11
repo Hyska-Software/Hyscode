@@ -14,6 +14,7 @@ import { useAgentStore } from '@/stores/agent-store';
 import { useProjectStore } from '@/stores/project-store';
 import { useLayoutStore } from '@/stores/layout-store';
 import { getActiveAgentBridge } from '@/lib/active-agent-bridge';
+import { mapPersistedAgentMessage } from '@/lib/agent-message-persistence';
 import { vortexSessionRuntimeManager } from '@/lib/vortex-session-runtime';
 import { tauriInvoke } from '@/lib/tauri-invoke';
 import { cn } from '@/lib/utils';
@@ -211,15 +212,9 @@ async function restoreSession(conversationId: string): Promise<void> {
       return;
     }
     const rows = await tauriInvoke('db_list_messages', { conversationId });
-    const messages: ChatMessage[] = rows.map((r) => ({
-      id: r.id,
-      role: r.role as 'user' | 'assistant',
-      content: r.content,
-      toolCalls: r.tool_calls ? JSON.parse(r.tool_calls) : undefined,
-      blocks: r.blocks ? JSON.parse(r.blocks) : undefined,
-      turnSummary: r.turn_summary ? JSON.parse(r.turn_summary) : undefined,
-      timestamp: new Date(r.created_at).getTime(),
-    }));
+    const messages: ChatMessage[] = rows
+      .map(mapPersistedAgentMessage)
+      .filter((message): message is ChatMessage => message !== null);
 
     const store = useAgentStore.getState();
 
