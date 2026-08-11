@@ -56,6 +56,7 @@ import {
   DialogHeader,
   DialogTitle,
   DialogTrigger,
+  Field,
   Input as AuroraInput,
   Select as AuroraSelect,
   Switch,
@@ -336,53 +337,59 @@ function NewTaskForm({
             </AuroraButton>
           </div>
           <div className="space-y-3 p-4">
-            <div className="space-y-1.5">
-              <label htmlFor="new-task-title" className="text-[10px] font-medium text-foreground">
-                Task title
-              </label>
-              <AuroraInput
-                id="new-task-title"
-                autoFocus
-                value={title}
-                onChange={(event) => setTitle(event.target.value)}
-                placeholder="What needs to be done?"
-                size="sm"
-                className="text-[11px]"
-              />
-            </div>
-            <div className="space-y-1.5">
-              <label htmlFor="new-task-description" className="text-[10px] font-medium text-foreground">
-                Description
-              </label>
-              <AuroraTextarea
-                id="new-task-description"
-                value={description}
-                onChange={(event) => setDescription(event.target.value)}
-                placeholder="Add context for the agent (optional)"
-                rows={compact ? 2 : 3}
-                className="min-h-16 resize-none text-[11px]"
-              />
-            </div>
-            <div className="flex items-end gap-2">
-              <div className="min-w-0 flex-1 space-y-1.5">
-                <label htmlFor="new-task-priority" className="text-[10px] font-medium text-foreground">
-                  Priority
-                </label>
-                <AuroraSelect
-                  id="new-task-priority"
-                  aria-label="Priority"
-                  value={priority}
-                  onChange={(event) => setPriority(event.target.value as KanbanTaskPriority)}
+            <Field
+              label={<span className="text-[10px] font-medium text-foreground">Task title</span>}
+            >
+              {({ id, ...fieldProps }) => (
+                <AuroraInput
+                  id={id}
+                  {...fieldProps}
+                  autoFocus
+                  value={title}
+                  onChange={(event) => setTitle(event.target.value)}
+                  placeholder="What needs to be done?"
                   size="sm"
-                  className="text-[10px]"
-                >
-                  {PRIORITIES.map((item) => (
-                    <option key={item.value} value={item.value}>
-                      {item.label}
-                    </option>
-                  ))}
-                </AuroraSelect>
-              </div>
+                  className="text-[11px]"
+                />
+              )}
+            </Field>
+            <Field
+              label={<span className="text-[10px] font-medium text-foreground">Description</span>}
+            >
+              {({ id, ...fieldProps }) => (
+                <AuroraTextarea
+                  id={id}
+                  {...fieldProps}
+                  value={description}
+                  onChange={(event) => setDescription(event.target.value)}
+                  placeholder="Add context for the agent (optional)"
+                  rows={compact ? 2 : 3}
+                  className="min-h-16 resize-none text-[11px]"
+                />
+              )}
+            </Field>
+            <div className="flex items-end gap-2">
+              <Field
+                className="min-w-0 flex-1"
+                label={<span className="text-[10px] font-medium text-foreground">Priority</span>}
+              >
+                {({ id, ...fieldProps }) => (
+                  <AuroraSelect
+                    id={id}
+                    {...fieldProps}
+                    value={priority}
+                    onChange={(event) => setPriority(event.target.value as KanbanTaskPriority)}
+                    size="sm"
+                    className="text-[10px]"
+                  >
+                    {PRIORITIES.map((item) => (
+                      <option key={item.value} value={item.value}>
+                        {item.label}
+                      </option>
+                    ))}
+                  </AuroraSelect>
+                )}
+              </Field>
               <AuroraButton
                 type="submit"
                 disabled={isSaving || !title.trim()}
@@ -589,55 +596,73 @@ function TaskDetails({ task }: { task: KanbanTask | null }) {
       </div>
       <ScrollArea className="min-h-0 flex-1">
         <div className="space-y-4 p-3">
-          <label className="block space-y-1.5">
-            <span className="text-[10px] font-medium text-muted-foreground">Title</span>
-            <AuroraInput
-              value={title}
-              onChange={(event) => setTitle(event.target.value)}
-              size="sm"
-              aria-label="Title"
-              className="text-[11px]"
-            />
-          </label>
-          <label className="block space-y-1.5">
-            <span className="text-[10px] font-medium text-muted-foreground">Description</span>
-            <AuroraTextarea
-              value={description}
-              onChange={(event) => setDescription(event.target.value)}
-              rows={4}
-              aria-label="Description"
-              className="min-h-24 resize-y text-[11px]"
-            />
-          </label>
-          <div className="grid gap-2 sm:grid-cols-2">
-            <label className="min-w-0 space-y-1.5">
-              <span className="text-[10px] font-medium text-muted-foreground">Priority</span>
-              <AuroraSelect
-                value={priority}
-                onChange={(event) => setPriority(event.target.value as KanbanTaskPriority)}
-                size="sm"
-                aria-label="Priority"
-                className="text-[10px]"
-              >
-                {PRIORITIES.map((item) => (
-                  <option key={item.value} value={item.value}>
-                    {item.label}
-                  </option>
-                ))}
-              </AuroraSelect>
-            </label>
-            <label className="min-w-0 space-y-1.5">
-              <span className="text-[10px] font-medium text-muted-foreground">Due date</span>
+          <Field
+            label={<span className="text-[10px] font-medium text-muted-foreground">Title</span>}
+          >
+            {({ id, ...fieldProps }) => (
               <AuroraInput
-                type="date"
-                value={dueDate}
-                onChange={(event) => setDueDate(event.target.value)}
+                id={id}
+                {...fieldProps}
+                value={title}
+                onChange={(event) => setTitle(event.target.value)}
                 size="sm"
-                aria-label="Due date"
-                leftIcon={<CalendarDays className="size-3" />}
-                className="text-[10px]"
+                className="text-[11px]"
               />
-            </label>
+            )}
+          </Field>
+          <Field
+            label={<span className="text-[10px] font-medium text-muted-foreground">Description</span>}
+          >
+            {({ id, ...fieldProps }) => (
+              <AuroraTextarea
+                id={id}
+                {...fieldProps}
+                value={description}
+                onChange={(event) => setDescription(event.target.value)}
+                rows={4}
+                className="min-h-24 resize-y text-[11px]"
+              />
+            )}
+          </Field>
+          <div className="grid gap-2 sm:grid-cols-2">
+            <Field
+              className="min-w-0"
+              label={<span className="text-[10px] font-medium text-muted-foreground">Priority</span>}
+            >
+              {({ id, ...fieldProps }) => (
+                <AuroraSelect
+                  id={id}
+                  {...fieldProps}
+                  value={priority}
+                  onChange={(event) => setPriority(event.target.value as KanbanTaskPriority)}
+                  size="sm"
+                  className="text-[10px]"
+                >
+                  {PRIORITIES.map((item) => (
+                    <option key={item.value} value={item.value}>
+                      {item.label}
+                    </option>
+                  ))}
+                </AuroraSelect>
+              )}
+            </Field>
+            <Field
+              className="min-w-0"
+              label={<span className="text-[10px] font-medium text-muted-foreground">Due date</span>}
+            >
+              {({ id, ...fieldProps }) => (
+                <AuroraInput
+                  id={id}
+                  {...fieldProps}
+                  type="date"
+                  value={dueDate}
+                  onChange={(event) => setDueDate(event.target.value)}
+                  size="sm"
+                  leftIcon={<CalendarDays className="size-3" />}
+                  className="text-[10px]"
+                />
+              )}
+            </Field>
             <div className="flex items-center justify-between gap-3 rounded-md border border-border/60 bg-muted/25 px-2.5 py-2 sm:col-span-2">
               <div>
                 <p className="text-[10px] font-medium text-foreground">Auto move</p>
@@ -652,17 +677,21 @@ function TaskDetails({ task }: { task: KanbanTask | null }) {
               />
             </div>
           </div>
-          <label className="block space-y-1.5">
-            <span className="text-[10px] font-medium text-muted-foreground">Labels</span>
-            <AuroraInput
-              value={labels}
-              onChange={(event) => setLabels(event.target.value)}
-              placeholder="frontend, urgent"
-              size="sm"
-              aria-label="Labels"
-              className="text-[10px]"
-            />
-          </label>
+          <Field
+            label={<span className="text-[10px] font-medium text-muted-foreground">Labels</span>}
+          >
+            {({ id, ...fieldProps }) => (
+              <AuroraInput
+                id={id}
+                {...fieldProps}
+                value={labels}
+                onChange={(event) => setLabels(event.target.value)}
+                placeholder="frontend, urgent"
+                size="sm"
+                className="text-[10px]"
+              />
+            )}
+          </Field>
           <div className="flex flex-wrap items-center gap-1.5">
             <AuroraButton
               type="button"
@@ -713,27 +742,41 @@ function TaskDetails({ task }: { task: KanbanTask | null }) {
                 </p>
               </div>
             </div>
-            <AuroraTextarea
-              value={instructions}
-              onChange={(event) => setInstructions(event.target.value)}
-              rows={3}
-              aria-label="Instructions for the agent"
-              placeholder="Instructions for the agent"
-              className="mt-3 min-h-20 resize-y text-[11px]"
-            />
-            <div className="mt-2 flex gap-2">
-              <div className="min-w-0 flex-1">
-                <AuroraSelect
-                  value={mode}
-                  onChange={(event) => setMode(event.target.value as KanbanTaskRunMode)}
-                  size="sm"
-                  aria-label="Execution target"
-                  className="text-[10px]"
-                >
-                  <option value="dedicated_session">Dedicated VORTEX session</option>
-                  <option value="current_chat">Current chat</option>
-                </AuroraSelect>
-              </div>
+            <Field
+              className="mt-3"
+              label={<span className="text-[10px] font-medium text-muted-foreground">Instructions</span>}
+            >
+              {({ id, ...fieldProps }) => (
+                <AuroraTextarea
+                  id={id}
+                  {...fieldProps}
+                  value={instructions}
+                  onChange={(event) => setInstructions(event.target.value)}
+                  rows={3}
+                  placeholder="Instructions for the agent"
+                  className="min-h-20 resize-y text-[11px]"
+                />
+              )}
+            </Field>
+            <div className="mt-2 flex items-end gap-2">
+              <Field
+                className="min-w-0 flex-1"
+                label={<span className="text-[10px] font-medium text-muted-foreground">Execution target</span>}
+              >
+                {({ id, ...fieldProps }) => (
+                  <AuroraSelect
+                    id={id}
+                    {...fieldProps}
+                    value={mode}
+                    onChange={(event) => setMode(event.target.value as KanbanTaskRunMode)}
+                    size="sm"
+                    className="text-[10px]"
+                  >
+                    <option value="dedicated_session">Dedicated VORTEX session</option>
+                    <option value="current_chat">Current chat</option>
+                  </AuroraSelect>
+                )}
+              </Field>
               <AuroraButton
                 type="button"
                 onClick={() => void handleDelegate()}
@@ -776,17 +819,23 @@ function TaskDetails({ task }: { task: KanbanTask | null }) {
               <MessageCircle className="h-3.5 w-3.5 text-primary" />
               <h2 className="text-[11px] font-semibold text-foreground">Activity</h2>
             </div>
-            <form onSubmit={handleComment} className="mt-2 flex gap-1.5">
-              <div className="min-w-0 flex-1">
-                <AuroraInput
-                  value={comment}
-                  onChange={(event) => setComment(event.target.value)}
-                  placeholder="Add a comment"
-                  aria-label="Add a comment"
-                  size="sm"
-                  className="text-[10px]"
-                />
-              </div>
+            <form onSubmit={handleComment} className="mt-2 flex items-end gap-1.5">
+              <Field
+                className="min-w-0 flex-1"
+                label={<span className="text-[10px] font-medium text-muted-foreground">Comment</span>}
+              >
+                {({ id, ...fieldProps }) => (
+                  <AuroraInput
+                    id={id}
+                    {...fieldProps}
+                    value={comment}
+                    onChange={(event) => setComment(event.target.value)}
+                    placeholder="Add a comment"
+                    size="sm"
+                    className="text-[10px]"
+                  />
+                )}
+              </Field>
               <AuroraButton
                 type="submit"
                 disabled={!comment.trim()}
