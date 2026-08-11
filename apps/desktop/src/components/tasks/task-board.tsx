@@ -1,6 +1,7 @@
 import {
   useEffect,
   useMemo,
+  useRef,
   useState,
   type DragEvent,
   type FormEvent,
@@ -17,6 +18,8 @@ import {
   Inbox,
   MessageCircle,
   MousePointerClick,
+  PanelRightClose,
+  PanelRightOpen,
   Pencil,
   Play,
   Plus,
@@ -26,6 +29,12 @@ import {
   Trash2,
   XCircle,
 } from 'lucide-react';
+import {
+  Panel,
+  PanelGroup,
+  PanelResizeHandle,
+  type ImperativePanelHandle,
+} from 'react-resizable-panels';
 import type {
   KanbanTask,
   KanbanTaskColumnKey,
@@ -38,7 +47,6 @@ import { useKanbanStore } from '@/stores/kanban-store';
 import { cn } from '@/lib/utils';
 import { promptConfirm } from '@/components/ui/dialogs';
 import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
 import {
   ContextMenu,
   ContextMenuContent,
@@ -50,6 +58,7 @@ import {
 import { ScrollArea } from '@/components/ui/scroll-area';
 import {
   Button as AuroraButton,
+  Badge as AuroraBadge,
   Dialog,
   DialogContent,
   DialogDescription,
@@ -58,6 +67,7 @@ import {
   DialogTrigger,
   Field,
   Input as AuroraInput,
+  SearchInput as AuroraSearchInput,
   Select as AuroraSelect,
   Switch,
   Textarea as AuroraTextarea,
@@ -158,9 +168,9 @@ function TaskCard({
         }}
         onClick={onSelect}
         className={cn(
-          'group cursor-grab rounded-lg border bg-card p-2.5 shadow-sm transition-[border-color,background-color,box-shadow] active:cursor-grabbing',
-          'border-border/70 hover:border-primary/50 hover:bg-muted/35 hover:shadow-md',
-          selected && 'border-primary bg-primary/10 shadow-md ring-1 ring-primary/30',
+          'group relative cursor-grab overflow-hidden rounded-lg border bg-surface-raised/75 p-2.5 shadow-none transition-[border-color,background-color,box-shadow,transform] duration-150 active:cursor-grabbing active:scale-[0.995]',
+          'border-border/70 hover:border-primary/45 hover:bg-surface-raised hover:shadow-sm',
+          selected && 'border-primary/65 bg-primary/10 shadow-sm ring-1 ring-primary/25',
         )}
         role="button"
         tabIndex={0}
@@ -173,6 +183,13 @@ function TaskCard({
         }}
         aria-label={`Open task ${task.title}`}
       >
+        <span
+          className={cn(
+            'pointer-events-none absolute inset-x-2.5 top-0 h-px bg-border/70',
+            selected && 'bg-primary',
+          )}
+          aria-hidden="true"
+        />
         <div className="flex items-start gap-1.5">
           <GripVertical className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground/50" />
           <span className="min-w-0 flex-1 text-[11px] font-medium leading-4 text-foreground">
@@ -301,17 +318,17 @@ function NewTaskForm({
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button
+        <AuroraButton
           type="button"
           disabled={disabled}
           variant="outline"
           size="sm"
           className="text-[10px]"
           title={disabled ? 'Open a project before creating tasks' : 'Create a new task'}
+          leftIcon={<Plus className="h-3.5 w-3.5" />}
         >
-          <Plus className="h-3.5 w-3.5" />
           New task
-        </Button>
+        </AuroraButton>
       </DialogTrigger>
       <DialogContent
         showClose={false}
@@ -416,7 +433,13 @@ function NewTaskForm({
   );
 }
 
-function TaskDetails({ task }: { task: KanbanTask | null }) {
+function TaskDetails({
+  task,
+  onToggleDetails,
+}: {
+  task: KanbanTask | null;
+  onToggleDetails: () => void;
+}) {
   const updateTask = useKanbanStore((state) => state.updateTask);
   const archiveTask = useKanbanStore((state) => state.archiveTask);
   const deleteTask = useKanbanStore((state) => state.deleteTask);
@@ -563,16 +586,37 @@ function TaskDetails({ task }: { task: KanbanTask | null }) {
 
   if (!task) {
     return (
-      <div className="flex h-full min-h-48 items-center justify-center p-4">
-        <div className="flex max-w-[220px] flex-col items-center gap-3 rounded-lg border border-dashed border-border/60 bg-muted/20 px-4 py-6 text-center">
-          <div className="flex size-9 items-center justify-center rounded-full bg-primary/10 text-primary">
-            <MousePointerClick className="size-4" />
-          </div>
+      <div className="flex h-full min-h-48 flex-col bg-surface">
+        <div className="flex shrink-0 items-center justify-between border-b border-border/60 bg-surface-raised/60 px-3 py-2.5">
           <div>
-            <p className="text-[11px] font-medium text-foreground">Select a task</p>
-            <p className="mt-1 text-[10px] leading-relaxed text-muted-foreground">
-              Inspect details, delegate work, or add a comment from here.
+            <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+              Inspector
             </p>
+            <p className="mt-0.5 text-[11px] font-medium text-foreground">Task details</p>
+          </div>
+          <AuroraButton
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="size-7"
+            onClick={onToggleDetails}
+            aria-label="Collapse task details"
+            title="Collapse task details"
+          >
+            <PanelRightClose className="size-3.5" />
+          </AuroraButton>
+        </div>
+        <div className="flex min-h-0 flex-1 items-center justify-center p-4">
+          <div className="flex max-w-[230px] flex-col items-center gap-3 rounded-xl border border-dashed border-border/70 bg-background/20 px-5 py-7 text-center">
+            <div className="flex size-10 items-center justify-center rounded-xl border border-primary/20 bg-primary/10 text-primary">
+              <MousePointerClick className="size-4" />
+            </div>
+            <div>
+              <p className="text-[11px] font-semibold text-foreground">Select a task</p>
+              <p className="mt-1 text-[10px] leading-relaxed text-muted-foreground">
+                Inspect details, delegate work, or add a comment from here.
+              </p>
+            </div>
           </div>
         </div>
       </div>
@@ -582,17 +626,35 @@ function TaskDetails({ task }: { task: KanbanTask | null }) {
   const displayRun = task.activeRun ?? task.latestRun;
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-card/35">
-      <div className="flex shrink-0 items-center justify-between border-b border-border/60 bg-card px-3 py-2.5">
-        <div className="min-w-0">
-          <p className="text-[10px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
-            Task details
-          </p>
-          <p className="truncate text-[12px] font-semibold text-foreground">{task.title}</p>
+    <div className="flex h-full min-h-0 flex-col bg-surface">
+      <div className="flex shrink-0 items-center justify-between border-b border-border/60 bg-surface-raised/60 px-3 py-2.5">
+        <div className="flex min-w-0 items-center gap-2">
+          <div className="flex size-7 shrink-0 items-center justify-center rounded-lg border border-primary/20 bg-primary/10 text-primary">
+            <Pencil className="size-3.5" />
+          </div>
+          <div className="min-w-0">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+              Inspector
+            </p>
+            <p className="truncate text-[12px] font-semibold text-foreground">{task.title}</p>
+          </div>
         </div>
-        <Badge variant="secondary" className="h-5 px-1.5 text-[9px]">
-          v{task.version}
-        </Badge>
+        <div className="flex shrink-0 items-center gap-1">
+          <Badge variant="secondary" className="h-5 px-1.5 text-[9px]">
+            v{task.version}
+          </Badge>
+          <AuroraButton
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="size-7"
+            onClick={onToggleDetails}
+            aria-label="Collapse task details"
+            title="Collapse task details"
+          >
+            <PanelRightClose className="size-3.5" />
+          </AuroraButton>
+        </div>
       </div>
       <ScrollArea className="min-h-0 flex-1">
         <div className="space-y-4 p-3">
@@ -879,29 +941,29 @@ function TaskDetails({ task }: { task: KanbanTask | null }) {
 function TaskBoardSkeleton({ compact }: { compact: boolean }) {
   return (
     <div
-      className="min-h-0 flex-1 overflow-auto bg-muted/10 p-3"
+      className="min-h-0 flex-1 overflow-auto bg-background/30 p-3"
       aria-busy="true"
       aria-label="Loading Kanban tasks"
     >
-      <div className="grid min-w-[900px] grid-cols-5 gap-2">
+      <div className="grid min-w-[980px] grid-cols-5 gap-2.5">
         {KANBAN_COLUMNS.map((column) => (
           <section
             key={column.key}
             className={cn(
-              'min-h-[250px] rounded-lg border border-border/60 border-t-2 bg-card/70 p-2.5',
+              'min-h-[280px] overflow-hidden rounded-xl border border-border/60 border-t-2 bg-surface p-2.5',
               column.accentClass,
             )}
           >
             <div className="flex items-center justify-between">
-              <div className="h-3 w-16 animate-pulse rounded bg-muted" />
-              <div className="size-4 animate-pulse rounded-full bg-muted" />
+              <div className="h-3 w-20 animate-pulse rounded bg-muted/80" />
+              <div className="size-5 animate-pulse rounded-full bg-muted/80" />
             </div>
             <div className="mt-3 space-y-2">
               {Array.from({ length: compact ? 2 : 3 }, (_, index) => (
-                <div key={index} className="rounded-lg border border-border/40 bg-card p-2.5">
-                  <div className="h-3 w-4/5 animate-pulse rounded bg-muted" />
-                  <div className="mt-2 h-2.5 w-full animate-pulse rounded bg-muted" />
-                  <div className="mt-2 h-2.5 w-2/5 animate-pulse rounded bg-muted" />
+                <div key={index} className="rounded-lg border border-border/50 bg-surface-raised/70 p-2.5">
+                  <div className="h-3 w-4/5 animate-pulse rounded bg-muted/80" />
+                  <div className="mt-2 h-2.5 w-full animate-pulse rounded bg-muted/70" />
+                  <div className="mt-2 h-2.5 w-2/5 animate-pulse rounded bg-muted/70" />
                 </div>
               ))}
             </div>
@@ -914,7 +976,7 @@ function TaskBoardSkeleton({ compact }: { compact: boolean }) {
 
 function TaskColumnEmptyState({ filtered }: { filtered: boolean }) {
   return (
-    <div className="flex min-h-32 flex-1 flex-col items-center justify-center rounded-md border border-dashed border-border/60 bg-muted/15 px-2 py-5 text-center">
+    <div className="flex min-h-36 flex-1 flex-col items-center justify-center rounded-lg border border-dashed border-border/70 bg-background/20 px-2 py-5 text-center transition-colors group-hover:border-primary/30">
       {filtered ? (
         <Search className="size-4 text-muted-foreground/70" />
       ) : (
@@ -932,9 +994,9 @@ function TaskColumnEmptyState({ filtered }: { filtered: boolean }) {
 
 function NoProjectState() {
   return (
-    <div className="flex min-h-0 flex-1 items-center justify-center bg-muted/10 p-6">
-      <div className="flex max-w-sm flex-col items-center gap-3 rounded-lg border border-dashed border-border/60 bg-card px-6 py-8 text-center shadow-sm">
-        <div className="flex size-10 items-center justify-center rounded-full bg-primary/10 text-primary">
+    <div className="flex min-h-0 flex-1 items-center justify-center bg-background/30 p-6">
+      <div className="flex max-w-sm flex-col items-center gap-3 rounded-xl border border-dashed border-border/70 bg-surface px-6 py-8 text-center">
+        <div className="flex size-11 items-center justify-center rounded-xl border border-primary/20 bg-primary/10 text-primary">
           <Inbox className="size-5" />
         </div>
         <div>
@@ -967,6 +1029,8 @@ export function KanbanBoard({ compact = false }: { compact?: boolean }) {
   const [actionError, setActionError] = useState<string | null>(null);
   const [keyboardAnnouncement, setKeyboardAnnouncement] = useState('');
   const [pendingTaskId, setPendingTaskId] = useState<string | null>(null);
+  const [detailsCollapsed, setDetailsCollapsed] = useState(false);
+  const detailsPanelRef = useRef<ImperativePanelHandle>(null);
 
   useEffect(() => {
     if (!projectId) {
@@ -1144,62 +1208,143 @@ export function KanbanBoard({ compact = false }: { compact?: boolean }) {
     selectTask(task.id);
   }
 
+  function toggleDetails(): void {
+    if (compact) {
+      setDetailsCollapsed((current) => !current);
+      return;
+    }
+    if (detailsCollapsed) {
+      detailsPanelRef.current?.expand();
+    } else {
+      detailsPanelRef.current?.collapse();
+    }
+  }
+
+  function handleDetailsLayout(sizes: number[]): void {
+    const detailsSize = sizes[1];
+    if (detailsSize === undefined) return;
+    const nextCollapsed = detailsSize <= 0;
+    setDetailsCollapsed((current) => (current === nextCollapsed ? current : nextCollapsed));
+  }
+
+  const boardColumns = (
+    <div className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-background/30">
+      <ScrollArea className="h-full">
+        <div className="min-w-[980px] p-3">
+          <div className="grid grid-cols-5 gap-2.5">
+            {KANBAN_COLUMNS.map((column) => {
+              const columnTasks = tasksForColumn(column.key);
+              return (
+                <section
+                  key={column.key}
+                  onDragOver={(event) => event.preventDefault()}
+                  onDrop={(event) => void handleDrop(column.key, event)}
+                  className={cn(
+                    'group flex min-h-[280px] flex-col overflow-hidden rounded-xl border border-border/60 border-t-2 bg-surface',
+                    column.accentClass,
+                  )}
+                >
+                  <div className="flex items-center justify-between border-b border-border/60 bg-surface-raised/45 px-2.5 py-2.5">
+                    <div className="flex items-center gap-1.5">
+                      <span className={cn('size-1.5 rounded-full', column.dotClass)} aria-hidden="true" />
+                      <span className="text-[10px] font-semibold uppercase tracking-[0.1em] text-foreground/80">
+                        {column.label}
+                      </span>
+                    </div>
+                    <Badge variant="secondary" className="h-5 min-w-5 justify-center px-1.5 text-[9px]">
+                      {columnTasks.length}
+                    </Badge>
+                  </div>
+                  <div className="flex min-h-36 flex-1 flex-col gap-2 p-2">
+                    {columnTasks.map((task) => (
+                      <TaskCard
+                        key={task.id}
+                        task={task}
+                        selected={task.id === selectedTaskId}
+                        onSelect={() => selectTask(task.id)}
+                        onDragStart={(event) => handleDragStart(task, event)}
+                        onDrop={(event) => void handleDrop(column.key, event, task.position)}
+                        onMove={(direction) => void handleKeyboardMove(task, direction)}
+                        onMoveTo={(columnKey) => void handleMoveTo(task, columnKey)}
+                        onArchive={() => void handleArchiveTask(task)}
+                        onDelete={() => void handleDeleteTask(task)}
+                        onDelegate={() => void handleDelegateTask(task)}
+                        onCancel={() => void handleCancelTask(task)}
+                        isActionPending={pendingTaskId === task.id}
+                      />
+                    ))}
+                    {columnTasks.length === 0 && <TaskColumnEmptyState filtered={isFiltering} />}
+                  </div>
+                </section>
+              );
+            })}
+          </div>
+        </div>
+      </ScrollArea>
+    </div>
+  );
+
   return (
     <div className="flex h-full min-h-0 flex-col bg-background">
-      <div className="relative flex shrink-0 flex-wrap items-center gap-2 border-b border-border bg-card/80 px-3 py-2.5">
-        <div className="flex min-w-0 items-center gap-2">
-          <div className="flex size-7 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary">
+      <header className="relative flex shrink-0 flex-wrap items-center gap-3 border-b border-border/70 bg-surface px-3 py-2.5">
+        <div className="flex min-w-0 items-center gap-2.5">
+          <div className="flex size-8 shrink-0 items-center justify-center rounded-xl border border-primary/20 bg-primary/10 text-primary">
             <CheckCircle2 className="size-4" />
           </div>
           <div className="min-w-0">
             <div className="flex items-center gap-1.5">
-              <span className="text-[12px] font-semibold text-foreground">Kanban</span>
-              <Badge variant="secondary" className="h-5 px-1.5 text-[9px]">
-                {tasks.length}
-              </Badge>
+              <h1 className="text-[12px] font-semibold tracking-tight text-foreground">Kanban board</h1>
+              <AuroraBadge variant="neutral" size="sm" className="h-5 px-1.5 text-[9px]">
+                {tasks.length} tasks
+              </AuroraBadge>
             </div>
             <p className="hidden truncate text-[9px] text-muted-foreground sm:block">
               {isFiltering ? `Showing ${filteredTasks.length} of ${tasks.length} tasks` : 'Project task flow'}
             </p>
           </div>
           {runningTaskCount > 0 && (
-            <Badge variant="default" className="hidden h-5 px-1.5 text-[9px] sm:inline-flex">
+            <AuroraBadge variant="primary" size="sm" dot className="hidden h-5 px-1.5 text-[9px] sm:inline-flex">
               <Play className="h-2.5 w-2.5 fill-current" />
-              {runningTaskCount} running
-            </Badge>
+              {runningTaskCount} active
+            </AuroraBadge>
           )}
         </div>
-        <div className="ml-auto flex min-w-0 items-center gap-1.5">
-          <label className="flex h-7 min-w-0 items-center gap-1.5 rounded-md border border-input bg-background px-2 text-muted-foreground transition-colors focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/30 dark:bg-input/30">
-            <Search className="h-3 w-3" />
-            <input
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-              placeholder="Search tasks"
-              aria-label="Search tasks"
-              className="w-[clamp(5rem,14vw,11rem)] min-w-0 bg-transparent text-[10px] text-foreground outline-none placeholder:text-muted-foreground/70"
-            />
-            {search && (
-              <button
-                type="button"
-                onClick={() => setSearch('')}
-                className="rounded-sm text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                aria-label="Clear task search"
-              >
-                <XCircle className="size-3" />
-              </button>
-            )}
-          </label>
-          <Button
+        <div className="ml-auto flex min-w-0 flex-wrap items-center justify-end gap-1.5">
+          <AuroraSearchInput
+            value={search}
+            onValueChange={setSearch}
+            onClear={() => setSearch('')}
+            placeholder="Search tasks"
+            aria-label="Search tasks"
+            size="sm"
+            className="w-[clamp(9rem,18vw,14rem)] border border-border/70 bg-surface-raised px-2 text-[10px]"
+          />
+          <AuroraButton
             type="button"
             onClick={() => void refresh()}
             variant="ghost"
-            size="icon-sm"
+            size="icon"
+            className="size-7"
             title="Refresh Kanban"
             aria-label="Refresh Kanban"
+            loading={isLoading}
           >
-            <RefreshCw className={cn('size-3.5', isLoading && 'animate-spin')} />
-          </Button>
+            <RefreshCw className="size-3.5" />
+          </AuroraButton>
+          {detailsCollapsed && (
+            <AuroraButton
+              type="button"
+              onClick={toggleDetails}
+              variant="outline"
+              size="sm"
+              className="text-[10px]"
+              leftIcon={<PanelRightOpen className="size-3.5" />}
+              aria-label="Open task details"
+              title="Open task details"
+            >
+              Details
+            </AuroraButton>
+          )}
           <NewTaskForm compact={compact} onCreated={handleCreated} disabled={!projectId} />
         </div>
         {actionError && (
@@ -1208,7 +1353,7 @@ export function KanbanBoard({ compact = false }: { compact?: boolean }) {
             {actionError}
           </div>
         )}
-      </div>
+      </header>
 
       {storeError && (
         <div role="alert" className="m-3 flex items-start gap-1.5 rounded-md border border-destructive/30 bg-destructive/10 p-2.5 text-[10px] text-destructive">
@@ -1223,64 +1368,51 @@ export function KanbanBoard({ compact = false }: { compact?: boolean }) {
       ) : isLoading ? (
         <TaskBoardSkeleton compact={compact} />
       ) : (
-        <div className={cn('flex min-h-0 flex-1', compact ? 'flex-col' : 'flex-col lg:flex-row')}>
-          <div className="min-h-0 min-w-0 flex-1 overflow-hidden bg-muted/10">
-            <ScrollArea className="h-full">
-              <div className="min-w-[900px] p-3">
-                <div className="grid grid-cols-5 gap-2">
-                  {KANBAN_COLUMNS.map((column) => {
-                    const columnTasks = tasksForColumn(column.key);
-                    return (
-                      <section
-                        key={column.key}
-                        onDragOver={(event) => event.preventDefault()}
-                        onDrop={(event) => void handleDrop(column.key, event)}
-                        className={cn(
-                          'flex min-h-[250px] flex-col rounded-lg border border-border/60 border-t-2 bg-card/70',
-                          column.accentClass,
-                        )}
-                      >
-                        <div className="flex items-center justify-between border-b border-border/50 px-2.5 py-2">
-                          <div className="flex items-center gap-1.5">
-                            <span className={cn('size-1.5 rounded-full', column.dotClass)} aria-hidden="true" />
-                            <span className="text-[10px] font-semibold uppercase tracking-[0.08em] text-foreground/80">
-                              {column.label}
-                            </span>
-                          </div>
-                          <Badge variant="secondary" className="h-5 min-w-5 justify-center px-1.5 text-[9px]">
-                            {columnTasks.length}
-                          </Badge>
-                        </div>
-                        <div className="flex min-h-32 flex-1 flex-col gap-2 p-1.5">
-                          {columnTasks.map((task) => (
-                            <TaskCard
-                              key={task.id}
-                              task={task}
-                              selected={task.id === selectedTaskId}
-                              onSelect={() => selectTask(task.id)}
-                              onDragStart={(event) => handleDragStart(task, event)}
-                              onDrop={(event) => void handleDrop(column.key, event, task.position)}
-                              onMove={(direction) => void handleKeyboardMove(task, direction)}
-                              onMoveTo={(columnKey) => void handleMoveTo(task, columnKey)}
-                              onArchive={() => void handleArchiveTask(task)}
-                              onDelete={() => void handleDeleteTask(task)}
-                              onDelegate={() => void handleDelegateTask(task)}
-                              onCancel={() => void handleCancelTask(task)}
-                              isActionPending={pendingTaskId === task.id}
-                            />
-                          ))}
-                          {columnTasks.length === 0 && <TaskColumnEmptyState filtered={isFiltering} />}
-                        </div>
-                      </section>
-                    );
-                  })}
-                </div>
-              </div>
-            </ScrollArea>
-          </div>
-          <aside className={cn('min-h-0 border-border/60 bg-card/35', compact ? 'border-t' : 'w-full border-t lg:w-[340px] lg:border-l lg:border-t-0')}>
-            <TaskDetails task={selectedTask} />
-          </aside>
+        <div className={cn('min-h-0 flex-1', compact ? 'flex flex-col' : 'flex')}>
+          {compact ? (
+            <>
+              <div className="min-h-[280px] min-w-0 flex-1 overflow-hidden bg-background/30">{boardColumns}</div>
+              {!detailsCollapsed && (
+                <aside className="min-h-0 max-h-[58%] border-t border-border/70 bg-surface">
+                  <TaskDetails task={selectedTask} onToggleDetails={toggleDetails} />
+                </aside>
+              )}
+            </>
+          ) : (
+            <PanelGroup
+              direction="horizontal"
+              autoSaveId="hyscode-kanban-task-details"
+              onLayout={handleDetailsLayout}
+              className="min-h-0 min-w-0 flex-1"
+            >
+              <Panel defaultSize={68} minSize={48}>
+                {boardColumns}
+              </Panel>
+              {!detailsCollapsed && (
+                <PanelResizeHandle
+                  aria-label="Resize task details panel"
+                  className="group relative z-10 w-2 shrink-0 cursor-col-resize bg-transparent outline-none transition-colors focus-visible:bg-primary/10"
+                >
+                  <span className="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-border transition-colors group-hover:bg-primary/60 group-focus-visible:bg-primary" />
+                  <GripVertical className="pointer-events-none absolute left-1/2 top-1/2 size-3 -translate-x-1/2 -translate-y-1/2 text-muted-foreground/50 opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100" />
+                </PanelResizeHandle>
+              )}
+              <Panel
+                ref={detailsPanelRef}
+                defaultSize={32}
+                minSize={24}
+                maxSize={48}
+                collapsible
+                collapsedSize={0}
+                onCollapse={() => setDetailsCollapsed(true)}
+                onExpand={() => setDetailsCollapsed(false)}
+              >
+                <aside className="h-full min-h-0 min-w-0 overflow-hidden bg-surface">
+                  <TaskDetails task={selectedTask} onToggleDetails={toggleDetails} />
+                </aside>
+              </Panel>
+            </PanelGroup>
+          )}
         </div>
       )}
     </div>
