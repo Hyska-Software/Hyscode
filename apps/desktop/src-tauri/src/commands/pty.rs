@@ -2,7 +2,8 @@ use portable_pty::{native_pty_system, ChildKiller, CommandBuilder, MasterPty, Pt
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
 use std::io::{Read, Write};
-use std::sync::{Arc, Mutex};
+use std::sync::{mpsc, Arc, Mutex};
+use std::time::Duration;
 use tauri::{AppHandle, Emitter, State};
 
 const MAX_OUTPUT_BYTES: usize = 1024 * 1024;
@@ -164,6 +165,7 @@ pub async fn pty_spawn(
         .take_writer()
         .map_err(|error| format!("Failed to take PTY writer: {error}"))?;
     let killer = child.clone_killer();
+    let (reader_done_tx, reader_done_rx) = mpsc::channel();
 
     state
         .0
@@ -211,12 +213,17 @@ pub async fn pty_spawn(
                 }
             }
         }
+        let _ = reader_done_tx.send(());
     });
 
     let waiter_id = pty_id.clone();
     let waiter_state = Arc::clone(&state.0);
     std::thread::spawn(move || {
         let exit_code = child.wait().ok().map(|status| status.exit_code());
+        // A child can exit before the PTY reader has committed its last bytes.
+        // Give that reader a bounded drain window before publishing the exit
+        // event; the snapshot path remains the fallback if the reader stalls.
+        let _ = reader_done_rx.recv_timeout(Duration::from_millis(250));
         let sequence = waiter_state
             .lock()
             .ok()
@@ -344,10 +351,14 @@ pub async fn pty_snapshot(
         data,
         from_sequence: first_available,
         to_sequence: session.output.sequence,
-        truncated: requested > 0 && requested + 1 < first_available,
+        truncated: snapshot_is_truncated(requested, first_available),
         alive: session.alive,
         exit_code: session.exit_code,
     })
+}
+
+fn snapshot_is_truncated(requested: u64, first_available: u64) -> bool {
+    first_available.saturating_sub(requested) > 1
 }
 
 #[tauri::command]
@@ -397,6 +408,15 @@ mod tests {
             normalize_dimension(Some(u16::MAX), DEFAULT_PTY_COLS),
             MAX_PTY_DIMENSION
         );
+    }
+
+    #[test]
+    fn snapshot_truncation_is_reported_even_for_a_full_replay() {
+        assert!(!snapshot_is_truncated(0, 0));
+        assert!(!snapshot_is_truncated(0, 1));
+        assert!(snapshot_is_truncated(0, 2));
+        assert!(!snapshot_is_truncated(5, 6));
+        assert!(snapshot_is_truncated(5, 7));
     }
 
     #[cfg(target_os = "windows")]

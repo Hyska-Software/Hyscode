@@ -55,15 +55,22 @@ describe('buildTerminalFrame', () => {
     const frame = buildTerminalFrame('npm test', 'bash', 'n1');
     expect(frame).toContain("printf '\\n__HYSCODE_BEGIN_n1__\\n'");
     expect(frame).toContain('npm test');
-    expect(frame).toContain("printf '\\n__HYSCODE_END_n1__:%s\\n'");
-    expect(frame).toContain('hys_code=$?');
+    expect(frame).toContain("trap 'hys_code=$?;");
+    expect(frame).toContain("__HYSCODE_END_n1__:%s");
+    expect(frame).toContain("' 0");
+    expect(frame).toContain('set +e');
   });
 
-  it('builds a PowerShell frame with LASTEXITCODE capture', () => {
+  it('builds a PowerShell frame with completion in a finally block', () => {
     const frame = buildTerminalFrame('Get-ChildItem', 'powershell', 'pw1');
     expect(frame).toContain('$global:LASTEXITCODE = 0;');
     expect(frame).toContain('Write-Output \'__HYSCODE_BEGIN_pw1__\'');
     expect(frame).toContain('__HYSCODE_END_pw1__:{0}');
+    expect(frame).toContain('try {');
+    expect(frame).toContain("$ErrorActionPreference = 'Stop'");
+    expect(frame).toContain('catch {');
+    expect(frame).toContain('finally {');
+    expect(frame).toContain('Write-Error $_');
   });
 });
 

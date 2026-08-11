@@ -46,10 +46,12 @@ export class CommandWatch {
     this.lastDataAt = config.startedAt;
   }
 
-  pushData(sequence: number, chunk: string): void {
+  pushData(sequence: number, chunk: string): boolean {
+    if (sequence <= this.maxSequence) return false;
     this.rawOutput = appendBounded(this.rawOutput, chunk);
-    this.maxSequence = Math.max(this.maxSequence, sequence);
+    this.maxSequence = sequence;
     this.lastDataAt = Date.now();
+    return true;
   }
 
   /** Reconcile with an authoritative snapshot without allowing older data to overwrite live output. */
@@ -67,7 +69,7 @@ export class CommandWatch {
 
   pushExit(code: number | null): void {
     this.exited = true;
-    this.exitValue = code;
+    if (code !== null || this.exitValue === null) this.exitValue = code;
   }
 
   get hasExited(): boolean {

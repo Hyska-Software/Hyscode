@@ -166,6 +166,8 @@ export { TerminalCommandRunner, stopCommand } from './terminal-command-runner';
 export type { TerminalCommandInput } from './terminal-command-runner';
 export { CommandWatch } from './command-watch';
 export type { CommandWatchConfig, CommandWatchOutcome } from './command-watch';
+export { resolveTerminalShell } from './terminal-shell';
+export type { TerminalShell, TerminalShellPlatform } from './terminal-shell';
 export {
   MAX_CAPTURE_CHARS,
   buildTerminalFrame,

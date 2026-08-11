@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { useTerminalStore } from '@/stores/terminal-store';
+import { useSettingsStore } from '@/stores/settings-store';
 
 const { listeners } = vi.hoisted(() => ({
   listeners: new Map<string, (payload: Record<string, unknown>) => void>(),
@@ -51,10 +52,30 @@ describe('DesktopTerminalRuntime', () => {
   });
 
   afterEach(() => {
+    if (useSettingsStore.getState().terminalShell) useSettingsStore.setState({ terminalShell: '' });
     vi.unstubAllGlobals();
   });
 
   describe('acquire', () => {
+    it('uses the configured shell to select the matching frame language', async () => {
+      vi.stubGlobal('navigator', { userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' });
+      useSettingsStore.setState({ terminalShell: 'C:\\Git\\bin\\bash.exe' });
+      invokeMock.mockImplementation(async (cmd: string) => (cmd === 'pty_spawn' ? 'pty-configured' : undefined));
+
+      const binding = await runtime.acquire({
+        conversationId: 'conversation-a',
+        toolCallId: 'tool-configured',
+        cwd: 'C:/workspace',
+        forceNew: false,
+        background: false,
+      });
+
+      expect(binding.frameLanguage).toBe('bash');
+      expect(invokeMock).toHaveBeenCalledWith('pty_spawn', expect.objectContaining({
+        shell: 'C:\\Git\\bin\\bash.exe',
+      }));
+    });
+
     it('reuses a healthy session and its live PTY', async () => {
       const sessionId = seedSession();
       invokeMock.mockImplementation(async (cmd: string) => (cmd === 'pty_exists' ? true : undefined));

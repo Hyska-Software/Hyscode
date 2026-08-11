@@ -34,13 +34,15 @@ export function buildTerminalFrame(
   const end = frameMarker('END', nonce);
   if (language === 'powershell') {
     return (
-      `$global:LASTEXITCODE = 0; Write-Output '${begin}'; & { ${command} }; ` +
-      `$hysOk = $?; $hysCode = if ($hysOk) { [int]$LASTEXITCODE } ` +
-      `elseif ($LASTEXITCODE -ne 0) { [int]$LASTEXITCODE } else { 1 }; ` +
-      `Write-Output (\"${end}:{0}\" -f $hysCode)\r\n`
+      `$global:LASTEXITCODE = 0; Write-Output '${begin}'; $hysCode = 0; ` +
+      `try { & { $ErrorActionPreference = 'Stop'; ${command} }; $hysOk = $?; ` +
+      `$hysCode = if ($hysOk) { [int]$LASTEXITCODE } ` +
+      `elseif ($LASTEXITCODE -ne 0) { [int]$LASTEXITCODE } else { 1 } } ` +
+      `catch { $hysCode = if ($LASTEXITCODE -ne 0) { [int]$LASTEXITCODE } else { 1 }; Write-Error $_ } ` +
+      `finally { Write-Output (\"${end}:{0}\" -f $hysCode) }\r\n`
     );
   }
-  return `printf '\\n${begin}\\n'; ${command}; hys_code=$?; printf '\\n${end}:%s\\n' \"$hys_code\"\n`;
+  return `printf '\\n${begin}\\n'; (set +e; trap 'hys_code=$?; printf \"\\n${end}:%s\\n\" \"$hys_code\"; exit \"$hys_code\"' 0; ${command})\n`;
 }
 
 export type ParsedTerminalFrame = {

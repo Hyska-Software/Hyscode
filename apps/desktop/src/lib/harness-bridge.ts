@@ -74,6 +74,7 @@ import {
   type TaskExecutionTarget,
 } from './task-execution-coordinator';
 import { normalizeAgentHistory } from './agent-history';
+import { projectTerminalProgress } from './terminal-progress';
 
 // ─── Error Parser ────────────────────────────────────────────────────────────
 // Converts raw technical error messages into friendly user-facing text.
@@ -2109,6 +2110,11 @@ Investigate the error, fix the underlying issue in the affected files, and verif
 
       case 'terminal_progress': {
         const progress = event.progress;
+        const current = useAgentStore
+          .getState()
+          .pendingToolCalls.find((toolCall) => toolCall.id === progress.toolCallId);
+        const projection = projectTerminalProgress(current, progress);
+        if (!projection) break;
         useTerminalStore
           .getState()
           .setAwaitingInput(progress.terminalId, progress.state === 'awaiting_input');
@@ -2123,15 +2129,8 @@ Investigate the error, fix the underlying issue in the affected files, and verif
             }
           }
         }
-        const current = useAgentStore
-          .getState()
-          .pendingToolCalls.find((toolCall) => toolCall.id === progress.toolCallId);
-        const liveOutput = `${current?.liveOutput ?? ''}${progress.chunk}`.slice(-65_536);
         store.updateToolCall(progress.toolCallId, {
-          terminalId: progress.terminalId,
-          terminalState: progress.state,
-          outputSequence: progress.sequence,
-          liveOutput,
+          ...projection,
         });
         break;
       }

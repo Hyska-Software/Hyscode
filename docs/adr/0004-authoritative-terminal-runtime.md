@@ -19,8 +19,11 @@ dedicated terminal and return an opaque terminal id that can be read or stopped 
 Live output events are ephemeral UI progress; the final tool result remains the canonical transcript
 content delivered to the model. Runtime terminal events are emitted through a multi-subscriber hub.
 Subscriptions register before taking a snapshot, queue concurrent PTY events, replay the snapshot,
-deduplicate by sequence, and deliver each exit once. Completed sessions remain inspectable until
-explicit cleanup or runtime shutdown.
+deduplicate by sequence, and deliver each exit once. The configured shell and frame dialect are
+resolved as one contract; unsupported shells fail before a command is written. Framed capture emits
+its completion marker from a failure-safe shell cleanup path, while the runner performs a bounded
+post-exit snapshot drain before classifying a command without a marker as an execution error.
+Completed sessions remain inspectable until explicit cleanup or runtime shutdown.
 
 The bridge includes current terminal summaries in every `runtime_ready` payload and emits
 `terminal_updated` events for creation, output, state, and exit. `terminal_resize` follows the same
@@ -46,6 +49,8 @@ separate user-terminal path and never bypasses agent ownership or approval bound
   active tool owner, and the approval mode permits manual input; sensitive prompts remain user-only.
 - PTY output combines stdout and stderr; consumers must not claim separate streams.
 - Timeout and cancellation interrupt the process and escalate to terminating an unresponsive PTY.
+- A process exit is not treated as a timeout: the runtime drains buffered output, and an exit without
+  a completion marker is reported immediately with its exit code when available.
 - Interactive commands can cross agent iterations without losing their PTY, framing, or ownership.
 - CLI and Desktop use the same Harness terminal contract while keeping their PTY authorities local to
   their host/runtime boundary.

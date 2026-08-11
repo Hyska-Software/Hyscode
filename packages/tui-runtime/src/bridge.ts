@@ -10,6 +10,7 @@ import {
   RuleLoader,
   SkillLoader,
   getAgentTypes,
+  resolveTerminalShell,
   type AgentQuestionAnswer,
   type AgentType,
   type ContextSource,
@@ -22,6 +23,7 @@ import {
   type TerminalAccess,
   type TerminalAcquireRequest,
   type TerminalBinding,
+  type TerminalProgress,
   type TerminalRole,
   type TerminalRuntimeAdapter,
   type TerminalSnapshot,
@@ -98,6 +100,7 @@ type CliTerminalEntry = {
   alive: boolean;
   exitCode: number | null;
   sequence: number;
+  terminalState: TerminalProgress['state'];
   outputPreview: string;
   truncated: boolean;
   handoffActive: boolean;
@@ -1723,10 +1726,22 @@ class CliTerminalRuntime implements TerminalRuntimeAdapter {
     throw new Error(`Terminal "${terminalId}" belongs to another conversation.`);
   }
 
-  setProgress(progress: { terminalId: string; toolCallId: string; state: string; sequence: number }): void {
+  setProgress(progress: Pick<TerminalProgress, 'terminalId' | 'toolCallId' | 'state' | 'sequence'>): void {
     const entry = this.entries.get(progress.terminalId);
     if (!entry) return;
+    const finalState = progress.state === 'complete'
+      || progress.state === 'error'
+      || progress.state === 'cancelled'
+      || progress.state === 'background';
+    const previousFinalState = entry.terminalState === 'complete'
+      || entry.terminalState === 'error'
+      || entry.terminalState === 'cancelled'
+      || entry.terminalState === 'background';
+    const startsNewCommand = progress.state === 'started' && entry.activeToolCallId === progress.toolCallId;
+    if ((previousFinalState && !finalState && !startsNewCommand)
+      || (!finalState && !startsNewCommand && progress.sequence < entry.sequence)) return;
     entry.sequence = Math.max(entry.sequence, progress.sequence);
+    entry.terminalState = progress.state;
     if (progress.state === 'awaiting_input') {
       entry.awaitingInput = true;
       entry.activeToolCallId = null;
@@ -1830,6 +1845,7 @@ class CliTerminalRuntime implements TerminalRuntimeAdapter {
       alive: true,
       exitCode: null,
       sequence: 0,
+      terminalState: 'started',
       outputPreview: '',
       truncated: false,
       handoffActive: false,
@@ -1916,11 +1932,10 @@ class CliTerminalRuntime implements TerminalRuntimeAdapter {
   }
 
   private resolveShell(): { command: string; frameLanguage: TerminalBinding['frameLanguage'] } {
-    const command = this.configuredShell || (process.platform === 'win32' ? 'powershell.exe' : process.env.SHELL || '/bin/sh');
-    const name = path.basename(command).toLowerCase().replace(/\.exe$/u, '');
-    if (name === 'powershell' || name === 'pwsh') return { command, frameLanguage: 'powershell' };
-    if (name === 'bash' || name === 'sh' || name === 'zsh' || name === 'dash') return { command, frameLanguage: 'bash' };
-    throw new Error(`Unsupported terminal shell "${command}". Configure PowerShell, bash, sh, zsh, or dash.`);
+    return resolveTerminalShell(
+      this.configuredShell || (process.platform === 'win32' ? null : process.env.SHELL),
+      process.platform === 'win32' ? 'windows' : 'posix',
+    );
   }
 }
 
