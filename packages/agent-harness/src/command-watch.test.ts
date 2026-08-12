@@ -14,13 +14,13 @@ function makeWatch(overrides: Partial<CommandWatchConfig> = {}): CommandWatch {
 }
 
 describe('CommandWatch accessors', () => {
-  it('tracks the highest sequence seen and exposes the raw output', () => {
+  it('ignores stale live chunks while retaining the highest sequence', () => {
     const watch = makeWatch();
     watch.pushData(3, 'a');
     watch.pushData(1, 'b');
     watch.pushData(7, 'c');
     expect(watch.sequence).toBe(7);
-    expect(watch.output()).toBe('abc');
+    expect(watch.output()).toBe('ac');
   });
 
   it('reports exit state and code', () => {
@@ -31,7 +31,7 @@ describe('CommandWatch accessors', () => {
     expect(watch.hasExited).toBe(true);
     expect(watch.exitCode).toBe(42);
     watch.pushExit(null);
-    expect(watch.exitCode).toBeNull();
+    expect(watch.exitCode).toBe(42);
   });
 
   it('parses the accumulated output against the frame nonce', () => {

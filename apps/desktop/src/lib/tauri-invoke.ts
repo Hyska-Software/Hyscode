@@ -93,6 +93,81 @@ export interface VortexProjectSessionIndexRow {
   recent_sessions: VortexSessionRow[];
 }
 
+export type KanbanTaskRunContract = {
+  id: string;
+  state: 'queued' | 'running' | 'waiting' | 'completed' | 'failed' | 'cancelled';
+  mode: 'current_chat' | 'dedicated_session';
+  conversation_id: string | null;
+  turn_id: string | null;
+  provider_id: string | null;
+  model_id: string | null;
+  error: string | null;
+  instructions: string;
+  summary: string | null;
+  started_at: string | null;
+  completed_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type KanbanTaskContract = {
+  id: string;
+  project_id: string;
+  board_id: string;
+  column_id: string;
+  column_key: 'backlog' | 'todo' | 'in_progress' | 'blocked' | 'done';
+  title: string;
+  description: string;
+  priority: 'none' | 'low' | 'medium' | 'high' | 'urgent';
+  position: number;
+  due_date: string | null;
+  auto_transition: boolean;
+  archived_at: string | null;
+  labels: string[];
+  version: number;
+  created_by: 'user' | 'agent' | 'system';
+  created_at: string;
+  updated_at: string;
+  active_run: KanbanTaskRunContract | null;
+  latest_run: KanbanTaskRunContract | null;
+};
+
+export type KanbanBoardSnapshotContract = {
+  board_id: string;
+  board_revision: number;
+  tasks: KanbanTaskContract[];
+};
+
+export type KanbanTaskMutationContract = {
+  board_id: string;
+  board_revision: number;
+  task: KanbanTaskContract;
+};
+
+export type KanbanTaskActivityContract = {
+  id: string;
+  task_id: string;
+  run_id: string | null;
+  actor: 'user' | 'agent' | 'system';
+  event_kind: string;
+  body: string;
+  payload: string;
+  mutation_id: string;
+  created_at: string;
+};
+
+export type KanbanChangedEventContract = {
+  project_id: string;
+  board_id: string;
+  board_revision: number;
+  mutation_id: string;
+  entity_kind: 'task' | 'task_deleted' | 'task_run' | 'activity';
+  entity_id: string;
+  snapshot: KanbanTaskContract | KanbanTaskRunContract | KanbanTaskActivityContract;
+  actor: 'user' | 'agent' | 'system';
+  created_at: string;
+};
+
 // ─── Command signatures ─────────────────────────────────────────────────────
 
 interface TauriCommands {
@@ -622,6 +697,120 @@ interface TauriCommands {
       cacheRequestHitRate: number | null;
       cacheUnknownRate: number | null;
     };
+  };
+
+  // Database: Desktop Kanban
+  kanban_list_tasks: {
+    args: {
+      projectId: string;
+      boardId?: string;
+      columnKey?: string;
+      search?: string;
+      limit?: number;
+    };
+    ret: KanbanBoardSnapshotContract;
+  };
+  kanban_get_task: {
+    args: { projectId: string; taskId: string };
+    ret: { board_id: string; board_revision: number; task: KanbanTaskContract | null };
+  };
+  kanban_create_task: {
+    args: {
+      projectId: string;
+      boardId?: string;
+      title: string;
+      description?: string;
+      priority?: string;
+      columnKey?: string;
+      dueDate?: string;
+      labels?: string[];
+      autoTransition?: boolean;
+      actor?: 'user' | 'agent' | 'system';
+    };
+    ret: KanbanTaskMutationContract;
+  };
+  kanban_update_task: {
+    args: {
+      projectId: string;
+      taskId: string;
+      title?: string;
+      description?: string;
+      priority?: string;
+      dueDate?: string;
+      clearDueDate?: boolean;
+      labels?: string[];
+      autoTransition?: boolean;
+      expectedVersion?: number;
+      actor?: 'user' | 'agent' | 'system';
+    };
+    ret: KanbanTaskMutationContract;
+  };
+  kanban_move_task: {
+    args: {
+      projectId: string;
+      taskId: string;
+      columnKey: string;
+      position?: number;
+      expectedVersion?: number;
+      actor?: 'user' | 'agent' | 'system';
+    };
+    ret: KanbanTaskMutationContract;
+  };
+  kanban_archive_task: {
+    args: {
+      projectId: string;
+      taskId: string;
+      expectedVersion?: number;
+      actor?: 'user' | 'agent' | 'system';
+    };
+    ret: KanbanTaskMutationContract;
+  };
+  kanban_delete_task: {
+    args: {
+      projectId: string;
+      taskId: string;
+      expectedVersion?: number;
+      actor?: 'user' | 'agent' | 'system';
+    };
+    ret: KanbanTaskMutationContract;
+  };
+  kanban_add_comment: {
+    args: {
+      projectId: string;
+      taskId: string;
+      body: string;
+      actor?: 'user' | 'agent' | 'system';
+    };
+    ret: KanbanTaskActivityContract;
+  };
+  kanban_create_task_run: {
+    args: {
+      projectId: string;
+      taskId: string;
+      mode?: 'current_chat' | 'dedicated_session';
+      instructions?: string;
+      providerId?: string;
+      modelId?: string;
+      actor?: 'user' | 'agent' | 'system';
+    };
+    ret: KanbanTaskRunContract;
+  };
+  kanban_update_task_run: {
+    args: {
+      projectId: string;
+      runId: string;
+      stateName: 'queued' | 'running' | 'waiting' | 'completed' | 'failed' | 'cancelled';
+      conversationId?: string;
+      turnId?: string;
+      summary?: string;
+      error?: string;
+      actor?: 'user' | 'agent' | 'system';
+    };
+    ret: KanbanTaskRunContract;
+  };
+  kanban_list_task_activity: {
+    args: { projectId: string; taskId: string; limit?: number };
+    ret: KanbanTaskActivityContract[];
   };
 
   // Database: Agent SDD

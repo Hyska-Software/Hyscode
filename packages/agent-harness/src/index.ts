@@ -63,6 +63,7 @@ export type {
   TurnIdentity,
   TranscriptBlock,
   TurnTranscript,
+  AgentTaskContext,
   EnvironmentContext,
   // Memory system
   Memory,
@@ -123,6 +124,30 @@ export { getAgentDefinition, getAllAgentDefinitions, getAgentTypes } from './age
 
 // ─── Tools ──────────────────────────────────────────────────────────────────
 export { getAllBuiltinTools, invalidateTerminalInput } from './tools';
+export { createKanbanTools } from './task-integration';
+export type {
+  KanbanTaskColumnKey,
+  KanbanTaskPriority,
+  KanbanTaskRunMode,
+  KanbanTaskRunState,
+  KanbanTaskRunSummary,
+  KanbanTask,
+  KanbanTaskToolContext,
+  KanbanTaskListInput,
+  KanbanTaskGetInput,
+  KanbanTaskCreateInput,
+  KanbanTaskUpdateInput,
+  KanbanTaskMoveInput,
+  KanbanTaskArchiveInput,
+  KanbanTaskDeleteInput,
+  KanbanTaskCommentInput,
+  KanbanTaskDelegateInput,
+  KanbanTaskListResult,
+  KanbanTaskMutationResult,
+  KanbanTaskCommentResult,
+  KanbanTaskDelegateResult,
+  KanbanTaskIntegration,
+} from './task-integration';
 export { resolveAuthorizedPath, resolveWorkspacePath } from './path-policy';
 export type { WorkspacePathOptions } from './path-policy';
 export { ExternalPathAccessRegistry } from './external-path-access';
@@ -141,6 +166,8 @@ export { TerminalCommandRunner, stopCommand } from './terminal-command-runner';
 export type { TerminalCommandInput } from './terminal-command-runner';
 export { CommandWatch } from './command-watch';
 export type { CommandWatchConfig, CommandWatchOutcome } from './command-watch';
+export { resolveTerminalShell } from './terminal-shell';
+export type { TerminalShell, TerminalShellPlatform } from './terminal-shell';
 export {
   MAX_CAPTURE_CHARS,
   buildTerminalFrame,

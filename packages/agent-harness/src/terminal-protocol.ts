@@ -20,6 +20,19 @@ export function appendBounded(current: string, chunk: string): string {
   return next.length <= MAX_CAPTURE_CHARS ? next : next.slice(-MAX_CAPTURE_CHARS);
 }
 
+/** Encode command source so PowerShell parses the wrapper, not the command itself. */
+function encodeUtf8Base64(value: string): string {
+  const bytes = new TextEncoder().encode(value);
+  let binary = '';
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary);
+}
+
+/** Quote arbitrary command source as a POSIX shell literal for deferred eval. */
+function quotePosixLiteral(value: string): string {
+  return `'${value.replaceAll("'", "'\\''")}'`;
+}
+
 /**
  * Wrap a command so its output and exit code can be captured between markers.
  * The wrapper language must match the shell the runtime spawned
@@ -33,14 +46,19 @@ export function buildTerminalFrame(
   const begin = frameMarker('BEGIN', nonce);
   const end = frameMarker('END', nonce);
   if (language === 'powershell') {
+    const encodedCommand = encodeUtf8Base64(command);
     return (
-      `$global:LASTEXITCODE = 0; Write-Output '${begin}'; & { ${command} }; ` +
-      `$hysOk = $?; $hysCode = if ($hysOk) { [int]$LASTEXITCODE } ` +
-      `elseif ($LASTEXITCODE -ne 0) { [int]$LASTEXITCODE } else { 1 }; ` +
-      `Write-Output (\"${end}:{0}\" -f $hysCode)\r\n`
+      `$global:LASTEXITCODE = 0; Write-Output '${begin}'; $hysCode = 0; ` +
+      `$hysCommand = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${encodedCommand}')); ` +
+      `try { & { $ErrorActionPreference = 'Stop'; Invoke-Expression -Command $hysCommand }; $hysOk = $?; ` +
+      `$hysCode = if ($hysOk) { [int]$LASTEXITCODE } ` +
+      `elseif ($LASTEXITCODE -ne 0) { [int]$LASTEXITCODE } else { 1 } } ` +
+      `catch { $hysCode = if ($LASTEXITCODE -ne 0) { [int]$LASTEXITCODE } else { 1 }; Write-Error $_ } ` +
+      `finally { Write-Output (\"${end}:{0}\" -f $hysCode) }\r\n`
     );
   }
-  return `printf '\\n${begin}\\n'; ${command}; hys_code=$?; printf '\\n${end}:%s\\n' \"$hys_code\"\n`;
+  const commandLiteral = quotePosixLiteral(command);
+  return `printf '\\n${begin}\\n'; hys_command=${commandLiteral}; (set +e; trap 'hys_code=$?; printf \"\\n${end}:%s\\n\" \"$hys_code\"; exit \"$hys_code\"' 0; eval \"$hys_command\")\n`;
 }
 
 export type ParsedTerminalFrame = {

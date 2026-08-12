@@ -458,8 +458,12 @@ describe('terminal command runner — run paths', () => {
     exit(1);
 
     const result = await pending;
-    expect(result).toMatchObject({ success: false, error: 'Command timed out after 10s.' });
-    expect(result.metadata).toMatchObject({ timedOut: false });
+    expect(result).toMatchObject({
+      success: false,
+      error: 'Terminal process exited before the completion marker (exit code: 1).',
+    });
+    expect(result.metadata).toMatchObject({ timedOut: false, exitedBeforeCompletion: true });
+    expect(adapter.interrupt).not.toHaveBeenCalled();
   });
 
   it('reconciles the final snapshot when PTY exit races the last data event', async () => {
@@ -498,6 +502,46 @@ describe('terminal command runner — run paths', () => {
 
     expect(result).toMatchObject({ success: true, output: 'final output' });
     expect(adapter.snapshot).toHaveBeenCalled();
+  });
+
+  it('keeps draining snapshots after exit until the final buffered frame arrives', async () => {
+    let snapshotCalls = 0;
+    let nonce = '';
+    const adapter = staticAdapter({
+      snapshot: vi.fn(async () => {
+        snapshotCalls += 1;
+        const complete = snapshotCalls >= 3;
+        const data = nonce
+          ? complete
+            ? `__HYSCODE_BEGIN_${nonce}__\nlate output\n__HYSCODE_END_${nonce}__:0\n`
+            : `__HYSCODE_BEGIN_${nonce}__\npartial\n`
+          : '';
+        return {
+          data,
+          fromSequence: complete ? 11 : 10,
+          toSequence: complete ? 11 : 10,
+          truncated: false,
+          alive: false,
+          exitCode: 0,
+        };
+      }),
+      subscribe: vi.fn(async (_terminalId, onData) => {
+        onData('previous terminal output\n', 9);
+        return () => undefined;
+      }),
+      write: vi.fn(async (_terminalId, frame) => {
+        nonce = String(frame).match(/__HYSCODE_BEGIN_([a-z0-9]+)__/i)?.[1] ?? '';
+      }),
+    });
+
+    const result = await new TerminalCommandRunner().run(
+      { command: 'late-buffer', timeoutMs: 2_000 },
+      contextWith(adapter),
+    );
+
+    expect(result).toMatchObject({ success: true, output: 'late output' });
+    expect(snapshotCalls).toBeGreaterThanOrEqual(3);
+    expect(adapter.snapshot).toHaveBeenCalledWith('terminal-e', 9);
   });
 
   it('falls back to the raw event bus when the adapter has no subscribe', async () => {
@@ -769,10 +813,14 @@ describe('terminal command runner — respond paths', () => {
     const pending = runner.respond('terminal-i', 'Y', 5_000, context);
     await vi.advanceTimersByTimeAsync(100);
     exit(0);
-    await vi.advanceTimersByTimeAsync(100);
+    await vi.advanceTimersByTimeAsync(1_100);
     const result = await pending;
 
-    expect(result).toMatchObject({ success: true, metadata: { awaitingInput: true } });
+    expect(result).toMatchObject({
+      success: false,
+      error: 'Terminal process exited before the completion marker (exit code: 0).',
+      metadata: { timedOut: false, exitedBeforeCompletion: true },
+    });
   });
 });
 

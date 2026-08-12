@@ -232,6 +232,18 @@ pub fn run() {
             commands::db::db_track_memory_access,
             commands::db::db_decay_memories,
             commands::db::db_get_memory_stats,
+            // Kanban
+            commands::kanban::kanban_list_tasks,
+            commands::kanban::kanban_get_task,
+            commands::kanban::kanban_create_task,
+            commands::kanban::kanban_update_task,
+            commands::kanban::kanban_move_task,
+            commands::kanban::kanban_archive_task,
+            commands::kanban::kanban_delete_task,
+            commands::kanban::kanban_add_comment,
+            commands::kanban::kanban_create_task_run,
+            commands::kanban::kanban_update_task_run,
+            commands::kanban::kanban_list_task_activity,
             // Notification commands
             commands::notifications::notify_agent_done,
             // Device management commands

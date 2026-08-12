@@ -32,6 +32,8 @@ pub fn open_database(app_dir: &std::path::Path) -> Connection {
         .expect("failed to run migration 008");
     conn.execute_batch(include_str!("../../migrations/009_agent_sdd.sql"))
         .expect("failed to run migration 009");
+    conn.execute_batch(include_str!("../../migrations/016_kanban.sql"))
+        .expect("failed to run migration 016");
     apply_migration_010(&conn);
     apply_migration_011(&conn);
     apply_migration_012(&conn);
@@ -666,7 +668,7 @@ pub fn db_list_messages(
             "SELECT id, role, content, tool_calls, blocks, turn_summary, token_input, token_output, created_at
              FROM messages
              WHERE conversation_id = ?1
-             ORDER BY created_at ASC",
+             ORDER BY created_at ASC, rowid ASC",
         )
         .map_err(|e| e.to_string())?;
     let rows = stmt

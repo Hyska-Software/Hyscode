@@ -17,6 +17,9 @@ export interface VortexRuntimeSnapshot {
   projectName: string;
   conversationId: string;
   title: string;
+  taskId?: string | null;
+  taskRunId?: string | null;
+  taskTitle?: string | null;
   mode: AgentMode;
   status: VortexRuntimeStatus;
   messageCount: number;

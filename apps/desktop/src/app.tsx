@@ -33,12 +33,14 @@ import { useEffect, useRef, useCallback } from 'react';
 import { pickFolder, pickFile } from './lib/tauri-dialog';
 import { initProviders } from './lib/init-providers';
 import { HarnessBridge } from './lib/harness-bridge';
+import { mapPersistedAgentMessage } from './lib/agent-message-persistence';
 import { startSharedConfigSync } from './lib/shared-config-sync';
 import { LspBridge } from './lib/lsp-bridge';
 import { startExtensionLspSync } from './lib/extension-lsp-bridge';
 import { getViewerType } from './lib/utils';
 import { UpdateDialog } from './components/updater/update-dialog';
 import { StartupNotification } from './components/notifications/startup-notification';
+import { TaskBoardSurface } from './components/tasks/task-board-surface';
 import {
   areSameProjectPath,
   closeProjectWorkspace,
@@ -77,14 +79,9 @@ async function restoreOpenTabs(projectId: string): Promise<void> {
             const msgRows = await tauriInvoke('db_list_messages', {
               conversationId: row.conversation_id,
             });
-            messages = msgRows.map((m) => ({
-              id: m.id,
-              role: m.role as 'user' | 'assistant',
-              content: m.content,
-              toolCalls: m.tool_calls ? JSON.parse(m.tool_calls) : undefined,
-              blocks: m.blocks ? JSON.parse(m.blocks) : undefined,
-              timestamp: new Date(m.created_at).getTime(),
-            }));
+            messages = msgRows
+              .map(mapPersistedAgentMessage)
+              .filter((message): message is ChatMessage => message !== null);
           } catch {
             // Messages may have been deleted
           }
@@ -182,6 +179,8 @@ function IDE() {
   const extSyncRef = useRef<(() => void) | null>(null);
 
   const workspaceMode = useLayoutStore((s) => s.workspaceMode);
+  const kanbanOpen = useLayoutStore((s) => s.kanbanOpen);
+  const setKanbanOpen = useLayoutStore((s) => s.setKanbanOpen);
 
   useThemeEffect();
   useRoundedBordersEffect();
@@ -293,6 +292,7 @@ function IDE() {
       </div>
 
       <StatusBar />
+      <TaskBoardSurface open={kanbanOpen} onClose={() => setKanbanOpen(false)} />
       <SettingsModal />
       <ExtensionOverlays />
       <CommandPalette />
@@ -453,6 +453,15 @@ export function App() {
         useLayoutStore.getState().toggleSidebar();
       },
       { category: 'View', key: 'ctrl+b' },
+    );
+
+    builtin(
+      'workbench.action.toggleKanban',
+      'Toggle Kanban',
+      () => {
+        useLayoutStore.getState().toggleKanban();
+      },
+      { category: 'View' },
     );
 
     builtin(

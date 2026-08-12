@@ -33,6 +33,7 @@ import {
   type TurnStatus,
   type TurnOutcome,
   type TurnRequest,
+  type AgentTaskContext,
   type TurnRecord,
   DEFAULT_HARNESS_CONFIG,
 } from './types';
@@ -67,6 +68,8 @@ import { selectToolPlan, type ToolSelectionDecision } from './tool-selection';
 import type { ChildHarnessOptions, HarnessEnvironment } from './environment';
 import { ExternalPathAccessRegistry } from './external-path-access';
 import { ReadLoopMiddleware } from './read-loop';
+import { createKanbanTools } from './task-integration';
+import type { KanbanTaskIntegration } from './task-integration';
 import {
   RequestPreparation,
   estimateActualCost,
@@ -134,6 +137,8 @@ export interface HarnessOptions {
   hasDirtyBuffers?: () => boolean;
   /** Shared session registry for mandatory external path grants. */
   externalPathAccess?: ExternalPathAccessRegistry;
+  /** Optional Desktop-only persistent Kanban integration. */
+  taskIntegration?: KanbanTaskIntegration;
   /** 0 = main agent (default), >0 = nested delegation depth. Exposed to tools
    *  via ToolExecutionContext.delegationLevel. */
   delegationLevel?: number;
@@ -203,6 +208,7 @@ export class Harness {
   private environment: HarnessEnvironment;
   private readCache = new Map<string, string>();
   private externalPathAccess: ExternalPathAccessRegistry;
+  private activeTaskContext: AgentTaskContext | null = null;
 
   constructor(options: HarnessOptions) {
     this.config = { ...DEFAULT_HARNESS_CONFIG, ...options.config };
@@ -235,6 +241,7 @@ export class Harness {
       memoryManager: options.memoryManager,
       hasDirtyBuffers: options.hasDirtyBuffers,
       externalPathAccess: this.externalPathAccess,
+      taskIntegration: options.taskIntegration,
     };
 
     // Agent terminal integration
@@ -282,6 +289,11 @@ export class Harness {
     // Register built-in tools
     for (const tool of getAllBuiltinTools()) {
       this.toolRouter.register(tool);
+    }
+    if (options.taskIntegration) {
+      for (const tool of createKanbanTools(options.taskIntegration)) {
+        this.toolRouter.register(tool);
+      }
     }
     this.registerProgressiveToolAccess();
 
@@ -361,6 +373,9 @@ export class Harness {
       delegationLevel: this.delegationLevel + 1,
       sddDb: undefined,
       savePlanFile: undefined,
+      // Persistent Kanban mutation/delegation is a top-level Desktop concern;
+      // child agents receive the task context but not the task tools.
+      taskIntegration: undefined,
     });
 
     child.setAgentType(options.agentType);
@@ -635,6 +650,10 @@ export class Harness {
     imageContent?: Array<{ base64: string; mediaType: string }>,
   ): Promise<TurnOutcome> {
     const previousTurnId = this.turnController.id;
+    const previousTaskContext = this.activeTaskContext;
+    if (typeof requestOrMessage !== 'string' && requestOrMessage.taskContext) {
+      this.activeTaskContext = requestOrMessage.taskContext;
+    }
     try {
       return await this.runInternal(requestOrMessage, history, imageContent);
     } catch (error) {
@@ -652,6 +671,8 @@ export class Harness {
         );
       }
       throw error;
+    } finally {
+      this.activeTaskContext = previousTaskContext;
     }
   }
 
@@ -1302,8 +1323,11 @@ export class Harness {
         invoke: this.invoke,
         listen: this.listen,
         projectId: this.projectId,
+        providerId: this.config.providerId,
+        modelId: this.config.modelId,
         memoryManager: this.memoryManager ?? undefined,
         hasDirtyBuffers: this.hasDirtyBuffers,
+        taskContext: this.activeTaskContext ?? undefined,
         readCache: {
           get: (path) => this.readCache.get(normalizeCachePath(path)),
           set: (path, content) => this.readCache.set(normalizeCachePath(path), content),
@@ -1835,10 +1859,17 @@ export class Harness {
 
   private emit(event: HarnessEvent): void {
     const iteration = event.iteration ?? (this.currentIteration || undefined);
+    const taskContext = this.activeTaskContext;
     this.eventHandler?.({
       ...event,
       turnId: event.turnId ?? this.turnController.id,
       conversationId: event.conversationId ?? this.conversationId,
+      ...(event.taskId ?? taskContext?.taskId
+        ? { taskId: event.taskId ?? taskContext?.taskId }
+        : {}),
+      ...(event.taskRunId ?? taskContext?.taskRunId
+        ? { taskRunId: event.taskRunId ?? taskContext?.taskRunId }
+        : {}),
       ...(iteration !== undefined ? { iteration } : {}),
       ...(event.iterationId
         ? { iterationId: event.iterationId }

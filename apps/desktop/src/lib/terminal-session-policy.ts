@@ -1,4 +1,9 @@
-import type { TerminalAcquireRequest } from '@hyscode/agent-harness';
+import {
+  resolveTerminalShell,
+  type TerminalAcquireRequest,
+  type TerminalShell,
+  type TerminalShellPlatform,
+} from '@hyscode/agent-harness';
 
 import type { TerminalSession } from '@/stores/terminal-store';
 
@@ -45,9 +50,16 @@ export function selectAgentSession(
   return candidate;
 }
 
+export function detectTerminalPlatform(): TerminalShellPlatform {
+  return typeof navigator !== 'undefined' && navigator.userAgent?.includes('Win') ? 'windows' : 'posix';
+}
+
+/** Resolve the shell configured for the desktop PTY and its matching frame language. */
+export function resolveDesktopShell(configuredShell?: string | null): TerminalShell {
+  return resolveTerminalShell(configuredShell, detectTerminalPlatform());
+}
+
 /** Shell language the desktop runtime spawns; capture frames must match it. */
-export function detectFrameLanguage(): 'bash' | 'powershell' {
-  return typeof navigator !== 'undefined' && navigator.userAgent?.includes('Win')
-    ? 'powershell'
-    : 'bash';
+export function detectFrameLanguage(configuredShell?: string | null): 'bash' | 'powershell' {
+  return resolveDesktopShell(configuredShell).frameLanguage;
 }

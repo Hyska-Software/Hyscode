@@ -10,6 +10,7 @@ import {
   FolderOpen,
   Hammer,
   History,
+  KanbanSquare,
   Loader2,
   MessageSquare,
   MoreHorizontal,
@@ -745,6 +746,12 @@ function VortexSessionRow({
           <span className="truncate text-[11px] font-medium">{session.title}</span>
           {isActive && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-primary" aria-label="Active session" />}
         </div>
+        {runtime?.taskId && (
+          <div className="mt-0.5 flex min-w-0 items-center gap-1 text-[9px] text-primary">
+            <KanbanSquare className="h-2.5 w-2.5 shrink-0" />
+            <span className="truncate">{runtime.taskTitle ?? 'Kanban task'}</span>
+          </div>
+        )}
         <div className="flex min-w-0 items-center gap-1.5 text-[9px] text-muted-foreground">
           {showProjectName && <span className="max-w-[8rem] truncate">{session.projectName}</span>}
           {showProjectName && <span>·</span>}

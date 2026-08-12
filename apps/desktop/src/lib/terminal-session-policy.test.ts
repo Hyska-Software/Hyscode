@@ -146,4 +146,14 @@ describe('detectFrameLanguage', () => {
     vi.stubGlobal('navigator', undefined);
     expect(detectFrameLanguage()).toBe('bash');
   });
+
+  it('uses the configured shell instead of the platform default', () => {
+    vi.stubGlobal('navigator', { userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' });
+    expect(detectFrameLanguage('C:\\Program Files\\Git\\bin\\bash.exe')).toBe('bash');
+    expect(detectFrameLanguage('pwsh.exe')).toBe('powershell');
+  });
+
+  it('rejects a configured shell without a compatible frame dialect', () => {
+    expect(() => detectFrameLanguage('cmd.exe')).toThrow('Unsupported terminal shell');
+  });
 });

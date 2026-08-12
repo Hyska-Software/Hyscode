@@ -10,7 +10,7 @@ import {
   PanelLeftOpen,
   PanelRightOpen,
 } from 'lucide-react';
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useMemo } from 'react';
 import { AgentMessages } from './agent-messages';
 import { AgentInput } from './agent-input';
 import { ContextChipsBar } from './context-chips-bar';
@@ -28,6 +28,8 @@ import { cn } from '@/lib/utils';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import type { TokenUsage } from '@/stores/agent-store';
 import { useSettingsStore } from '@/stores/settings-store';
+import { useKanbanStore } from '@/stores/kanban-store';
+import { AgentTaskContextCard } from './agent-task-context-card';
 import { getProviderRegistry } from '@hyscode/ai-providers';
 import { TerminalPanel } from '@/components/terminal';
 import type { AIModel } from '@hyscode/ai-providers';
@@ -381,6 +383,18 @@ export function AgentPanel() {
   const switchTab = useAgentStore((s) => s.switchTab);
   const closeTab = useAgentStore((s) => s.closeTab);
   const openNewTab = useAgentStore((s) => s.openNewTab);
+  const conversationId = useAgentStore((s) => s.conversationId);
+  const kanbanTasks = useKanbanStore((s) => s.tasks);
+  const linkedTask = useMemo(
+    () =>
+      kanbanTasks.find(
+        (task) => {
+          const run = task.activeRun ?? task.latestRun;
+          return run?.conversationId === conversationId;
+        },
+      ) ?? null,
+    [conversationId, kanbanTasks],
+  );
 
   const handleSpecApprove = async () => {
     try {
@@ -562,6 +576,8 @@ export function AgentPanel() {
           )}
         </div>
       </div>
+
+      {linkedTask && <AgentTaskContextCard task={linkedTask} />}
 
       {/* Session History overlay */}
       {historyOpen ? (

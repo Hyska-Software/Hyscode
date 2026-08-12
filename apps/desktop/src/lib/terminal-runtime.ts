@@ -11,7 +11,7 @@ import {
 import { useTerminalStore } from '@/stores/terminal-store';
 import { useSettingsStore } from '@/stores/settings-store';
 
-import { detectFrameLanguage, selectAgentSession } from './terminal-session-policy';
+import { resolveDesktopShell, selectAgentSession } from './terminal-session-policy';
 import { tauriInvokeRaw } from './tauri-invoke';
 
 type NativeSnapshot = {
@@ -24,9 +24,11 @@ type NativeSnapshot = {
 };
 
 export class DesktopTerminalRuntime implements TerminalRuntimeAdapter {
+  private readonly shellContracts = new Map<string, ReturnType<typeof resolveDesktopShell>>();
+
   async acquire(request: TerminalAcquireRequest): Promise<TerminalBinding> {
     const store = useTerminalStore.getState();
-    const frameLanguage = detectFrameLanguage();
+    const configuredShell = useSettingsStore.getState().terminalShell.trim() || null;
     let session = selectAgentSession(store.sessions, request);
     if (!session) {
       const isolationKey = request.ownerId ?? request.conversationId;
@@ -39,18 +41,21 @@ export class DesktopTerminalRuntime implements TerminalRuntimeAdapter {
     }
     if (!session) throw new Error('Failed to create agent terminal session.');
 
+    let shell = this.shellContracts.get(session.id) ?? resolveDesktopShell(configuredShell);
+
     let ptyId = session.ptyId;
     if (ptyId) {
       const alive = await tauriInvokeRaw<boolean>('pty_exists', { ptyId }).catch(() => false);
       if (!alive) {
         useTerminalStore.getState().markPtyDead(session.id);
+        this.shellContracts.delete(session.id);
+        shell = resolveDesktopShell(configuredShell);
         ptyId = null;
       }
     }
     if (!ptyId) {
-      const terminalShell = useSettingsStore.getState().terminalShell.trim();
       ptyId = await tauriInvokeRaw<string>('pty_spawn', {
-        shell: terminalShell || null,
+        shell: shell.command,
         cwd: request.cwd,
         env: null,
         cols: 120,
@@ -58,10 +63,12 @@ export class DesktopTerminalRuntime implements TerminalRuntimeAdapter {
         interactive: false,
       });
       useTerminalStore.getState().setPtyId(session.id, ptyId);
+      shell = resolveDesktopShell(configuredShell);
     }
 
+    this.shellContracts.set(session.id, shell);
     useTerminalStore.getState().setAgentActivity(session.id, request.toolCallId);
-    return { terminalId: session.id, ptyId, persistent: true, frameLanguage };
+    return { terminalId: session.id, ptyId, persistent: true, frameLanguage: shell.frameLanguage };
   }
 
   async snapshot(terminalId: string, afterSequence?: number): Promise<TerminalSnapshot> {

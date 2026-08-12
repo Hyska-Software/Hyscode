@@ -8,9 +8,6 @@ import { useEditorStore, type Tab } from '@/stores/editor-store';
 import {
   useAgentStore,
   type AgentMode,
-  type ChatMessage,
-  type ToolCallDisplay,
-  type TurnSummary,
 } from '@/stores/agent-store';
 import { useLayoutStore, type WorkspaceMode } from '@/stores/layout-store';
 import { useDbViewerStore } from '@/stores/db-viewer-store';
@@ -19,12 +16,14 @@ import { useFileStore } from '@/stores/file-store';
 import { useGitStore } from '@/stores/git-store';
 import { useLspStore } from '@/stores/lsp-store';
 import { useMemoryStore } from '@/stores/memory-store';
+import { useKanbanStore } from '@/stores/kanban-store';
 import { useProjectStore } from '@/stores/project-store';
 import { useRulesStore } from '@/stores/rules-store';
 import { useSchemaDiagramStore } from '@/stores/schema-diagram-store';
 import { useSkillsStore } from '@/stores/skills-store';
 import { useTerminalStore } from '@/stores/terminal-store';
 import { HarnessBridge } from './harness-bridge';
+import { mapPersistedAgentMessage } from './agent-message-persistence';
 import { areSameProjectPath, normalizeProjectPath } from './project-path';
 import { tauriInvoke } from './tauri-invoke';
 import { vortexSessionRuntimeManager } from './vortex-session-runtime';
@@ -107,38 +106,6 @@ function toAgentMode(mode: string): AgentMode {
   return ['chat', 'build', 'review', 'debug', 'plan'].includes(mode)
     ? (mode as AgentMode)
     : 'chat';
-}
-
-function parseJsonValue<T>(value: string | null): T | undefined {
-  if (!value) return undefined;
-  try {
-    return JSON.parse(value) as T;
-  } catch {
-    return undefined;
-  }
-}
-
-function mapDatabaseMessage(message: {
-  id: string;
-  role: string;
-  content: string;
-  tool_calls: string | null;
-  blocks: string | null;
-  turn_summary: string | null;
-  created_at: string;
-}): ChatMessage | null {
-  if (message.role === 'system' || (message.role !== 'user' && message.role !== 'assistant')) {
-    return null;
-  }
-  return {
-    id: message.id,
-    role: message.role,
-    content: message.content,
-    toolCalls: parseJsonValue<ToolCallDisplay[]>(message.tool_calls),
-    blocks: parseJsonValue<NonNullable<ChatMessage['blocks']>>(message.blocks),
-    turnSummary: parseJsonValue<TurnSummary>(message.turn_summary),
-    timestamp: new Date(message.created_at).getTime(),
-  };
 }
 
 /** Persist the agent's open tabs for a project before its store is reset. */
@@ -261,7 +228,7 @@ async function restoreAgentState(
       for (const m of dbMessages) {
         if (!isCurrent()) return;
         if (m.role === 'system') continue;
-        const message = mapDatabaseMessage(m);
+        const message = mapPersistedAgentMessage(m);
         if (!message) continue;
         store.addMessage(message);
         if (message.turnSummary) store.hydrateTurnSummary(message.turnSummary);
@@ -354,7 +321,7 @@ export async function restoreProjectConversation(
   store.updateTabTitle(store.activeTabId, conversation.title || 'Conversation');
 
   for (const row of rows) {
-    const message = mapDatabaseMessage(row);
+    const message = mapPersistedAgentMessage(row);
     if (!message || !isCurrent()) continue;
     store.addMessage(message);
     if (message.turnSummary) store.hydrateTurnSummary(message.turnSummary);
@@ -392,6 +359,7 @@ export async function clearAllProjectState(
   useGitStore.getState().resetForProjectSwitch();
   useLspStore.getState().clearAll();
   useMemoryStore.getState().resetProjectState();
+  useKanbanStore.getState().reset();
   useRulesStore.getState().resetProjectState();
   useSchemaDiagramStore.getState().reset();
   useSkillsStore.getState().resetProjectState();
@@ -476,6 +444,9 @@ async function performProjectOpen(
     await tauriInvoke('db_ensure_project', { id: rootPath, path: rootPath }).catch((error) => {
       console.warn('[project-persistence] Failed to register project in the database:', error);
     });
+    if (switchId !== projectSwitchGeneration) return;
+
+    await useKanbanStore.getState().loadProject(rootPath);
     if (switchId !== projectSwitchGeneration) return;
 
     const snapshot = loadProjectState(rootPath);

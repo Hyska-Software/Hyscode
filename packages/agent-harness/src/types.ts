@@ -97,12 +97,17 @@ export interface ToolExecutionContext {
   onTerminalProgress?: (progress: TerminalProgress) => void;
   /** Project ID for scoped operations (e.g. memory) */
   projectId?: string;
+  /** Provider/model selected for this harness turn. */
+  providerId?: string;
+  modelId?: string;
   /** Memory manager for persistent cross-session knowledge */
   memoryManager?: MemoryManager;
   /** Reports whether Monaco has unsaved buffers that Git mutations could overwrite. */
   hasDirtyBuffers?: () => boolean;
   /** Per-call resolver for paths approved outside the workspace. */
   externalPathAccess?: ExternalPathAccess;
+  /** Durable Desktop Kanban task context for background task runs. */
+  taskContext?: AgentTaskContext;
 }
 
 export type TerminalAcquireRequest = {
@@ -558,12 +563,21 @@ export type TurnTranscript = {
   status: TurnTerminalStatus | null;
 };
 
+/** Correlation context for a persistent Desktop Kanban task execution. */
+export type AgentTaskContext = {
+  taskId: string;
+  taskRunId: string;
+  runMode: 'current_chat' | 'dedicated_session';
+};
+
 export type TurnRequest = {
   userMessage: string;
   history: Message[];
   images?: Array<{ base64: string; mediaType: string }>;
   /** Files/directories that determine the native project-instruction scope. */
   ruleTargetPaths?: string[];
+  /** Present only for a durable Desktop Kanban task run. */
+  taskContext?: AgentTaskContext;
 };
 
 export type TurnOutcome = {
@@ -659,6 +673,9 @@ export type HarnessEvent = HarnessEventPayload & {
   conversationId?: string;
   iterationId?: string;
   iteration?: number;
+  /** Present only for a durable Desktop Kanban task run. */
+  taskId?: string;
+  taskRunId?: string;
 };
 
 export type HarnessEventHandler = (event: HarnessEvent) => void;

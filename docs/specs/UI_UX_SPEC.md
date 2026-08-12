@@ -270,6 +270,26 @@ remain visible and retryable. Git Settings states that remote providers receive
 repository-relative staged paths and patches, while local providers such as Ollama keep that
 data on the machine.
 
+### Desktop Kanban
+
+Kanban is a Desktop-only surface. The Editor Activity Bar exposes `Tasks`,
+while the top bar places a `Kanban` button immediately beside the File and View
+menus. The same board opens as a modal from VORTEX and the agent chat; these
+surfaces share the project-scoped store and never duplicate task data.
+
+The board uses five seeded columns (`Backlog`, `To do`, `In progress`,
+`Blocked`, and `Done`), draggable cards, keyboard left/right movement, search,
+priority and label badges, a selected-task detail pane, activity history, and
+explicit loading, empty, error, conflict, waiting, failed, and cancelled
+states. Delegation displays the selected provider/model and current run state;
+the chat card and VORTEX navigator link back to the same task/run.
+
+Task cards expose the standard Desktop context menu on right click. It provides
+editing, column movement, delegation or run cancellation, recoverable archive,
+and permanently destructive deletion. Archive and deletion use the shared
+confirmation dialog, and destructive actions are disabled while a task run is
+active.
+
 ### Loading States
 
 - **App launch**: skeleton layout with pulsing zinc-800 blocks
