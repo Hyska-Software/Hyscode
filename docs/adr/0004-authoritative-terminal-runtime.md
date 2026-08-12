@@ -21,8 +21,11 @@ content delivered to the model. Runtime terminal events are emitted through a mu
 Subscriptions register before taking a snapshot, queue concurrent PTY events, replay the snapshot,
 deduplicate by sequence, and deliver each exit once. The configured shell and frame dialect are
 resolved as one contract; unsupported shells fail before a command is written. Framed capture emits
-its completion marker from a failure-safe shell cleanup path, while the runner performs a bounded
-post-exit snapshot drain before classifying a command without a marker as an execution error.
+its completion marker from a failure-safe shell cleanup path. Command source is transported as data
+before evaluation: PowerShell uses UTF-8 Base64 decoding and `Invoke-Expression`, while POSIX shells
+use a quoted literal and deferred `eval`; multiline commands and shell parse errors therefore cannot
+prevent the wrapper from emitting its completion marker. The runner performs a bounded post-exit
+snapshot drain before classifying a command without a marker as an execution error.
 Completed sessions remain inspectable until explicit cleanup or runtime shutdown.
 
 The bridge includes current terminal summaries in every `runtime_ready` payload and emits

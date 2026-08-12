@@ -5,7 +5,6 @@ import {
   ChevronRight,
   Settings,
   Blocks,
-  KanbanSquare,
   X,
   PanelLeftClose,
 } from 'lucide-react';
@@ -80,7 +79,6 @@ function ExtensionsModal({ onClose }: { onClose: () => void }) {
 export function AgentLeftPanel() {
   const openSettings = useSettingsStore((s) => s.openSettings);
   const setLeftCollapsed = useLayoutStore((s) => s.setAgentLeftCollapsed);
-  const setKanbanOpen = useLayoutStore((s) => s.setKanbanOpen);
   const [extensionsOpen, setExtensionsOpen] = useState(false);
 
   return (
@@ -128,13 +126,6 @@ export function AgentLeftPanel() {
         >
           <Settings className="h-3 w-3" />
           Settings
-        </button>
-        <button
-          onClick={() => setKanbanOpen(true)}
-          className="flex items-center gap-1.5 rounded-md px-2 py-1 text-[10px] text-muted-foreground hover:bg-muted/50 hover:text-foreground transition-colors"
-        >
-          <KanbanSquare className="h-3 w-3" />
-          Kanban
         </button>
         <button
           onClick={() => setExtensionsOpen(true)}

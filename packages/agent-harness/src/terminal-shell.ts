@@ -16,7 +16,7 @@ function shellName(command: string): string {
 export function resolveTerminalShell(
   configuredShell: string | null | undefined,
   platform: TerminalShellPlatform,
-  posixDefault = '/bin/sh',
+  posixDefault = '/bin/bash',
 ): TerminalShell {
   const command = configuredShell?.trim() || (platform === 'windows' ? 'powershell.exe' : posixDefault);
   const name = shellName(command);

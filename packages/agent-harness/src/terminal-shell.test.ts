@@ -20,10 +20,12 @@ describe('resolveTerminalShell', () => {
 
   it('uses platform defaults when no shell is configured', () => {
     expect(resolveTerminalShell('', 'windows')).toEqual({ command: 'powershell.exe', frameLanguage: 'powershell' });
+    expect(resolveTerminalShell(undefined, 'posix')).toEqual({ command: '/bin/bash', frameLanguage: 'bash' });
     expect(resolveTerminalShell(undefined, 'posix', '/bin/bash')).toEqual({ command: '/bin/bash', frameLanguage: 'bash' });
   });
 
   it('rejects shells whose framing contract is unknown', () => {
     expect(() => resolveTerminalShell('cmd.exe', 'windows')).toThrow('Unsupported terminal shell');
+    expect(() => resolveTerminalShell('/usr/bin/fish', 'posix')).toThrow('Unsupported terminal shell');
   });
 });

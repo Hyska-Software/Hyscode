@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { spawn } from 'node:child_process';
 
 import {
   appendBounded,
@@ -56,6 +57,7 @@ describe('buildTerminalFrame', () => {
     expect(frame).toContain("printf '\\n__HYSCODE_BEGIN_n1__\\n'");
     expect(frame).toContain('npm test');
     expect(frame).toContain("trap 'hys_code=$?;");
+    expect(frame).toContain('eval "$hys_command"');
     expect(frame).toContain("__HYSCODE_END_n1__:%s");
     expect(frame).toContain("' 0");
     expect(frame).toContain('set +e');
@@ -68,9 +70,78 @@ describe('buildTerminalFrame', () => {
     expect(frame).toContain('__HYSCODE_END_pw1__:{0}');
     expect(frame).toContain('try {');
     expect(frame).toContain("$ErrorActionPreference = 'Stop'");
+    expect(frame).toContain('Invoke-Expression -Command $hysCommand');
     expect(frame).toContain('catch {');
     expect(frame).toContain('finally {');
     expect(frame).toContain('Write-Error $_');
+  });
+
+  it.skipIf(process.platform !== 'win32')('completes an interactive PowerShell frame with multiline command source', async () => {
+    const nonce = 'powershell-multiline';
+    const command = `python -c "print('line one')
+print('line two')"`;
+    const child = spawn('powershell.exe', ['-NoLogo', '-NoProfile'], { windowsHide: true });
+    let output = '';
+    child.stdout.on('data', (data) => {
+      output += data.toString();
+    });
+    child.stderr.on('data', (data) => {
+      output += data.toString();
+    });
+    const closed = new Promise<number | null>((resolve) => child.once('close', resolve));
+
+    child.stdin.end(buildTerminalFrame(command, 'powershell', nonce));
+
+    await closed;
+    expect(parseTerminalFrame(output, nonce)).toMatchObject({
+      complete: true,
+      output: 'line one\nline two',
+      exitCode: 0,
+    });
+  });
+
+  it.skipIf(process.platform !== 'win32')('emits a final marker when the command has a PowerShell parse error', async () => {
+    const nonce = 'powershell-parse-error';
+    const child = spawn('powershell.exe', ['-NoLogo', '-NoProfile'], { windowsHide: true });
+    let output = '';
+    child.stdout.on('data', (data) => {
+      output += data.toString();
+    });
+    child.stderr.on('data', (data) => {
+      output += data.toString();
+    });
+    const closed = new Promise<number | null>((resolve) => child.once('close', resolve));
+
+    child.stdin.end(buildTerminalFrame('Write-Output "unterminated', 'powershell', nonce));
+
+    await closed;
+    const parsed = parseTerminalFrame(output, nonce);
+    expect(parsed).toMatchObject({
+      complete: true,
+      exitCode: 1,
+    });
+    expect(parsed.output).toContain('unterminated');
+  });
+
+  it.skipIf(process.platform === 'win32')('emits a final marker when a POSIX command has a shell parse error', async () => {
+    const nonce = 'posix-parse-error';
+    const child = spawn('/bin/sh', ['-s']);
+    let output = '';
+    child.stdout.on('data', (data) => {
+      output += data.toString();
+    });
+    child.stderr.on('data', (data) => {
+      output += data.toString();
+    });
+    const closed = new Promise<number | null>((resolve) => child.once('close', resolve));
+
+    child.stdin.end(buildTerminalFrame('printf "unterminated', 'bash', nonce));
+
+    await closed;
+    expect(parseTerminalFrame(output, nonce)).toMatchObject({
+      complete: true,
+      exitCode: 2,
+    });
   });
 });
 

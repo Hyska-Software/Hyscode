@@ -49,12 +49,13 @@ export class DesktopTerminalRuntime implements TerminalRuntimeAdapter {
       if (!alive) {
         useTerminalStore.getState().markPtyDead(session.id);
         this.shellContracts.delete(session.id);
+        shell = resolveDesktopShell(configuredShell);
         ptyId = null;
       }
     }
     if (!ptyId) {
       ptyId = await tauriInvokeRaw<string>('pty_spawn', {
-        shell: configuredShell,
+        shell: shell.command,
         cwd: request.cwd,
         env: null,
         cols: 120,

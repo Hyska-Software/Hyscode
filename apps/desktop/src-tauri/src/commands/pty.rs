@@ -2,6 +2,7 @@ use portable_pty::{native_pty_system, ChildKiller, CommandBuilder, MasterPty, Pt
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
 use std::io::{Read, Write};
+use std::path::Path;
 use std::sync::{mpsc, Arc, Mutex};
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, State};
@@ -68,8 +69,20 @@ fn default_shell() -> String {
     }
     #[cfg(not(target_os = "windows"))]
     {
-        std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".to_string())
+        let configured = std::env::var("SHELL").unwrap_or_default();
+        if is_supported_posix_shell(&configured) {
+            configured
+        } else {
+            "/bin/bash".to_string()
+        }
     }
+}
+
+fn is_supported_posix_shell(shell: &str) -> bool {
+    matches!(
+        Path::new(shell).file_name().and_then(|name| name.to_str()),
+        Some("bash" | "sh" | "zsh" | "dash")
+    )
 }
 
 #[cfg(target_os = "windows")]
@@ -408,6 +421,15 @@ mod tests {
             normalize_dimension(Some(u16::MAX), DEFAULT_PTY_COLS),
             MAX_PTY_DIMENSION
         );
+    }
+
+    #[test]
+    fn unsupported_posix_defaults_are_not_used_with_bash_framing() {
+        assert!(is_supported_posix_shell("/bin/bash"));
+        assert!(is_supported_posix_shell("/bin/zsh"));
+        assert!(is_supported_posix_shell("/bin/dash"));
+        assert!(!is_supported_posix_shell("/usr/bin/fish"));
+        assert!(!is_supported_posix_shell(""));
     }
 
     #[test]

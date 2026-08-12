@@ -76,6 +76,22 @@ describe('DesktopTerminalRuntime', () => {
       }));
     });
 
+    it('passes the resolved POSIX default shell to the native PTY', async () => {
+      invokeMock.mockImplementation(async (cmd: string) => (cmd === 'pty_spawn' ? 'pty-posix' : undefined));
+
+      await runtime.acquire({
+        conversationId: 'conversation-a',
+        toolCallId: 'tool-posix',
+        cwd: 'C:/workspace',
+        forceNew: false,
+        background: false,
+      });
+
+      expect(invokeMock).toHaveBeenCalledWith('pty_spawn', expect.objectContaining({
+        shell: '/bin/bash',
+      }));
+    });
+
     it('reuses a healthy session and its live PTY', async () => {
       const sessionId = seedSession();
       invokeMock.mockImplementation(async (cmd: string) => (cmd === 'pty_exists' ? true : undefined));
