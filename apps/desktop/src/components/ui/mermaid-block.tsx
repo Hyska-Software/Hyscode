@@ -23,6 +23,42 @@ function processMermaidSvg(svgStr: string): string {
     .replace(/max-width\s*:\s*[\d.]+px\s*;?\s*/g, '');
 }
 
+function getMermaidErrorMessage(error: unknown): string {
+  const fallback = 'Unable to render this Mermaid diagram.';
+  let message = '';
+  if (error instanceof Error) {
+    message = error.message;
+  } else if (typeof error === 'string') {
+    message = error;
+  } else if (error && typeof error === 'object' && 'message' in error) {
+    const candidate = (error as { message?: unknown }).message;
+    if (typeof candidate === 'string') message = candidate;
+  }
+  const normalized = message.replace(/\s+/g, ' ').trim();
+  if (!normalized) return fallback;
+
+  const maxLength = 240;
+  return normalized.length > maxLength
+    ? `${normalized.slice(0, maxLength - 1)}…`
+    : normalized;
+}
+
+function MermaidError({ message }: { message: string }) {
+  return (
+    <div
+      role="alert"
+      className="my-2.5 max-w-full min-w-0 overflow-hidden rounded-lg border border-destructive/20 bg-destructive/[0.06]"
+    >
+      <div className="flex h-7 items-center gap-1.5 border-b border-destructive/10 px-3">
+        <span className="text-[10px] font-medium uppercase tracking-wider text-destructive/70">
+          Mermaid error
+        </span>
+      </div>
+      <p className="break-words px-3 py-2 text-[11px] text-destructive/80">{message}</p>
+    </div>
+  );
+}
+
 // ─── Fullscreen Modal ──────────────────────────────────────────────────────────
 
 function MermaidModal({ svg, code, onClose }: { svg: string; code: string; onClose: () => void }) {
@@ -221,10 +257,17 @@ export function MermaidBlock({ code }: { code: string }) {
     }
 
     async function render() {
+      const id = `mermaid-${crypto.randomUUID().replace(/-/g, '')}`;
       try {
         const mermaid = await import('mermaid').then((m) => m.default);
-        mermaid.initialize({ startOnLoad: false, theme: mermaidTheme, securityLevel: 'loose' });
-        const id = `mermaid-${crypto.randomUUID().replace(/-/g, '')}`;
+        mermaid.initialize({
+          startOnLoad: false,
+          theme: mermaidTheme,
+          securityLevel: 'loose',
+          // Mermaid otherwise inserts its syntax-error SVG into document.body
+          // before rejecting, which escapes the preview and changes the window layout.
+          suppressErrorRendering: true,
+        });
         const { svg: rendered } = await mermaid.render(id, code);
         if (!cancelled) {
           const processed = processMermaidSvg(rendered);
@@ -232,9 +275,15 @@ export function MermaidBlock({ code }: { code: string }) {
           setSvg(processed);
           setError(null);
         }
-      } catch {
-        if (!cancelled && !prevSvgRef.current) {
-          setError('Rendering…');
+      } catch (renderError) {
+        if (!cancelled) {
+          setError(getMermaidErrorMessage(renderError));
+        }
+      } finally {
+        // Mermaid normally removes these nodes itself. Remove them defensively
+        // when a renderer throws before Mermaid reaches its cleanup path.
+        for (const temporaryId of [id, `d${id}`, `i${id}`]) {
+          document.getElementById(temporaryId)?.remove();
         }
       }
     }
@@ -255,15 +304,8 @@ export function MermaidBlock({ code }: { code: string }) {
     });
   }, [code]);
 
-  if (!displaySvg && error && error !== 'Rendering…') {
-    return (
-      <div className="my-2.5 overflow-hidden rounded-lg border border-destructive/20 bg-destructive/[0.06]">
-        <div className="flex h-7 items-center gap-1.5 border-b border-destructive/10 px-3">
-          <span className="text-[10px] font-medium uppercase tracking-wider text-destructive/70">Mermaid error</span>
-        </div>
-        <p className="px-3 py-2 text-[11px] text-destructive/80">{error}</p>
-      </div>
-    );
+  if (!displaySvg && error) {
+    return <MermaidError message={error} />;
   }
 
   if (!displaySvg) {
@@ -279,6 +321,7 @@ export function MermaidBlock({ code }: { code: string }) {
 
   return (
     <>
+      {error && <MermaidError message={error} />}
       <div className="group/mermaid my-2.5 overflow-hidden rounded-lg border border-border/20 bg-surface-raised/20">
         {/* Toolbar */}
         <div className="flex h-8 items-center justify-between border-b border-border/10 bg-surface-raised/50 px-2.5 opacity-0 transition-opacity group-hover/mermaid:opacity-100">
