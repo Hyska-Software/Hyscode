@@ -134,6 +134,73 @@ describe('VORTEX updater', () => {
 
     expect(await arm64Updater.check('stable')).toBeNull();
   });
+  it('accepts GitHub release asset redirects on Windows, Linux, and macOS', async () => {
+    const installRoot = await temporaryExecutableDirectory();
+    const manifestUrl = 'https://github.com/Hyska-Software/Hyscode/releases/download/v0.9.0/vortex-cli-manifest-0.9.0.json';
+    const apiUrl = 'https://api.github.com/repos/Hyska-Software/Hyscode/releases/latest';
+    const redirectedAssetUrl = 'https://release-assets.githubusercontent.com/github-production-release-asset/123456/abcdef';
+    const manifest = {
+      schemaVersion: 1,
+      version: '0.9.0',
+      assets: [
+        {
+          platform: 'windows',
+          architecture: 'x64',
+          kind: 'archive',
+          name: 'vortex-cli-0.9.0-windows-x64.zip',
+          size: 1234,
+          sha256: 'a'.repeat(64),
+        },
+        {
+          platform: 'linux',
+          architecture: 'x64',
+          kind: 'archive',
+          name: 'vortex-cli-0.9.0-linux-x64.tar.gz',
+          size: 1234,
+          sha256: 'b'.repeat(64),
+        },
+        {
+          platform: 'macos',
+          architecture: 'x64',
+          kind: 'archive',
+          name: 'vortex-cli-0.9.0-macos-x64.tar.gz',
+          size: 1234,
+          sha256: 'c'.repeat(64),
+        },
+      ],
+    };
+    const release = {
+      tag_name: 'v0.9.0',
+      html_url: 'https://github.com/Hyska-Software/Hyscode/releases/tag/v0.9.0',
+      assets: [
+        { name: 'vortex-cli-manifest-0.9.0.json', browser_download_url: manifestUrl, size: JSON.stringify(manifest).length },
+        { name: 'vortex-cli-0.9.0-windows-x64.zip', browser_download_url: 'https://github.com/Hyska-Software/Hyscode/releases/download/v0.9.0/vortex-cli-0.9.0-windows-x64.zip', size: 1234 },
+        { name: 'vortex-cli-0.9.0-linux-x64.tar.gz', browser_download_url: 'https://github.com/Hyska-Software/Hyscode/releases/download/v0.9.0/vortex-cli-0.9.0-linux-x64.tar.gz', size: 1234 },
+        { name: 'vortex-cli-0.9.0-macos-x64.tar.gz', browser_download_url: 'https://github.com/Hyska-Software/Hyscode/releases/download/v0.9.0/vortex-cli-0.9.0-macos-x64.tar.gz', size: 1234 },
+      ],
+    };
+    const targets: Array<{ platform: NodeJS.Platform; assetName: string }> = [
+      { platform: 'win32', assetName: 'vortex-cli-0.9.0-windows-x64.zip' },
+      { platform: 'linux', assetName: 'vortex-cli-0.9.0-linux-x64.tar.gz' },
+      { platform: 'darwin', assetName: 'vortex-cli-0.9.0-macos-x64.tar.gz' },
+    ];
+
+    for (const target of targets) {
+      const updater = new CliUpdater({
+        version: '0.8.2',
+        executablePath: path.join(installRoot, 'vortex.exe'),
+        platform: target.platform,
+        architecture: 'x64',
+        fetchImpl: async (url) => url === manifestUrl
+          ? jsonResponse(manifest, redirectedAssetUrl)
+          : jsonResponse(release, apiUrl),
+      });
+
+      const result = await updater.check('stable');
+
+      expect(result?.asset?.name).toBe(target.assetName);
+    }
+  });
 
   it('requires manual installation when a release has no integrity manifest', async () => {
     const installRoot = await temporaryExecutableDirectory();
@@ -179,6 +246,7 @@ describe('VORTEX updater', () => {
   it('downloads and validates installer bytes using the manifest checksum', async () => {
     const installRoot = await temporaryExecutableDirectory();
     const payload = new TextEncoder().encode('installer-payload');
+    const redirectedAssetUrl = 'https://release-assets.githubusercontent.com/github-production-release-asset/123456/abcdef';
     const sha256 = createHash('sha256').update(payload).digest('hex');
     const release = {
       version: '0.9.0',
@@ -193,7 +261,7 @@ describe('VORTEX updater', () => {
         architecture: 'x64' as const,
         kind: 'installer' as const,
         name: 'Vortex-CLI-Setup-0.9.0-x64.exe',
-        url: 'https://objects.githubusercontent.com/Vortex-CLI-Setup-0.9.0-x64.exe',
+        url: 'https://github.com/Hyska-Software/Hyscode/releases/download/v0.9.0/Vortex-CLI-Setup-0.9.0-x64.exe',
         size: payload.byteLength,
         sha256,
       },
@@ -211,7 +279,7 @@ describe('VORTEX updater', () => {
       executablePath: path.join(installRoot, 'vortex.exe'),
       platform: 'win32',
       architecture: 'x64',
-      fetchImpl: async () => binaryResponse(payload, release.asset?.url),
+      fetchImpl: async () => binaryResponse(payload, redirectedAssetUrl),
     });
 
     const update = await updater.download(release);

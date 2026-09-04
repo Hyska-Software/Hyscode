@@ -192,6 +192,7 @@ const TRUSTED_DOWNLOAD_HOSTS = new Set([
   'github.com',
   'objects.githubusercontent.com',
   'github-releases.githubusercontent.com',
+  'release-assets.githubusercontent.com',
 ]);
 
 export class CliUpdater {
