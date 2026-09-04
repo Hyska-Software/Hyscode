@@ -142,13 +142,27 @@ pub fn create_file(path: String, content: Option<String>) -> Result<(), String> 
         .map_err(|e| format!("Failed to create file: {}", e))
 }
 
-#[tauri::command]
-pub fn delete_path(path: String) -> Result<(), String> {
-    let path = PathBuf::from(&path);
-    if !path.exists() && fs::symlink_metadata(&path).is_err() {
+fn ensure_path_exists(path: &Path) -> Result<(), String> {
+    if !path.exists() && fs::symlink_metadata(path).is_err() {
         return Err(format!("Path not found: {}", path.display()));
     }
-    remove_all_hardened(&path)
+    Ok(())
+}
+
+/// Permanently delete a file or directory on the blocking filesystem pool.
+///
+/// Recursive deletion can take a long time for large workspaces. Keeping it
+/// off the Tauri async runtime prevents filesystem work from delaying commands
+/// that need to keep the application responsive.
+#[tauri::command]
+pub async fn delete_path(path: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let path = PathBuf::from(path);
+        ensure_path_exists(&path)?;
+        remove_all_hardened(&path)
+    })
+    .await
+    .map_err(|error| format!("Delete task failed: {}", error))?
 }
 
 /// Move a file or directory to the OS Trash / Recycle Bin.
@@ -157,12 +171,14 @@ pub fn delete_path(path: String) -> Result<(), String> {
 /// used (e.g. Linux without a Freedesktop trash backend). Callers should offer
 /// a permanent delete as an explicit user-confirmed fallback in that case.
 #[tauri::command]
-pub fn trash_path(path: String) -> Result<(), String> {
-    let path = PathBuf::from(&path);
-    if !path.exists() && fs::symlink_metadata(&path).is_err() {
-        return Err(format!("Path not found: {}", path.display()));
-    }
-    trash::delete(&path).map_err(|e| format!("TRASH_UNAVAILABLE: {}", e))
+pub async fn trash_path(path: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let path = PathBuf::from(path);
+        ensure_path_exists(&path)?;
+        trash::delete(&path).map_err(|e| format!("TRASH_UNAVAILABLE: {}", e))
+    })
+    .await
+    .map_err(|error| format!("Trash task failed: {}", error))?
 }
 
 /// Clear the read-only flag recursively so deletes succeed on all platforms
@@ -220,8 +236,36 @@ fn remove_all_hardened(path: &Path) -> Result<(), String> {
         let _ = fs::set_permissions(path, writable_permissions(&meta));
         return fs::remove_file(path).map_err(|e| format!("Failed to delete file: {}", e));
     }
+
+    // Most directories do not need permission preparation. Trying the native
+    // recursive removal first avoids walking every entry twice on large trees.
+    let delete_error = match fs::remove_dir_all(path) {
+        Ok(()) => return Ok(()),
+        Err(error) => error,
+    };
+    // Read-only entries are handled by the fallback below. Keeping this path
+    // on every error preserves the hardened delete behavior on all platforms.
+
+    // A failed recursive delete may have removed the last entries already.
+    match fs::symlink_metadata(path) {
+        Ok(_) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => {
+            return Err(format!(
+                "Failed to inspect directory {} after delete failure: {}",
+                path.display(),
+                error
+            ));
+        }
+    }
+
     clear_readonly_recursive(path)?;
-    fs::remove_dir_all(path).map_err(|e| format!("Failed to delete directory: {}", e))
+    fs::remove_dir_all(path).map_err(|error| {
+        format!(
+            "Failed to delete directory (initial attempt: {}; retry: {})",
+            delete_error, error
+        )
+    })
 }
 
 #[tauri::command]
@@ -1076,7 +1120,30 @@ mod tests {
     #[test]
     fn open_and_trash_reject_missing_paths_without_side_effects() {
         assert!(open_path("/nonexistent-hyscode-path-xyz".to_string()).is_err());
-        assert!(trash_path("/nonexistent-hyscode-path-xyz".to_string()).is_err());
+        assert!(tauri::async_runtime::block_on(trash_path(
+            "/nonexistent-hyscode-path-xyz".to_string(),
+        ))
+        .is_err());
+    }
+
+    #[test]
+    fn delete_path_removes_nested_directory_on_blocking_pool() {
+        let base =
+            std::env::temp_dir().join(format!("hyscode-fs-test-{}-delete", std::process::id()));
+        let target = base.join("large-tree");
+        let nested = target.join("nested");
+        let _ = fs::remove_dir_all(&base);
+        fs::create_dir_all(&nested).unwrap();
+        for index in 0..128 {
+            fs::write(nested.join(format!("file-{index}.txt")), b"data").unwrap();
+        }
+
+        let result =
+            tauri::async_runtime::block_on(delete_path(target.to_string_lossy().to_string()));
+
+        assert!(result.is_ok());
+        assert!(!target.exists());
+        let _ = fs::remove_dir_all(&base);
     }
 
     #[test]
