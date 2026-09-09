@@ -1,9 +1,7 @@
 name: Stale
 
 on:
-  schedule:
-    # Run daily at 03:00 UTC
-    - cron: "0 3 * * *"
+  # Automatic execution disabled — run manually from the Actions tab when needed.
   workflow_dispatch:
 
 permissions:
