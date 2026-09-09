@@ -1,6 +1,7 @@
 import path from 'node:path';
 import type { AgentType } from '@hyscode/agent-harness';
 import { AGENT_TYPES, type CliParseResult, type CliUpdateOptions, type CommandFlow, type SelectionFlowAction, type UiState } from './types';
+import { COMPACT_CLI_LOGO } from './logo';
 
 export type CommandSpec = {
   name: string;
@@ -352,6 +353,7 @@ export function parseCliArgs(args: readonly string[], cwd = process.cwd(), versi
 export function helpText(): string {
   const commandLines = COMMANDS.map((command) => `  ${command.usage.padEnd(30)} ${command.description}`);
   return [
+    ...COMPACT_CLI_LOGO.slice(0, 3),
     'VORTEX',
     '',
     'Usage: vortex [workspace] [options]',

@@ -355,7 +355,7 @@ describe('TUI renderer', () => {
     const renderer = new TerminalRenderer();
     const dark = renderer.render(state({ themeId: 'hyscode-dark' }));
     const light = renderer.render(state({ themeId: 'hyscode-light' }));
-    const logoLine = CLI_LOGO[2];
+    const logoLine = ` ${CLI_LOGO[2]}`;
 
     expect(dark).toContain(`\u001b[38;2;16;163;127m${logoLine}\u001b[0m`);
     expect(light).toContain(`\u001b[38;2;13;138;108m${logoLine}\u001b[0m`);

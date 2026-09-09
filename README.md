@@ -1,7 +1,7 @@
 # HysCode
 
 <p align="center">
-  <img src="img-logos/vortex_icon_svg.svg" alt="HysCode logo" width="140" />
+  <img src="assets/brand/vortex-flat.svg" alt="Vortex logo" width="140" />
 </p>
 
 <p align="center">

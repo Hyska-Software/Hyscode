@@ -100,7 +100,8 @@ recovery while retaining protocol version 1 for older NDJSON clients.
 When a workspace is ready, the empty transcript becomes a welcome surface with
 the CLI wordmark, workspace/runtime details, keyboard-first tips, and recent
 sessions from the same TUI data store. `tools/hyscode-tui/src/logo.ts` provides
-the half-block rasterization of `apps/desktop/public/hyscode-logo.svg` and a
+the half-block rasterization of `assets/brand/vortex.png` (flat Vortex mark,
+regenerate with `node scripts/render-cli-logo.mjs --write`) and a
 compact fallback for narrow terminals. The logo glyphs use the active theme
 accent at render time, so `/theme` repaints the mark together with the rest of
 the shell.

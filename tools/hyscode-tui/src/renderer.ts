@@ -665,8 +665,17 @@ function welcomeTopLine(state: UiState, width: number): string {
   return `${PANEL}╭─${title}${'─'.repeat(ruleWidth)}╮${RESET}`;
 }
 
+function fitLogo(lines: readonly string[], width: number): string[] {
+  const safeWidth = Math.max(1, width);
+  return lines.map((line) => {
+    const trimmed = line.length > safeWidth ? line.slice(0, safeWidth) : line;
+    return ` ${trimmed}`;
+  });
+}
+
 function welcomeIdentityLines(state: UiState, width: number): string[] {
-  const logo = getCliLogo(width - 2).map((line) => ` ${ACCENT}${line}${RESET}`);
+  const available = Math.max(8, width - 1);
+  const logo = fitLogo(getCliLogo(available), available).map((line) => `${ACCENT}${line}${RESET}`);
   const model = state.provider && state.model ? `${state.provider}/${state.model}` : 'No model selected';
   return [
     `${ACCENT}${BOLD}Welcome to VORTEX${RESET}`,

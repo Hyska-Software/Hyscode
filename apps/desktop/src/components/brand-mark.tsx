@@ -3,10 +3,10 @@ import { cn } from '@/lib/utils';
 
 type BrandMarkProps = Omit<ImgHTMLAttributes<HTMLImageElement>, 'src'>;
 
-export function BrandMark({ className, alt = 'HysCode logo', ...props }: BrandMarkProps) {
+export function BrandMark({ className, alt = 'Vortex logo', ...props }: BrandMarkProps) {
   return (
     <img
-      src="/hyscode-logo.svg"
+      src="/vortex-logo.svg"
       alt={alt}
       draggable={false}
       className={cn('select-none shrink-0 object-contain', className)}

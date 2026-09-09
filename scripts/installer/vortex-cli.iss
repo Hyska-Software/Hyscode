@@ -19,6 +19,11 @@
 #define VortexCliSourceDir "..\..\tools\hyscode-tui\dist\vortex-production"
 #endif
 
+; Borded Vortex icon shared with the desktop bundle (OS-level, com borda)
+#define VortexIconFile "..\..\..\apps\desktop\src-tauri\icons\icon.ico"
+#define VortexWizardImageFile "..\..\..\apps\desktop\src-tauri\icons\nsis-sidebar.bmp"
+#define VortexWizardSmallImageFile "..\..\..\apps\desktop\src-tauri\icons\nsis-header.bmp"
+
 [Setup]
 AppId={{8F6F8E4C-2C4B-4E90-9F0B-4B1C0E6A2A41}
 AppName={#MyAppName}
@@ -34,6 +39,10 @@ DefaultGroupName={#MyAppName}
 AllowNoIcons=yes
 OutputDir=..\..\tools\hyscode-tui\dist\vortex-installer
 OutputBaseFilename=Vortex-CLI-Setup-{#MyAppVersion}-{#VortexCliArchitecture}
+SetupIconFile={#VortexIconFile}
+UninstallDisplayIcon={app}\{#MyAppExeName}
+WizardImageFile={#VortexWizardImageFile}
+WizardSmallImageFile={#VortexWizardSmallImageFile}
 Compression=lzma2/ultra64
 SolidCompression=yes
 WizardStyle=modern

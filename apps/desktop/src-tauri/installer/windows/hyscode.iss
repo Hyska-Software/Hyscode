@@ -15,6 +15,8 @@
 #define SourceDir "..\..\target\x86_64-pc-windows-msvc\release"
 #define VortexCliSourceDir "..\..\target\x86_64-pc-windows-msvc\release\vortex-cli"
 #define IconFile "..\..\icons\icon.ico"
+#define WizardImageFile "..\..\icons\nsis-sidebar.bmp"
+#define WizardSmallImageFile "..\..\icons\nsis-header.bmp"
 
 [Setup]
 AppId={{D3B1D2A0-1C2E-4F5B-8A9D-0E1F2C3D4E5F}
@@ -33,6 +35,8 @@ OutputDir=..\..\target\x86_64-pc-windows-msvc\release\bundle\inno
 OutputBaseFilename=HysCode-Setup-{#MyAppVersion}-x64
 SetupIconFile={#IconFile}
 UninstallDisplayIcon={app}\{#MyAppExeName}
+WizardImageFile={#WizardImageFile}
+WizardSmallImageFile={#WizardSmallImageFile}
 Compression=lzma2/ultra64
 SolidCompression=yes
 WizardStyle=modern
