@@ -22,11 +22,14 @@ const mocks = vi.hoisted(() => {
       activeToolCallId: string | null;
       awaitingInput: boolean;
     }>,
+    deadCalls: [] as unknown[][],
     setPtyId: (sessionId: string, ptyId: string | null) => {
       const session = terminalState.sessions.find((item) => item.id === sessionId);
       if (session) session.ptyId = ptyId;
     },
-    markPtyDead: () => undefined,
+    markPtyDead: (...args: unknown[]) => {
+      terminalState.deadCalls.push(args);
+    },
     setLastCommand: () => undefined,
     appendCommandHistory: () => undefined,
     setAwaitingInput: () => undefined,
@@ -37,9 +40,22 @@ const mocks = vi.hoisted(() => {
     { getState: () => terminalState },
   );
   return {
+    spawnUserTerminal: vi.fn(async () => 'pty-test'),
+    write: vi.fn(async () => undefined),
+    resize: vi.fn(async () => undefined),
     invoke: vi.fn(async (command: string) => command === 'pty_spawn' ? 'pty-test' : undefined),
-    subscribe: vi.fn(async () => () => undefined),
-    terminals: [] as Array<{ options: Record<string, unknown>; cols: number; rows: number }>,
+    subscribe: vi.fn(async (
+      _terminalId?: string,
+      _onData?: (data: string, sequence: number) => void,
+      _onExit?: (exitCode: number | null, failure?: { operation: string; message: string } | null) => void,
+    ) => () => undefined),
+    kill: vi.fn(async () => ({ status: 'stopped', failures: [] })),
+    terminals: [] as Array<{
+      options: Record<string, unknown>;
+      cols: number;
+      rows: number;
+      onDataHandler: ((data: string) => void) | null;
+    }>,
     errors: [] as string[],
     settings,
     terminalState,
@@ -52,6 +68,7 @@ vi.mock('@xterm/xterm', () => ({
   Terminal: class FakeTerminal {
     cols = 80;
     rows = 24;
+    onDataHandler: ((data: string) => void) | null = null;
     options: Record<string, unknown>;
 
     constructor(options: Record<string, unknown>) {
@@ -68,7 +85,10 @@ vi.mock('@xterm/xterm', () => ({
     write(): void {}
     writeln(value: string): void { mocks.errors.push(value); }
     dispose(): void {}
-    onData(): { dispose: () => void } { return { dispose: () => undefined }; }
+    onData(handler: (data: string) => void): { dispose: () => void } {
+      this.onDataHandler = handler;
+      return { dispose: () => { this.onDataHandler = null; } };
+    }
   },
 }));
 vi.mock('@xterm/addon-fit', () => ({
@@ -83,8 +103,15 @@ vi.mock('@xterm/addon-fit', () => ({
     }
   },
 }));
-vi.mock('@tauri-apps/api/event', () => ({ listen: vi.fn(async () => () => undefined) }));
-vi.mock('../../lib/terminal-runtime', () => ({ desktopTerminalRuntime: { subscribe: mocks.subscribe } }));
+vi.mock('../../lib/terminal-runtime', () => ({
+  desktopTerminalRuntime: {
+    spawnUserTerminal: mocks.spawnUserTerminal,
+    subscribe: mocks.subscribe,
+    write: mocks.write,
+    resize: mocks.resize,
+    kill: mocks.kill,
+  },
+}));
 vi.mock('../../lib/monaco-themes', () => ({ getXtermTheme: vi.fn(() => ({})) }));
 vi.mock('../../stores/project-store', () => ({
   useProjectStore: (selector: (state: { rootPath: string }) => unknown) => selector({ rootPath: 'C:/workspace' }),
@@ -108,8 +135,21 @@ import { TerminalInstance } from './terminal-instance';
 describe('TerminalInstance', () => {
   beforeEach(() => {
     mocks.invoke.mockClear();
+    mocks.spawnUserTerminal.mockClear();
     mocks.subscribe.mockClear();
+    mocks.write.mockClear();
+    mocks.resize.mockClear();
     mocks.terminals.length = 0;
+    mocks.kill.mockClear();
+    mocks.terminalState.deadCalls.length = 0;
+    mocks.invoke.mockImplementation(async (command: string) =>
+      command === 'pty_spawn' ? 'pty-test' : undefined,
+    );
+    mocks.spawnUserTerminal.mockImplementation(async () => 'pty-test');
+    mocks.subscribe.mockImplementation(async () => () => undefined);
+    mocks.write.mockImplementation(async () => undefined);
+    mocks.resize.mockImplementation(async () => undefined);
+    mocks.kill.mockImplementation(async () => ({ status: 'stopped', failures: [] }));
     mocks.errors.length = 0;
     mocks.settings.terminalFontSize = 15;
     mocks.settings.terminalFontFamily = 'Test Mono';
@@ -145,20 +185,16 @@ describe('TerminalInstance', () => {
   it('uses persisted terminal settings and the measured viewport for a manual PTY', async () => {
     render(<TerminalInstance sessionId="session-1" isActive />);
 
-    await waitFor(() => expect(mocks.invoke).toHaveBeenCalledWith('pty_spawn', expect.objectContaining({
-      shell: 'pwsh.exe',
-      cwd: 'C:/workspace',
-      cols: 120,
-      rows: 32,
-      interactive: true,
-    })));
+    await waitFor(() => expect(mocks.spawnUserTerminal).toHaveBeenCalledWith(
+      'session-1',
+      'C:/workspace',
+      120,
+      32,
+      true,
+    ));
     if (mocks.errors.length > 0) throw new Error(mocks.errors.join('\n'));
     await waitFor(() => expect(mocks.subscribe).toHaveBeenCalled());
-    await waitFor(() => expect(mocks.invoke).toHaveBeenCalledWith('pty_resize', {
-      ptyId: 'pty-test',
-      cols: 120,
-      rows: 32,
-    }));
+    await waitFor(() => expect(mocks.resize).toHaveBeenCalledWith('session-1', 120, 32));
 
     expect(mocks.terminals[0]?.options).toMatchObject({
       fontSize: 15,
@@ -168,6 +204,51 @@ describe('TerminalInstance', () => {
       letterSpacing: 0,
       lineHeight: 1,
     });
+  });
+  it('shows a nonzero process exit code when no runtime failure is available', async () => {
+    mocks.subscribe.mockImplementation(async (
+      _terminalId?: string,
+      _onData?: (data: string, sequence: number) => void,
+      onExit?: (exitCode: number | null, failure?: { operation: string; message: string } | null) => void,
+    ) => {
+      onExit?.(7, null);
+      return () => undefined;
+    });
+    render(<TerminalInstance sessionId="session-1" isActive />);
+
+    await waitFor(() => expect(mocks.errors.some((value) => value.includes('Process exited with code 7'))).toBe(true));
+  });
+
+
+  it('marks a manual terminal dead when direct PTY writes fail', async () => {
+    mocks.write.mockImplementation(async () => {
+      throw new Error('write unavailable');
+    });
+    render(<TerminalInstance sessionId="session-1" isActive />);
+
+    await waitFor(() => expect(mocks.subscribe).toHaveBeenCalled());
+    mocks.terminals[0]?.onDataHandler?.('x');
+
+    await waitFor(() => expect(mocks.terminalState.deadCalls).toHaveLength(1));
+    expect(mocks.write).toHaveBeenCalledWith('session-1', 'x');
+    expect(mocks.kill).toHaveBeenCalledWith('session-1');
+    expect(mocks.errors.some((value) => value.includes('write unavailable'))).toBe(true);
+  });
+
+  it('surfaces spawn failures and records the failed terminal state', async () => {
+    mocks.spawnUserTerminal.mockImplementation(async () => {
+      throw new Error('spawn unavailable');
+    });
+    render(<TerminalInstance sessionId="session-1" isActive />);
+
+    await waitFor(() => expect(mocks.terminalState.deadCalls).toHaveLength(1));
+    expect(mocks.terminalState.deadCalls[0]?.[2]).toMatchObject({
+      operation: 'acquire',
+      message: 'spawn unavailable',
+    });
+    expect(mocks.errors.some((value) => value.includes('Failed to spawn terminal'))).toBe(true);
+    expect(mocks.kill).toHaveBeenCalledWith('session-1');
+    expect(mocks.subscribe).not.toHaveBeenCalled();
   });
 
   it('applies font changes to an already mounted terminal', async () => {

@@ -8,6 +8,7 @@ import type {
   AgentQuestion,
   TurnTerminalStatus,
   ExternalPathAccessRequest,
+  TerminalRuntimeFailure,
 } from '@hyscode/agent-harness';
 import type { MessageContent, TokenUsage } from '@hyscode/ai-providers';
 import type { ProviderErrorDetails } from '@hyscode/ai-providers';
@@ -157,6 +158,9 @@ export interface ToolCallDisplay {
     | 'error'
     | 'cancelled';
   outputSequence?: number;
+  failure?: TerminalRuntimeFailure | null;
+  terminalProvisional?: boolean;
+  terminalCanonical?: boolean;
 }
 
 export interface ChatMessage {

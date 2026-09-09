@@ -1,4 +1,5 @@
 import { StringDecoder } from 'node:string_decoder';
+import type { TerminalRuntimeFailure } from '@hyscode/agent-harness';
 import type { TerminalHandoff } from '@hyscode/tui-runtime';
 import { normalizeTerminalViewport, sameTerminalViewport, type TerminalViewport } from '@hyscode/tui-runtime';
 import { enterAlternateScreen, leaveAlternateScreen } from './input';
@@ -12,16 +13,25 @@ export type TerminalHandoffIo = {
   resumeOuter: () => void;
 };
 
-export async function runTerminalHandoff(terminal: TerminalHandoff, io: TerminalHandoffIo): Promise<void> {
+export type TerminalHandoffOutcome =
+  | { kind: 'detached' }
+  | { kind: 'exited'; exitCode: number | null; failure: TerminalRuntimeFailure | null };
+
+export async function runTerminalHandoff(
+  terminal: TerminalHandoff,
+  io: TerminalHandoffIo,
+): Promise<TerminalHandoffOutcome> {
   if (io.stdin.isTTY !== true || io.stdout.isTTY !== true) {
     throw new Error('Interactive terminal handoff requires a TTY for stdin and stdout.');
   }
 
   let restored = false;
+  let finishPromise: Promise<void> | null = null;
   let unsubscribe: (() => void) | null = null;
   let handoffError: Error | null = null;
   let resolveCompletion: (() => void) | null = null;
   let writeQueue = Promise.resolve();
+  let outcome: TerminalHandoffOutcome | null = null;
   const inputDecoder = new StringDecoder('utf8');
   let pendingViewport: TerminalViewport | null = null;
   let lastRequestedViewport: TerminalViewport | null = null;
@@ -32,6 +42,59 @@ export async function runTerminalHandoff(terminal: TerminalHandoff, io: Terminal
   const completion = new Promise<void>((resolve) => {
     resolveCompletion = resolve;
   });
+
+  const recordCleanupError = (action: () => void): void => {
+    try {
+      action();
+    } catch (error: unknown) {
+      handoffError ??= toError(error);
+    }
+  };
+
+  const finish = (
+    detachTerminal: boolean,
+    exitCode: number | null = null,
+    failure: TerminalRuntimeFailure | null = null,
+  ): Promise<void> => {
+    if (finishPromise) return finishPromise;
+    outcome = detachTerminal
+      ? { kind: 'detached' }
+      : { kind: 'exited', exitCode, failure };
+    restored = true;
+    finishPromise = (async () => {
+      try {
+        recordCleanupError(() => io.stdin.off('data', onInput));
+        recordCleanupError(() => io.stdout.off('resize', resize));
+        recordCleanupError(() => io.stdin.setRawMode?.(false));
+        recordCleanupError(() => io.stdin.pause());
+        recordCleanupError(() => { inputDecoder.end(); });
+        try {
+          unsubscribe?.();
+        } catch (error: unknown) {
+          handoffError ??= toError(error);
+        }
+        unsubscribe = null;
+        for (const signal of signals) {
+          recordCleanupError(() => process.off(signal, onSignal));
+        }
+        await writeQueue.catch((error: unknown) => {
+          handoffError ??= toError(error);
+        });
+        if (detachTerminal) {
+          try {
+            await terminal.detach();
+          } catch (error: unknown) {
+            handoffError ??= toError(error);
+          }
+        }
+        recordCleanupError(() => enterAlternateScreen(io.stdout));
+        recordCleanupError(() => io.resumeOuter());
+      } finally {
+        resolveCompletion?.();
+      }
+    })();
+    return finishPromise;
+  };
 
   const resize = (): void => {
     if (restored) return;
@@ -56,24 +119,6 @@ export async function runTerminalHandoff(terminal: TerminalHandoff, io: Terminal
     })();
   };
 
-  const finish = async (detachTerminal: boolean): Promise<void> => {
-    if (restored) return;
-    restored = true;
-    io.stdin.off('data', onInput);
-    io.stdout.off('resize', resize);
-    io.stdin.setRawMode?.(false);
-    io.stdin.pause();
-    inputDecoder.end();
-    unsubscribe?.();
-    unsubscribe = null;
-    for (const signal of signals) process.off(signal, onSignal);
-    await writeQueue.catch(() => undefined);
-    if (detachTerminal) await terminal.detach().catch(() => undefined);
-    enterAlternateScreen(io.stdout);
-    io.resumeOuter();
-    resolveCompletion?.();
-  };
-
   const onInput = (chunk: Buffer | string): void => {
     if (restored) return;
     const data = inputDecoder.write(typeof chunk === 'string' ? Buffer.from(chunk) : chunk);
@@ -95,19 +140,33 @@ export async function runTerminalHandoff(terminal: TerminalHandoff, io: Terminal
     void finish(true);
   };
 
-  io.pauseOuter();
-  leaveAlternateScreen(io.stdout);
   try {
-    unsubscribe = await terminal.subscribe(
-      (data) => io.stdout.write(data),
-      () => { void finish(false); },
+    io.pauseOuter();
+    leaveAlternateScreen(io.stdout);
+    const subscribed = await terminal.subscribe(
+      (data) => {
+        try {
+          io.stdout.write(data);
+        } catch (error: unknown) {
+          handoffError = toError(error);
+          void finish(true);
+        }
+      },
+      (exitCode, failure) => {
+        void finish(false, exitCode, failure ?? null);
+      },
     );
-    io.stdin.setRawMode?.(true);
-    io.stdin.resume();
-    io.stdin.on('data', onInput);
-    io.stdout.on('resize', resize);
-    for (const signal of signals) process.on(signal, onSignal);
-    resize();
+    if (restored) {
+      recordCleanupError(() => subscribed());
+    } else {
+      unsubscribe = subscribed;
+      io.stdin.setRawMode?.(true);
+      io.stdin.resume();
+      io.stdin.on('data', onInput);
+      io.stdout.on('resize', resize);
+      for (const signal of signals) process.on(signal, onSignal);
+      if (!restored) resize();
+    }
     await completion;
   } catch (error) {
     handoffError = toError(error);
@@ -117,6 +176,8 @@ export async function runTerminalHandoff(terminal: TerminalHandoff, io: Terminal
   }
 
   if (handoffError) throw handoffError;
+  if (!outcome) throw new Error('Terminal handoff completed without an outcome.');
+  return outcome;
 }
 
 function toError(error: unknown): Error {

@@ -10,6 +10,9 @@ export type {
   TerminalBinding,
   TerminalSnapshot,
   TerminalProgress,
+  TerminalFailureOperation,
+  TerminalRuntimeFailure,
+  TerminalStopResult,
   TerminalFrameLanguage,
   TerminalRole,
   ToolCallRecord,
@@ -162,7 +165,13 @@ export type {
 } from './external-path-access';
 
 // ─── Terminal ───────────────────────────────────────────────────────────────
-export { TerminalCommandRunner, stopCommand } from './terminal-command-runner';
+export {
+  TerminalCommandRunner,
+  stopCommand,
+  withTerminalDeadline,
+  TERMINAL_ADAPTER_CALL_TIMEOUT_MS,
+  TERMINAL_STOP_CALL_TIMEOUT_MS,
+} from './terminal-command-runner';
 export type { TerminalCommandInput } from './terminal-command-runner';
 export { CommandWatch } from './command-watch';
 export type { CommandWatchConfig, CommandWatchOutcome } from './command-watch';
@@ -178,6 +187,32 @@ export {
   stripAnsi,
 } from './terminal-protocol';
 export type { ParsedTerminalFrame } from './terminal-protocol';
+export {
+  asTerminalRuntimeFailure,
+  isTerminalRecord,
+  validateTerminalDataEvent,
+  validateTerminalExitCode,
+  validateTerminalExitEvent,
+  validateTerminalFailure,
+  validateTerminalSequence,
+  validateTerminalSnapshot,
+  validateTerminalStopResult,
+  validateTerminalString,
+  TerminalValidationError,
+} from './terminal-runtime-validation';
+export type {
+  NormalizedTerminalDataEvent,
+  NormalizedTerminalExitEvent,
+} from './terminal-runtime-validation';
+export {
+  projectTerminalProgress,
+  projectTerminalRuntimeSummary,
+} from './terminal-progress';
+export type {
+  TerminalProgressProjection,
+  TerminalProgressProjectionCurrent,
+  TerminalRuntimeProjectionInput,
+} from './terminal-progress';
 
 // ─── Memory System ──────────────────────────────────────────────────────────
 export { MemoryManager } from './memory-manager';

@@ -1,12 +1,29 @@
 import { listen } from '@tauri-apps/api/event';
 
 import {
+  asTerminalRuntimeFailure,
+  isTerminalRecord,
+  TerminalValidationError,
+  validateTerminalExitEvent,
+  validateTerminalFailure,
+  validateTerminalSnapshot,
+  validateTerminalStopResult,
+  validateTerminalSequence,
+  validateTerminalString,
+  withTerminalDeadline,
+  TERMINAL_ADAPTER_CALL_TIMEOUT_MS,
+  TERMINAL_STOP_CALL_TIMEOUT_MS,
   normalizeTerminalOutput,
-  type TerminalAccess,
-  type TerminalAcquireRequest,
-  type TerminalBinding,
-  type TerminalRuntimeAdapter,
-  type TerminalSnapshot,
+} from '@hyscode/agent-harness';
+import type {
+  TerminalAccess,
+  TerminalAcquireRequest,
+  TerminalBinding,
+  TerminalRuntimeAdapter,
+  TerminalRuntimeFailure,
+  TerminalShell,
+  TerminalSnapshot,
+  TerminalStopResult,
 } from '@hyscode/agent-harness';
 import { useTerminalStore } from '@/stores/terminal-store';
 import { useSettingsStore } from '@/stores/settings-store';
@@ -14,17 +31,25 @@ import { useSettingsStore } from '@/stores/settings-store';
 import { resolveDesktopShell, selectAgentSession } from './terminal-session-policy';
 import { tauriInvokeRaw } from './tauri-invoke';
 
-type NativeSnapshot = {
+type NativeSnapshotWire = {
+  data: unknown;
+  from_sequence: unknown;
+  to_sequence: unknown;
+  truncated: unknown;
+  alive: unknown;
+  exit_code: unknown;
+  failure: unknown;
+};
+
+type QueuedData = {
   data: string;
-  from_sequence: number;
-  to_sequence: number;
-  truncated: boolean;
-  alive: boolean;
-  exit_code: number | null;
+  sequence: number;
 };
 
 export class DesktopTerminalRuntime implements TerminalRuntimeAdapter {
-  private readonly shellContracts = new Map<string, ReturnType<typeof resolveDesktopShell>>();
+  private readonly shellContracts = new Map<string, TerminalShell>();
+  private readonly stopPromises = new Map<string, Promise<TerminalStopResult>>();
+  private readonly quarantinePromises = new Map<string, Promise<void>>();
 
   async acquire(request: TerminalAcquireRequest): Promise<TerminalBinding> {
     const store = useTerminalStore.getState();
@@ -39,31 +64,100 @@ export class DesktopTerminalRuntime implements TerminalRuntimeAdapter {
       });
       session = useTerminalStore.getState().sessions.find((item) => item.id === sessionId) ?? null;
     }
-    if (!session) throw new Error('Failed to create agent terminal session.');
+    if (!session) throw new TerminalValidationError({
+      operation: 'acquire',
+      message: 'Failed to create agent terminal session.',
+    });
 
     let shell = this.shellContracts.get(session.id) ?? resolveDesktopShell(configuredShell);
-
     let ptyId = session.ptyId;
     if (ptyId) {
-      const alive = await tauriInvokeRaw<boolean>('pty_exists', { ptyId }).catch(() => false);
+      let alive: boolean;
+      try {
+        const result = await withTerminalDeadline(
+          'acquire',
+          () => tauriInvokeRaw<unknown>('pty_exists', { ptyId }),
+          undefined,
+          TERMINAL_ADAPTER_CALL_TIMEOUT_MS,
+        );
+        if (typeof result !== 'boolean') throw new Error('pty_exists returned a non-boolean result.');
+        alive = result;
+      } catch (error) {
+        const failure = asTerminalRuntimeFailure(error, 'acquire');
+        await this.quarantineTerminal(session.id, ptyId, failure);
+        throw new TerminalValidationError(failure);
+      }
       if (!alive) {
-        useTerminalStore.getState().markPtyDead(session.id);
-        this.shellContracts.delete(session.id);
+        const staleSessionId = session.id;
+        this.markSessionDeadIfCurrent(staleSessionId, ptyId, null, null);
+        this.shellContracts.delete(staleSessionId);
+        const isolationKey = request.ownerId ?? request.conversationId;
+        const replacementId = useTerminalStore.getState().createAgentSession({
+          name: request.sessionName,
+          conversationId: isolationKey,
+          cwd: request.cwd,
+        });
+        session = useTerminalStore.getState().sessions.find((item) => item.id === replacementId) ?? null;
+        if (!session) throw new TerminalValidationError({
+          operation: 'acquire',
+          message: 'Failed to create replacement agent terminal session.',
+        });
         shell = resolveDesktopShell(configuredShell);
         ptyId = null;
       }
     }
+    const spawningSessionId = session.id;
+
     if (!ptyId) {
-      ptyId = await tauriInvokeRaw<string>('pty_spawn', {
-        shell: shell.command,
-        cwd: request.cwd,
-        env: null,
-        cols: 120,
-        rows: 32,
-        interactive: false,
-      });
-      useTerminalStore.getState().setPtyId(session.id, ptyId);
-      shell = resolveDesktopShell(configuredShell);
+        const spawned = await withTerminalDeadline(
+          'acquire',
+          () => tauriInvokeRaw<unknown>('pty_spawn', {
+            shell: shell.command,
+            cwd: request.cwd,
+            env: null,
+            cols: 120,
+            rows: 32,
+            interactive: false,
+          }),
+          (latePtyId) => {
+            if (typeof latePtyId !== 'string') {
+              console.error('[terminal-runtime] Late acquire returned an invalid PTY id.', latePtyId);
+              return;
+            }
+            const lateFailure: TerminalRuntimeFailure = {
+              operation: 'acquire',
+              message: 'PTY acquisition completed after its deadline.',
+            };
+            const current = useTerminalStore.getState().sessions.find(
+              (item) => item.id === spawningSessionId,
+            );
+            if (current && current.ptyId === null) {
+              useTerminalStore.getState().setPtyId(spawningSessionId, latePtyId);
+              void this.quarantineTerminal(spawningSessionId, latePtyId, lateFailure);
+              return;
+            }
+            void withTerminalDeadline(
+              'kill',
+              () => tauriInvokeRaw<unknown>('pty_kill', { ptyId: latePtyId }),
+              undefined,
+              TERMINAL_STOP_CALL_TIMEOUT_MS,
+            )
+              .then((rawStop) => {
+                const stop = validateTerminalStopResult(rawStop);
+                if (stop.status !== 'stopped') {
+                  console.error(`[terminal-runtime] Late acquire cleanup was not confirmed (${stop.status}).`, stop.failures);
+                }
+              })
+              .catch((error: unknown) => {
+                console.error('[terminal-runtime] Late acquire cleanup failed.', error);
+              });
+          },
+          TERMINAL_ADAPTER_CALL_TIMEOUT_MS,
+        );
+        ptyId = validateTerminalString(spawned, 'pty_id', 'acquire');
+        useTerminalStore.getState().setPtyId(session.id, ptyId);
+        this.quarantinePromises.delete(session.id);
+        shell = resolveDesktopShell(configuredShell);
     }
 
     this.shellContracts.set(session.id, shell);
@@ -71,33 +165,133 @@ export class DesktopTerminalRuntime implements TerminalRuntimeAdapter {
     return { terminalId: session.id, ptyId, persistent: true, frameLanguage: shell.frameLanguage };
   }
 
-  async snapshot(terminalId: string, afterSequence?: number): Promise<TerminalSnapshot> {
-    const session = this.getSession(terminalId);
-    if (!session.ptyId) throw new Error(`Terminal ${terminalId} has no PTY.`);
-    const snapshot = await tauriInvokeRaw<NativeSnapshot>('pty_snapshot', {
-      ptyId: session.ptyId,
-      afterSequence,
-    });
-    useTerminalStore.getState().setOutputSequence(terminalId, snapshot.to_sequence);
-    return {
-      data: snapshot.data,
-      fromSequence: snapshot.from_sequence,
-      toSequence: snapshot.to_sequence,
-      truncated: snapshot.truncated,
-      alive: snapshot.alive,
-      exitCode: snapshot.exit_code,
-    };
+  async spawnUserTerminal(
+    sessionId: string,
+    cwd: string,
+    cols = 120,
+    rows = 32,
+    interactive = true,
+  ): Promise<string> {
+    const session = this.getSession(sessionId);
+    const shell = this.shellContracts.get(sessionId)
+      ?? resolveDesktopShell(useSettingsStore.getState().terminalShell.trim() || null);
+    try {
+      const spawned = await withTerminalDeadline(
+        'acquire',
+        () => tauriInvokeRaw<unknown>('pty_spawn', {
+          shell: shell.command,
+          cwd,
+          env: null,
+          cols,
+          rows,
+          interactive,
+        }),
+        (latePtyId) => {
+          if (typeof latePtyId !== 'string') {
+            console.error('[terminal-runtime] Late user terminal spawn returned an invalid PTY id.', latePtyId);
+            return;
+          }
+          const lateFailure: TerminalRuntimeFailure = {
+            operation: 'acquire',
+            message: 'User terminal spawn completed after its deadline.',
+          };
+          const current = useTerminalStore.getState().sessions.find((item) => item.id === sessionId);
+          if (current && current.ptyId === null) {
+            useTerminalStore.getState().setPtyId(sessionId, latePtyId);
+            void this.quarantineTerminal(sessionId, latePtyId, lateFailure);
+            return;
+          }
+          void withTerminalDeadline(
+            'kill',
+            () => tauriInvokeRaw<unknown>('pty_kill', { ptyId: latePtyId }),
+            undefined,
+            TERMINAL_STOP_CALL_TIMEOUT_MS,
+          ).catch((error: unknown) => {
+            console.error('[terminal-runtime] Late user terminal cleanup failed.', error);
+          });
+        },
+        TERMINAL_ADAPTER_CALL_TIMEOUT_MS,
+      );
+      const ptyId = validateTerminalString(spawned, 'pty_id', 'acquire');
+      useTerminalStore.getState().setPtyId(session.id, ptyId);
+      this.shellContracts.set(sessionId, shell);
+      return ptyId;
+    } catch (error) {
+      throw new TerminalValidationError(asTerminalRuntimeFailure(error, 'acquire'));
+    }
   }
 
+  async snapshot(terminalId: string, afterSequence?: number): Promise<TerminalSnapshot> {
+    const session = this.getSession(terminalId);
+    if (!session.ptyId) throw new TerminalValidationError({
+      operation: 'snapshot',
+      message: `Terminal ${terminalId} has no PTY.`,
+    });
+    let snapshot: TerminalSnapshot;
+    try {
+      snapshot = await withTerminalDeadline(
+        'snapshot',
+        () => tauriInvokeRaw<unknown>('pty_snapshot', {
+          ptyId: session.ptyId,
+          afterSequence,
+        }),
+        undefined,
+        TERMINAL_ADAPTER_CALL_TIMEOUT_MS,
+      ).then((value) => normalizeNativeSnapshot(value));
+    } catch (error) {
+      const failure = asTerminalRuntimeFailure(error, 'snapshot');
+      this.quarantineTerminal(terminalId, session.ptyId, failure);
+      throw new TerminalValidationError(failure);
+    }
+    const current = useTerminalStore.getState().sessions.find((item) => item.id === terminalId);
+    if (current?.ptyId === session.ptyId) {
+      useTerminalStore.getState().setOutputSequence(terminalId, snapshot.toSequence);
+      if (!snapshot.alive || snapshot.failure) {
+        this.markSessionDeadIfCurrent(
+          terminalId,
+          session.ptyId,
+          snapshot.exitCode,
+          snapshot.failure,
+        );
+      }
+    }
+    return snapshot;
+  }
   async write(terminalId: string, data: string): Promise<void> {
     const session = this.getSession(terminalId);
-    if (!session.ptyId) throw new Error(`Terminal ${terminalId} has no PTY.`);
-    await tauriInvokeRaw('pty_write', { ptyId: session.ptyId, data });
+    if (!session.ptyId) throw new TerminalValidationError({
+      operation: 'write',
+      message: `Terminal ${terminalId} has no PTY.`,
+    });
+    try {
+      await withTerminalDeadline(
+        'write',
+        () => tauriInvokeRaw('pty_write', { ptyId: session.ptyId, data }),
+        undefined,
+        TERMINAL_ADAPTER_CALL_TIMEOUT_MS,
+      );
+    } catch (error) {
+      const failure = asTerminalRuntimeFailure(error, 'write');
+      this.markSessionDeadIfCurrent(terminalId, session.ptyId, session.exitCode, failure);
+      throw new TerminalValidationError(failure);
+    }
   }
 
   async resize(terminalId: string, cols: number, rows: number): Promise<void> {
     const session = this.getSession(terminalId);
-    if (session.ptyId) await tauriInvokeRaw('pty_resize', { ptyId: session.ptyId, cols, rows });
+    if (!session.ptyId) return;
+    try {
+      await withTerminalDeadline(
+        'event',
+        () => tauriInvokeRaw('pty_resize', { ptyId: session.ptyId, cols, rows }),
+        undefined,
+        TERMINAL_ADAPTER_CALL_TIMEOUT_MS,
+      );
+    } catch (error) {
+      const failure = asTerminalRuntimeFailure(error, 'event');
+      this.markSessionDeadIfCurrent(terminalId, session.ptyId, session.exitCode, failure);
+      throw new TerminalValidationError(failure);
+    }
   }
 
   authorize(terminalId: string, access: TerminalAccess): void {
@@ -124,20 +318,67 @@ export class DesktopTerminalRuntime implements TerminalRuntimeAdapter {
 
   async interrupt(terminalId: string): Promise<void> {
     const session = this.getSession(terminalId);
-    if (session.ptyId) await tauriInvokeRaw('pty_interrupt', { ptyId: session.ptyId });
+    if (!session.ptyId) return;
+    try {
+      await withTerminalDeadline(
+        'interrupt',
+        () => tauriInvokeRaw('pty_interrupt', { ptyId: session.ptyId }),
+        undefined,
+        TERMINAL_STOP_CALL_TIMEOUT_MS,
+      );
+    } catch (error) {
+      const failure = asTerminalRuntimeFailure(error, 'interrupt');
+      this.markSessionDeadIfCurrent(terminalId, session.ptyId, session.exitCode, failure);
+      throw new TerminalValidationError(failure);
+    }
   }
 
-  async kill(terminalId: string): Promise<void> {
+  async kill(terminalId: string): Promise<TerminalStopResult> {
+    const existing = this.stopPromises.get(terminalId);
+    if (existing) return existing;
+    const promise = this.killInternal(terminalId);
+    this.stopPromises.set(terminalId, promise);
+    try {
+      return await promise;
+    } finally {
+      if (this.stopPromises.get(terminalId) === promise) this.stopPromises.delete(terminalId);
+    }
+  }
+
+  private async killInternal(terminalId: string): Promise<TerminalStopResult> {
     const session = this.getSession(terminalId);
-    if (session.ptyId) await tauriInvokeRaw('pty_kill', { ptyId: session.ptyId });
-    useTerminalStore.getState().markPtyDead(terminalId);
-    useTerminalStore.getState().setAgentActivity(terminalId, null);
+    const ptyId = session.ptyId;
+    if (!ptyId) return { status: 'stopped', failures: [] };
+    const expectedToolCallId = session.activeToolCallId ?? undefined;
+    try {
+      const raw = await withTerminalDeadline(
+        'kill',
+        () => tauriInvokeRaw<unknown>('pty_kill', { ptyId }),
+        undefined,
+        TERMINAL_STOP_CALL_TIMEOUT_MS,
+      );
+      const stop = validateTerminalStopResult(raw);
+      const failure = stop.failures[0] ?? (
+        stop.status === 'stopped'
+          ? null
+          : {
+              operation: 'kill' as const,
+              message: `Terminal stop was not confirmed (${stop.status}).`,
+            }
+      );
+      this.markSessionDeadIfCurrent(terminalId, ptyId, null, failure, expectedToolCallId);
+      return stop;
+    } catch (error) {
+      const failure = asTerminalRuntimeFailure(error, 'kill');
+      this.markSessionDeadIfCurrent(terminalId, ptyId, null, failure, expectedToolCallId);
+      return { status: 'unknown', failures: [failure] };
+    }
   }
 
   release(terminalId: string, toolCallId: string): void {
     const session = useTerminalStore.getState().sessions.find((item) => item.id === terminalId);
     if (!session || session.activeToolCallId !== toolCallId) return;
-    useTerminalStore.getState().setAgentActivity(terminalId, null);
+    useTerminalStore.getState().clearAgentActivityIfOwned(terminalId, toolCallId);
   }
 
   async snapshotActive(maxChars = 16_000): Promise<{
@@ -166,51 +407,149 @@ export class DesktopTerminalRuntime implements TerminalRuntimeAdapter {
   async subscribe(
     terminalId: string,
     onData: (data: string, sequence: number) => void,
-    onExit: (exitCode: number | null) => void,
+    onExit: (exitCode: number | null, failure?: TerminalRuntimeFailure | null) => void,
   ): Promise<() => void> {
     const session = this.getSession(terminalId);
-    if (!session.ptyId) throw new Error(`Terminal ${terminalId} has no PTY.`);
+    if (!session.ptyId) throw new TerminalValidationError({
+      operation: 'subscribe',
+      message: `Terminal ${terminalId} has no PTY.`,
+    });
     const ptyId = session.ptyId;
-    const queued: Array<{ data: string; sequence: number }> = [];
+    const queued: QueuedData[] = [];
     let replayComplete = false;
     let appliedSequence = 0;
     let exited = false;
-    const unlistenData = await listen<{ pty_id: string; sequence: number; data: string }>(
-      'pty:data',
-      (event) => {
-        if (event.payload.pty_id !== ptyId) return;
-        const chunk = { data: event.payload.data, sequence: event.payload.sequence };
+    let unlistenData: (() => void) | null = null;
+    let unlistenExit: (() => void) | null = null;
+    const reportFailure = (error: unknown): void => {
+      const failure = asTerminalRuntimeFailure(error, 'event');
+      this.quarantineTerminal(terminalId, ptyId, failure);
+      if (exited) return;
+      exited = true;
+      try {
+        onExit(null, failure);
+      } catch (callbackError) {
+        console.error('[terminal-runtime] Terminal exit callback failed.', callbackError);
+      }
+    };
+    const handleData = (event: { payload: unknown }): void => {
+      const payload = event.payload;
+      if (!isTerminalRecord(payload) || payload.pty_id !== ptyId || exited) return;
+      try {
+        const normalized = {
+          data: validateTerminalString(payload.data, 'data', 'event'),
+          sequence: validateTerminalSequence(payload.sequence, 'sequence', 'event'),
+        };
+        const chunk = { data: normalized.data, sequence: normalized.sequence };
         if (!replayComplete) queued.push(chunk);
         else if (chunk.sequence > appliedSequence) {
           appliedSequence = chunk.sequence;
           onData(chunk.data, chunk.sequence);
         }
-      },
-    );
-    const unlistenExit = await listen<{ pty_id: string; code: number | null }>(
-      'pty:exit',
-      (event) => {
-        if (event.payload.pty_id !== ptyId || exited) return;
+      } catch (error) {
+        reportFailure(error);
+      }
+    };
+    const handleExit = (event: { payload: unknown }): void => {
+      const payload = event.payload;
+      if (!isTerminalRecord(payload) || payload.pty_id !== ptyId || exited) return;
+      try {
+        const normalized = validateTerminalExitEvent(payload);
         exited = true;
-        onExit(event.payload.code ?? null);
-      },
-    );
-    const snapshot = await this.snapshot(terminalId);
-    appliedSequence = snapshot.toSequence;
-    if (snapshot.data) onData(snapshot.data, snapshot.toSequence);
-    replayComplete = true;
-    for (const chunk of queued.sort((left, right) => left.sequence - right.sequence)) {
-      if (chunk.sequence <= appliedSequence) continue;
-      appliedSequence = chunk.sequence;
-      onData(chunk.data, chunk.sequence);
-    }
-    if (!snapshot.alive && !exited) {
-      exited = true;
-      onExit(snapshot.exitCode);
+        this.markSessionDeadIfCurrent(terminalId, ptyId, normalized.code, normalized.failure);
+        try {
+          onExit(normalized.code, normalized.failure);
+        } catch (error) {
+          console.error('[terminal-runtime] Terminal exit callback failed.', error);
+        }
+      } catch (error) {
+        reportFailure(error);
+      }
+    };
+
+    try {
+      unlistenData = await withTerminalDeadline(
+        'subscribe',
+        () => listen<unknown>('pty:data', handleData),
+        (lateUnlisten) => {
+          try {
+            lateUnlisten();
+          } catch (error) {
+            console.error('[terminal-runtime] Late data subscription cleanup failed.', error);
+          }
+        },
+        TERMINAL_ADAPTER_CALL_TIMEOUT_MS,
+      );
+      unlistenExit = await withTerminalDeadline(
+        'subscribe',
+        () => listen<unknown>('pty:exit', handleExit),
+        (lateUnlisten) => {
+          try {
+            lateUnlisten();
+          } catch (error) {
+            console.error('[terminal-runtime] Late exit subscription cleanup failed.', error);
+          }
+        },
+        TERMINAL_ADAPTER_CALL_TIMEOUT_MS,
+      );
+      const snapshot = await withTerminalDeadline(
+        'snapshot',
+        () => this.snapshot(terminalId),
+        undefined,
+        TERMINAL_ADAPTER_CALL_TIMEOUT_MS,
+      );
+      appliedSequence = snapshot.toSequence;
+      if (snapshot.data) onData(snapshot.data, snapshot.toSequence);
+      replayComplete = true;
+      for (const chunk of queued.sort((left, right) => left.sequence - right.sequence)) {
+        if (chunk.sequence <= appliedSequence) continue;
+        appliedSequence = chunk.sequence;
+        onData(chunk.data, chunk.sequence);
+      }
+      if ((!snapshot.alive || snapshot.failure) && !exited) {
+        exited = true;
+        onExit(snapshot.exitCode, snapshot.failure);
+      }
+    } catch (error) {
+      let cleanupError: unknown = null;
+      reportFailure(error);
+      try {
+        unlistenData?.();
+      } catch (unsubscribeError) {
+        cleanupError = unsubscribeError;
+      }
+      try {
+        unlistenExit?.();
+      } catch (unsubscribeError) {
+        cleanupError ??= unsubscribeError;
+      }
+      unlistenData = null;
+      unlistenExit = null;
+      if (cleanupError) {
+        const failure = asTerminalRuntimeFailure(error, 'subscribe');
+        const cleanupFailure = asTerminalRuntimeFailure(cleanupError, 'subscribe');
+        throw new TerminalValidationError({
+          operation: failure.operation,
+          message: `${failure.message} Cleanup: ${cleanupFailure.message}`,
+        });
+      }
+      throw error;
     }
     return () => {
-      unlistenData();
-      unlistenExit();
+      let firstError: unknown = null;
+      try {
+        unlistenData?.();
+      } catch (error) {
+        firstError = error;
+      }
+      try {
+        unlistenExit?.();
+      } catch (error) {
+        firstError ??= error;
+      }
+      unlistenData = null;
+      unlistenExit = null;
+      if (firstError) throw firstError;
     };
   }
 
@@ -219,6 +558,66 @@ export class DesktopTerminalRuntime implements TerminalRuntimeAdapter {
     if (!session) throw new Error(`Unknown terminal: ${terminalId}`);
     return session;
   }
+
+  private quarantineTerminal(
+    terminalId: string,
+    ptyId: string,
+    failure: TerminalRuntimeFailure,
+  ): Promise<void> {
+    this.markSessionDeadIfCurrent(terminalId, ptyId, null, failure);
+    const existing = this.quarantinePromises.get(terminalId);
+    if (existing) return existing;
+    const cleanup = this.kill(terminalId)
+      .then((stop) => {
+        if (stop.status !== 'stopped') {
+          console.error(`[terminal-runtime] Terminal quarantine was not confirmed (${stop.status}).`, stop.failures);
+        }
+      })
+      .catch((error: unknown) => {
+        console.error('[terminal-runtime] Terminal quarantine failed.', error);
+      });
+    this.quarantinePromises.set(terminalId, cleanup);
+    return cleanup;
+  }
+
+
+  private markSessionDeadIfCurrent(
+    terminalId: string,
+    expectedPtyId: string,
+    exitCode: number | null,
+    failure: TerminalRuntimeFailure | null,
+    expectedToolCallId?: string,
+  ): void {
+    const session = useTerminalStore.getState().sessions.find((item) => item.id === terminalId);
+    if (!session || session.ptyId !== expectedPtyId) return;
+    useTerminalStore.getState().markPtyDead(
+      terminalId,
+      exitCode,
+      failure,
+      expectedToolCallId ?? session.activeToolCallId ?? undefined,
+    );
+  }
+}
+
+function normalizeNativeSnapshot(raw: unknown): TerminalSnapshot {
+  if (!isTerminalRecord(raw)) throw new TerminalValidationError({
+    operation: 'snapshot',
+    message: 'PTY snapshot must be an object.',
+  });
+  if (!('failure' in raw) || raw.failure === undefined) throw new TerminalValidationError({
+    operation: 'snapshot',
+    message: 'PTY snapshot failure field is missing.',
+  });
+  const native = raw as NativeSnapshotWire;
+  return validateTerminalSnapshot({
+    data: native.data,
+    fromSequence: native.from_sequence,
+    toSequence: native.to_sequence,
+    truncated: native.truncated,
+    alive: native.alive,
+    exitCode: native.exit_code,
+    failure: validateTerminalFailure(native.failure, 'snapshot'),
+  });
 }
 
 export const desktopTerminalRuntime = new DesktopTerminalRuntime();

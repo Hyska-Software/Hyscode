@@ -107,14 +107,18 @@ the shell.
 
 `@hyscode/tui-runtime` owns the TypeScript host adapter and creates native PTYs
 through `node-pty`. PTY output is sequenced and bounded to the Harness capture limit, supports
-snapshot/replay from a sequence, independent subscribers, resize, interrupt, kill, exit events,
-and shutdown. Agent and manual terminals have separate roles and ownership; agent reuse requires
-the same owner, conversation, and normalized `cwd`. The runtime remains the lifecycle authority:
-the TUI normally consumes `terminal_updated` projections, while a manual user terminal may use a
-temporary in-process `TerminalHandoff` for raw stdin/stdout passthrough. Handoff never transfers
-PTY ownership and is denied for agent terminals. The same host also exposes filesystem, Git,
-Docker, web, keychain, memory, SDD, and diagnostic commands to the harness. There is no Rust UI,
-Rust agent runtime, or production host round trip in the TUI path.
+authoritative full snapshots, output-only delta reads, independent subscribers, resize, interrupt,
+kill, exit events, and shutdown. Runtime failures carry their operation and message through terminal
+summaries, progress, and one-shot exit events. Agent and manual terminals have separate roles and
+ownership; agent reuse requires the same owner, conversation, and normalized `cwd`. Bounded stop
+calls return confirmed `stopped` or an explicit `still_running`/`unknown` result; unconfirmed
+sessions are retained and quarantined rather than reused. The runtime remains the lifecycle
+authority: the TUI normally consumes `terminal_updated` projections, while a manual user terminal
+may use a temporary in-process `TerminalHandoff` for raw stdin/stdout passthrough. Handoff returns
+typed detached or exited outcomes and restores the outer TUI before surfacing failures. Handoff
+never transfers PTY ownership and is denied for agent terminals. The same host also exposes
+filesystem, Git, Docker, web, keychain, memory, SDD, and diagnostic commands to the harness. There
+is no Rust UI, Rust agent runtime, or production host round trip in the TUI path.
 
 Desktop settings are mirrored from the existing Zustand/local-storage store to
 the platform shared settings file (`%LOCALAPPDATA%/hyscode/settings.json` on
@@ -225,6 +229,10 @@ terminals remain projected and protected by the Harness. Terminals waiting for n
 still use the guarded composer input mode. Resize events are forwarded to the active PTY. Chat,
 review, and plan policies continue to deny terminal tools; build and debug keep them enabled and
 report tool errors through the normal TUI activity and result surfaces.
+Terminal failures are rendered as a non-running final state with the operation and diagnostic
+message. Live progress is provisional and cannot replace a canonical tool result; full runtime
+snapshots remain authoritative when events arrive out of order. A terminal that cannot be confirmed
+stopped remains visible as quarantined and is never silently reused.
 
 `Ctrl-C` cancels an active turn and quits when the input is empty; `Shift-Tab`
 cycles agent modes; `Ctrl-T` cycles supported thinking levels; `Tab` changes

@@ -1,8 +1,15 @@
 import { readdir, readFile, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { isSensitiveTerminalPrompt, normalizeTerminalOutput } from '@hyscode/agent-harness';
-import type { AgentType, FileChangePending, HarnessEvent, SddTask } from '@hyscode/agent-harness';
+import {
+  isSensitiveTerminalPrompt,
+  normalizeTerminalOutput,
+  projectTerminalProgress,
+  projectTerminalRuntimeSummary,
+  validateTerminalFailure,
+  validateTerminalSnapshot,
+} from '@hyscode/agent-harness';
+import type { AgentType, FileChangePending, HarnessEvent, SddTask, TerminalSnapshot } from '@hyscode/agent-harness';
 import type { Message, ThinkingConfig, TokenUsage } from '@hyscode/ai-providers';
 import type {
   BridgeMessage,
@@ -17,13 +24,13 @@ import type {
   SessionRecord,
   SddStatePayload,
   TerminalSummary,
-  TerminalUpdatedPayload,
   TuiBridge,
 } from '@hyscode/tui-runtime';
 import { BUILTIN_THEMES, CliUpdaterError, DEFAULT_THEME_ID, normalizeTerminalViewport } from '@hyscode/tui-runtime';
 import { MODE_OPTIONS, commandArgument, matchingCommands, parseSlashCommand, resolveCommandName, selectionOptions } from './commands';
 import { AGENT_TYPES } from './types';
 import type { AgentTaskListItem, CliOptions, CommandFlow, ContextView, InteractionState, Key, MemoryView, RuleView, RuntimeNotice, SkillView, SubAgentView, ToolView, TranscriptItem, TranscriptKind, UiState } from './types';
+import type { TerminalHandoffOutcome } from './terminal-handoff';
 import { SUBAGENT_OUTPUT_CAP, SUBAGENT_THINKING_CAP, appendCappedText, createSubAgentView, mergeTokenUsage } from './subagent-state';
 
 const SELECTION_PAGE_SIZE = 8;
@@ -35,7 +42,7 @@ export type RuntimeClient = Pick<TuiBridge, 'handle'>;
 export type TuiControllerOptions = {
   updater?: CliUpdater;
   interactive?: boolean;
-  onTerminalAttach?: (terminalId: string) => Promise<void>;
+  onTerminalAttach?: (terminalId: string) => Promise<TerminalHandoffOutcome>;
 };
 
 export class TuiController {
@@ -47,7 +54,7 @@ export class TuiController {
   private gitRefreshInFlight = false;
   private readonly updater: CliUpdater | null;
   private readonly interactive: boolean;
-  private readonly onTerminalAttach: ((terminalId: string) => Promise<void>) | null;
+  private readonly onTerminalAttach: ((terminalId: string) => Promise<TerminalHandoffOutcome>) | null;
   private startupUpdateTimer: ReturnType<typeof setTimeout> | null = null;
   private downloadedUpdate: DownloadedUpdate | null = null;
   private initialized = false;
@@ -411,7 +418,7 @@ export class TuiController {
         if (method === 'terminal_open') this.state.mainPanel = 'terminal';
         break;
       case 'terminal_snapshot':
-        this.applyTerminalSnapshot(response.result);
+        this.applyTerminalSnapshot(response.result, requestParams);
         break;
       case 'file_change_resolve':
       case 'file_change_resolve_all':
@@ -487,9 +494,14 @@ export class TuiController {
     }
     if (payload.context) this.applyContext(payload.context);
     if (payload.sdd) this.applySdd(payload.sdd);
-    if (payload.terminals) {
+    if (Array.isArray(payload.terminals)) {
       const merged = new Map<string, TerminalSummary>();
-      for (const terminal of payload.terminals) {
+      for (const value of payload.terminals) {
+        const terminal = normalizeTerminalSummary(value);
+        if (!terminal) {
+          this.append('error', 'Runtime terminal summary was invalid');
+          continue;
+        }
         this.mergeTerminal(merged, terminal);
         this.terminalOutputSequence.set(terminal.terminalId, terminal.sequence);
       }
@@ -622,10 +634,15 @@ export class TuiController {
 
   private applyTerminals(result: unknown): void {
     const values = Array.isArray(result) ? result : [result];
-    const terminals = values.filter((value): value is TerminalSummary => {
-      const item = asRecord(value);
-      return typeof item.terminalId === 'string' && typeof item.ptyId === 'string';
-    });
+    const terminals: TerminalSummary[] = [];
+    for (const value of values) {
+      const terminal = normalizeTerminalSummary(value);
+      if (!terminal) {
+        this.append('error', 'Runtime terminal summary was invalid');
+        continue;
+      }
+      terminals.push(terminal);
+    }
     if (Array.isArray(result)) {
       const merged = new Map(this.state.terminals.map((terminal) => [terminal.terminalId, terminal]));
       for (const terminal of terminals) this.mergeTerminal(merged, terminal);
@@ -640,34 +657,125 @@ export class TuiController {
         this.state.activeTerminalId = next.terminalId;
       }
     }
+    for (const terminal of terminals) this.applyTerminalRuntimeSummary(terminal);
   }
 
-  private applyTerminalSnapshot(result: unknown): void {
-    const snapshot = asRecord(result);
-    const terminalId = stringValue(snapshot.terminalId, this.state.activeTerminalId ?? '');
+  private applyTerminalSnapshot(result: unknown, requestParams: Record<string, unknown>): void {
+    const snapshotRecord = asRecord(result);
+    let snapshot: TerminalSnapshot;
+    try {
+      snapshot = validateTerminalSnapshot(snapshotRecord);
+    } catch (error) {
+      this.append('error', error instanceof Error ? error.message : String(error));
+      return;
+    }
+    const terminalId = stringValue(snapshotRecord.terminalId, this.state.activeTerminalId ?? '');
     const terminal = this.state.terminals.find((candidate) => candidate.terminalId === terminalId);
     if (!terminal) return;
-    const sequence = numberValue(snapshot.toSequence, terminal.sequence);
-    if (sequence < terminal.sequence) return;
-    terminal.outputPreview = normalizeTerminalOutput(stringValue(snapshot.data, terminal.outputPreview), 4_000);
-    terminal.sequence = sequence;
-    this.terminalOutputSequence.set(terminalId, Math.max(this.terminalOutputSequence.get(terminalId) ?? 0, sequence));
-    terminal.alive = snapshot.alive !== false;
-    terminal.exitCode = typeof snapshot.exitCode === 'number' || snapshot.exitCode === null ? snapshot.exitCode : terminal.exitCode;
-    terminal.truncated = snapshot.truncated === true || terminal.truncated;
+    const data = snapshot.data;
+    const snapshotIsFinal = !snapshot.alive || Boolean(snapshot.failure);
+    if (snapshot.toSequence < terminal.sequence && !snapshotIsFinal) return;
+    const afterSequence = numberValue(requestParams.afterSequence, 0);
+    if (afterSequence === 0 && snapshot.toSequence >= terminal.sequence) {
+      terminal.outputPreview = normalizeTerminalOutput(data, 4_000);
+    }
+    terminal.sequence = Math.max(terminal.sequence, snapshot.toSequence);
+    this.terminalOutputSequence.set(terminalId, Math.max(this.terminalOutputSequence.get(terminalId) ?? 0, snapshot.toSequence));
+    const wasDead = !terminal.alive;
+    terminal.alive = wasDead ? false : snapshot.alive && !snapshot.failure;
+    if (snapshot.exitCode !== null || terminal.exitCode === null) terminal.exitCode = snapshot.exitCode;
+    terminal.failure ??= snapshot.failure;
+    terminal.truncated = snapshot.truncated || terminal.truncated;
+    if (!terminal.alive || terminal.failure) {
+      terminal.activeToolCallId = null;
+      terminal.awaitingInput = false;
+    }
+    if (snapshot.failure) {
+      this.state.status = `Terminal failed · ${snapshot.failure.message}`;
+    } else if (!snapshot.alive || wasDead) {
+      this.state.status = 'Terminal exited';
+    }
+    this.applyTerminalRuntimeSummary(terminal);
   }
 
-  private applyTerminalUpdated(payload: TerminalUpdatedPayload): void {
-    const terminal = payload.terminal;
-    if (payload.turnId && this.currentTurnId && payload.turnId !== this.currentTurnId) return;
-    if (payload.conversationId && this.currentConversationId && payload.conversationId !== this.currentConversationId) return;
+  private applyTerminalRuntimeSummary(terminal: TerminalSummary): void {
+    if (terminal.alive && !terminal.failure) return;
+    const tool = [...this.state.tools]
+      .reverse()
+      .find((candidate) => {
+        if (candidate.terminalId !== terminal.terminalId || candidate.terminalCanonical) return false;
+        return candidate.status === 'running'
+          || candidate.terminalState === 'started'
+          || candidate.terminalState === 'running'
+          || candidate.terminalState === 'awaiting_input';
+      });
+    if (!tool) return;
+    const projection = projectTerminalRuntimeSummary(
+      {
+        terminalId: tool.terminalId,
+        terminalState: tool.terminalState,
+        outputSequence: tool.outputSequence,
+        liveOutput: tool.liveOutput,
+        failure: tool.failure,
+        provisional: tool.terminalProvisional,
+        canonical: tool.terminalCanonical,
+      },
+      {
+        terminalId: terminal.terminalId,
+        sequence: terminal.sequence,
+        alive: terminal.alive,
+        exitCode: terminal.exitCode ?? null,
+        failure: terminal.failure,
+      },
+    );
+    if (!projection) return;
+    this.updateTool(tool.id, {
+      status: 'error',
+      terminalId: projection.terminalId,
+      terminalState: projection.terminalState,
+      outputSequence: projection.outputSequence,
+      liveOutput: projection.liveOutput,
+      failure: projection.failure,
+      error: projection.failure?.message,
+      terminalProvisional: true,
+      terminalCanonical: false,
+    });
+  }
+
+  private applyTerminalUpdated(payload: unknown): void {
+    const item = asRecord(payload);
+    const terminal = normalizeTerminalSummary(item.terminal);
+    if (!terminal) {
+      this.append('error', 'Runtime terminal update was invalid');
+      return;
+    }
+    const turnId = typeof item.turnId === 'string' ? item.turnId : null;
+    const conversationId = typeof item.conversationId === 'string' ? item.conversationId : null;
+    if (turnId && this.currentTurnId && turnId !== this.currentTurnId) return;
+    if (conversationId && this.currentConversationId && conversationId !== this.currentConversationId) return;
     if (terminal.ownerConversationId && this.currentConversationId && terminal.ownerConversationId !== this.currentConversationId) return;
-    const previousSequence = this.terminalOutputSequence.get(terminal.terminalId) ?? 0;
-    if (terminal.sequence < previousSequence) return;
-    const merged = new Map(this.state.terminals.map((item) => [item.terminalId, item]));
+    const cause = item.cause === 'created' || item.cause === 'output' || item.cause === 'state' || item.cause === 'exit'
+      ? item.cause
+      : null;
+    if (!cause) {
+      this.append('error', 'Runtime terminal update cause was invalid');
+      return;
+    }
+    const current = this.state.terminals.find((entry) => entry.terminalId === terminal.terminalId);
+    const samePty = current?.ptyId === terminal.ptyId;
+    const previousSequence = samePty
+      ? this.terminalOutputSequence.get(terminal.terminalId) ?? 0
+      : 0;
+    const terminalIsFinal = !terminal.alive || Boolean(terminal.failure);
+    if (samePty && terminal.sequence < previousSequence && !terminalIsFinal) return;
+    if (samePty && current && !current.alive && terminal.alive && !terminal.failure) return;
+    const merged = new Map(this.state.terminals.map((entry) => [entry.terminalId, entry]));
     this.mergeTerminal(merged, terminal);
     this.state.terminals = [...merged.values()];
-    this.terminalOutputSequence.set(terminal.terminalId, terminal.sequence);
+    this.terminalOutputSequence.set(
+      terminal.terminalId,
+      Math.max(this.terminalOutputSequence.get(terminal.terminalId) ?? 0, terminal.sequence),
+    );
     if (!this.state.activeTerminalId) this.state.activeTerminalId = terminal.terminalId;
     if (
       terminal.awaitingInput
@@ -686,21 +794,51 @@ export class TuiController {
       this.state.terminalInput = null;
       this.clearInput();
     }
-    if (payload.cause === 'exit' && this.state.terminalInput?.terminalId === terminal.terminalId) {
+    if (cause === 'exit' && this.state.terminalInput?.terminalId === terminal.terminalId) {
       this.state.terminalInput = null;
       this.clearInput();
     }
+    this.applyTerminalRuntimeSummary(terminal);
+    if (terminal.failure) this.state.status = `Terminal failed · ${terminal.failure.message}`;
+    else if (cause === 'exit') this.state.status = 'Terminal exited';
   }
 
   private mergeTerminal(target: Map<string, TerminalSummary>, next: TerminalSummary): void {
     const current = target.get(next.terminalId);
-    if (current && next.sequence < current.sequence) return;
+    const samePty = current?.ptyId === next.ptyId;
+    const staleFinal = Boolean(
+      current
+      && samePty
+      && next.sequence < current.sequence
+      && (!next.alive || next.failure),
+    );
+    if (current && samePty && next.sequence < current.sequence && !staleFinal) return;
+    if (current && samePty && !current.alive && next.alive && !next.failure) return;
+    const exitCode = samePty
+      && current?.exitCode !== undefined
+      && (next.exitCode === undefined || next.exitCode === null)
+      ? current.exitCode
+      : next.exitCode;
     target.set(next.terminalId, {
       ...current,
       ...next,
-      outputPreview: normalizeTerminalOutput(next.outputPreview ?? current?.outputPreview ?? '', 4_000),
+      sequence: Math.max(current?.sequence ?? 0, next.sequence),
+      ...(exitCode !== undefined ? { exitCode } : {}),
+      alive: samePty && current && !current.alive ? false : next.alive && !next.failure,
+      failure: samePty && current?.failure && !next.failure ? current.failure : next.failure,
+      outputPreview: normalizeTerminalOutput(
+        staleFinal ? current?.outputPreview ?? next.outputPreview : next.outputPreview ?? current?.outputPreview ?? '',
+        4_000,
+      ),
     });
-    this.terminalOutputSequence.set(next.terminalId, Math.max(this.terminalOutputSequence.get(next.terminalId) ?? 0, next.sequence));
+    this.terminalOutputSequence.set(
+      next.terminalId,
+      Math.max(
+        this.terminalOutputSequence.get(next.terminalId) ?? 0,
+        current?.sequence ?? 0,
+        next.sequence,
+      ),
+    );
   }
 
   private applySdd(payload: SddStatePayload): void {
@@ -848,14 +986,68 @@ export class TuiController {
         this.state.status = event.description;
         break;
       case 'tool_call_result': {
+        const resultMetadata = event.result.metadata ?? {};
+        const terminalId = typeof resultMetadata.terminalId === 'string' ? resultMetadata.terminalId : undefined;
+        const existing = this.state.tools.find((tool) => tool.id === event.toolCallId);
+        const expanded = existing?.expanded;
         const linkedToTranscript = this.state.transcript.some((item) => item.toolId === event.toolCallId);
-        const expanded = event.toolName === 'spawn_subagent' && event.result.success && !ownerId ? true : undefined;
+        let failure: ToolView['failure'] = null;
+        if ('failure' in resultMetadata) {
+          if (resultMetadata.failure === undefined) {
+            failure = {
+              operation: 'event',
+              message: 'Terminal result failure must be null or a runtime failure.',
+            };
+          } else if (resultMetadata.failure === null) {
+            failure = null;
+          } else {
+            try {
+              failure = validateTerminalFailure(resultMetadata.failure, 'event');
+            } catch (error) {
+              failure = {
+                operation: 'event',
+                message: error instanceof Error ? error.message : String(error),
+              };
+            }
+          }
+        }
+        const awaitingInput = resultMetadata.awaitingInput === true;
+        const terminalState = terminalId
+          ? awaitingInput
+            ? 'awaiting_input'
+            : failure
+              ? 'error'
+              : event.result.success
+                ? resultMetadata.background === true ? 'background' : 'complete'
+                : resultMetadata.cancelled === true ? 'cancelled' : 'error'
+          : undefined;
         this.updateTool(event.toolCallId, {
-          status: event.result.success ? 'success' : 'error',
+          status: awaitingInput
+            ? 'awaiting_input'
+            : resultMetadata.cancelled === true || failure
+              ? resultMetadata.cancelled === true ? 'cancelled' : 'error'
+              : event.result.success
+                ? 'success'
+                : 'error',
           output: event.result.output,
           error: event.result.error,
           durationMs: event.durationMs,
-          ...(expanded !== undefined ? { expanded } : {}),
+          ...(typeof resultMetadata.sequence === 'number' && Number.isSafeInteger(resultMetadata.sequence) && resultMetadata.sequence >= 0 ? { outputSequence: resultMetadata.sequence } : {}),
+          failure,
+          ...(terminalId
+            ? {
+                terminalId,
+                terminalState,
+                liveOutput: event.result.output,
+                terminalProvisional: false,
+                terminalCanonical: true,
+              }
+            : {}),
+          ...(event.toolName === 'spawn_subagent' && event.result.success && !ownerId
+            ? { expanded: true }
+            : expanded !== undefined
+              ? { expanded }
+              : {}),
         });
         if (ownerId) this.upsertSubAgent(ownerId, { toolId: event.toolCallId });
         else {
@@ -899,6 +1091,7 @@ export class TuiController {
         this.addNotice('warning', `${event.recovery.error.userMessage || event.recovery.error.technicalMessage} · ${event.recovery.action}`);
         break;
       case 'turn_end':
+        this.sweepUnfinalizedTerminalTools(ownerId);
         this.applyUsage(event.tokenUsage);
         if (ownerId) {
           this.upsertSubAgent(ownerId, {
@@ -962,6 +1155,37 @@ export class TuiController {
         break;
     }
   }
+  private sweepUnfinalizedTerminalTools(ownerId: string | null): void {
+    for (const tool of this.state.tools) {
+      const belongsToTurn = ownerId ? tool.ownerId === ownerId : !tool.ownerId;
+      if (!belongsToTurn || !tool.terminalId || tool.terminalCanonical) continue;
+      if (tool.input.background === true || tool.terminalState === 'background') continue;
+      const active =
+        tool.status === 'running'
+        || tool.terminalState === 'started'
+        || tool.terminalState === 'running'
+        || tool.terminalState === 'awaiting_input';
+      if (!active) continue;
+      const failure = {
+        operation: 'event' as const,
+        message: 'Terminal command ended without a final result.',
+      };
+      this.updateTool(tool.id, {
+        status: 'error',
+        terminalState: 'error',
+        terminalProvisional: true,
+        terminalCanonical: false,
+        failure,
+        error: failure.message,
+      });
+      const terminal = this.state.terminals.find((candidate) => candidate.terminalId === tool.terminalId);
+      if (terminal?.activeToolCallId === tool.id) {
+        terminal.activeToolCallId = null;
+        terminal.awaitingInput = false;
+      }
+    }
+  }
+
 
   private upsertTool(tool: ToolView): void {
     const existing = this.state.tools.find((candidate) => candidate.id === tool.id);
@@ -999,6 +1223,7 @@ export class TuiController {
       });
       return;
     }
+    if (existing.terminalCanonical && patch.terminalCanonical !== true) return;
     const { liveOutputAppend, ...rest } = patch;
     if (rest.outputSequence !== undefined && rest.outputSequence < existing.outputSequence) delete rest.outputSequence;
     if (
@@ -1014,12 +1239,42 @@ export class TuiController {
   }
 
   private applyTerminalProgress(progress: NonNullable<Extract<HarnessEvent, { type: 'terminal_progress' }>['progress']>, ownerId: string | null): void {
-    const previousSequence = this.terminalOutputSequence.get(progress.terminalId) ?? 0;
-    if (progress.sequence < previousSequence || (progress.sequence === previousSequence && progress.chunk)) return;
-    if (progress.sequence > previousSequence) this.terminalOutputSequence.set(progress.terminalId, progress.sequence);
+    const existing = this.state.tools.find((tool) => tool.id === progress.toolCallId);
+    const previousSequence = Math.max(
+      this.terminalOutputSequence.get(progress.terminalId) ?? 0,
+      existing?.outputSequence ?? 0,
+    );
+    const current = existing
+      ? {
+          terminalId: existing.terminalId,
+          terminalState: existing.terminalState,
+          outputSequence: previousSequence,
+          liveOutput: existing.liveOutput,
+          failure: existing.failure,
+          provisional: existing.terminalProvisional,
+          canonical: existing.terminalCanonical,
+        }
+      : previousSequence > 0
+        ? { outputSequence: previousSequence }
+        : undefined;
+    const projection = projectTerminalProgress(
+      current,
+      progress,
+      {
+        provisional: progress.state === 'complete'
+          || progress.state === 'error'
+          || progress.state === 'cancelled'
+          || progress.state === 'background',
+      },
+    );
+    if (!projection) return;
+
     const raw = this.terminalRawOutput.get(progress.terminalId) ?? '';
-    const nextRaw = progress.chunk ? `${raw}${progress.chunk}`.slice(-65_536) : raw;
+    const nextRaw = progress.sequence > previousSequence && progress.chunk
+      ? `${raw}${progress.chunk}`.slice(-65_536)
+      : raw;
     this.terminalRawOutput.set(progress.terminalId, nextRaw);
+    this.terminalOutputSequence.set(progress.terminalId, projection.outputSequence);
     const liveOutput = normalizeTerminalOutput(nextRaw, 65_536);
     const status = progress.state === 'error'
       ? 'error'
@@ -1032,15 +1287,21 @@ export class TuiController {
             : 'running';
     this.updateTool(progress.toolCallId, {
       liveOutput,
-      terminalId: progress.terminalId,
-      terminalState: progress.state,
-      outputSequence: Math.max(previousSequence, progress.sequence),
+      terminalId: projection.terminalId,
+      terminalState: projection.terminalState,
+      outputSequence: projection.outputSequence,
+      failure: projection.failure,
+      terminalProvisional: projection.provisional,
+      terminalCanonical: false,
       status,
     });
     if (progress.state === 'awaiting_input' && !ownerId && this.state.approvalMode !== 'yolo') {
       this.state.terminalInput = { terminalId: progress.terminalId, masked: isSensitiveTerminalPrompt(nextRaw) };
       this.state.mainPanel = 'terminal';
       this.state.status = 'Terminal input required';
+    } else if (progress.state !== 'awaiting_input' && this.state.terminalInput?.terminalId === progress.terminalId) {
+      this.state.terminalInput = null;
+      this.clearInput();
     }
   }
 
@@ -1483,8 +1744,14 @@ export class TuiController {
     this.state.mainPanel = 'terminal';
     this.state.status = `Attaching terminal · ${terminal.name}`;
     try {
-      await this.onTerminalAttach(terminalId);
-      this.state.status = `Detached terminal · ${terminal.name}`;
+      const outcome = await this.onTerminalAttach(terminalId);
+      if (outcome.kind === 'detached') {
+        this.state.status = `Detached terminal · ${terminal.name}`;
+      } else if (outcome.failure) {
+        this.state.status = `Terminal exited with failure · ${outcome.failure.message}`;
+      } else {
+        this.state.status = `Terminal exited · code ${outcome.exitCode ?? 'unknown'}`;
+      }
     } catch (error) {
       this.state.status = 'Terminal attach failed';
       this.state.lastError = error instanceof Error ? error.message : String(error);
@@ -2593,6 +2860,92 @@ export class TuiController {
   private thinkingLabel(): string {
     return this.state.thinking.enabled ? this.state.thinking.level ?? 'on' : 'off';
   }
+}
+
+function normalizeTerminalSummary(value: unknown): TerminalSummary | null {
+  const item = asRecord(value);
+  if (
+    typeof item.terminalId !== 'string'
+    || item.terminalId.length === 0
+    || typeof item.ptyId !== 'string'
+    || item.ptyId.length === 0
+    || typeof item.name !== 'string'
+    || typeof item.alive !== 'boolean'
+    || typeof item.sequence !== 'number'
+    || !Number.isSafeInteger(item.sequence)
+    || item.sequence < 0
+    || typeof item.outputPreview !== 'string'
+    || (item.frameLanguage !== 'bash' && item.frameLanguage !== 'powershell')
+    || !('failure' in item)
+    || item.failure === undefined
+  ) {
+    return null;
+  }
+  if (
+    'role' in item
+    && item.role !== undefined
+    && item.role !== 'user'
+    && item.role !== 'agent'
+  ) return null;
+  if (
+    ('cwd' in item && item.cwd !== undefined && typeof item.cwd !== 'string')
+    || ('ownerConversationId' in item && item.ownerConversationId !== undefined && typeof item.ownerConversationId !== 'string')
+    || ('ownerId' in item && item.ownerId !== undefined && typeof item.ownerId !== 'string')
+    || ('activeToolCallId' in item && item.activeToolCallId !== undefined && item.activeToolCallId !== null && typeof item.activeToolCallId !== 'string')
+    || ('awaitingInput' in item && item.awaitingInput !== undefined && typeof item.awaitingInput !== 'boolean')
+    || ('truncated' in item && item.truncated !== undefined && typeof item.truncated !== 'boolean')
+    || ('handoffActive' in item && item.handoffActive !== undefined && typeof item.handoffActive !== 'boolean')
+    || ('canUserWrite' in item && item.canUserWrite !== undefined && typeof item.canUserWrite !== 'boolean')
+  ) return null;
+  if (
+    'exitCode' in item
+    && item.exitCode !== undefined
+    && item.exitCode !== null
+    && (typeof item.exitCode !== 'number' || !Number.isSafeInteger(item.exitCode))
+  ) return null;
+  let failure: TerminalSummary['failure'];
+  try {
+    failure = validateTerminalFailure(item.failure, 'event');
+  } catch {
+    return null;
+  }
+  if (failure === null && item.failure !== null) return null;
+  const permissions = item.permissions;
+  if (
+    permissions !== undefined
+    && (
+      typeof permissions !== 'object'
+      || permissions === null
+      || typeof (permissions as Record<string, unknown>).read !== 'boolean'
+      || typeof (permissions as Record<string, unknown>).write !== 'boolean'
+      || typeof (permissions as Record<string, unknown>).respond !== 'boolean'
+      || typeof (permissions as Record<string, unknown>).interrupt !== 'boolean'
+      || typeof (permissions as Record<string, unknown>).kill !== 'boolean'
+      || typeof (permissions as Record<string, unknown>).resize !== 'boolean'
+    )
+  ) return null;
+  const role = item.role === 'user' || item.role === 'agent' ? item.role : undefined;
+  return {
+    terminalId: item.terminalId,
+    ptyId: item.ptyId,
+    name: item.name,
+    alive: item.alive,
+    sequence: item.sequence,
+    outputPreview: item.outputPreview,
+    frameLanguage: item.frameLanguage,
+    failure,
+    ...(role ? { role } : {}),
+    ...(typeof item.cwd === 'string' ? { cwd: item.cwd } : {}),
+    ...(typeof item.ownerConversationId === 'string' ? { ownerConversationId: item.ownerConversationId } : {}),
+    ...(typeof item.ownerId === 'string' ? { ownerId: item.ownerId } : {}),
+    ...('activeToolCallId' in item && item.activeToolCallId !== undefined ? { activeToolCallId: item.activeToolCallId as string | null } : {}),
+    ...('awaitingInput' in item && item.awaitingInput !== undefined ? { awaitingInput: item.awaitingInput as boolean } : {}),
+    ...('exitCode' in item && item.exitCode !== undefined ? { exitCode: item.exitCode as number | null } : {}),
+    ...('truncated' in item && item.truncated !== undefined ? { truncated: item.truncated as boolean } : {}),
+    ...('handoffActive' in item && item.handoffActive !== undefined ? { handoffActive: item.handoffActive as boolean } : {}),
+    ...('canUserWrite' in item && item.canUserWrite !== undefined ? { canUserWrite: item.canUserWrite as boolean } : {}),
+    ...(permissions ? { permissions: permissions as TerminalSummary['permissions'] } : {}),
+  };
 }
 
 function asRecord(value: unknown): Record<string, unknown> {

@@ -87,6 +87,7 @@ export type ParsedTerminalFrame = {
   output: string;
   exitCode: number | null;
   started: boolean;
+  protocolError: string | null;
 };
 
 export function parseTerminalFrame(raw: string, nonce: string): ParsedTerminalFrame {
@@ -94,25 +95,49 @@ export function parseTerminalFrame(raw: string, nonce: string): ParsedTerminalFr
   const end = frameMarker('END', nonce);
   const lines = stripAnsi(raw).split('\n');
   const beginIndex = lines.findIndex((line) => line.trim() === begin);
-  if (beginIndex < 0) return { complete: false, output: '', exitCode: null, started: false };
+  if (beginIndex < 0) {
+    return { complete: false, output: '', exitCode: null, started: false, protocolError: null };
+  }
 
   // The END marker may arrive glued to the command's last partial line (a
   // trailing progress spinner without a newline). Accept it as a line suffix.
-  const endPattern = new RegExp(`^(.*?)${end}:(-?\\d+)$`);
+  const escapedEnd = escapeRegExp(end);
+  const endPattern = new RegExp(`^(.*?)${escapedEnd}:([-+]?\\d+)$`);
   for (let index = beginIndex + 1; index < lines.length; index++) {
-    const match = lines[index].trim().match(endPattern);
-    if (!match) continue;
-    const before = lines
-      .slice(beginIndex + 1, index)
-      .join('\n')
-      .trim();
-    const inline = match[1].trim();
-    return {
-      complete: true,
-      output: [before, inline].filter((part) => part.length > 0).join('\n'),
-      exitCode: Number.parseInt(match[2], 10),
-      started: true,
-    };
+    const line = lines[index].trim();
+    const match = line.match(endPattern);
+    if (match) {
+      const exitCode = Number(match[2]);
+      if (!Number.isSafeInteger(exitCode)) {
+        return {
+          complete: false,
+          output: frameOutput(lines, beginIndex + 1, index, match[1]),
+          exitCode: null,
+          started: true,
+          protocolError: 'The terminal completion marker contained an unsafe exit code.',
+        };
+      }
+      return {
+        complete: true,
+        output: frameOutput(lines, beginIndex + 1, index, match[1]),
+        exitCode,
+        started: true,
+        protocolError: null,
+      };
+    }
+    if (line.includes(end)) {
+      const isPowerShellWrapperEcho = line.includes('$hysCode')
+        || line.includes('$__hyscode_')
+        || INTERNAL_POWERSHELL_PATTERNS.some((pattern) => pattern.test(line));
+      if (isPowerShellWrapperEcho) continue;
+      return {
+        complete: false,
+        output: frameOutput(lines, beginIndex + 1, index),
+        exitCode: null,
+        started: true,
+        protocolError: 'The terminal completion marker contained an invalid exit code.',
+      };
+    }
   }
   return {
     complete: false,
@@ -122,7 +147,18 @@ export function parseTerminalFrame(raw: string, nonce: string): ParsedTerminalFr
       .trim(),
     exitCode: null,
     started: true,
+    protocolError: null,
   };
+}
+
+function frameOutput(lines: string[], start: number, end: number, inline = ''): string {
+  const before = lines.slice(start, end).join('\n').trim();
+  const suffix = inline.trim();
+  return [before, suffix].filter((part) => part.length > 0).join('\n');
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 /** Lines that only exist because the PowerShell wrapper was echoed into the shell. */
@@ -180,9 +216,16 @@ export function looksLikeTerminalPrompt(output: string): boolean {
     .filter(Boolean)
     .at(-1);
   if (!line) return false;
-  return /(?:\?|:\s*$|\[(?:y\/n|Y\/n|yes\/no)\]\s*$|\((?:y\/n|yes\/no)\)\s*$|password\s*:|passphrase\s*:|press (?:enter|return)|select (?:an? )?(?:option|choice)|enter (?:a )?(?:value|choice|number|name))/i.test(
-    line,
-  );
+
+  const explicitChoice = /(?:\[(?:y\/n|Y\/n|yes\/no)\]|\((?:y\/n|yes\/no)\))\s*$/i;
+  const sensitiveLabel = /^(?:password|passphrase|secret|api(?:[_ -]?key)?|access(?:[_ -]?token)?|mfa(?:\s+code)?|one[- ]time(?:\s+code)?|verification(?:\s+code)?|captcha)\s*:\s*$/i;
+  const actionRequest = /^(?:please\s+)?(?:continue|proceed|confirm|overwrite|retry|install|trust)\b(?:[^?]*\?|\s*:\s*)$/i;
+  return explicitChoice.test(line)
+    || sensitiveLabel.test(line)
+    || /^\s*press\s+(?:enter|return)\b.*$/i.test(line)
+    || /^(?:select|choose)\b.+:\s*$/i.test(line)
+    || /^(?:enter|provide)\b.+:\s*$/i.test(line)
+    || actionRequest.test(line);
 }
 
 export function isSensitiveTerminalPrompt(output: string): boolean {

@@ -1,10 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
 import type { TerminalProgress } from '@hyscode/agent-harness';
+import { projectTerminalProgress } from '@hyscode/agent-harness';
 import type { ToolCallDisplay } from '@/stores/agent-store';
-
-import { projectTerminalProgress } from './terminal-progress';
-
 function progress(overrides: Partial<TerminalProgress> = {}): TerminalProgress {
   return {
     toolCallId: 'tool-1',

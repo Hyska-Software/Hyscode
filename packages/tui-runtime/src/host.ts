@@ -3,7 +3,18 @@ import { mkdir, readFile, readdir, rename, rm, stat, writeFile, copyFile } from 
 import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
-import { MAX_CAPTURE_CHARS } from '@hyscode/agent-harness';
+import {
+  MAX_CAPTURE_CHARS,
+  TERMINAL_STOP_CALL_TIMEOUT_MS,
+  TerminalValidationError,
+  asTerminalRuntimeFailure,
+  type TerminalRuntimeFailure,
+  type TerminalStopResult,
+  validateTerminalExitCode,
+  validateTerminalFailure,
+  validateTerminalStopResult,
+  withTerminalDeadline,
+} from '@hyscode/agent-harness';
 import { spawn as spawnPtyProcess, type IDisposable, type IPty } from './pty';
 import { normalizeTerminalViewport, sameTerminalViewport, type TerminalViewport } from './terminal-handoff';
 import type { CliDataStore } from './data-store';
@@ -28,6 +39,9 @@ type PtySession = {
   viewport: TerminalViewport;
   alive: boolean;
   exitCode: number | null;
+  failure: TerminalRuntimeFailure | null;
+  exitEmitted: boolean;
+  stopConfirmed: boolean;
 };
 
 type ProcessResult = {
@@ -39,6 +53,7 @@ type ProcessResult = {
 const MAX_PTY_OUTPUT = MAX_CAPTURE_CHARS;
 const MAX_SEARCH_FILES = 20_000;
 const DEFAULT_COMMAND_TIMEOUT = 120_000;
+const PTY_STOP_POLL_MS = 50;
 
 export class CliHost {
   private readonly listeners = new Map<string, Set<Listener>>();
@@ -53,14 +68,48 @@ export class CliHost {
   ) {}
 
   async shutdown(): Promise<void> {
+    const failures: TerminalRuntimeFailure[] = [];
     if (this.requestPty) {
       await Promise.all(Array.from(this.remotePtys, async (id) => {
-        await this.requestPty?.('pty_kill', { ptyId: id }).catch(() => undefined);
+        try {
+          const result = validateTerminalStopResult(await withTerminalDeadline(
+            'kill',
+            () => this.requestPty!('pty_kill', { ptyId: id }),
+            undefined,
+            TERMINAL_STOP_CALL_TIMEOUT_MS,
+          ));
+          if (result.status !== 'stopped') {
+            failures.push(...result.failures);
+            if (result.failures.length === 0) {
+              failures.push({
+                operation: 'kill',
+                message: `Remote PTY "${id}" stop was not confirmed (${result.status}).`,
+              });
+            }
+          }
+          if (result.status === 'stopped') this.remotePtys.delete(id);
+        } catch (error) {
+          failures.push(asTerminalRuntimeFailure(error, 'kill'));
+        }
       }));
-      this.remotePtys.clear();
     }
-    await Promise.all(Array.from(this.ptys.keys(), (id) => this.killPty(id)));
-    this.ptys.clear();
+    await Promise.all(Array.from(this.ptys.keys(), async (id) => {
+      try {
+        const result = await this.killPty(id);
+        if (result.status !== 'stopped') {
+          failures.push(...result.failures);
+          if (result.failures.length === 0) {
+            failures.push({
+              operation: 'kill',
+              message: `PTY "${id}" stop was not confirmed (${result.status}).`,
+            });
+          }
+        }
+      } catch (error) {
+        failures.push(asTerminalRuntimeFailure(error, 'kill'));
+      }
+    }));
+    if (failures[0]) throw new TerminalValidationError(failures[0]);
   }
 
   async listen(event: string, handler: Listener): Promise<() => void> {
@@ -161,12 +210,11 @@ export class CliHost {
       case 'pty_kill':
         if (this.requestPty) {
           const id = String(args.ptyId ?? args.id ?? '');
-          await this.requestPty('pty_kill', args);
-          this.remotePtys.delete(id);
-          return undefined as T;
+          const result = validateTerminalStopResult(await this.requestPty('pty_kill', args));
+          if (result.status === 'stopped') this.remotePtys.delete(id);
+          return result as T;
         }
-        await this.killPty(String(args.ptyId ?? args.id ?? ''));
-        return undefined as T;
+        return await this.killPty(String(args.ptyId ?? args.id ?? '')) as T;
       case 'pty_interrupt':
         if (this.requestPty) {
           await this.requestPty('pty_interrupt', args);
@@ -174,9 +222,19 @@ export class CliHost {
         }
         this.interruptPty(String(args.ptyId ?? args.id ?? ''));
         return undefined as T;
-      case 'pty_exists':
+      case 'pty_exists': {
         if (this.requestPty) return await this.requestPty('pty_exists', args) as T;
-        return (this.ptys.get(String(args.ptyId ?? args.id ?? ''))?.alive === true) as T;
+        const id = String(args.ptyId ?? args.id ?? '');
+        const session = this.ptys.get(id);
+        if (!session) return false as T;
+        if (session.failure) {
+          throw new Error(`PTY session ${id} has a lifecycle failure [${session.failure.operation}]: ${session.failure.message}`);
+        }
+        if (!session.alive && !session.stopConfirmed) {
+          throw new Error(`PTY session ${id} liveness is unconfirmed.`);
+        }
+        return session.alive as T;
+      }
       case 'pty_snapshot':
         if (this.requestPty) return await this.requestPty('pty_snapshot', args) as T;
         return this.snapshotPty(String(args.ptyId ?? args.id ?? ''), numberValue(args.afterSequence, 0)) as T;
@@ -455,19 +513,39 @@ export class CliHost {
       viewport,
       alive: true,
       exitCode: null,
+      failure: null,
+      stopConfirmed: false,
+      exitEmitted: false,
     };
     this.ptys.set(id, session);
     session.dataSubscription = terminal.onData((data) => this.emitPtyData(session, data));
-    session.exitSubscription = terminal.onExit(({ exitCode }) => {
-      session.alive = false;
-      session.exitCode = exitCode ?? null;
-      this.emit('pty:exit', { pty_id: id, code: session.exitCode, sequence: session.sequence });
+    session.exitSubscription = terminal.onExit((event) => {
+      const eventWithFailure = event as unknown as {
+        exitCode?: unknown;
+        failure?: unknown;
+      };
+      let exitCode: number | null;
+      try {
+        exitCode = validateTerminalExitCode(eventWithFailure.exitCode ?? null, 'code', 'wait');
+      } catch (error) {
+        this.markPtyFailure(session, asTerminalRuntimeFailure(error, 'wait'));
+        return;
+      }
+      let failure: TerminalRuntimeFailure | null = null;
+      if (eventWithFailure.failure !== undefined && eventWithFailure.failure !== null) {
+        try {
+          failure = validateTerminalFailure(eventWithFailure.failure);
+        } catch (error) {
+          failure = asTerminalRuntimeFailure(error, 'wait');
+        }
+      }
+      this.recordPtyExit(session, exitCode, failure);
     });
     return id;
   }
 
   private emitPtyData(session: PtySession, data: string): void {
-    if (!data) return;
+    if (!session.alive || !data) return;
     session.sequence += 1;
     session.chunks.push({ sequence: session.sequence, data });
     session.outputSize += data.length;
@@ -478,10 +556,66 @@ export class CliHost {
     this.emit('pty:data', { pty_id: session.id, data, sequence: session.sequence });
   }
 
+  private recordPtyExit(
+    session: PtySession,
+    exitCode: number | null,
+    failure: TerminalRuntimeFailure | null,
+  ): void {
+    if (session.exitEmitted) {
+      let conflictingExit = false;
+      if (exitCode !== null) {
+        if (session.exitCode === null) {
+          session.exitCode = exitCode;
+        } else if (session.exitCode !== exitCode) {
+          const message = `Conflicting terminal exit codes: ${session.exitCode} and ${exitCode}.`;
+          if (session.failure) {
+            session.failure.message = `${session.failure.message} ${message}`;
+          } else {
+            session.failure = {
+              operation: 'event',
+              message,
+            };
+          }
+          conflictingExit = true;
+        }
+      }
+      if (failure) {
+        session.failure ??= failure;
+        session.stopConfirmed = false;
+      } else if (!conflictingExit) {
+        session.stopConfirmed = true;
+      }
+      return;
+    }
+    session.alive = false;
+    session.stopConfirmed = failure === null;
+    session.exitCode = exitCode;
+    session.failure = failure;
+    session.exitEmitted = true;
+    this.emit('pty:exit', {
+      pty_id: session.id,
+      code: session.exitCode,
+      sequence: session.sequence,
+      failure: session.failure,
+    });
+  }
+
+  private markPtyFailure(session: PtySession, failure: TerminalRuntimeFailure): void {
+    this.recordPtyExit(session, session.exitCode, failure);
+  }
+
   private writePty(id: string, data: string): void {
     const session = this.ptys.get(id);
     if (!session?.alive) throw new Error(`PTY "${id}" is not writable.`);
-    session.terminal.write(data);
+    try {
+      session.terminal.write(data);
+    } catch (error) {
+      this.markPtyFailure(session, {
+        operation: 'write',
+        message: error instanceof Error ? error.message : String(error),
+      });
+      throw error;
+    }
   }
 
   private resizePty(id: string, cols: number, rows: number): void {
@@ -489,55 +623,119 @@ export class CliHost {
     if (!session?.alive) return;
     const viewport = normalizeTerminalViewport(cols, rows, session.viewport);
     if (sameTerminalViewport(session.viewport, viewport)) return;
-    session.terminal.resize(viewport.cols, viewport.rows);
-    session.viewport = viewport;
+    try {
+      session.terminal.resize(viewport.cols, viewport.rows);
+      session.viewport = viewport;
+    } catch (error) {
+      this.markPtyFailure(session, {
+        operation: 'event',
+        message: error instanceof Error ? error.message : String(error),
+      });
+      throw error;
+    }
   }
-
-  private async killPty(id: string): Promise<void> {
+  private async killPty(id: string): Promise<TerminalStopResult> {
     const session = this.ptys.get(id);
-    if (!session) return;
-    if (!session.alive) {
+    if (!session) {
+      return {
+        status: 'unknown',
+        failures: [{ operation: 'kill', message: `PTY "${id}" not found.` }],
+      };
+    }
+    if (!session.alive && session.stopConfirmed) {
       session.dataSubscription.dispose();
       session.exitSubscription.dispose();
-      return;
+      this.ptys.delete(id);
+      return {
+        status: 'stopped',
+        failures: session.failure ? [session.failure] : [],
+      };
     }
-    await new Promise<void>((resolve) => {
+    session.alive = false;
+    session.stopConfirmed = false;
+    let killFailure: TerminalRuntimeFailure | null = null;
+    const status = await new Promise<'stopped' | 'unknown'>((resolve) => {
       let settled = false;
-      const finish = () => {
+      let deadlineTimer: ReturnType<typeof setTimeout> | null = null;
+      let pollTimer: ReturnType<typeof setTimeout> | null = null;
+      const finish = (result: 'stopped' | 'unknown'): void => {
         if (settled) return;
         settled = true;
-        resolve();
+        if (deadlineTimer) clearTimeout(deadlineTimer);
+        if (pollTimer) clearTimeout(pollTimer);
+        deadlineTimer = null;
+        pollTimer = null;
+        resolve(result);
       };
-      const exitSubscription = session.terminal.onExit(finish);
+      const poll = (): void => {
+        if (session.stopConfirmed) {
+          finish('stopped');
+          return;
+        }
+        pollTimer = setTimeout(poll, PTY_STOP_POLL_MS);
+      };
+      deadlineTimer = setTimeout(() => finish('unknown'), TERMINAL_STOP_CALL_TIMEOUT_MS);
       try {
         session.terminal.kill();
-      } catch {
-        finish();
+        poll();
+      } catch (error) {
+        killFailure = {
+          operation: 'kill',
+          message: error instanceof Error ? error.message : String(error),
+        };
+        finish('unknown');
       }
-      setTimeout(() => exitSubscription.dispose(), 2000);
-      setTimeout(finish, 2000);
     });
-    session.dataSubscription.dispose();
-    session.exitSubscription.dispose();
+    if (status === 'stopped') {
+      session.alive = false;
+      session.stopConfirmed = true;
+      session.dataSubscription.dispose();
+      session.exitSubscription.dispose();
+      this.ptys.delete(id);
+      return {
+        status,
+        failures: session.failure ? [session.failure] : [],
+      };
+    }
+    const failure = killFailure ?? {
+      operation: 'kill' as const,
+      message: `PTY "${id}" did not exit within the stop deadline.`,
+    };
+    this.markPtyFailure(session, failure);
+    return { status: 'unknown', failures: [failure] };
   }
 
   private interruptPty(id: string): void {
     const session = this.ptys.get(id);
     if (!session?.alive) return;
-    session.terminal.write('\u0003');
+    try {
+      session.terminal.write('\u0003');
+    } catch (error) {
+      this.markPtyFailure(session, {
+        operation: 'interrupt',
+        message: error instanceof Error ? error.message : String(error),
+      });
+      throw error;
+    }
   }
 
   private snapshotPty(id: string, afterSequence: number): Record<string, unknown> {
     const session = this.ptys.get(id);
     if (!session) throw new Error(`PTY "${id}" not found.`);
-    const selected = session.chunks.filter((chunk) => chunk.sequence > afterSequence);
+    const selected = afterSequence === 0
+      ? session.chunks
+      : session.chunks.filter((chunk) => chunk.sequence > afterSequence);
+    const toSequence = session.sequence;
+    const firstAvailable = session.chunks[0]?.sequence ?? toSequence;
+    const fromSequence = selected[0]?.sequence ?? Math.min(afterSequence, toSequence);
     return {
       data: selected.map((chunk) => chunk.data).join(''),
-      from_sequence: selected[0]?.sequence ?? afterSequence,
-      to_sequence: session.sequence,
-      truncated: session.chunks[0]?.sequence !== undefined && session.chunks[0].sequence > afterSequence + 1,
+      from_sequence: fromSequence,
+      to_sequence: toSequence,
+      truncated: firstAvailable > afterSequence + 1,
       alive: session.alive,
       exit_code: session.exitCode,
+      failure: session.failure,
     };
   }
 
@@ -656,7 +854,13 @@ export class CliHost {
   }
 
   private emit(event: string, payload: unknown): void {
-    for (const listener of this.listeners.get(event) ?? []) listener(payload);
+    for (const listener of this.listeners.get(event) ?? []) {
+      try {
+        listener(payload);
+      } catch (error) {
+        console.error(`[tui-host] ${event} listener failed.`, error);
+      }
+    }
   }
 }
 

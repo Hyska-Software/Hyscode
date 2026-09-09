@@ -17,7 +17,13 @@ import { CATEGORY_RISK } from './types';
 import { resolveAuthorizedPath } from './path-policy';
 import type { ExternalPathField, ExternalPathOperation } from './external-path-access';
 import { normalizeTerminalOutput } from './terminal-protocol';
-import { stopCommand, TerminalCommandRunner } from './terminal-command-runner';
+import { asTerminalRuntimeFailure, validateTerminalSnapshot } from './terminal-runtime-validation';
+import {
+  stopCommand,
+  TerminalCommandRunner,
+  TERMINAL_ADAPTER_CALL_TIMEOUT_MS,
+  withTerminalDeadline,
+} from './terminal-command-runner';
 
 // ─── Helper ─────────────────────────────────────────────────────────────────
 
@@ -717,29 +723,38 @@ export const readTerminalOutputTool = defineTool(
     const adapter = ctx.terminal;
     if (!adapter) return { success: false, output: '', error: 'Terminal runtime is unavailable.' };
     try {
-      await adapter.authorize?.(terminalId, {
+      const access: TerminalAccess = {
         conversationId: ctx.conversationId,
         ...(ctx.ownerId ? { ownerId: ctx.ownerId } : {}),
         toolCallId: ctx.toolCallId,
         source: 'agent',
-      });
-      const snapshot = await adapter.snapshot(
-        terminalId,
-        input.after_sequence as number | undefined,
-      );
-      return {
-        success: true,
-        output: normalizeTerminalOutput(snapshot.data, (input.max_chars as number) || 16_000),
-        metadata: {
-          terminalId,
-          sequence: snapshot.toSequence,
-          alive: snapshot.alive,
-          exitCode: snapshot.exitCode,
-          truncated: snapshot.truncated,
-        },
       };
+      await withTerminalDeadline(
+        'authorize',
+        () => adapter.authorize?.(terminalId, access),
+        undefined,
+        TERMINAL_ADAPTER_CALL_TIMEOUT_MS,
+      );
+      const snapshot = validateTerminalSnapshot(await withTerminalDeadline(
+        'snapshot',
+        () => adapter.snapshot(terminalId, input.after_sequence as number | undefined),
+        undefined,
+        TERMINAL_ADAPTER_CALL_TIMEOUT_MS,
+      ));
+      const output = normalizeTerminalOutput(snapshot.data, (input.max_chars as number) || 16_000);
+      const metadata = {
+        terminalId,
+        sequence: snapshot.toSequence,
+        alive: snapshot.alive,
+        exitCode: snapshot.exitCode,
+        truncated: snapshot.truncated,
+        ...(snapshot.failure ? { failure: snapshot.failure } : {}),
+      };
+      if (snapshot.failure) return { success: false, output, error: snapshot.failure.message, metadata };
+      return { success: true, output, metadata };
     } catch (error) {
-      return { success: false, output: '', error: String(error) };
+      const failure = asTerminalRuntimeFailure(error, 'snapshot');
+      return { success: false, output: '', error: failure.message, metadata: { terminalId, failure } };
     }
   },
 );
@@ -790,18 +805,25 @@ export const stopTerminalProcessTool = defineTool(
     const adapter = ctx.terminal;
     if (!adapter) return { success: false, output: '', error: 'Terminal runtime is unavailable.' };
     try {
-      await stopCommand(adapter, terminalId, {
+      const stop = await stopCommand(adapter, terminalId, {
         conversationId: ctx.conversationId,
         ...(ctx.ownerId ? { ownerId: ctx.ownerId } : {}),
         toolCallId: ctx.toolCallId,
         source: 'agent',
       });
-      const snapshot = await adapter.snapshot(terminalId).catch(() => null);
-      if (snapshot?.alive)
-        return { success: false, output: '', error: `Process did not stop: ${terminalId}` };
-      return { success: true, output: `Stopped terminal ${terminalId}.`, metadata: { terminalId } };
+      const metadata = {
+        terminalId,
+        stopStatus: stop.status,
+        stopFailures: stop.failures,
+      };
+      if (stop.status !== 'stopped') {
+        const detail = stop.failures[0]?.message ?? `Terminal cleanup was not confirmed (${stop.status}).`;
+        return { success: false, output: '', error: detail, metadata };
+      }
+      return { success: true, output: `Stopped terminal ${terminalId}.`, metadata };
     } catch (error) {
-      return { success: false, output: '', error: String(error) };
+      const failure = asTerminalRuntimeFailure(error, 'kill');
+      return { success: false, output: '', error: failure.message, metadata: { terminalId, failure } };
     }
   },
 );

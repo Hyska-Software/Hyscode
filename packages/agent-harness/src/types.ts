@@ -133,6 +133,31 @@ export type TerminalAccess = {
 
 export type TerminalFrameLanguage = 'bash' | 'powershell';
 
+export type TerminalFailureOperation =
+  | 'acquire'
+  | 'authorize'
+  | 'subscribe'
+  | 'snapshot'
+  | 'write'
+  | 'interrupt'
+  | 'kill'
+  | 'reader'
+  | 'wait'
+  | 'protocol'
+  | 'event'
+  | 'release'
+  | 'timeout';
+
+export type TerminalRuntimeFailure = {
+  operation: TerminalFailureOperation;
+  message: string;
+};
+
+export type TerminalStopResult = {
+  status: 'stopped' | 'still_running' | 'unknown';
+  failures: TerminalRuntimeFailure[];
+};
+
 export type TerminalBinding = {
   terminalId: string;
   ptyId: string;
@@ -148,14 +173,20 @@ export type TerminalSnapshot = {
   truncated: boolean;
   alive: boolean;
   exitCode: number | null;
+  failure: TerminalRuntimeFailure | null;
 };
 
 export interface TerminalRuntimeAdapter {
   acquire(request: TerminalAcquireRequest): Promise<TerminalBinding>;
+  /**
+   * A snapshot without `afterSequence`, or with `afterSequence === 0`, is a
+   * full authoritative aggregate. A positive `afterSequence` returns only the
+   * output delta after that sequence and is intended for output readers.
+   */
   snapshot(terminalId: string, afterSequence?: number): Promise<TerminalSnapshot>;
   write(terminalId: string, data: string): Promise<void>;
   interrupt(terminalId: string): Promise<void>;
-  kill(terminalId: string): Promise<void>;
+  kill(terminalId: string): Promise<TerminalStopResult>;
   /** Optional access check used by runtimes that expose multiple owners. */
   authorize?(terminalId: string, access: TerminalAccess): Promise<void> | void;
   /** Resize the PTY when the backend supports interactive dimensions. */
@@ -166,7 +197,7 @@ export interface TerminalRuntimeAdapter {
   subscribe?(
     terminalId: string,
     onData: (data: string, sequence: number) => void,
-    onExit: (exitCode: number | null) => void,
+    onExit: (exitCode: number | null, failure?: TerminalRuntimeFailure | null) => void,
   ): Promise<() => void>;
 }
 
@@ -183,6 +214,7 @@ export type TerminalProgress = {
     | 'complete'
     | 'error'
     | 'cancelled';
+  failure?: TerminalRuntimeFailure;
 };
 
 /** Emitted when a tool writes/edits/creates a file so the UI can track it */

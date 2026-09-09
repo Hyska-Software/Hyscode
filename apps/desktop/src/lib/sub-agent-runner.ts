@@ -1,4 +1,4 @@
-import { DelegatedRunner, Harness, resolveEffectiveAgentPolicy, SUB_AGENT_PREAMBLE } from '@hyscode/agent-harness';
+import { DelegatedRunner, Harness, projectTerminalProgress, resolveEffectiveAgentPolicy, SUB_AGENT_PREAMBLE, asTerminalRuntimeFailure, validateTerminalFailure } from '@hyscode/agent-harness';
 import type {
   AgentType,
   Skill,
@@ -311,32 +311,91 @@ export class SubAgentRunner {
         break;
       }
       case 'tool_call_result': {
+        const metadata = event.result.metadata ?? {};
+        let failure: ToolCallDisplay['failure'] = null;
+        if ('failure' in metadata) {
+          if (metadata.failure === undefined) {
+            failure = {
+              operation: 'event',
+              message: 'Terminal result failure must be null or a runtime failure.',
+            };
+          } else if (metadata.failure === null) {
+            failure = null;
+          } else {
+            try {
+              failure = validateTerminalFailure(metadata.failure, 'event');
+            } catch (error) {
+              failure = asTerminalRuntimeFailure(error, 'event');
+            }
+          }
+        }
+        const terminalId = typeof metadata.terminalId === 'string' ? metadata.terminalId : undefined;
+        const awaitingInput = metadata.awaitingInput === true;
         this.replaceToolCall(event.toolCallId, {
-          status: event.result.success
-            ? 'success'
-            : event.result.error?.toLowerCase().includes('cancel')
-              ? 'cancelled'
+          status: metadata.cancelled === true || failure
+            ? metadata.cancelled === true ? 'cancelled' : 'error'
+            : event.result.success
+              ? 'success'
               : 'error',
           output: event.result.output,
           error: event.result.error,
           completedAt: Date.now(),
+          ...(terminalId ? { terminalCanonical: !awaitingInput, terminalProvisional: awaitingInput } : {}),
+          ...(terminalId
+            ? {
+                terminalId,
+                liveOutput: event.result.output,
+                terminalState: awaitingInput
+                  ? 'awaiting_input'
+                  : failure
+                    ? 'error'
+                    : metadata.cancelled === true
+                      ? 'cancelled'
+                      : event.result.success
+                        ? metadata.background === true ? 'background' : 'complete'
+                        : 'error',
+              }
+            : {}),
+          ...(typeof metadata.sequence === 'number' && Number.isSafeInteger(metadata.sequence) && metadata.sequence >= 0
+            ? { outputSequence: metadata.sequence }
+            : {}),
+          failure,
         });
         this.scheduleToolCallsUpdate();
         break;
       }
       case 'terminal_progress': {
         const progress = event.progress;
-        const liveOutput = this.toolCallCache.find(
-          (tc) => tc.id === progress.toolCallId,
-        )?.liveOutput;
-        const nextLive = (liveOutput ?? '') + progress.chunk;
+        const existing = this.toolCallCache.find((tc) => tc.id === progress.toolCallId);
+        const projection = projectTerminalProgress(
+          existing
+            ? {
+                terminalId: existing.terminalId,
+                terminalState: existing.terminalState,
+                outputSequence: existing.outputSequence,
+                liveOutput: existing.liveOutput,
+                failure: existing.failure,
+                provisional: existing.terminalProvisional,
+                canonical: existing.terminalCanonical,
+              }
+            : undefined,
+          progress,
+          {
+            provisional: progress.state === 'complete'
+              || progress.state === 'error'
+              || progress.state === 'cancelled'
+              || progress.state === 'background',
+          },
+        );
+        if (!projection) break;
         this.replaceToolCall(progress.toolCallId, {
-          terminalId: progress.terminalId,
-          terminalState: progress.state,
-          liveOutput:
-            nextLive.length > MAX_LIVE_OUTPUT_CHARS
-              ? nextLive.slice(-MAX_LIVE_OUTPUT_CHARS)
-              : nextLive,
+          terminalId: projection.terminalId,
+          terminalState: projection.terminalState,
+          outputSequence: projection.outputSequence,
+          liveOutput: projection.liveOutput,
+          failure: projection.failure,
+          terminalProvisional: projection.provisional,
+          terminalCanonical: false,
         });
         this.scheduleToolCallsUpdate();
         break;

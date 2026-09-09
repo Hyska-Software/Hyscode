@@ -181,6 +181,37 @@ describe('terminal store — agent sessions', () => {
       activeToolCallId: null,
     });
   });
+  it('retains failure metadata and protects a newer tool owner from late death events', () => {
+    const sessionId = useTerminalStore.getState().createAgentSession();
+    useTerminalStore.getState().setPtyId(sessionId, 'pty-dead');
+    useTerminalStore.getState().setAgentActivity(sessionId, 'tool-new');
+    useTerminalStore.getState().setAwaitingInput(sessionId, true);
+
+    useTerminalStore.getState().markPtyDead(
+      sessionId,
+      7,
+      { operation: 'reader', message: 'reader failed' },
+      'tool-old',
+    );
+
+    expect(useTerminalStore.getState().sessions[0]).toMatchObject({
+      isDead: true,
+      exitCode: 7,
+      failure: { operation: 'reader', message: 'reader failed' },
+      activeToolCallId: 'tool-new',
+      awaitingInput: true,
+    });
+
+    useTerminalStore.getState().markPtyDead(
+      sessionId,
+      9,
+      { operation: 'wait', message: 'late wait failure' },
+    );
+    expect(useTerminalStore.getState().sessions[0]).toMatchObject({
+      exitCode: 7,
+      failure: { operation: 'reader', message: 'reader failed' },
+    });
+  });
 
   it('allows manual input only for waiting agent terminals outside auto-approve', () => {
     const session = {

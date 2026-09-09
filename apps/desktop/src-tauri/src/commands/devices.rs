@@ -1,6 +1,5 @@
 use super::utils::cmd;
 use serde::{Deserialize, Serialize};
-use tauri::Emitter;
 
 const DEVICE_PTY_COLS: u16 = 120;
 const DEVICE_PTY_ROWS: u16 = 24;
@@ -475,7 +474,6 @@ pub async fn run_on_device(
     state: tauri::State<'_, super::pty::PtyState>,
 ) -> Result<String, String> {
     use portable_pty::CommandBuilder;
-    use std::io::Read;
 
     let flutter = resolve_flutter(flutter_sdk_path.as_deref());
     let sdk_root = resolve_android_sdk_root(android_sdk_path.as_deref());
@@ -538,92 +536,19 @@ pub async fn run_on_device(
         }
     }
 
-    let mut child = pair
+    let child = pair
         .slave
         .spawn_command(cmd)
         .map_err(|e| format!("Failed to spawn: {e}"))?;
 
-    drop(pair.slave);
-
-    let pty_id = uuid::Uuid::new_v4().to_string();
-
-    // ── Store session before starting event threads ───────────────────────────
-    let mut reader = pair
-        .master
-        .try_clone_reader()
-        .map_err(|e| format!("Failed to clone PTY reader: {e}"))?;
-    let writer = pair
-        .master
-        .take_writer()
-        .map_err(|e| format!("Failed to take PTY writer: {e}"))?;
-    let killer = child.clone_killer();
-    {
-        let mut sessions = state.0.lock().map_err(|e| format!("Lock error: {e}"))?;
-        sessions.insert(
-            pty_id.clone(),
-            super::pty::PtySession {
-                writer,
-                master: pair.master,
-                killer,
-                alive: true,
-                exit_code: None,
-                cols: DEVICE_PTY_COLS,
-                rows: DEVICE_PTY_ROWS,
-                output: super::pty::OutputBuffer::new(),
-            },
-        );
-    }
-
-    // ── Reader thread ─────────────────────────────────────────────────────────
-    let reader_id = pty_id.clone();
-    let reader_state = std::sync::Arc::clone(&state.0);
-    let app_clone = app.clone();
-    std::thread::spawn(move || {
-        let mut buf = [0u8; 4096];
-        loop {
-            match reader.read(&mut buf) {
-                Ok(0) => break,
-                Ok(n) => {
-                    let text = String::from_utf8_lossy(&buf[..n]).to_string();
-                    let sequence = reader_state.lock().ok().and_then(|mut sessions| {
-                        sessions
-                            .get_mut(&reader_id)
-                            .map(|session| session.output.append(text.clone()))
-                    });
-                    if let Some(sequence) = sequence {
-                        let _ = app_clone.emit(
-                            "pty:data",
-                            serde_json::json!({ "pty_id": reader_id, "sequence": sequence, "data": text }),
-                        );
-                    }
-                }
-                Err(_) => break,
-            }
-        }
-    });
-
-    let waiter_id = pty_id.clone();
-    let waiter_state = std::sync::Arc::clone(&state.0);
-    std::thread::spawn(move || {
-        let exit_code = child.wait().ok().map(|status| status.exit_code());
-        let sequence = waiter_state
-            .lock()
-            .ok()
-            .and_then(|mut sessions| {
-                sessions.get_mut(&waiter_id).map(|session| {
-                    session.alive = false;
-                    session.exit_code = exit_code;
-                    session.output.sequence
-                })
-            })
-            .unwrap_or_default();
-        let _ = app.emit(
-            "pty:exit",
-            serde_json::json!({ "pty_id": waiter_id, "sequence": sequence, "code": exit_code }),
-        );
-    });
-
-    Ok(pty_id)
+    super::pty::register_pty_session(
+        pair,
+        child,
+        DEVICE_PTY_COLS,
+        DEVICE_PTY_ROWS,
+        app,
+        std::sync::Arc::clone(&state.0),
+    )
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────

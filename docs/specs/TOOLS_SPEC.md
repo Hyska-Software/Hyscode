@@ -353,7 +353,7 @@ type ToolCategory = 'filesystem' | 'terminal' | 'git' | 'code' | 'browser' | 'mc
 ```json
 {
   "name": "run_terminal_command",
-  "description": "Execute a command in a visible terminal. Returns normalized combined PTY output and the exit code.",
+  "description": "Execute a command in a visible terminal. Returns normalized combined PTY output, the exit code, and structured runtime failure metadata when execution or cleanup fails.",
   "inputSchema": {
     "type": "object",
     "properties": {
@@ -380,9 +380,12 @@ type ToolCategory = 'filesystem' | 'terminal' | 'git' | 'code' | 'browser' | 'mc
 }
 ```
 
-**Output**: Combined normalized PTY output plus metadata containing `exitCode`, `terminalId`, and
-`background`. With `background=true`, the tool uses a dedicated persistent terminal and returns once
-`ready_pattern` matches or observable startup is confirmed.
+**Output**: Combined normalized PTY output plus metadata containing `exitCode`, `terminalId`,
+`background`, and optional `failure` (`{ operation, message }`). Runtime failures return
+`success=false` and the same diagnostic in `error`; a valid command completion marker remains
+authoritative over a later failure observed during the bounded output drain. With `background=true`,
+the tool uses a dedicated persistent terminal and returns once `ready_pattern` matches or observable
+startup is confirmed.
 
 Agent terminals are distinct from manual TUI terminals. A runtime may reuse an agent PTY only when
 conversation, owner, and normalized `cwd` all match; a manual terminal is never acquired by the
@@ -396,12 +399,19 @@ terminal id alone.
 Reads buffered output and lifecycle state from a terminal id returned by `run_terminal_command`.
 Supports incremental reads through `after_sequence`, monotonic sequence reconciliation, and an
 explicit truncation marker when the retained PTY buffer no longer contains the requested history.
-This read-only tool does not require approval, but it remains owner-bound.
+The full snapshot form (`after_sequence` omitted or `0`) is authoritative for output, sequence,
+alive state, exit code, and failure. A positive `after_sequence` request is an output delta and must
+not overwrite newer lifecycle state. A snapshot failure returns `success=false` with
+`metadata.failure`; the terminal remains owner-bound and inspectable when liveness is uncertain.
+This read-only tool does not require approval.
 
 ### 7c. stop_terminal_process
 
 Interrupts a background process, waits briefly, and terminates the PTY if it remains alive. This
-terminal mutation requires approval.
+terminal mutation requires approval. Its metadata contains `stopStatus` (`stopped`,
+`still_running`, or `unknown`) and `stopFailures`. `success=true` is returned only for confirmed
+`stopped`; an unconfirmed stop remains visible as a failure and the runtime quarantines the terminal
+so it cannot be reused.
 
 ### 7d. respond_terminal_input
 
@@ -425,8 +435,11 @@ function-key sequences. `Ctrl-]` detaches and restores the TUI while leaving the
 The bridge emits `runtime_ready` with the current terminal summaries and publishes
 `terminal_updated` for `created`, `output`, `state`, and `exit`. Terminal subscriptions use replay:
 the listener is registered before the snapshot, concurrent events are queued, and sequences already
-included in the snapshot are discarded. Exits are emitted once and exited sessions remain readable
-until explicit cleanup or shutdown.
+included in the snapshot are discarded. A terminal summary always includes nullable `failure`;
+`pty:exit` carries nullable `code` plus the same failure shape. Exits are emitted once and exited
+sessions remain readable until explicit cleanup or shutdown. Full snapshots are authoritative;
+positive sequence snapshots carry output deltas only. Runtime calls are bounded, and an
+unconfirmed stop is retained as `still_running` or `unknown` rather than reported as success.
 
 The fullscreen VORTEX client embeds this bridge. `vortex --protocol ndjson` is the supported
 non-interactive automation surface and accepts the same `initialize`, `send_message`, approval,

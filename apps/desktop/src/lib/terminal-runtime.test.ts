@@ -3,20 +3,26 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useTerminalStore } from '@/stores/terminal-store';
 import { useSettingsStore } from '@/stores/settings-store';
 
-const { listeners } = vi.hoisted(() => ({
-  listeners: new Map<string, (payload: Record<string, unknown>) => void>(),
-}));
-
-vi.mock('@tauri-apps/api/event', () => ({
-  listen: vi.fn(async (event: string, handler: (event: { payload: Record<string, unknown> }) => void) => {
+const { listeners, listenMock } = vi.hoisted(() => {
+  const listeners = new Map<string, (payload: Record<string, unknown>) => void>();
+  const listenMock = vi.fn(async (
+    event: string,
+    handler: (event: { payload: Record<string, unknown> }) => void,
+  ) => {
     listeners.set(event, (payload) => handler({ payload }));
     return () => listeners.delete(event);
-  }),
+  });
+  return { listeners, listenMock };
+});
+
+vi.mock('@tauri-apps/api/event', () => ({
+  listen: listenMock,
 }));
 
 const { invokeMock } = vi.hoisted(() => ({
   invokeMock: vi.fn(
-    async (_cmd: string, _args?: Record<string, unknown>): Promise<unknown> => undefined,
+    async (cmd: string, _args?: Record<string, unknown>): Promise<unknown> =>
+      cmd === 'pty_kill' ? { status: 'stopped', failures: [] } : undefined,
   ),
 }));
 vi.mock('./tauri-invoke', () => ({
@@ -49,6 +55,18 @@ describe('DesktopTerminalRuntime', () => {
     vi.stubGlobal('navigator', { userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X)' });
     useTerminalStore.setState({ sessions: [], activeSessionId: null, nextIndex: 1 });
     invokeMock.mockReset();
+    invokeMock.mockImplementation(async (cmd: string) =>
+      cmd === 'pty_kill' ? { status: 'stopped', failures: [] } : undefined,
+    );
+    listeners.clear();
+    listenMock.mockReset();
+    listenMock.mockImplementation(async (
+      event: string,
+      handler: (event: { payload: Record<string, unknown> }) => void,
+    ) => {
+      listeners.set(event, (payload) => handler({ payload }));
+      return () => listeners.delete(event);
+    });
   });
 
   afterEach(() => {
@@ -114,7 +132,7 @@ describe('DesktopTerminalRuntime', () => {
       expect(useTerminalStore.getState().sessions[0].activeToolCallId).toBe('tool-1');
     });
 
-    it('spawns a fresh PTY when the stored one died', async () => {
+    it('replaces a stored PTY only after marking its session dead', async () => {
       const sessionId = seedSession();
       invokeMock.mockImplementation(async (cmd: string) =>
         cmd === 'pty_exists' ? false : cmd === 'pty_spawn' ? 'pty-new' : undefined,
@@ -128,10 +146,13 @@ describe('DesktopTerminalRuntime', () => {
         background: false,
       });
 
-      expect(binding.terminalId).toBe(sessionId);
+      const sessions = useTerminalStore.getState().sessions;
+      const stale = sessions.find((session) => session.id === sessionId);
+      const replacement = sessions.find((session) => session.id === binding.terminalId);
+      expect(binding.terminalId).not.toBe(sessionId);
       expect(binding.ptyId).toBe('pty-new');
-      expect(useTerminalStore.getState().sessions[0].ptyId).toBe('pty-new');
-      expect(useTerminalStore.getState().sessions[0].isDead).toBe(false);
+      expect(stale).toMatchObject({ ptyId: 'pty-1', isDead: true });
+      expect(replacement).toMatchObject({ ptyId: 'pty-new', isDead: false });
     });
 
     it('creates a session when none is available and spawns its PTY', async () => {
@@ -175,6 +196,30 @@ describe('DesktopTerminalRuntime', () => {
       expect(binding.terminalId).not.toBe(sessionId);
       expect(useTerminalStore.getState().sessions).toHaveLength(2);
     });
+    it('records pty_exists failures, quarantines, and does not reuse the session', async () => {
+      const sessionId = seedSession();
+      invokeMock.mockImplementation(async (cmd: string) => {
+        if (cmd === 'pty_exists') throw new Error('native health check failed');
+        if (cmd === 'pty_kill') return { status: 'stopped', failures: [] };
+        return undefined;
+      });
+
+      await expect(runtime.acquire({
+        conversationId: 'conversation-a',
+        toolCallId: 'tool-health',
+        cwd: 'C:/workspace',
+        forceNew: false,
+        background: false,
+      })).rejects.toThrow('[acquire] native health check failed');
+
+      expect(useTerminalStore.getState().sessions[0]).toMatchObject({
+        id: sessionId,
+        isDead: true,
+        failure: { operation: 'acquire', message: 'native health check failed' },
+      });
+      expect(invokeMock).toHaveBeenCalledWith('pty_kill', { ptyId: 'pty-1' });
+      expect(invokeMock).not.toHaveBeenCalledWith('pty_spawn', expect.anything());
+    });
   });
 
   describe('snapshot / write / interrupt', () => {
@@ -189,6 +234,7 @@ describe('DesktopTerminalRuntime', () => {
               truncated: false,
               alive: true,
               exit_code: 0,
+              failure: null,
             }
           : undefined,
       );
@@ -201,6 +247,7 @@ describe('DesktopTerminalRuntime', () => {
         truncated: false,
         alive: true,
         exitCode: 0,
+        failure: null,
       });
       expect(useTerminalStore.getState().sessions[0].outputSequence).toBe(7);
     });
@@ -216,6 +263,7 @@ describe('DesktopTerminalRuntime', () => {
               truncated: false,
               alive: true,
               exit_code: null,
+              failure: null,
             }
           : undefined,
       );
@@ -223,6 +271,31 @@ describe('DesktopTerminalRuntime', () => {
       await expect(runtime.snapshot(sessionId)).resolves.toMatchObject({
         alive: true,
         exitCode: null,
+        failure: null,
+      });
+    });
+    it('rejects malformed snapshots and quarantines the PTY', async () => {
+      const sessionId = seedSession();
+      invokeMock.mockImplementation(async (cmd: string) =>
+        cmd === 'pty_snapshot'
+          ? {
+              data: '',
+              from_sequence: 0,
+              to_sequence: 0,
+              truncated: false,
+              alive: true,
+              exit_code: null,
+            }
+          : cmd === 'pty_kill'
+            ? { status: 'stopped', failures: [] }
+            : undefined,
+      );
+
+      await expect(runtime.snapshot(sessionId)).rejects.toThrow('failure field is missing');
+      await vi.waitFor(() => expect(invokeMock).toHaveBeenCalledWith('pty_kill', { ptyId: 'pty-1' }));
+      expect(useTerminalStore.getState().sessions[0]).toMatchObject({
+        isDead: true,
+        failure: { operation: 'snapshot' },
       });
     });
 
@@ -306,6 +379,7 @@ describe('DesktopTerminalRuntime', () => {
         truncated: false,
         alive: true,
         exit_code: null,
+        failure: null,
       });
 
       await unsubscribePromise;
@@ -323,6 +397,7 @@ describe('DesktopTerminalRuntime', () => {
         truncated: false,
         alive: true,
         exit_code: null,
+        failure: null,
       });
       const unsubscribe = await secondSubscribe;
       unsubscribe();
@@ -340,31 +415,114 @@ describe('DesktopTerminalRuntime', () => {
               truncated: false,
               alive: false,
               exit_code: 1,
+              failure: null,
             }
           : undefined,
       );
 
       const onExit = vi.fn();
       await runtime.subscribe(sessionId, vi.fn(), onExit);
-      fireExit({ pty_id: 'pty-1', code: 2 });
+      fireExit({ pty_id: 'pty-1', sequence: 2, code: 2, failure: null });
       expect(onExit).toHaveBeenCalledTimes(1);
-      expect(onExit).toHaveBeenCalledWith(1);
+      expect(onExit).toHaveBeenCalledWith(1, null);
     });
 
     it('delivers live exit events for the subscribed PTY only', async () => {
       const sessionId = seedSession();
       invokeMock.mockImplementation(async (cmd: string) =>
         cmd === 'pty_snapshot'
-          ? { data: '', from_sequence: 0, to_sequence: 0, truncated: false, alive: true, exit_code: null }
+          ? {
+              data: '',
+              from_sequence: 0,
+              to_sequence: 0,
+              truncated: false,
+              alive: true,
+              exit_code: null,
+              failure: null,
+            }
           : undefined,
       );
 
       const onExit = vi.fn();
       await runtime.subscribe(sessionId, vi.fn(), onExit);
-      fireExit({ pty_id: 'pty-other', code: 3 });
-      fireExit({ pty_id: 'pty-1', code: 2 });
+      fireExit({ pty_id: 'pty-other', sequence: 1, code: 3, failure: null });
+      fireExit({ pty_id: 'pty-1', sequence: 2, code: 2, failure: null });
       expect(onExit).toHaveBeenCalledTimes(1);
-      expect(onExit).toHaveBeenCalledWith(2);
+      expect(onExit).toHaveBeenCalledWith(2, null);
+    });
+    it('quarantines malformed data events and emits one failure exit', async () => {
+      const sessionId = seedSession();
+      invokeMock.mockImplementation(async (cmd: string) =>
+        cmd === 'pty_snapshot'
+          ? {
+              data: '',
+              from_sequence: 0,
+              to_sequence: 0,
+              truncated: false,
+              alive: true,
+              exit_code: null,
+              failure: null,
+            }
+          : cmd === 'pty_kill'
+            ? { status: 'stopped', failures: [] }
+            : undefined,
+      );
+
+      const onExit = vi.fn();
+      const unsubscribe = await runtime.subscribe(sessionId, vi.fn(), onExit);
+      fireData({ pty_id: 'pty-1', sequence: 'invalid', data: 'bad' });
+
+      await vi.waitFor(() => expect(invokeMock).toHaveBeenCalledWith('pty_kill', { ptyId: 'pty-1' }));
+      expect(onExit).toHaveBeenCalledWith(
+        null,
+        expect.objectContaining({ operation: 'event' }),
+      );
+      expect(useTerminalStore.getState().sessions[0]).toMatchObject({
+        isDead: true,
+        failure: { operation: 'event' },
+      });
+      unsubscribe();
+    });
+
+    it('rolls back listeners and quarantines when exit subscription setup fails', async () => {
+      const sessionId = seedSession();
+      invokeMock.mockImplementation(async (cmd: string) =>
+        cmd === 'pty_snapshot'
+          ? {
+              data: '',
+              from_sequence: 0,
+              to_sequence: 0,
+              truncated: false,
+              alive: true,
+              exit_code: null,
+              failure: null,
+            }
+          : cmd === 'pty_kill'
+            ? { status: 'stopped', failures: [] }
+            : undefined,
+      );
+      listenMock.mockImplementationOnce(async (
+        event: string,
+        handler: (event: { payload: Record<string, unknown> }) => void,
+      ) => {
+        listeners.set(event, (payload) => handler({ payload }));
+        return () => listeners.delete(event);
+      });
+      listenMock.mockImplementationOnce(async () => {
+        throw new Error('exit listener setup failed');
+      });
+
+      const onExit = vi.fn();
+      await expect(runtime.subscribe(sessionId, vi.fn(), onExit)).rejects.toThrow(
+        'exit listener setup failed',
+      );
+
+      await vi.waitFor(() => expect(invokeMock).toHaveBeenCalledWith('pty_kill', { ptyId: 'pty-1' }));
+      expect(listeners.size).toBe(0);
+      expect(onExit).toHaveBeenCalledWith(
+        null,
+        expect.objectContaining({ operation: 'event' }),
+      );
     });
   });
 
@@ -381,6 +539,7 @@ describe('DesktopTerminalRuntime', () => {
               truncated: false,
               alive: true,
               exit_code: null,
+              failure: null,
             }
           : undefined,
       );

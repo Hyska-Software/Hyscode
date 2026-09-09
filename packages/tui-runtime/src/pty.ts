@@ -1,8 +1,8 @@
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
+import type { TerminalRuntimeFailure } from '@hyscode/agent-harness';
 import type * as nodePtyTypes from 'node-pty';
-
 declare const require: NodeRequire;
 
 declare global {
@@ -124,7 +124,7 @@ type PtySpawn = (file: string, args: string[], options: nodePtyTypes.IPtyForkOpt
 
 function spawnBunConPty(file: string, args: string[], options: nodePtyTypes.IPtyForkOptions): nodePtyTypes.IPty {
   let dataListener: ((data: string) => void) | null = null;
-  let exitListener: ((event: { exitCode: number; signal?: number }) => void) | null = null;
+  let exitListener: ((event: { exitCode: number | null; signal?: number; failure?: TerminalRuntimeFailure | null }) => void) | null = null;
   const terminal = new Bun.Terminal({
     cols: options.cols ?? 80,
     rows: options.rows ?? 24,
@@ -136,7 +136,16 @@ function spawnBunConPty(file: string, args: string[], options: nodePtyTypes.IPty
     env: environment,
     terminal,
   });
-  void child.exited.then((exitCode) => exitListener?.({ exitCode }));
+  void child.exited.then(
+    (exitCode) => exitListener?.({ exitCode, failure: null }),
+    (error: unknown) => exitListener?.({
+      exitCode: null,
+      failure: {
+        operation: 'wait',
+        message: error instanceof Error ? error.message : String(error),
+      },
+    }),
+  );
   return {
     pid: child.pid ?? 0,
     write: (data: string | Buffer) => terminal.write(typeof data === 'string' ? data : data.toString()),
@@ -146,7 +155,7 @@ function spawnBunConPty(file: string, args: string[], options: nodePtyTypes.IPty
       dataListener = listener;
       return { dispose: () => { if (dataListener === listener) dataListener = null; } };
     },
-    onExit: (listener: (event: { exitCode: number; signal?: number }) => void) => {
+    onExit: (listener: (event: { exitCode: number | null; signal?: number; failure?: TerminalRuntimeFailure | null }) => void) => {
       exitListener = listener;
       return { dispose: () => { if (exitListener === listener) exitListener = null; } };
     },

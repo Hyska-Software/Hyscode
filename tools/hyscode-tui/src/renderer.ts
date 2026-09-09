@@ -253,11 +253,14 @@ function terminalPanel(state: UiState, width: number): string[] {
   const outputRows = wrapText(terminal.outputPreview || 'Terminal is ready for input.', innerWidth)
     .slice(-10)
     .map((line) => `${SOFT}${line}${RESET}`);
+  const failureRows = terminal.failure
+    ? [`${ERROR}Failure · ${shorten(terminal.failure.message, innerWidth - 12)}${RESET}`]
+    : [];
   const hint = terminal.awaitingInput
     ? `${WARNING}Input is required${RESET} · type a response and press Enter`
     : `${DIM}Type !command to send input${RESET}`;
   const hints = `${hint} ${DIM}· /terminal focus preview · /terminal attach ${shorten(terminal.terminalId ?? '', 18)} for fullscreen · Ctrl-] detaches${RESET}`;
-  return [...roundedFrame(title, [...outputRows, hints], width), ''];
+  return [...roundedFrame(title, [...outputRows, ...failureRows, hints], width), ''];
 }
 
 function sddPanel(state: UiState, width: number): string[] {
@@ -391,6 +394,7 @@ function activityPanel(state: UiState, width: number): string[] {
       lines.push(`  ${ownerLabel}${tool.status === 'error' ? ERROR : tool.status === 'success' ? SUCCESS : WARNING}●${RESET} ${shorten(tool.name, width - 28)} ${DIM}${stateLabel} · ${terminalLabel}${RESET}`);
       if (command) lines.push(`    ${DIM}$ ${shorten(command, width - 8)}${RESET}`);
       if (tool.liveOutput) lines.push(`    ${shorten(tool.liveOutput.split(/\r?\n/u).at(-1) ?? '', width - 10)}`);
+      if (tool.failure) lines.push(`    ${ERROR}failure · ${shorten(tool.failure.message, width - 18)}${RESET}`);
     }
     lines.push(`${DIM}Use /terminal focus <id> to preview, or /terminal attach <id> for a manual fullscreen terminal.${RESET}`);
   }

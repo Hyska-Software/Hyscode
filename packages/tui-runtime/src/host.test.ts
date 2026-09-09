@@ -144,7 +144,16 @@ describe('CLI host adapter', () => {
         calls.push({ command, args });
         if (command === 'pty_spawn') return 'remote-terminal';
         if (command === 'pty_exists') return true;
-        if (command === 'pty_snapshot') return { data: 'remote output', from_sequence: 1, to_sequence: 1, truncated: false, alive: true, exit_code: null };
+        if (command === 'pty_snapshot') return {
+          data: 'remote output',
+          from_sequence: 1,
+          to_sequence: 1,
+          truncated: false,
+          alive: true,
+          exit_code: null,
+          failure: null,
+        };
+        if (command === 'pty_kill') return { status: 'stopped', failures: [] };
         return undefined;
       },
     );

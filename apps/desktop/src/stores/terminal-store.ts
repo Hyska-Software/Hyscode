@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { immer } from 'zustand/middleware/immer';
-
+import type { TerminalRuntimeFailure } from '@hyscode/agent-harness';
 // ─── Types ──────────────────────────────────────────────────────────────────
 
 export interface CommandHistoryEntry {
@@ -28,6 +28,10 @@ export interface TerminalSession {
   commandHistory: CommandHistoryEntry[];
   /** When true the PTY exited and should not be reused */
   isDead: boolean;
+  /** Last native exit code observed for this session. */
+  exitCode: number | null;
+  /** Last native/runtime lifecycle failure, retained for inspection. */
+  failure: TerminalRuntimeFailure | null;
   /** Conversation that owns an agent terminal. User terminals remain unowned. */
   ownerConversationId: string | null;
   /** Tool currently controlling the PTY; manual input is disabled while set. */
@@ -63,7 +67,12 @@ interface TerminalState {
   renameSession: (id: string, name: string) => void;
   setPtyId: (sessionId: string, ptyId: string | null) => void;
   /** Mark a session's PTY as dead (exited / killed) so it won't be reused */
-  markPtyDead: (sessionId: string) => void;
+  markPtyDead: (
+    sessionId: string,
+    exitCode?: number | null,
+    failure?: TerminalRuntimeFailure | null,
+    expectedToolCallId?: string,
+  ) => void;
   /** Record a finished command on a session */
   setLastCommand: (
     sessionId: string,
@@ -77,6 +86,7 @@ interface TerminalState {
   /** Create a fresh agent terminal session owned by a conversation (or sub-agent). */
   createAgentSession: (opts?: { name?: string; conversationId?: string; cwd?: string }) => string;
   setAgentActivity: (sessionId: string, toolCallId: string | null) => void;
+  clearAgentActivityIfOwned: (sessionId: string, expectedToolCallId: string) => void;
   setAwaitingInput: (sessionId: string, awaiting: boolean) => void;
   setOutputSequence: (sessionId: string, sequence: number) => void;
   /** Kill the PTY and remove the session from store */
@@ -116,6 +126,8 @@ export const useTerminalStore = create<TerminalState>()(
           lastCommand: null,
           commandHistory: [],
           isDead: false,
+          exitCode: null,
+          failure: null,
           ownerConversationId: null,
           activeToolCallId: null,
           awaitingInput: false,
@@ -159,15 +171,34 @@ export const useTerminalStore = create<TerminalState>()(
         const session = state.sessions.find((s) => s.id === sessionId);
         if (session) {
           session.ptyId = ptyId;
-          if (ptyId) session.isDead = false;
+          if (ptyId) {
+            session.isDead = false;
+            session.exitCode = null;
+            session.failure = null;
+          }
         }
       }),
 
-    markPtyDead: (sessionId: string) =>
+    markPtyDead: (
+      sessionId: string,
+      exitCode?: number | null,
+      failure?: TerminalRuntimeFailure | null,
+      expectedToolCallId?: string,
+    ) =>
       set((state) => {
         const session = state.sessions.find((s) => s.id === sessionId);
-        if (session) {
-          session.isDead = true;
+        if (!session) return;
+        if (session.isDead) {
+          if (session.exitCode === null && exitCode !== undefined && exitCode !== null) {
+            session.exitCode = exitCode;
+          }
+          if (session.failure === null && failure) session.failure = failure;
+          return;
+        }
+        session.isDead = true;
+        if (exitCode !== undefined) session.exitCode = exitCode;
+        if (failure !== undefined) session.failure = failure;
+        if (expectedToolCallId === undefined || session.activeToolCallId === expectedToolCallId) {
           session.activeToolCallId = null;
           session.awaitingInput = false;
         }
@@ -209,6 +240,8 @@ export const useTerminalStore = create<TerminalState>()(
           lastCommand: null,
           commandHistory: [],
           isDead: false,
+          exitCode: null,
+          failure: null,
           ownerConversationId: conversationId ?? null,
           activeToolCallId: null,
           awaitingInput: false,
@@ -223,6 +256,12 @@ export const useTerminalStore = create<TerminalState>()(
       set((state) => {
         const session = state.sessions.find((item) => item.id === sessionId);
         if (session) session.activeToolCallId = toolCallId;
+      }),
+
+    clearAgentActivityIfOwned: (sessionId, expectedToolCallId) =>
+      set((state) => {
+        const session = state.sessions.find((item) => item.id === sessionId);
+        if (session?.activeToolCallId === expectedToolCallId) session.activeToolCallId = null;
       }),
 
     setAwaitingInput: (sessionId, awaiting) =>

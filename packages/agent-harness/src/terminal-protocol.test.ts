@@ -299,7 +299,7 @@ print('line two')"`;
       'powershell-state-cleanup',
       'powershell.exe',
       undefined,
-      'if (Get-Variable -Name hysState -ErrorAction SilentlyContinue -or Get-Variable -Name __hyscode_native_code_powershell_state_cleanup -ErrorAction SilentlyContinue -or Get-Variable -Name __hyscode_error_baseline_powershell_state_cleanup -ErrorAction SilentlyContinue) { Write-Output LEAKED } else { Write-Output CLEAN }',
+      'if ((Get-Variable -Name hysState -ErrorAction SilentlyContinue) -or (Get-Variable -Name __hyscode_native_code_powershell_state_cleanup -ErrorAction SilentlyContinue) -or (Get-Variable -Name __hyscode_error_baseline_powershell_state_cleanup -ErrorAction SilentlyContinue)) { Write-Output LEAKED } else { Write-Output CLEAN }',
     );
     const outputLines = result.raw.split(/\r?\n/u).map((line) => line.trim());
 
@@ -409,6 +409,7 @@ describe('parseTerminalFrame', () => {
       output: '',
       exitCode: null,
       started: false,
+      protocolError: null,
     });
   });
 
@@ -428,6 +429,7 @@ describe('parseTerminalFrame', () => {
       complete: true,
       output: 'out1\nout2',
       exitCode: 3,
+      protocolError: null,
     });
   });
 
@@ -448,6 +450,7 @@ describe('parseTerminalFrame', () => {
       complete: true,
       output: 'installing 42 packages',
       exitCode: 2,
+      protocolError: null,
     });
   });
 
@@ -458,6 +461,39 @@ describe('parseTerminalFrame', () => {
       started: true,
       complete: true,
       output: 'output',
+    });
+  });
+  it('reports malformed matching completion markers as protocol failures', () => {
+    const raw = `__HYSCODE_BEGIN_${nonce}__\noutput\n__HYSCODE_END_${nonce}__:not-a-code\n`;
+    expect(parseTerminalFrame(raw, nonce)).toMatchObject({
+      started: true,
+      complete: false,
+      protocolError: 'The terminal completion marker contained an invalid exit code.',
+    });
+  });
+
+  it('treats nonce punctuation literally', () => {
+    const specialNonce = 'nonce.with+symbols';
+    const raw = `__HYSCODE_BEGIN_${specialNonce}__\noutput\n__HYSCODE_END_${specialNonce}__:0\n`;
+    expect(parseTerminalFrame(raw, specialNonce)).toMatchObject({
+      complete: true,
+      output: 'output',
+      exitCode: 0,
+    });
+  });
+
+  it('rejects unsafe completion exit codes', () => {
+    const raw = `__HYSCODE_BEGIN_${nonce}__\noutput\n__HYSCODE_END_${nonce}__:999999999999999999999999\n`;
+    expect(parseTerminalFrame(raw, nonce).protocolError).toBe(
+      'The terminal completion marker contained an unsafe exit code.',
+    );
+  });
+  it('accepts explicitly signed completion exit codes', () => {
+    const raw = `__HYSCODE_BEGIN_${nonce}__\noutput\n__HYSCODE_END_${nonce}__:+7\n`;
+    expect(parseTerminalFrame(raw, nonce)).toMatchObject({
+      complete: true,
+      output: 'output',
+      exitCode: 7,
     });
   });
 });
@@ -532,6 +568,11 @@ describe('looksLikeTerminalPrompt', () => {
   it('only inspects the last non-empty line', () => {
     expect(looksLikeTerminalPrompt('downloaded 10 MB\nContinue? [Y/n]')).toBe(true);
     expect(looksLikeTerminalPrompt('Continue? [Y/n]\nfinished')).toBe(false);
+  });
+  it('does not classify generic questions or labels as prompts', () => {
+    expect(looksLikeTerminalPrompt('build finished?')).toBe(false);
+    expect(looksLikeTerminalPrompt('downloaded:')).toBe(false);
+    expect(looksLikeTerminalPrompt('http://localhost:8080')).toBe(false);
   });
 });
 

@@ -40,10 +40,11 @@ function snapshotAdapter(overrides: Partial<TerminalRuntimeAdapter> = {}): Termi
       truncated: false,
       alive: true,
       exitCode: null,
+      failure: null,
     })),
     write: vi.fn(async () => undefined),
     interrupt: vi.fn(async () => undefined),
-    kill: vi.fn(async () => undefined),
+    kill: vi.fn(async () => ({ status: 'stopped' as const, failures: [] })),
     ...overrides,
   };
 }
@@ -151,7 +152,7 @@ describe('read_terminal_output tool', () => {
       { terminal_id: 'terminal-1' },
       contextWith(adapter),
     );
-    expect(result).toMatchObject({ success: false, error: 'Error: PTY gone' });
+    expect(result).toMatchObject({ success: false, error: 'PTY gone' });
   });
 
   it('reports a missing terminal runtime', async () => {
@@ -194,6 +195,7 @@ describe('respond_terminal_input tool', () => {
         truncated: false,
         alive: true,
         exitCode: null,
+        failure: null,
       })),
       write: vi.fn(async (_terminalId, data) => {
         const nonceMatch = String(data).match(/__HYSCODE_BEGIN_([a-z0-9]+)__/i);
@@ -209,7 +211,7 @@ describe('respond_terminal_input tool', () => {
         pushData?.(`${data}accepted\n`);
       }),
       interrupt: vi.fn(async () => undefined),
-      kill: vi.fn(async () => undefined),
+      kill: vi.fn(async () => ({ status: 'stopped' as const, failures: [] })),
       subscribe: vi.fn(async (_terminalId, onData) => {
         pushData = (chunk: string) => {
           sequence += 1;
@@ -247,6 +249,7 @@ describe('stop_terminal_process tool', () => {
         truncated: false,
         alive: false,
         exitCode: 0,
+        failure: null,
       })),
     });
     const result = await stopTerminalProcessTool.execute(
@@ -268,13 +271,15 @@ describe('stop_terminal_process tool', () => {
         truncated: false,
         alive: true,
         exitCode: null,
+        failure: null,
       })),
+      kill: vi.fn(async () => ({ status: 'still_running' as const, failures: [] })),
     });
     const result = await stopTerminalProcessTool.execute(
       { terminal_id: 'terminal-1' },
       contextWith(adapter),
     );
-    expect(result).toMatchObject({ success: false, error: 'Process did not stop: terminal-1' });
+    expect(result).toMatchObject({ success: false, error: 'Terminal cleanup was not confirmed (still_running).' });
     expect(adapter.kill).toHaveBeenCalled();
   });
 

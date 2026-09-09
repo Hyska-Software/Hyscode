@@ -8,7 +8,7 @@ import { parseCliArgs, VORTEX_UPDATE_EXIT_CODES } from './commands';
 import { TuiController } from './controller';
 import { enterAlternateScreen, leaveAlternateScreen, TerminalInput } from './input';
 import { TerminalRenderer } from './renderer';
-import { runTerminalHandoff } from './terminal-handoff';
+import { runTerminalHandoff, type TerminalHandoffOutcome } from './terminal-handoff';
 import type { CliUpdateOptions } from './types';
 
 declare const __HYSCODE_TUI_VERSION__: string | undefined;
@@ -121,10 +121,10 @@ async function main(): Promise<void> {
       outerScreenActive = false;
     }
   };
-  const attachTerminal = async (terminalId: string): Promise<void> => {
+  const attachTerminal = async (terminalId: string): Promise<TerminalHandoffOutcome> => {
     if (!interactive) throw new Error('Interactive terminal attach requires a TTY.');
     const handoff = await bridge.openUserTerminalHandoff(terminalId);
-    await runTerminalHandoff(handoff, {
+    return runTerminalHandoff(handoff, {
       stdin: process.stdin,
       stdout: process.stdout,
       pauseOuter,

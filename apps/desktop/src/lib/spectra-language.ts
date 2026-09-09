@@ -6,9 +6,8 @@
 //
 // Toolchain: `spectralang` CLI (run/check/compile/lint/fmt/new) + `spectra-lsp`
 // (IntelliSense, registered natively in packages/lsp-client).
-
-import { invoke } from '@tauri-apps/api/core';
 import * as monaco from 'monaco-editor';
+import { invoke } from '@tauri-apps/api/core';
 import { useCommandStore } from '@/stores/command-store';
 import { useKeybindingStore } from '@/stores/keybinding-store';
 import { useSettingsStore } from '@/stores/settings-store';
@@ -18,6 +17,7 @@ import { useLayoutStore } from '@/stores/layout-store';
 import { useProjectStore } from '@/stores/project-store';
 import { useExtensionUiStore } from '@/stores/extension-ui-store';
 import type { Tab } from '@/stores/editor-store';
+import { desktopTerminalRuntime } from './terminal-runtime';
 
 // ── Toolchain helpers ────────────────────────────────────────────────────────
 
@@ -70,10 +70,6 @@ function quoteArg(arg: string): string {
   return `"${String(arg).replace(/"/g, '\\"')}"`;
 }
 
-function isWindows(): boolean {
-  return typeof navigator !== 'undefined' && /win/i.test(navigator.platform);
-}
-
 /**
  * Runs a command in the visible integrated terminal (spawning a PTY if needed).
  * Mirrors the extension-host `terminal.sendToActive` implementation.
@@ -82,31 +78,34 @@ async function runInTerminal(cli: string, args: string[]): Promise<void> {
   const termStore = useTerminalStore.getState();
   const rootPath = useProjectStore.getState().rootPath;
 
-  let session =
+  const session =
     termStore.sessions.find(
-      (s) => s.id === termStore.activeSessionId && !s.isDead && s.ptyId,
+      (candidate) =>
+        candidate.id === termStore.activeSessionId
+        && !candidate.isDead
+        && !candidate.failure
+        && candidate.ptyId,
     ) ??
-    termStore.sessions.find((s) => !s.isAgentSession && !s.isDead && s.ptyId);
-
+    termStore.sessions.find(
+      (candidate) => !candidate.isAgentSession && !candidate.isDead && !candidate.failure && candidate.ptyId,
+    );
+  let sessionId = session?.id ?? null;
   let ptyId = session?.ptyId ?? null;
   let isNewPty = false;
-
   if (!ptyId) {
-    const sessionId = termStore.createSession('Spectra', false, rootPath ?? undefined);
-    ptyId = await invoke<string>('pty_spawn', { shell: null, cwd: rootPath ?? null, env: null });
-    termStore.setPtyId(sessionId, ptyId);
+    sessionId = termStore.createSession('Spectra', false, rootPath ?? undefined);
+    ptyId = await desktopTerminalRuntime.spawnUserTerminal(sessionId, rootPath ?? '');
     isNewPty = true;
   }
 
   useLayoutStore.getState().setTerminalVisible(true);
-
   if (isNewPty) {
     await new Promise<void>((resolve) => setTimeout(resolve, 1500));
   }
 
-  const callPrefix = isWindows() ? '& ' : '';
-  const command = `${callPrefix}${quoteArg(cli)} ${args.map(quoteArg).join(' ')}`;
-  await invoke('pty_write', { ptyId, data: command + '\r' });
+  if (!sessionId) throw new Error('Spectra terminal session was not created.');
+  const command = [cli, ...args].map(quoteArg).join(' ');
+  await desktopTerminalRuntime.write(sessionId, command + '\r');
 }
 
 // ── Editor insertion (API actions) ───────────────────────────────────────────

@@ -405,6 +405,7 @@ describe('TUI renderer', () => {
         frameLanguage: 'powershell',
         role: 'agent',
         awaitingInput: true,
+        failure: null,
       }],
       activeTerminalId: 'term-1',
     }));
@@ -413,6 +414,51 @@ describe('TUI renderer', () => {
     expect(plain).toContain('TERMINAL INPUT');
     expect(plain).toContain('••••••••••••');
     expect(plain).not.toContain('secret-value');
+  });
+
+  it('renders terminal failures as final state instead of active work', () => {
+    const failedState = state({
+      mainPanel: 'activity',
+      transcript: [{ kind: 'tool', text: 'npm test', toolId: 'terminal-tool' }],
+      tools: [{
+        id: 'terminal-tool',
+        name: 'run_terminal_command',
+        input: { command: 'npm test' },
+        status: 'error',
+        liveOutput: 'partial output',
+        outputSequence: 4,
+        expanded: false,
+        terminalId: 'term-failed',
+        terminalState: 'error',
+        failure: { operation: 'reader', message: 'PTY reader failed' },
+      }],
+      terminals: [{
+        terminalId: 'term-failed',
+        ptyId: 'pty-failed',
+        name: 'Failed terminal',
+        alive: false,
+        sequence: 4,
+        outputPreview: 'partial output',
+        frameLanguage: 'powershell',
+        role: 'agent',
+        awaitingInput: false,
+        failure: { operation: 'reader', message: 'PTY reader failed' },
+      }],
+      activeTerminalId: 'term-failed',
+    });
+    const rendered = new TerminalRenderer().render(failedState);
+    const plain = rendered.replace(/\u001b\[[0-9;]*[A-Za-z]/g, '').replace(/\r/g, '');
+    const terminalRendered = new TerminalRenderer().render({
+      ...failedState,
+      mainPanel: 'terminal',
+      transcript: [{ kind: 'assistant', text: 'Terminal failure observed.' }],
+    });
+    const terminalPlain = terminalRendered.replace(/\u001b\[[0-9;]*[A-Za-z]/g, '').replace(/\r/g, '');
+
+    expect(plain).toContain('failed');
+    expect(plain).toContain('PTY reader failed');
+    expect(terminalPlain).toContain('exited');
+    expect(plain).not.toContain('· running');
   });
 
   it('shows an animated working indicator at the top of the execution chat area', () => {
@@ -686,6 +732,7 @@ describe('TUI renderer improvements', () => {
         frameLanguage: 'powershell' as const,
         role: 'agent' as const,
         awaitingInput: false,
+        failure: null,
       }],
       activeTerminalId: 'term-1',
     }));

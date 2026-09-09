@@ -28,6 +28,9 @@ export function selectAgentSession(
         (session) =>
           session.isAgentSession &&
           session.name === request.sessionName &&
+          !session.isDead &&
+          !session.failure &&
+          Boolean(session.ptyId) &&
           session.ownerConversationId === isolationKey &&
           !session.awaitingInput &&
           session.cwd === request.cwd,
@@ -38,6 +41,7 @@ export function selectAgentSession(
         (session) =>
           session.isAgentSession &&
           !session.isDead &&
+          !session.failure &&
           !session.awaitingInput &&
           session.ptyId &&
           session.ownerConversationId === isolationKey &&

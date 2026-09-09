@@ -12,6 +12,7 @@ import type {
   SddSession,
   SddTask,
   ToolRiskLevel,
+  TerminalRuntimeFailure,
 } from '@hyscode/agent-harness';
 import type { AIModel, AIProvider, Message, ThinkingConfig, TokenUsage } from '@hyscode/ai-providers';
 import type { ThemeSummary } from '@hyscode/theme';
@@ -185,6 +186,7 @@ export type TerminalSummary = {
   activeToolCallId?: string | null;
   awaitingInput?: boolean;
   exitCode?: number | null;
+  failure: TerminalRuntimeFailure | null;
   truncated?: boolean;
   handoffActive?: boolean;
   canUserWrite?: boolean;

@@ -1,7 +1,8 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { BridgeRequest, BridgeResponse, RuntimeReadyPayload } from '@hyscode/tui-runtime';
 import { CliUpdater } from '@hyscode/tui-runtime';
 import { TuiController, summarizeToolInput, type RuntimeClient } from './controller';
+import type { TerminalHandoffOutcome } from './terminal-handoff';
 
 function readyPayload(workspacePath: string, includeThinkingModel = false): RuntimeReadyPayload {
   const thinkingModel = {
@@ -85,6 +86,7 @@ describe('TUI controller', () => {
       activeToolCallId: 'tool-terminal',
       awaitingInput: false,
       exitCode: null,
+      failure: null,
       truncated: false,
       canUserWrite: false,
     };
@@ -132,6 +134,7 @@ describe('TUI controller', () => {
       activeToolCallId: null,
       awaitingInput: true,
       exitCode: null,
+      failure: null,
       truncated: false,
       canUserWrite: true,
     };
@@ -167,6 +170,7 @@ describe('TUI controller', () => {
       frameLanguage: 'bash' as const,
       role: 'agent' as const,
       ownerConversationId: 'conversation-current',
+      failure: null,
     };
     controller.handleRuntimeMessage({
       type: 'event',
@@ -311,6 +315,7 @@ describe('TUI controller', () => {
 
   it('persists VORTEX update preferences through the shared runtime command', async () => {
     const updater = new CliUpdater({ version: '0.8.2', platform: 'win32', architecture: 'x64' });
+    vi.spyOn(updater, 'check').mockResolvedValue(null);
     const runtime = new FakeRuntime();
     const controller = new TuiController({ workspace: 'C:/workspace' }, runtime, { updater, interactive: false });
     await controller.start();
@@ -321,7 +326,6 @@ describe('TUI controller', () => {
     await controller.handleKey({ type: 'enter' });
     await controller.handleKey({ type: 'character', value: '/update channel pre-release' });
     await controller.handleKey({ type: 'enter' });
-
     expect(runtime.requests.slice(-3).map((request) => request.params)).toEqual([
       { checkForUpdatesOnStartup: false },
       { autoDownload: true },
@@ -482,7 +486,7 @@ describe('TUI controller', () => {
     const runtime = new FakeRuntime();
     const controller = new TuiController({ workspace: 'C:/workspace' }, runtime);
     await controller.start();
-    controller.state.terminals = [{ terminalId: 'term-1', ptyId: 'pty-1', name: 'PowerShell', alive: true, sequence: 0, outputPreview: '', frameLanguage: 'powershell' }];
+    controller.state.terminals = [{ terminalId: 'term-1', ptyId: 'pty-1', name: 'PowerShell', alive: true, sequence: 0, outputPreview: '', frameLanguage: 'powershell', failure: null }];
 
     await controller.handleKey({ type: 'character', value: '/context' });
     await controller.handleKey({ type: 'enter' });
@@ -501,12 +505,15 @@ describe('TUI controller', () => {
     const runtime = new FakeRuntime();
     let attachedTerminalId: string | null = null;
     const controller = new TuiController({ workspace: 'C:/workspace' }, runtime, {
-      onTerminalAttach: async (terminalId) => { attachedTerminalId = terminalId; },
+      onTerminalAttach: async (terminalId) => {
+        attachedTerminalId = terminalId;
+        return { kind: 'detached' };
+      },
     });
     await controller.start();
     controller.state.terminals = [
-      { terminalId: 'manual-terminal', ptyId: 'pty-manual', name: 'PowerShell', alive: true, sequence: 0, outputPreview: '', frameLanguage: 'powershell', role: 'user' },
-      { terminalId: 'agent-terminal', ptyId: 'pty-agent', name: 'Agent', alive: true, sequence: 0, outputPreview: '', frameLanguage: 'powershell', role: 'agent' },
+      { terminalId: 'manual-terminal', ptyId: 'pty-manual', name: 'PowerShell', alive: true, sequence: 0, outputPreview: '', frameLanguage: 'powershell', failure: null, role: 'user' },
+      { terminalId: 'agent-terminal', ptyId: 'pty-agent', name: 'Agent', alive: true, sequence: 0, outputPreview: '', frameLanguage: 'powershell', failure: null, role: 'agent' },
     ];
 
     await controller.handleKey({ type: 'character', value: '/terminal attach manual-terminal' });
@@ -518,6 +525,51 @@ describe('TUI controller', () => {
     await controller.handleKey({ type: 'enter' });
     expect(attachedTerminalId).toBe('manual-terminal');
     expect(controller.state.status).toContain('Agent terminals remain projected');
+  });
+
+  it('distinguishes natural terminal failure, clean exit, and attach errors', async () => {
+    const runtime = new FakeRuntime();
+    const outcome: { current: TerminalHandoffOutcome } = {
+      current: {
+        kind: 'exited',
+        exitCode: null,
+        failure: { operation: 'reader', message: 'PTY reader failed' },
+      },
+    };
+    let attachError = false;
+    const controller = new TuiController({ workspace: 'C:/workspace' }, runtime, {
+      onTerminalAttach: async () => {
+        if (attachError) throw new Error('handoff restore failed');
+        return outcome.current;
+      },
+    });
+    await controller.start();
+    controller.state.terminals = [{
+      terminalId: 'manual-terminal',
+      ptyId: 'pty-manual',
+      name: 'PowerShell',
+      alive: true,
+      sequence: 0,
+      outputPreview: '',
+      frameLanguage: 'powershell',
+      failure: null,
+      role: 'user',
+    }];
+
+    await controller.handleKey({ type: 'character', value: '/terminal attach manual-terminal' });
+    await controller.handleKey({ type: 'enter' });
+    expect(controller.state.status).toContain('Terminal exited with failure');
+
+    outcome.current = { kind: 'exited', exitCode: 7, failure: null };
+    await controller.handleKey({ type: 'character', value: '/terminal attach manual-terminal' });
+    await controller.handleKey({ type: 'enter' });
+    expect(controller.state.status).toContain('Terminal exited · code 7');
+
+    attachError = true;
+    await controller.handleKey({ type: 'character', value: '/terminal attach manual-terminal' });
+    await controller.handleKey({ type: 'enter' });
+    expect(controller.state.status).toBe('Terminal attach failed');
+    expect(controller.state.lastError).toBe('handoff restore failed');
   });
 });
 
@@ -561,6 +613,87 @@ describe('TUI controller tool projection', () => {
     expect(controller.state.tools[0]?.expanded).toBe(true);
     await controller.handleKey({ type: 'ctrl', value: 'o' });
     expect(controller.state.tools[0]?.expanded).toBe(false);
+  });
+
+  it('lets canonical terminal results replace provisional failures and block late progress regressions', async () => {
+    const runtime = new FakeRuntime();
+    const controller = new TuiController({ workspace: 'C:/workspace' }, runtime);
+    await controller.start();
+
+    controller.handleRuntimeMessage({
+      type: 'event',
+      event: 'harness_event',
+      payload: {
+        type: 'tool_call_start',
+        toolCallId: 'terminal-canonical',
+        toolName: 'run_terminal_command',
+        input: { command: 'npm test' },
+      },
+    });
+    controller.handleRuntimeMessage({
+      type: 'event',
+      event: 'harness_event',
+      payload: {
+        type: 'terminal_progress',
+        progress: {
+          toolCallId: 'terminal-canonical',
+          terminalId: 'terminal-canonical',
+          sequence: 4,
+          chunk: 'failure output',
+          state: 'error',
+          failure: { operation: 'wait', message: 'PTY exited before completion.' },
+        },
+      },
+    });
+    expect(controller.state.tools[0]).toMatchObject({
+      status: 'error',
+      terminalProvisional: true,
+      terminalCanonical: false,
+      failure: { operation: 'wait' },
+    });
+
+    controller.handleRuntimeMessage({
+      type: 'event',
+      event: 'harness_event',
+      payload: {
+        type: 'tool_call_result',
+        toolCallId: 'terminal-canonical',
+        toolName: 'run_terminal_command',
+        result: {
+          success: true,
+          output: 'completed',
+          metadata: {
+            terminalId: 'terminal-canonical',
+            sequence: 4,
+            failure: null,
+          },
+        },
+        durationMs: 10,
+      },
+    });
+    expect(controller.state.tools[0]).toMatchObject({
+      status: 'success',
+      output: 'completed',
+      terminalProvisional: false,
+      terminalCanonical: true,
+      failure: null,
+    });
+
+    controller.handleRuntimeMessage({
+      type: 'event',
+      event: 'harness_event',
+      payload: {
+        type: 'terminal_progress',
+        progress: {
+          toolCallId: 'terminal-canonical',
+          terminalId: 'terminal-canonical',
+          sequence: 5,
+          chunk: 'late running',
+          state: 'running',
+        },
+      },
+    });
+    expect(controller.state.tools[0]).toMatchObject({ status: 'success', output: 'completed', terminalCanonical: true });
   });
 
   it('deduplicates transcript and lifecycle events for every tool type', async () => {

@@ -1,5 +1,6 @@
 import { EventEmitter } from 'node:events';
 import { describe, expect, it } from 'vitest';
+import type { TerminalRuntimeFailure } from '@hyscode/agent-harness';
 import type { TerminalHandoff } from '@hyscode/tui-runtime';
 import { runTerminalHandoff } from './terminal-handoff';
 
@@ -40,10 +41,10 @@ function fakeHandoff(): {
   writes: string[];
   resizes: Array<{ cols: number; rows: number }>;
   emitData: (data: string) => void;
-  emitExit: (code: number | null) => void;
+  emitExit: (code: number | null, failure?: TerminalRuntimeFailure | null) => void;
 } {
   let onData: ((data: string, sequence: number) => void) | null = null;
-  let onExit: ((code: number | null) => void) | null = null;
+  let onExit: ((code: number | null, failure?: TerminalRuntimeFailure | null) => void) | null = null;
   const writes: string[] = [];
   const resizes: Array<{ cols: number; rows: number }> = [];
   const handoff: TerminalHandoff = {
@@ -71,7 +72,7 @@ function fakeHandoff(): {
     writes,
     resizes,
     emitData: (data) => onData?.(data, 1),
-    emitExit: (code) => onExit?.(code),
+    emitExit: (code, failure = null) => onExit?.(code, failure),
   };
 }
 
@@ -98,9 +99,12 @@ describe('TUI terminal handoff', () => {
     stdout.columns = 120;
     stdout.rows = 40;
     stdout.emit('resize');
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await Promise.resolve();
+    await Promise.resolve();
     stdin.emit('data', Buffer.from('\u001d'));
-    await run;
+    const outcome = await run;
+
+    expect(outcome).toEqual({ kind: 'detached' });
 
     expect(stdout.writes.join('')).toContain('\u001b[2J\u001b[H');
     expect(stdout.writes.join('')).toContain('Pi');
@@ -109,5 +113,41 @@ describe('TUI terminal handoff', () => {
     expect(stdin.rawModes).toEqual([true, false]);
     expect(paused).toBe(1);
     expect(resumed).toBe(1);
+  });
+
+  it('returns a natural-exit outcome with exit code and failure', async () => {
+    const stdin = new FakeInput();
+    const stdout = new FakeOutput();
+    const fake = fakeHandoff();
+    const run = runTerminalHandoff(fake.handoff, {
+      stdin: stdin as unknown as NodeJS.ReadStream,
+      stdout: stdout as unknown as NodeJS.WriteStream,
+      pauseOuter: () => {},
+      resumeOuter: () => {},
+    });
+
+    await Promise.resolve();
+    const failure = { operation: 'reader' as const, message: 'reader closed unexpectedly' };
+    fake.emitExit(17, failure);
+
+    await expect(run).resolves.toEqual({ kind: 'exited', exitCode: 17, failure });
+  });
+
+  it('surfaces restoration failures after returning control to the outer TUI', async () => {
+    const stdin = new FakeInput();
+    const stdout = new FakeOutput();
+    const fake = fakeHandoff();
+    const run = runTerminalHandoff(fake.handoff, {
+      stdin: stdin as unknown as NodeJS.ReadStream,
+      stdout: stdout as unknown as NodeJS.WriteStream,
+      pauseOuter: () => {},
+      resumeOuter: () => { throw new Error('outer resume failed'); },
+    });
+
+    await Promise.resolve();
+    fake.emitExit(0);
+
+    await expect(run).rejects.toThrow('outer resume failed');
+    expect(stdin.rawModes).toEqual([true, false]);
   });
 });

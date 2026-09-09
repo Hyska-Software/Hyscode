@@ -12,6 +12,12 @@ import {
   effectivePolicyConfig,
   MemoryManager,
   SAFE_TOOLS,
+  projectTerminalProgress,
+  projectTerminalRuntimeSummary,
+  isTerminalRecord,
+  asTerminalRuntimeFailure,
+  validateTerminalExitEvent,
+  validateTerminalFailure,
 } from '@hyscode/agent-harness';
 import type {
   HarnessEvent,
@@ -74,7 +80,6 @@ import {
   type TaskExecutionTarget,
 } from './task-execution-coordinator';
 import { normalizeAgentHistory } from './agent-history';
-import { projectTerminalProgress } from './terminal-progress';
 
 // ─── Error Parser ────────────────────────────────────────────────────────────
 // Converts raw technical error messages into friendly user-facing text.
@@ -252,6 +257,7 @@ export class HarnessBridge {
   private lastCompletedTurnId: string | null = null;
   private activeTaskContext: AgentTaskContext | null = null;
   private taskTargetUnregister: (() => void) | null = null;
+  private ptyExitUnsubscribe: (() => void) | null = null;
 
   // ─── Agent Terminal Integration ───────────────────────────────────
   /** Last terminal command, isolated by conversation for deterministic context injection. */
@@ -468,16 +474,88 @@ export class HarnessBridge {
       },
     });
 
-    // Listen for PTY exits so we can mark agent sessions as dead and avoid reuse
-    tauriListen<{ pty_id: string }>('pty:exit', (e) => {
-      if (this.disposed) return;
-      const deadPtyId = e.payload.pty_id;
+    // Listen for PTY exits so we can mark agent sessions as dead and avoid reuse.
+    void tauriListen<unknown>('pty:exit', (e) => {
+      if (this.disposed || !isTerminalRecord(e.payload)) return;
+      const payload = e.payload;
+      if (typeof payload.pty_id !== 'string') return;
       const ts = useTerminalStore.getState();
-      const session = ts.sessions.find((s) => s.ptyId === deadPtyId && s.isAgentSession);
-      if (session) {
-        ts.markPtyDead(session.id);
+      const session = ts.sessions.find((s) => s.ptyId === payload.pty_id && s.isAgentSession);
+      if (!session) return;
+      const expectedToolCallId = session.activeToolCallId ?? undefined;
+      const projectExit = (
+        sequence: number,
+        exitCode: number | null,
+        failure: Parameters<typeof projectTerminalRuntimeSummary>[1]['failure'],
+      ): void => {
+        if (!expectedToolCallId) return;
+        const current = useAgentStore
+          .getState()
+          .pendingToolCalls
+          .find((toolCall) => toolCall.id === expectedToolCallId);
+        if (
+          !current
+          || !(
+            current.status === 'running'
+            || current.status === 'cancelling'
+            || current.terminalState === 'started'
+            || current.terminalState === 'running'
+            || current.terminalState === 'awaiting_input'
+          )
+        ) return;
+        const projection = projectTerminalRuntimeSummary(
+          {
+            terminalId: current.terminalId,
+            terminalState: current.terminalState,
+            outputSequence: current.outputSequence,
+            liveOutput: current.liveOutput,
+            failure: current.failure,
+            provisional: current.terminalProvisional,
+            canonical: current.terminalCanonical,
+          },
+          { terminalId: session.id, sequence, alive: false, exitCode, failure },
+        );
+        if (!projection) return;
+        useAgentStore.getState().updateToolCall(expectedToolCallId, {
+          status: 'error',
+          terminalId: projection.terminalId,
+          terminalState: projection.terminalState,
+          outputSequence: projection.outputSequence,
+          liveOutput: projection.liveOutput,
+          failure: projection.failure,
+          error: projection.failure?.message,
+          terminalProvisional: true,
+          terminalCanonical: false,
+        });
+      };
+      try {
+        const exit = validateTerminalExitEvent(payload);
+        projectExit(exit.sequence, exit.code, exit.failure);
+        ts.markPtyDead(session.id, exit.code, exit.failure, expectedToolCallId);
+      } catch (error) {
+        const failure = asTerminalRuntimeFailure(error, 'event');
+        projectExit(
+          typeof payload.sequence === 'number' && Number.isSafeInteger(payload.sequence) && payload.sequence >= 0
+            ? payload.sequence
+            : 0,
+          null,
+          failure,
+        );
+        ts.markPtyDead(session.id, null, failure, expectedToolCallId);
       }
-    }).catch(() => {});
+    }).then((unsubscribe) => {
+      if (this.disposed) {
+        try {
+          unsubscribe();
+        } catch (error) {
+          console.error('[HarnessBridge] PTY exit listener cleanup failed after disposal.', error);
+        }
+      } else {
+        this.ptyExitUnsubscribe = unsubscribe;
+      }
+    }).catch((error: unknown) => {
+      this.debug(`Could not subscribe to PTY exits: ${error instanceof Error ? error.message : String(error)}`);
+    });
   }
 
   private static _homePathCache: string | null = null;
@@ -1091,8 +1169,24 @@ export class HarnessBridge {
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
-    this.taskTargetUnregister?.();
+    const unregisterTasks = this.taskTargetUnregister;
     this.taskTargetUnregister = null;
+    if (unregisterTasks) {
+      try {
+        unregisterTasks();
+      } catch (error) {
+        console.error('[HarnessBridge] Task target cleanup failed.', error);
+      }
+    }
+    const unsubscribePtyExit = this.ptyExitUnsubscribe;
+    this.ptyExitUnsubscribe = null;
+    if (unsubscribePtyExit) {
+      try {
+        unsubscribePtyExit();
+      } catch (error) {
+        console.error('[HarnessBridge] PTY exit listener cleanup failed.', error);
+      }
+    }
     this.cancel();
   }
 
@@ -2107,30 +2201,70 @@ Investigate the error, fix the underlying issue in the affected files, and verif
         store.addToolCall(tc);
         break;
       }
-
       case 'terminal_progress': {
         const progress = event.progress;
         const current = useAgentStore
           .getState()
           .pendingToolCalls.find((toolCall) => toolCall.id === progress.toolCallId);
-        const projection = projectTerminalProgress(current, progress);
+        const projection = projectTerminalProgress(
+          current
+            ? {
+                terminalId: current.terminalId,
+                terminalState: current.terminalState,
+                outputSequence: current.outputSequence,
+                liveOutput: current.liveOutput,
+                failure: current.failure,
+                provisional: current.terminalProvisional,
+                canonical: current.terminalCanonical,
+              }
+            : undefined,
+          progress,
+          {
+            provisional: progress.state === 'complete'
+              || progress.state === 'error'
+              || progress.state === 'cancelled'
+              || progress.state === 'background',
+          },
+        );
         if (!projection) break;
-        useTerminalStore
-          .getState()
-          .setAwaitingInput(progress.terminalId, progress.state === 'awaiting_input');
+        const terminalStore = useTerminalStore.getState();
+        terminalStore.setAwaitingInput(progress.terminalId, progress.state === 'awaiting_input');
+        if (
+          progress.state === 'complete'
+          || progress.state === 'error'
+          || progress.state === 'cancelled'
+          || progress.state === 'background'
+        ) {
+          terminalStore.clearAgentActivityIfOwned(progress.terminalId, progress.toolCallId);
+        }
         if (progress.state !== 'awaiting_input') {
           for (const toolCall of useAgentStore.getState().pendingToolCalls) {
             if (
-              toolCall.id !== progress.toolCallId &&
-              toolCall.terminalId === progress.terminalId &&
-              toolCall.terminalState === 'awaiting_input'
+              toolCall.id !== progress.toolCallId
+              && toolCall.terminalId === progress.terminalId
+              && toolCall.terminalState === 'awaiting_input'
             ) {
               store.updateToolCall(toolCall.id, { terminalState: progress.state });
             }
           }
         }
+        const provisionalStatus: ToolCallDisplay['status'] | null =
+          progress.state === 'error'
+            ? 'error'
+            : progress.state === 'cancelled'
+              ? 'cancelled'
+              : progress.state === 'complete' || progress.state === 'background'
+                ? 'success'
+                : null;
         store.updateToolCall(progress.toolCallId, {
-          ...projection,
+          ...(provisionalStatus ? { status: provisionalStatus } : {}),
+          terminalId: projection.terminalId,
+          terminalState: projection.terminalState,
+          outputSequence: projection.outputSequence,
+          liveOutput: projection.liveOutput,
+          failure: projection.failure,
+          terminalProvisional: projection.provisional,
+          terminalCanonical: false,
         });
         break;
       }
@@ -2160,18 +2294,67 @@ Investigate the error, fix the underlying issue in the affected files, and verif
       case 'tool_call_result': {
         const label = event.result.success ? '✓' : '✗';
         this.debug(`${label} ${event.toolName} (${event.durationMs}ms)`);
+        const metadata = event.result.metadata ?? {};
+        const terminalId = typeof metadata.terminalId === 'string'
+          ? metadata.terminalId
+          : undefined;
+        let failure: ToolCallDisplay['failure'] = null;
+        if ('failure' in metadata) {
+          if (metadata.failure === undefined) {
+            failure = {
+              operation: 'event',
+              message: 'Terminal result failure must be null or a runtime failure.',
+            };
+          } else if (metadata.failure === null) {
+            failure = null;
+          } else {
+            try {
+              failure = validateTerminalFailure(metadata.failure, 'event');
+            } catch (error) {
+              failure = asTerminalRuntimeFailure(error, 'event');
+            }
+          }
+        }
+        const awaitingInput = metadata.awaitingInput === true;
+        const terminalState = terminalId
+          ? awaitingInput
+            ? 'awaiting_input'
+            : failure
+              ? 'error'
+              : metadata.cancelled === true
+                ? 'cancelled'
+                : event.result.success
+                  ? metadata.background === true ? 'background' : 'complete'
+                  : 'error'
+          : undefined;
         // Find tool call by the harness-assigned ID (stable correlation)
         store.updateToolCall(event.toolCallId, {
-          status: event.result.success ? 'success' : 'error',
+          status: metadata.cancelled === true || failure
+            ? metadata.cancelled === true ? 'cancelled' : 'error'
+            : event.result.success
+              ? 'success'
+              : 'error',
           output: event.result.output,
           error: event.result.error,
           completedAt: Date.now(),
-          terminalId:
-            (event.result.metadata?.terminalId as string | undefined) ??
-            useAgentStore
-              .getState()
-              .pendingToolCalls.find((toolCall) => toolCall.id === event.toolCallId)?.terminalId,
+          ...(terminalId ? { terminalCanonical: !awaitingInput, terminalProvisional: awaitingInput } : {}),
+          failure,
+          ...(terminalId
+            ? {
+                terminalId,
+                liveOutput: event.result.output,
+                terminalState,
+              }
+            : {}),
+          ...(typeof metadata.sequence === 'number' && Number.isSafeInteger(metadata.sequence) && metadata.sequence >= 0
+            ? { outputSequence: metadata.sequence }
+            : {}),
         });
+        if (terminalId && !awaitingInput) {
+          const terminalStore = useTerminalStore.getState();
+          terminalStore.clearAgentActivityIfOwned(terminalId, event.toolCallId);
+          terminalStore.setAwaitingInput(terminalId, false);
+        }
         if (event.toolName === 'run_terminal_command') {
           const completedCall = useAgentStore
             .getState()
@@ -2236,6 +2419,7 @@ Investigate the error, fix the underlying issue in the affected files, and verif
       }
 
       case 'turn_end': {
+        this.sweepUnfinalizedTerminalTools();
         if (event.reason === 'error' && event.error) {
           const technical = event.errorDetails?.technicalMessage;
           this.debug(
@@ -2377,6 +2561,38 @@ Investigate the error, fix the underlying issue in the affected files, and verif
             .catch(() => {});
         }
         break;
+      }
+    }
+  }
+
+  private sweepUnfinalizedTerminalTools(): void {
+    const store = this.agentStore.getState();
+    for (const toolCall of store.pendingToolCalls) {
+      if (!toolCall.terminalId || toolCall.terminalCanonical) continue;
+      if (toolCall.input.background === true || toolCall.terminalState === 'background') continue;
+      const active =
+        toolCall.status === 'running'
+        || toolCall.status === 'cancelling'
+        || toolCall.terminalState === 'started'
+        || toolCall.terminalState === 'running'
+        || toolCall.terminalState === 'awaiting_input';
+      if (!active) continue;
+      const failure = {
+        operation: 'event' as const,
+        message: 'Terminal command ended without a final result.',
+      };
+      store.updateToolCall(toolCall.id, {
+        status: 'error',
+        terminalState: 'error',
+        terminalProvisional: true,
+        terminalCanonical: false,
+        failure,
+        error: failure.message,
+      });
+      const terminal = useTerminalStore.getState().sessions.find((session) => session.id === toolCall.terminalId);
+      if (terminal?.activeToolCallId === toolCall.id) {
+        useTerminalStore.getState().clearAgentActivityIfOwned(toolCall.terminalId, toolCall.id);
+        useTerminalStore.getState().setAwaitingInput(toolCall.terminalId, false);
       }
     }
   }

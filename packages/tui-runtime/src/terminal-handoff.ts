@@ -1,3 +1,5 @@
+import type { TerminalRuntimeFailure } from '@hyscode/agent-harness';
+
 export type TerminalViewport = {
   cols: number;
   rows: number;
@@ -8,7 +10,10 @@ export const MAX_TERMINAL_COLS = 4096;
 export const MAX_TERMINAL_ROWS = 4096;
 
 export type TerminalDataHandler = (data: string, sequence: number) => void;
-export type TerminalExitHandler = (exitCode: number | null) => void;
+export type TerminalExitHandler = (
+  exitCode: number | null,
+  failure?: TerminalRuntimeFailure | null,
+) => void;
 
 export type TerminalHandoff = {
   terminalId: string;

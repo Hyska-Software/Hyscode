@@ -14,6 +14,8 @@ function session(overrides: Partial<TerminalSession>): TerminalSession {
     lastCommand: null,
     commandHistory: [],
     isDead: false,
+    exitCode: null,
+    failure: null,
     ownerConversationId: null,
     activeToolCallId: null,
     awaitingInput: false,

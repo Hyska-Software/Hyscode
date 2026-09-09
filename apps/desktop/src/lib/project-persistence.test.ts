@@ -71,6 +71,7 @@ describe('project workspace lifecycle', () => {
     storageValues.clear();
     invokeMock.mockReset();
     invokeMock.mockImplementation(async (command: string) => {
+      if (command === 'pty_kill') return { status: 'stopped', failures: [] };
       if (command === 'db_list_conversations') return [];
       if (command === 'db_get_conversation') return null;
       return undefined;

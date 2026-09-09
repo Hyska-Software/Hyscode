@@ -1,8 +1,9 @@
 import { useEffect, useCallback, useRef } from 'react';
 import { Terminal, Plus, X, GripVertical, Bot } from 'lucide-react';
-import { invoke } from '@tauri-apps/api/core';
+import { asTerminalRuntimeFailure } from '@hyscode/agent-harness';
 import { useTerminalStore } from '../../stores/terminal-store';
 import { useLayoutStore } from '../../stores/layout-store';
+import { desktopTerminalRuntime } from '../../lib/terminal-runtime';
 import { TerminalInstance } from './terminal-instance';
 
 export function TerminalPanel() {
@@ -10,7 +11,6 @@ export function TerminalPanel() {
   const sessions = allSessions.filter((session) => session.location === 'panel');
   const activeSessionId = useTerminalStore((s) => s.activeSessionId);
   const createSession = useTerminalStore((s) => s.createSession);
-  const closeSession = useTerminalStore((s) => s.closeSession);
   const setActiveSession = useTerminalStore((s) => s.setActiveSession);
   const terminalLocation = useLayoutStore((s) => s.terminalLocation);
 
@@ -22,14 +22,30 @@ export function TerminalPanel() {
   }, []);
 
   const handleClose = useCallback(
-    (e: React.MouseEvent, sessionId: string, ptyId: string | null) => {
+    async (e: React.MouseEvent, sessionId: string, ptyId: string | null): Promise<void> => {
       e.stopPropagation();
       if (ptyId) {
-        invoke('pty_kill', { ptyId }).catch(() => {});
+        try {
+          const stop = await desktopTerminalRuntime.kill(sessionId);
+          if (stop.status !== 'stopped') {
+            const failure = stop.failures[0] ?? {
+              operation: 'kill' as const,
+              message: `Terminal stop was not confirmed (${stop.status}).`,
+            };
+            useTerminalStore.getState().markPtyDead(sessionId, null, failure);
+            console.error('[Terminal] Close could not confirm PTY termination', { sessionId, stop });
+            return;
+          }
+        } catch (error) {
+          const failure = asTerminalRuntimeFailure(error, 'kill');
+          useTerminalStore.getState().markPtyDead(sessionId, null, failure);
+          console.error('[Terminal] Close failed to terminate PTY', { sessionId, error: failure.message });
+          return;
+        }
       }
-      closeSession(sessionId);
+      useTerminalStore.getState().closeSession(sessionId);
     },
-    [closeSession],
+    [],
   );
 
   // Translate vertical wheel input into horizontal scrolling once tabs overflow

@@ -5,12 +5,26 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import {
   Harness,
-  invalidateTerminalInput,
   MemoryManager,
+  asTerminalRuntimeFailure,
+  invalidateTerminalInput,
+  isTerminalRecord,
+  MAX_CAPTURE_CHARS,
+  projectTerminalProgress,
   RuleLoader,
   SkillLoader,
-  getAgentTypes,
+  TerminalValidationError,
+  validateTerminalDataEvent,
+  validateTerminalExitEvent,
+  validateTerminalFailure,
+  validateTerminalSnapshot,
+  validateTerminalStopResult,
+  validateTerminalString,
+  withTerminalDeadline,
+  TERMINAL_ADAPTER_CALL_TIMEOUT_MS,
+  TERMINAL_STOP_CALL_TIMEOUT_MS,
   resolveTerminalShell,
+  getAgentTypes,
   type AgentQuestionAnswer,
   type AgentType,
   type ContextSource,
@@ -26,7 +40,9 @@ import {
   type TerminalProgress,
   type TerminalRole,
   type TerminalRuntimeAdapter,
+  type TerminalRuntimeFailure,
   type TerminalSnapshot,
+  type TerminalStopResult,
   type ToolHandler,
   type ToolResult,
   type ApprovalDecision,
@@ -99,21 +115,24 @@ type CliTerminalEntry = {
   activeToolCallId: string | null;
   awaitingInput: boolean;
   alive: boolean;
+  stopConfirmed: boolean;
+  failure: TerminalRuntimeFailure | null;
   exitCode: number | null;
   sequence: number;
-  terminalState: TerminalProgress['state'];
-  outputPreview: string;
   truncated: boolean;
+  terminalState: TerminalProgress['state'];
+  provisional: boolean;
+  canonical: boolean;
+  outputPreview: string;
+  output: string;
   handoffActive: boolean;
   handoffDetach: (() => void) | null;
   observerUnsubscribe: (() => void) | null;
 };
 
 type TerminalUpdateCause = TerminalUpdatedPayload['cause'];
-type TerminalDataEvent = { pty_id?: string; data?: string; sequence?: number };
-type TerminalExitEvent = { pty_id?: string; code?: number | null; sequence?: number };
-
 const MAX_TERMINAL_PREVIEW = 4_000;
+
 
 type BridgeOutput = (message: BridgeResponse | BridgeEvent) => void;
 
@@ -760,12 +779,20 @@ export class TuiBridge {
     return { interrupted: true };
   }
 
-  private async terminalKill(rawParams: Record<string, unknown>): Promise<{ killed: boolean }> {
+  private async terminalKill(rawParams: Record<string, unknown>): Promise<{
+    killed: boolean;
+    status: TerminalStopResult['status'];
+    failures: TerminalRuntimeFailure[];
+  }> {
     const runtime = this.requireTerminalRuntime();
     const terminalId = String(rawParams.terminalId ?? '');
     runtime.authorize(terminalId, this.userTerminalAccess());
-    await runtime.kill(terminalId);
-    return { killed: true };
+    const result = await runtime.kill(terminalId);
+    return {
+      killed: result.status === 'stopped',
+      status: result.status,
+      failures: result.failures,
+    };
   }
 
   private async resolveFileChange(rawParams: Record<string, unknown>): Promise<{ resolved: boolean }> {
@@ -921,18 +948,41 @@ export class TuiBridge {
   }
 
   private async shutdown(): Promise<void> {
+    let firstFailure: TerminalRuntimeFailure | null = null;
+    const capture = (error: unknown, operation: TerminalRuntimeFailure['operation']): void => {
+      firstFailure ??= asTerminalRuntimeFailure(error, operation);
+    };
     const activeRun = this.activeRun;
     this.cancel();
-    await activeRun?.catch(() => undefined);
+    await activeRun?.catch((error: unknown) => capture(error, 'event'));
     for (const pending of this.hostRequests.values()) pending.reject(new Error('Runtime host was shut down.'));
     this.hostRequests.clear();
-    await this.terminalRuntime?.shutdown();
-    this.terminalRuntime = null;
+    const terminalRuntime = this.terminalRuntime;
+    try {
+      await terminalRuntime?.shutdown();
+    } catch (error) {
+      capture(error, 'kill');
+    } finally {
+      this.terminalRuntime = null;
+    }
     this.attachments.clear();
     this.pendingFileChanges.clear();
     this.childAgents.clear();
-    if (this.mcp) await Promise.all(this.mcp.listServers().map((server) => this.mcp?.disconnect(server.config.id)));
-    await this.host?.shutdown();
+    if (this.mcp) {
+      for (const server of this.mcp.listServers()) {
+        try {
+          await this.mcp.disconnect(server.config.id);
+        } catch (error) {
+          capture(error, 'kill');
+        }
+      }
+    }
+    try {
+      await this.host?.shutdown();
+    } catch (error) {
+      capture(error, 'kill');
+    }
+    if (firstFailure) throw new TerminalValidationError(firstFailure);
   }
 
   private async refreshGitSummary(): Promise<GitSummary> {
@@ -1251,6 +1301,7 @@ export class TuiBridge {
   private emitHarnessEvent(event: HarnessEvent): void {
     if (event.type === 'turn_recoverable_error') this.lastRecovery = event.recovery;
     if (event.type === 'terminal_progress') this.terminalRuntime?.setProgress(event.progress);
+    if (event.type === 'tool_call_result') this.terminalRuntime?.setResult(event.toolCallId, event.result);
     if (event.type === 'turn_start' && !this.activeTurnId) this.activeTurnId = event.turnId ?? null;
     if (event.type === 'transcript_message' && this.belongsToActiveTurn(event)) {
       this.activeTurnMessages.push({ role: event.role, content: event.blocks });
@@ -1518,6 +1569,8 @@ export class TuiBridge {
 
 class CliTerminalRuntime implements TerminalRuntimeAdapter {
   private readonly entries = new Map<string, CliTerminalEntry>();
+  private readonly stopPromises = new Map<string, Promise<TerminalStopResult>>();
+  private readonly quarantinePromises = new Map<string, Promise<void>>();
 
   constructor(
     private readonly host: CliHost,
@@ -1533,16 +1586,33 @@ class CliTerminalRuntime implements TerminalRuntimeAdapter {
         if (entry.isolationKey !== isolationKey) continue;
         if (entry.cwd !== normalizeTerminalPath(request.cwd)) continue;
         if (request.sessionName && entry.sessionName !== request.sessionName) continue;
-        if (entry.awaitingInput) continue;
+        if (entry.awaitingInput || entry.failure) continue;
         if (entry.activeToolCallId && entry.activeToolCallId !== request.toolCallId) continue;
-        const alive = await this.host.invoke<boolean>('pty_exists', { ptyId: entry.binding.ptyId }).catch(() => false);
+        let alive: boolean;
+        try {
+          const result = await withTerminalDeadline(
+            'acquire',
+            () => this.host.invoke<unknown>('pty_exists', { ptyId: entry.binding.ptyId }),
+            undefined,
+            TERMINAL_ADAPTER_CALL_TIMEOUT_MS,
+          );
+          if (typeof result !== 'boolean') throw new Error('pty_exists returned a non-boolean result.');
+          alive = result;
+        } catch (error) {
+          this.quarantineTerminal(entry, asTerminalRuntimeFailure(error, 'acquire'));
+          continue;
+        }
         if (!alive) {
-          this.markExited(entry, entry.exitCode);
+          this.markExited(entry, entry.exitCode, null);
           continue;
         }
         entry.alive = true;
         entry.activeToolCallId = request.toolCallId;
         entry.awaitingInput = false;
+        entry.failure = null;
+        entry.provisional = false;
+        entry.canonical = false;
+        entry.terminalState = 'started';
         this.notify(entry, 'state');
         return entry.binding;
       }
@@ -1585,34 +1655,48 @@ class CliTerminalRuntime implements TerminalRuntimeAdapter {
 
   async snapshot(terminalId: string, afterSequence = 0): Promise<TerminalSnapshot> {
     const entry = this.requireEntry(terminalId);
-    const snapshot = await this.host.invoke<{
-      data: string;
-      from_sequence: number;
-      to_sequence: number;
-      truncated: boolean;
-      alive: boolean;
-      exit_code: number | null;
-    }>('pty_snapshot', { ptyId: entry.binding.ptyId, afterSequence });
-    entry.sequence = Math.max(entry.sequence, snapshot.to_sequence);
-    entry.truncated = entry.truncated || snapshot.truncated;
-    if (afterSequence === 0) entry.outputPreview = tail(snapshot.data);
-    else if (snapshot.data) entry.outputPreview = tail(`${entry.outputPreview}${snapshot.data}`);
-    if (snapshot.alive) {
-      if (entry.alive) {
-        entry.exitCode = snapshot.exit_code;
+    if (!entry.alive && entry.stopConfirmed) {
+      return {
+        data: afterSequence === 0 ? entry.output : '',
+        fromSequence: afterSequence === 0 ? 0 : entry.sequence,
+        toSequence: entry.sequence,
+        truncated: entry.truncated,
+        alive: false,
+        exitCode: entry.exitCode,
+        failure: entry.failure,
+      };
+    }
+    try {
+      const snapshot = await withTerminalDeadline(
+        'snapshot',
+        () => this.host.invoke<unknown>('pty_snapshot', {
+          ptyId: entry.binding.ptyId,
+          afterSequence,
+        }).then((value) => normalizeCliSnapshot(value)),
+        undefined,
+        TERMINAL_ADAPTER_CALL_TIMEOUT_MS,
+      );
+      entry.sequence = Math.max(entry.sequence, snapshot.toSequence);
+      entry.truncated = afterSequence === 0
+        ? snapshot.truncated
+        : entry.truncated || snapshot.truncated;
+      if (afterSequence === 0) {
+        entry.output = snapshot.data.slice(-MAX_CAPTURE_CHARS);
+        entry.outputPreview = tail(entry.output);
+      }
+      if (!snapshot.alive || snapshot.failure) {
+        this.markExited(entry, snapshot.exitCode, snapshot.failure);
+      } else if (entry.alive) {
+        entry.exitCode = snapshot.exitCode;
+        entry.failure = snapshot.failure;
         this.notify(entry, 'output');
       }
-    } else {
-      this.markExited(entry, snapshot.exit_code);
+      return snapshot;
+    } catch (error) {
+      const failure = asTerminalRuntimeFailure(error, 'snapshot');
+      this.quarantineTerminal(entry, failure);
+      throw new TerminalValidationError(failure);
     }
-    return {
-      data: snapshot.data,
-      fromSequence: snapshot.from_sequence,
-      toSequence: snapshot.to_sequence,
-      truncated: snapshot.truncated,
-      alive: snapshot.alive,
-      exitCode: snapshot.exit_code,
-    };
   }
 
   async list(): Promise<TerminalSummary[]> {
@@ -1630,9 +1714,19 @@ class CliTerminalRuntime implements TerminalRuntimeAdapter {
   async write(terminalId: string, data: string): Promise<void> {
     const entry = this.requireEntry(terminalId);
     if (!entry.alive) throw new Error(`Terminal "${terminalId}" is not writable.`);
-    await this.host.invoke('pty_write', { ptyId: entry.binding.ptyId, data });
+    try {
+      await withTerminalDeadline(
+        'write',
+        () => this.host.invoke('pty_write', { ptyId: entry.binding.ptyId, data }),
+        undefined,
+        TERMINAL_ADAPTER_CALL_TIMEOUT_MS,
+      );
+    } catch (error) {
+      const failure = asTerminalRuntimeFailure(error, 'write');
+      this.quarantineTerminal(entry, failure);
+      throw new TerminalValidationError(failure);
+    }
   }
-
   async writeUser(terminalId: string, data: string, approvalMode: string, access: TerminalAccess): Promise<void> {
     const entry = this.requireEntry(terminalId);
     this.authorize(terminalId, access);
@@ -1643,24 +1737,29 @@ class CliTerminalRuntime implements TerminalRuntimeAdapter {
     this.notify(entry, 'state');
     await this.write(terminalId, data);
   }
-
   async openUserTerminalHandoff(terminalId: string, access: TerminalAccess): Promise<TerminalHandoff> {
     const entry = this.requireEntry(terminalId);
-    this.authorize(terminalId, access);
     if (entry.role !== 'user') throw new Error('Only manual user terminals can be attached interactively.');
+    this.authorize(terminalId, access);
     if (!entry.alive) throw new Error(`Terminal "${terminalId}" is not alive.`);
     if (entry.handoffActive) throw new Error(`Terminal "${terminalId}" is already attached.`);
 
     let detached = false;
     let subscription: (() => void) | null = null;
     const clearHandoff = (): void => {
-      subscription?.();
+      let firstError: unknown = null;
+      try {
+        subscription?.();
+      } catch (error) {
+        firstError = error;
+      }
       subscription = null;
       entry.handoffDetach = null;
       if (entry.handoffActive) {
         entry.handoffActive = false;
         this.notify(entry, 'state');
       }
+      if (firstError) throw firstError;
     };
 
     entry.handoffActive = true;
@@ -1675,15 +1774,29 @@ class CliTerminalRuntime implements TerminalRuntimeAdapter {
         const unsubscribe = await this.subscribe(
           terminalId,
           onData,
-          (exitCode) => {
+          (exitCode, failure) => {
             detached = true;
-            clearHandoff();
-            onExit(exitCode);
+            let cleanupFailure: TerminalRuntimeFailure | null = null;
+            try {
+              clearHandoff();
+            } catch (error) {
+              cleanupFailure = asTerminalRuntimeFailure(error, 'release');
+            }
+            const finalFailure = cleanupFailure
+              ? {
+                  operation: 'release' as const,
+                  message: `${failure?.message ?? 'Terminal exited.'} Cleanup: ${cleanupFailure.message}`,
+                }
+              : failure;
+            try {
+              onExit(exitCode, finalFailure);
+            } catch (error) {
+              console.error('[terminal-runtime] Terminal handoff exit callback failed.', error);
+            }
           },
         );
         if (detached) {
-          unsubscribe();
-          throw new Error(`Terminal "${terminalId}" exited before the handoff was attached.`);
+          return unsubscribe;
         }
         subscription = unsubscribe;
         return () => {
@@ -1713,18 +1826,93 @@ class CliTerminalRuntime implements TerminalRuntimeAdapter {
 
   async interrupt(terminalId: string): Promise<void> {
     const entry = this.requireEntry(terminalId);
-    if (entry.alive) await this.host.invoke('pty_interrupt', { ptyId: entry.binding.ptyId });
+    if (!entry.alive) return;
+    try {
+      await withTerminalDeadline(
+        'interrupt',
+        () => this.host.invoke('pty_interrupt', { ptyId: entry.binding.ptyId }),
+        undefined,
+        TERMINAL_STOP_CALL_TIMEOUT_MS,
+      );
+    } catch (error) {
+      const failure = asTerminalRuntimeFailure(error, 'interrupt');
+      this.quarantineTerminal(entry, failure);
+      throw new TerminalValidationError(failure);
+    }
   }
 
-  async kill(terminalId: string): Promise<void> {
+  async kill(terminalId: string): Promise<TerminalStopResult> {
+    const existing = this.stopPromises.get(terminalId);
+    if (existing) return existing;
+    const promise = this.killInternal(terminalId);
+    this.stopPromises.set(terminalId, promise);
+    try {
+      return await promise;
+    } finally {
+      if (this.stopPromises.get(terminalId) === promise) this.stopPromises.delete(terminalId);
+    }
+  }
+
+  private async killInternal(terminalId: string): Promise<TerminalStopResult> {
     const entry = this.requireEntry(terminalId);
-    await this.host.invoke('pty_kill', { ptyId: entry.binding.ptyId });
-    this.markExited(entry, entry.exitCode);
+    try {
+      const raw = await withTerminalDeadline(
+        'kill',
+        () => this.host.invoke<unknown>('pty_kill', { ptyId: entry.binding.ptyId }),
+        (lateRaw) => {
+          try {
+            const lateStop = validateTerminalStopResult(lateRaw);
+            const lateFailure = lateStop.failures[0] ?? (
+              lateStop.status === 'stopped'
+                ? null
+                : {
+                    operation: 'kill' as const,
+                    message: `Terminal stop was not confirmed (${lateStop.status}).`,
+                  }
+            );
+            this.markExited(entry, entry.exitCode, lateFailure);
+            entry.stopConfirmed = lateStop.status === 'stopped';
+          } catch (error) {
+            entry.stopConfirmed = false;
+            this.markExited(entry, entry.exitCode, asTerminalRuntimeFailure(error, 'kill'));
+          }
+        },
+        TERMINAL_STOP_CALL_TIMEOUT_MS,
+      );
+      const stop = validateTerminalStopResult(raw);
+      const failure = stop.failures[0] ?? (
+        stop.status === 'stopped'
+          ? null
+          : {
+              operation: 'kill' as const,
+              message: `Terminal stop was not confirmed (${stop.status}).`,
+            }
+      );
+      this.markExited(entry, entry.exitCode, failure);
+      entry.stopConfirmed = stop.status === 'stopped';
+      return stop;
+    } catch (error) {
+      const failure = asTerminalRuntimeFailure(error, 'kill');
+      entry.stopConfirmed = false;
+      this.markExited(entry, entry.exitCode, failure);
+      return { status: 'unknown', failures: [failure] };
+    }
   }
 
   async resize(terminalId: string, cols: number, rows: number): Promise<void> {
     const entry = this.requireEntry(terminalId);
-    await this.host.invoke('pty_resize', { ptyId: entry.binding.ptyId, cols, rows });
+    try {
+      await withTerminalDeadline(
+        'event',
+        () => this.host.invoke('pty_resize', { ptyId: entry.binding.ptyId, cols, rows }),
+        undefined,
+        TERMINAL_ADAPTER_CALL_TIMEOUT_MS,
+      );
+    } catch (error) {
+      const failure = asTerminalRuntimeFailure(error, 'event');
+      this.quarantineTerminal(entry, failure);
+      throw new TerminalValidationError(failure);
+    }
   }
 
   authorize(terminalId: string, access: TerminalAccess): void {
@@ -1740,35 +1928,131 @@ class CliTerminalRuntime implements TerminalRuntimeAdapter {
       }
       return;
     }
-    if (ownerMatches) return;
+
+    if (entry.role === 'user' && ownerMatches) return;
+    if (entry.role === 'agent' && entry.ownerConversationId === access.conversationId
+      && !entry.activeToolCallId && entry.awaitingInput) {
+      return;
+    }
+    if (entry.role === 'agent') throw new Error(`Terminal "${terminalId}" is owned by the Harness.`);
     throw new Error(`Terminal "${terminalId}" belongs to another conversation.`);
   }
 
-  setProgress(progress: Pick<TerminalProgress, 'terminalId' | 'toolCallId' | 'state' | 'sequence'>): void {
+  setProgress(progress: TerminalProgress): void {
     const entry = this.entries.get(progress.terminalId);
     if (!entry) return;
-    const finalState = progress.state === 'complete'
-      || progress.state === 'error'
-      || progress.state === 'cancelled'
-      || progress.state === 'background';
-    const previousFinalState = entry.terminalState === 'complete'
-      || entry.terminalState === 'error'
-      || entry.terminalState === 'cancelled'
-      || entry.terminalState === 'background';
-    const startsNewCommand = progress.state === 'started' && entry.activeToolCallId === progress.toolCallId;
-    if ((previousFinalState && !finalState && !startsNewCommand)
-      || (!finalState && !startsNewCommand && progress.sequence < entry.sequence)) return;
-    entry.sequence = Math.max(entry.sequence, progress.sequence);
-    entry.terminalState = progress.state;
+    const isInitialState = progress.state === 'started'
+      && progress.toolCallId === entry.activeToolCallId
+      && entry.terminalState === 'started'
+      && !entry.canonical
+      && !entry.provisional;
+    const projection = projectTerminalProgress(
+      {
+        terminalId: entry.binding.terminalId,
+        terminalState: isInitialState ? undefined : entry.terminalState,
+        outputSequence: isInitialState ? undefined : entry.sequence,
+        liveOutput: entry.outputPreview,
+        failure: entry.failure,
+        provisional: entry.provisional,
+        canonical: entry.canonical,
+      },
+      progress,
+      {
+        provisional: progress.state === 'complete'
+          || progress.state === 'error'
+          || progress.state === 'cancelled'
+          || progress.state === 'background',
+      },
+    );
+    if (!projection) return;
+    entry.sequence = Math.max(entry.sequence, projection.outputSequence);
+    entry.terminalState = projection.terminalState;
+    entry.failure = projection.failure;
+    entry.provisional = projection.provisional;
+    entry.canonical = false;
     if (progress.state === 'awaiting_input') {
       entry.awaitingInput = true;
       entry.activeToolCallId = null;
     } else if (progress.state === 'started' || progress.state === 'running') {
       entry.awaitingInput = false;
       entry.activeToolCallId = progress.toolCallId;
-    } else if (progress.state === 'complete' || progress.state === 'error' || progress.state === 'cancelled' || progress.state === 'background') {
+    } else {
       entry.awaitingInput = false;
+      if (entry.activeToolCallId === progress.toolCallId) entry.activeToolCallId = null;
     }
+    this.notify(entry, 'state');
+  }
+
+  setResult(toolCallId: string, result: ToolResult): void {
+    const metadata = isTerminalRecord(result.metadata) ? result.metadata : {};
+    const terminalId = typeof metadata.terminalId === 'string' ? metadata.terminalId : null;
+    const entry = terminalId
+      ? this.entries.get(terminalId)
+      : Array.from(this.entries.values()).find((item) => item.activeToolCallId === toolCallId);
+    if (!entry || entry.canonical) return;
+    let runtimeFailure: TerminalRuntimeFailure | null = null;
+    if ('failure' in metadata) {
+      try {
+        if (metadata.failure === undefined) throw new Error('Terminal result failure must be null or a runtime failure.');
+        runtimeFailure = validateTerminalFailure(metadata.failure, 'event');
+      } catch (error) {
+        runtimeFailure = asTerminalRuntimeFailure(error, 'event');
+      }
+    }
+    if (runtimeFailure && !entry.failure) this.markExited(entry, entry.exitCode, runtimeFailure);
+    const sequence = typeof metadata.sequence === 'number'
+      && Number.isSafeInteger(metadata.sequence)
+      && metadata.sequence >= 0
+      ? metadata.sequence
+      : entry.sequence;
+    const awaitingInput = metadata.awaitingInput === true;
+    const state: TerminalProgress['state'] = runtimeFailure
+      ? 'error'
+      : awaitingInput
+        ? 'awaiting_input'
+        : result.success
+          ? metadata.background === true ? 'background' : 'complete'
+          : metadata.cancelled === true ? 'cancelled' : 'error';
+    const output = typeof result.output === 'string' ? result.output : '';
+    if (output && !awaitingInput) entry.outputPreview = tail(output);
+    if (awaitingInput) {
+      entry.sequence = Math.max(entry.sequence, sequence);
+      entry.terminalState = 'awaiting_input';
+      entry.failure = runtimeFailure;
+      entry.provisional = true;
+      entry.canonical = false;
+      entry.awaitingInput = true;
+      entry.activeToolCallId = null;
+      this.notify(entry, 'state');
+      return;
+    }
+    const projection = projectTerminalProgress(
+      {
+        terminalId: entry.binding.terminalId,
+        terminalState: entry.terminalState,
+        outputSequence: entry.sequence,
+        liveOutput: entry.outputPreview,
+        failure: runtimeFailure,
+        provisional: entry.provisional,
+        canonical: false,
+      },
+      {
+        toolCallId,
+        terminalId: entry.binding.terminalId,
+        sequence,
+        chunk: '',
+        state,
+        ...(runtimeFailure ? { failure: runtimeFailure } : {}),
+      },
+    );
+    if (!projection) return;
+    entry.sequence = projection.outputSequence;
+    entry.terminalState = projection.terminalState;
+    entry.failure = projection.failure;
+    entry.provisional = false;
+    entry.canonical = true;
+    entry.awaitingInput = false;
+    if (entry.activeToolCallId === toolCallId) entry.activeToolCallId = null;
     this.notify(entry, 'state');
   }
 
@@ -1782,52 +2066,182 @@ class CliTerminalRuntime implements TerminalRuntimeAdapter {
   async subscribe(
     terminalId: string,
     onData: (data: string, sequence: number) => void,
-    onExit: (exitCode: number | null) => void,
+    onExit: (exitCode: number | null, failure?: TerminalRuntimeFailure | null) => void,
   ): Promise<() => void> {
     const entry = this.requireEntry(terminalId);
     const queued: Array<{ data: string; sequence: number }> = [];
     let replayComplete = false;
     let appliedSequence = 0;
     let exited = false;
+    let unsubscribeData: (() => void) | null = null;
+    let unsubscribeExit: (() => void) | null = null;
+    const cleanup = (): void => {
+      let firstError: unknown = null;
+      try {
+        unsubscribeData?.();
+      } catch (error) {
+        firstError = error;
+      }
+      try {
+        unsubscribeExit?.();
+      } catch (error) {
+        firstError ??= error;
+      }
+      unsubscribeData = null;
+      unsubscribeExit = null;
+      if (firstError) throw firstError;
+    };
+    const reportFailure = (error: unknown): void => {
+      const failure = asTerminalRuntimeFailure(error, 'event');
+      const wasExited = exited;
+      exited = true;
+      let cleanupFailure: TerminalRuntimeFailure | null = null;
+      try {
+        cleanup();
+      } catch (unsubscribeError) {
+        cleanupFailure = asTerminalRuntimeFailure(unsubscribeError, 'subscribe');
+      }
+      const finalFailure = cleanupFailure
+        ? {
+            operation: failure.operation,
+            message: `${failure.message} Cleanup: ${cleanupFailure.message}`,
+          }
+        : failure;
+      this.quarantineTerminal(entry, finalFailure);
+      if (!wasExited) {
+        try {
+          onExit(null, finalFailure);
+        } catch (callbackError) {
+          console.error('[terminal-runtime] Terminal exit callback failed.', callbackError);
+        }
+      }
+    };
+
     const deliverData = (data: string, sequence: number): void => {
       if (sequence <= appliedSequence) return;
       appliedSequence = sequence;
       onData(data, sequence);
     };
-    const unsubscribeData = await this.host.listen('pty:data', (payload) => {
-      const event = payload as TerminalDataEvent;
-      if (event.pty_id !== entry.binding.ptyId || typeof event.data !== 'string') return;
-      const chunk = { data: event.data, sequence: event.sequence ?? appliedSequence + 1 };
-      if (!replayComplete) queued.push(chunk);
-      else deliverData(chunk.data, chunk.sequence);
-    });
-    const unsubscribeExit = await this.host.listen('pty:exit', (payload) => {
-      const event = payload as TerminalExitEvent;
-      if (event.pty_id !== entry.binding.ptyId || exited) return;
-      exited = true;
-      onExit(event.code ?? null);
-    });
-    const replay = await this.snapshot(terminalId, 0);
-    appliedSequence = replay.toSequence;
-    if (replay.data) onData(replay.data, replay.toSequence);
-    replayComplete = true;
-    for (const chunk of queued.sort((left, right) => left.sequence - right.sequence)) deliverData(chunk.data, chunk.sequence);
-    if (!replay.alive && !exited) {
-      exited = true;
-      onExit(replay.exitCode);
-    }
-    return () => {
-      unsubscribeData();
-      unsubscribeExit();
+    const handleData = (payload: unknown): void => {
+      if (exited || !isTerminalRecord(payload) || payload.pty_id !== entry.binding.ptyId) return;
+      try {
+        const event = validateTerminalDataEvent(payload);
+        const chunk = { data: event.data, sequence: event.sequence };
+        if (!replayComplete) queued.push(chunk);
+        else deliverData(chunk.data, chunk.sequence);
+      } catch (error) {
+        reportFailure(error);
+      }
     };
+    const handleExit = (payload: unknown): void => {
+      if (!isTerminalRecord(payload) || payload.pty_id !== entry.binding.ptyId || exited) return;
+      try {
+        const event = validateTerminalExitEvent(payload);
+        exited = true;
+        entry.sequence = Math.max(entry.sequence, event.sequence);
+        this.markExited(entry, event.code, event.failure);
+        try {
+          onExit(event.code, event.failure);
+        } catch (error) {
+          console.error('[terminal-runtime] Terminal exit callback failed.', error);
+        }
+      } catch (error) {
+        reportFailure(error);
+      }
+    };
+
+    try {
+      unsubscribeData = await withTerminalDeadline(
+        'subscribe',
+        () => this.host.listen('pty:data', handleData),
+        (lateUnsubscribe) => {
+          try {
+            lateUnsubscribe();
+          } catch (error) {
+            console.error('[terminal-runtime] Late data subscription cleanup failed.', error);
+          }
+        },
+        TERMINAL_ADAPTER_CALL_TIMEOUT_MS,
+      );
+      unsubscribeExit = await withTerminalDeadline(
+        'subscribe',
+        () => this.host.listen('pty:exit', handleExit),
+        (lateUnsubscribe) => {
+          try {
+            lateUnsubscribe();
+          } catch (error) {
+            console.error('[terminal-runtime] Late exit subscription cleanup failed.', error);
+          }
+        },
+        TERMINAL_ADAPTER_CALL_TIMEOUT_MS,
+      );
+      const replay = await this.snapshot(terminalId, 0);
+      appliedSequence = replay.toSequence;
+      if (replay.data) onData(replay.data, replay.toSequence);
+      replayComplete = true;
+      for (const chunk of queued.sort((left, right) => left.sequence - right.sequence)) {
+        deliverData(chunk.data, chunk.sequence);
+      }
+      if ((!replay.alive || replay.failure) && !exited) {
+        exited = true;
+        onExit(replay.exitCode, replay.failure);
+      }
+      return cleanup;
+    } catch (error) {
+      reportFailure(error);
+      try {
+        cleanup();
+      } catch (cleanupError) {
+        const failure = asTerminalRuntimeFailure(error, 'subscribe');
+        const cleanupFailure = asTerminalRuntimeFailure(cleanupError, 'subscribe');
+        throw new TerminalValidationError({
+          operation: failure.operation,
+          message: `${failure.message} Cleanup: ${cleanupFailure.message}`,
+        });
+      }
+      throw error;
+    }
   }
 
   async shutdown(): Promise<void> {
-    for (const entry of this.entries.values()) {
-      entry.handoffDetach?.();
-      entry.observerUnsubscribe?.();
+    const failures: TerminalRuntimeFailure[] = [];
+    const entries = [...this.entries.values()];
+    for (const entry of entries) {
+      try {
+        entry.handoffDetach?.();
+      } catch (error) {
+        failures.push(asTerminalRuntimeFailure(error, 'event'));
+      }
+      try {
+        entry.observerUnsubscribe?.();
+      } catch (error) {
+        failures.push(asTerminalRuntimeFailure(error, 'event'));
+      }
     }
-    this.entries.clear();
+    for (const entry of entries) {
+      if (!entry.alive && entry.stopConfirmed) continue;
+      try {
+        const stop = await this.kill(entry.binding.terminalId);
+        entry.stopConfirmed = stop.status === 'stopped';
+        if (stop.status !== 'stopped') {
+          failures.push(...stop.failures);
+          if (stop.failures.length === 0) {
+            failures.push({
+              operation: 'kill',
+              message: `Terminal stop was not confirmed (${stop.status}).`,
+            });
+          }
+        }
+      } catch (error) {
+        entry.stopConfirmed = false;
+        failures.push(asTerminalRuntimeFailure(error, 'kill'));
+      }
+    }
+    for (const entry of entries) {
+      if (entry.stopConfirmed) this.entries.delete(entry.binding.terminalId);
+    }
+    const failure = failures[0];
+    if (failure) throw new TerminalValidationError(failure);
   }
 
   private async spawn(request: {
@@ -1841,14 +2255,67 @@ class CliTerminalRuntime implements TerminalRuntimeAdapter {
   }): Promise<TerminalBinding> {
     const terminalId = `terminal-${crypto.randomUUID()}`;
     const shell = this.resolveShell();
-    const ptyId = await this.host.invoke<string>('pty_spawn', {
-      id: terminalId,
-      shell: shell.command,
-      cwd: request.cwd,
-      cols: 120,
-      rows: 32,
-      interactive: request.role === 'user' && process.stdin.isTTY === true && process.stdout.isTTY === true,
-    });
+    let ptyId: string;
+    try {
+      const rawPtyId = await withTerminalDeadline(
+        'acquire',
+        () => this.host.invoke<unknown>('pty_spawn', {
+          id: terminalId,
+          shell: shell.command,
+          cwd: request.cwd,
+          cols: 120,
+          rows: 32,
+          interactive: request.role === 'user' && process.stdin.isTTY === true && process.stdout.isTTY === true,
+        }),
+        (latePtyId) => {
+          if (typeof latePtyId !== 'string') {
+            console.error('[terminal-runtime] Late acquire returned an invalid PTY id.', latePtyId);
+            return;
+          }
+          const lateFailure: TerminalRuntimeFailure = {
+            operation: 'acquire',
+            message: 'PTY acquisition completed after its deadline.',
+          };
+          const lateBinding: TerminalBinding = {
+            terminalId,
+            ptyId: latePtyId,
+            persistent: true,
+            frameLanguage: shell.frameLanguage,
+          };
+          const lateEntry: CliTerminalEntry = {
+            binding: lateBinding,
+            role: request.role,
+            isolationKey: request.isolationKey,
+            ownerConversationId: request.ownerConversationId,
+            ...(request.ownerId ? { ownerId: request.ownerId } : {}),
+            cwd: normalizeTerminalPath(request.cwd),
+            ...(request.sessionName ? { sessionName: request.sessionName } : {}),
+            activeToolCallId: request.activeToolCallId,
+            awaitingInput: false,
+            alive: true,
+            stopConfirmed: false,
+            exitCode: null,
+            failure: null,
+            sequence: 0,
+            truncated: false,
+            terminalState: 'started',
+            provisional: true,
+            canonical: false,
+            outputPreview: '',
+            output: '',
+            handoffActive: false,
+            handoffDetach: null,
+            observerUnsubscribe: null,
+          };
+          this.entries.set(terminalId, lateEntry);
+          this.quarantineTerminal(lateEntry, lateFailure);
+        },
+        TERMINAL_ADAPTER_CALL_TIMEOUT_MS,
+      );
+      ptyId = validateTerminalString(rawPtyId, 'pty_id', 'acquire');
+    } catch (error) {
+      throw new TerminalValidationError(asTerminalRuntimeFailure(error, 'acquire'));
+    }
     const binding: TerminalBinding = { terminalId, ptyId, persistent: true, frameLanguage: shell.frameLanguage };
     const entry: CliTerminalEntry = {
       binding,
@@ -1861,48 +2328,177 @@ class CliTerminalRuntime implements TerminalRuntimeAdapter {
       activeToolCallId: request.activeToolCallId,
       awaitingInput: false,
       alive: true,
+      stopConfirmed: false,
       exitCode: null,
+      failure: null,
+      truncated: false,
       sequence: 0,
       terminalState: 'started',
+      provisional: false,
+      canonical: false,
       outputPreview: '',
-      truncated: false,
+      output: '',
       handoffActive: false,
       handoffDetach: null,
       observerUnsubscribe: null,
     };
     this.entries.set(terminalId, entry);
-    await this.attachObserver(entry);
+    try {
+      await this.attachObserver(entry);
+    } catch (error) {
+      const failure = asTerminalRuntimeFailure(error, 'subscribe');
+      this.markExited(entry, entry.exitCode, failure);
+      this.quarantineTerminal(entry, failure);
+      throw error;
+    }
     this.notify(entry, 'created');
     return binding;
+
   }
 
   private async attachObserver(entry: CliTerminalEntry): Promise<void> {
-    const unsubscribeData = await this.host.listen('pty:data', (payload) => {
-      const event = payload as TerminalDataEvent;
-      if (event.pty_id !== entry.binding.ptyId || typeof event.data !== 'string') return;
-      entry.sequence = Math.max(entry.sequence, event.sequence ?? entry.sequence + 1);
-      entry.outputPreview = tail(`${entry.outputPreview}${event.data}`);
-      this.notify(entry, 'output');
-    });
-    const unsubscribeExit = await this.host.listen('pty:exit', (payload) => {
-      const event = payload as TerminalExitEvent;
-      if (event.pty_id !== entry.binding.ptyId) return;
-      entry.sequence = Math.max(entry.sequence, event.sequence ?? entry.sequence);
-      this.markExited(entry, event.code ?? null);
-    });
+    let unsubscribeData: (() => void) | null = null;
+    let unsubscribeExit: (() => void) | null = null;
+    const reportFailure = (error: unknown): void => {
+      const failure = asTerminalRuntimeFailure(error, 'event');
+      this.quarantineTerminal(entry, failure);
+    };
+    const handleData = (payload: unknown): void => {
+      if (!entry.alive || !isTerminalRecord(payload) || payload.pty_id !== entry.binding.ptyId) return;
+      try {
+        const event = validateTerminalDataEvent(payload);
+        if (event.sequence <= entry.sequence) return;
+        entry.sequence = event.sequence;
+        entry.output = `${entry.output}${event.data}`.slice(-MAX_CAPTURE_CHARS);
+        entry.outputPreview = tail(entry.output);
+        this.notify(entry, 'output');
+      } catch (error) {
+        reportFailure(error);
+      }
+    };
+    const handleExit = (payload: unknown): void => {
+      if (!isTerminalRecord(payload) || payload.pty_id !== entry.binding.ptyId) return;
+      try {
+        const event = validateTerminalExitEvent(payload);
+        entry.sequence = Math.max(entry.sequence, event.sequence);
+        this.markExited(entry, event.code, event.failure);
+      } catch (error) {
+        reportFailure(error);
+      }
+    };
+    try {
+      unsubscribeData = await withTerminalDeadline(
+        'subscribe',
+        () => this.host.listen('pty:data', handleData),
+        (lateUnsubscribe) => {
+          try {
+            lateUnsubscribe();
+          } catch (error) {
+            console.error('[terminal-runtime] Late data subscription cleanup failed.', error);
+          }
+        },
+        TERMINAL_ADAPTER_CALL_TIMEOUT_MS,
+      );
+      unsubscribeExit = await withTerminalDeadline(
+        'subscribe',
+        () => this.host.listen('pty:exit', handleExit),
+        (lateUnsubscribe) => {
+          try {
+            lateUnsubscribe();
+          } catch (error) {
+            console.error('[terminal-runtime] Late exit subscription cleanup failed.', error);
+          }
+        },
+        TERMINAL_ADAPTER_CALL_TIMEOUT_MS,
+      );
+    } catch (error) {
+      let cleanupError: unknown = null;
+      try {
+        unsubscribeData?.();
+      } catch (unsubscribeError) {
+        cleanupError = unsubscribeError;
+      }
+      try {
+        unsubscribeExit?.();
+      } catch (unsubscribeError) {
+        cleanupError ??= unsubscribeError;
+      }
+      unsubscribeData = null;
+      unsubscribeExit = null;
+      if (cleanupError) {
+        const failure = asTerminalRuntimeFailure(error, 'subscribe');
+        const cleanupFailure = asTerminalRuntimeFailure(cleanupError, 'subscribe');
+        throw new TerminalValidationError({
+          operation: failure.operation,
+          message: `${failure.message} Cleanup: ${cleanupFailure.message}`,
+        });
+      }
+      throw error;
+    }
     entry.observerUnsubscribe = () => {
-      unsubscribeData();
-      unsubscribeExit();
+      let firstError: unknown = null;
+      try {
+        unsubscribeData?.();
+      } catch (error) {
+        firstError = error;
+      }
+      try {
+        unsubscribeExit?.();
+      } catch (error) {
+        firstError ??= error;
+      }
+      unsubscribeData = null;
+      unsubscribeExit = null;
+      if (firstError) throw firstError;
     };
   }
 
-  private markExited(entry: CliTerminalEntry, exitCode: number | null): void {
+  private quarantineTerminal(entry: CliTerminalEntry, failure: TerminalRuntimeFailure): Promise<void> {
+    this.markExited(entry, entry.exitCode, failure);
+    const existing = this.quarantinePromises.get(entry.binding.terminalId);
+    if (existing) return existing;
+    const cleanup = this.kill(entry.binding.terminalId)
+      .then((stop) => {
+        if (stop.status !== 'stopped') {
+          console.error(`[terminal-runtime] Terminal quarantine was not confirmed (${stop.status}).`, stop.failures);
+        }
+      })
+      .catch((error: unknown) => {
+        console.error('[terminal-runtime] Terminal quarantine failed.', error);
+      });
+    this.quarantinePromises.set(entry.binding.terminalId, cleanup);
+    return cleanup;
+  }
+
+  private markExited(
+    entry: CliTerminalEntry,
+    exitCode: number | null,
+    failure?: TerminalRuntimeFailure | null,
+  ): void {
     if (!entry.alive) {
-      if (entry.exitCode === null && exitCode !== null) entry.exitCode = exitCode;
+      let changed = false;
+      if (!failure && !entry.stopConfirmed) {
+        entry.stopConfirmed = true;
+        changed = true;
+      }
+      if (failure) {
+        entry.stopConfirmed = false;
+        if (entry.failure === null) {
+          entry.failure = failure;
+          changed = true;
+        }
+      }
+      if (entry.exitCode === null && exitCode !== null) {
+        entry.exitCode = exitCode;
+        changed = true;
+      }
+      if (changed) this.notify(entry, 'exit');
       return;
     }
     entry.alive = false;
+    entry.stopConfirmed = !failure;
     entry.exitCode = exitCode;
+    if (failure) entry.failure ??= failure;
     entry.activeToolCallId = null;
     entry.awaitingInput = false;
     this.notify(entry, 'exit');
@@ -1931,6 +2527,7 @@ class CliTerminalRuntime implements TerminalRuntimeAdapter {
       activeToolCallId: entry.activeToolCallId,
       awaitingInput: entry.awaitingInput,
       exitCode: entry.exitCode,
+      failure: entry.failure,
       truncated: entry.truncated,
       handoffActive: entry.handoffActive,
       canUserWrite,
@@ -1946,7 +2543,11 @@ class CliTerminalRuntime implements TerminalRuntimeAdapter {
   }
 
   private notify(entry: CliTerminalEntry, cause: TerminalUpdateCause): void {
-    this.onUpdate(this.toSummary(entry), cause);
+    try {
+      this.onUpdate(this.toSummary(entry), cause);
+    } catch (error) {
+      console.error('[terminal-runtime] Terminal update observer failed.', error);
+    }
   }
 
   private resolveShell(): { command: string; frameLanguage: TerminalBinding['frameLanguage'] } {
@@ -2047,6 +2648,24 @@ function mergeTokenUsage(previous: TokenUsage | undefined, current: TokenUsage):
 function sumOptional(left: number | undefined, right: number | undefined): number | undefined {
   if (left === undefined && right === undefined) return undefined;
   return (left ?? 0) + (right ?? 0);
+}
+
+function normalizeCliSnapshot(raw: unknown): TerminalSnapshot {
+  if (!isTerminalRecord(raw)) {
+    throw new TerminalValidationError({
+      operation: 'snapshot',
+      message: 'PTY snapshot must be an object.',
+    });
+  }
+  return validateTerminalSnapshot({
+    data: raw.data,
+    fromSequence: raw.from_sequence,
+    toSequence: raw.to_sequence,
+    truncated: raw.truncated,
+    alive: raw.alive,
+    exitCode: raw.exit_code,
+    failure: raw.failure,
+  });
 }
 
 function normalizeTerminalPath(value: string): string {

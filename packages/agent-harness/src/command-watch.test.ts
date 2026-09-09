@@ -40,40 +40,151 @@ describe('CommandWatch accessors', () => {
     expect(watch.parsed()).toMatchObject({ started: true, complete: false, output: 'hi' });
   });
 });
+  it('does not count retained history toward a new command capture limit', () => {
+    const watch = makeWatch();
+    watch.pushData(1, 'x'.repeat(MAX_CAPTURE_CHARS));
+    watch.markCommandBaseline();
+    watch.pushData(2, '__HYSCODE_BEGIN_watch__\nok\n__HYSCODE_END_watch__:0\n');
 
-describe('CommandWatch syncSnapshot', () => {
+    expect(watch.truncated).toBe(false);
+    expect(watch.evaluate(Date.now())).toMatchObject({ kind: 'complete', exitCode: 0 });
+  });
+
+  it('reconciles a full snapshot from the new frame after retained history', () => {
+    const watch = makeWatch();
+    const history = 'x'.repeat(MAX_CAPTURE_CHARS - 128);
+    const frame = '__HYSCODE_BEGIN_watch__\nfresh\n__HYSCODE_END_watch__:0\n';
+    watch.pushData(1, history);
+    watch.markCommandBaseline();
+    watch.syncFullSnapshot({
+      data: `${history}${frame}`,
+      fromSequence: 1,
+      toSequence: 2,
+      truncated: false,
+      alive: true,
+      exitCode: null,
+      failure: null,
+    });
+
+    expect(watch.output()).toBe(frame);
+    expect(watch.evaluate(Date.now())).toMatchObject({ kind: 'complete', exitCode: 0 });
+  });
+
+  it('retains an interactive frame while counting only response output', () => {
+    const watch = makeWatch();
+    const baseline = '__HYSCODE_BEGIN_watch__\nContinue? [Y/n]\n';
+    const history = 'x'.repeat(MAX_CAPTURE_CHARS - baseline.length - 64);
+    const retained = `${history}${baseline}`;
+    watch.syncFullSnapshot({
+      data: retained,
+      fromSequence: 1,
+      toSequence: 1,
+      truncated: false,
+      alive: true,
+      exitCode: null,
+      failure: null,
+    });
+    watch.markCommandBaseline({ preserveOutput: true });
+    watch.syncFullSnapshot({
+      data: `${retained}Y\n__HYSCODE_END_watch__:0\n`,
+      fromSequence: 1,
+      toSequence: 2,
+      truncated: false,
+      alive: true,
+      exitCode: null,
+      failure: null,
+    });
+
+    expect(watch.evaluate(Date.now())).toMatchObject({ kind: 'complete', exitCode: 0 });
+  });
+
+
+describe('CommandWatch syncFullSnapshot', () => {
   it('replaces the accumulator with the authoritative snapshot', () => {
     const watch = makeWatch();
     watch.pushData(1, 'stale');
-    watch.syncSnapshot('__HYSCODE_BEGIN_watch__\nfresh\n__HYSCODE_END_watch__:0\n', 9);
+    watch.syncFullSnapshot({
+      data: '__HYSCODE_BEGIN_watch__\nfresh\n__HYSCODE_END_watch__:0\n',
+      fromSequence: 9,
+      toSequence: 9,
+      truncated: false,
+      alive: true,
+      exitCode: null,
+      failure: null,
+    });
     expect(watch.output()).toBe('__HYSCODE_BEGIN_watch__\nfresh\n__HYSCODE_END_watch__:0\n');
     expect(watch.evaluate(Date.now())).toMatchObject({ kind: 'complete' });
+  });
+  it('keeps a complete frame authoritative over a late snapshot failure', () => {
+    const watch = makeWatch();
+    watch.syncFullSnapshot({
+      data: '__HYSCODE_BEGIN_watch__\nfresh\n__HYSCODE_END_watch__:0\n',
+      fromSequence: 9,
+      toSequence: 9,
+      truncated: false,
+      alive: false,
+      exitCode: 0,
+      failure: { operation: 'reader', message: 'PTY reader failed after completion.' },
+    });
+    expect(watch.evaluate(Date.now())).toMatchObject({ kind: 'complete', exitCode: 0 });
   });
 
   it('does not let an older snapshot erase newer live output', () => {
     const watch = makeWatch();
     watch.pushData(2, '__HYSCODE_BEGIN_watch__\nlive\n');
-    watch.syncSnapshot('stale snapshot', 1);
+    watch.syncFullSnapshot({
+      data: 'stale snapshot',
+      fromSequence: 1,
+      toSequence: 1,
+      truncated: false,
+      alive: true,
+      exitCode: null,
+      failure: null,
+    });
     expect(watch.output()).toBe('__HYSCODE_BEGIN_watch__\nlive\n');
   });
 
   it('keeps the current frame while a newer snapshot has not replayed it yet', () => {
     const watch = makeWatch();
     watch.pushData(2, '__HYSCODE_BEGIN_watch__\nlive\n');
-    watch.syncSnapshot('older terminal output', 5);
+    watch.syncFullSnapshot({
+      data: 'older terminal output',
+      fromSequence: 5,
+      toSequence: 5,
+      truncated: false,
+      alive: true,
+      exitCode: null,
+      failure: null,
+    });
     expect(watch.output()).toBe('__HYSCODE_BEGIN_watch__\nlive\n');
   });
 
   it('caps oversized snapshots to the capture bound', () => {
     const watch = makeWatch();
     const huge = 'x'.repeat(MAX_CAPTURE_CHARS + 10);
-    watch.syncSnapshot(huge, 1);
+    watch.syncFullSnapshot({
+      data: huge,
+      fromSequence: 1,
+      toSequence: 1,
+      truncated: false,
+      alive: true,
+      exitCode: null,
+      failure: null,
+    });
     expect(watch.output().length).toBe(MAX_CAPTURE_CHARS);
   });
 
   it('retains the truncation marker from the authoritative runtime', () => {
     const watch = makeWatch();
-    watch.syncSnapshot('__HYSCODE_BEGIN_watch__\npartial\n', 12, true);
+    watch.syncFullSnapshot({
+      data: '__HYSCODE_BEGIN_watch__\npartial\n',
+      fromSequence: 12,
+      toSequence: 12,
+      truncated: true,
+      alive: true,
+      exitCode: null,
+      failure: null,
+    });
     expect(watch.truncated).toBe(true);
   });
 });
@@ -89,6 +200,52 @@ describe('CommandWatch evaluate', () => {
     const watch = makeWatch();
     watch.pushData(1, '__HYSCODE_BEGIN_watch__\nok\n__HYSCODE_END_watch__:0\n');
     expect(watch.evaluate(Date.now())).toMatchObject({ kind: 'complete', exitCode: 0 });
+  });
+
+  it('preserves a framed nonzero exit code as a successful capture', () => {
+    const watch = makeWatch();
+    watch.pushData(1, '__HYSCODE_BEGIN_watch__\nfailed command\n__HYSCODE_END_watch__:-7\n');
+    expect(watch.evaluate(Date.now())).toMatchObject({ kind: 'complete', exitCode: -7 });
+  });
+
+  it('keeps a valid completion authoritative over later runtime failures', () => {
+    const watch = makeWatch();
+    watch.pushData(1, '__HYSCODE_BEGIN_watch__\nok\n__HYSCODE_END_watch__:0\n');
+    watch.pushFailure({ operation: 'reader', message: 'PTY reader failed.' });
+    expect(watch.evaluate(Date.now())).toMatchObject({
+      kind: 'complete',
+      exitCode: 0,
+    });
+  });
+
+  it('keeps a runtime failure authoritative when observed before completion', () => {
+    const watch = makeWatch();
+    watch.pushFailure({ operation: 'reader', message: 'PTY reader failed.' });
+    watch.pushData(1, '__HYSCODE_BEGIN_watch__\nok\n__HYSCODE_END_watch__:0\n');
+    expect(watch.evaluate(Date.now())).toMatchObject({
+      kind: 'error',
+      failure: { operation: 'reader', message: 'PTY reader failed.' },
+    });
+  });
+
+  it('reports malformed completion markers as protocol errors', () => {
+    const watch = makeWatch();
+    watch.pushData(1, '__HYSCODE_BEGIN_watch__\noutput\n__HYSCODE_END_watch__:not-a-code\n');
+    expect(watch.evaluate(Date.now())).toMatchObject({
+      kind: 'error',
+      failure: { operation: 'protocol' },
+    });
+  });
+
+  it('uses the exit event only when no completion marker exists', () => {
+    const watch = makeWatch();
+    watch.pushData(1, '__HYSCODE_BEGIN_watch__\npartial\n');
+    watch.pushExit(3);
+    expect(watch.evaluate(Date.now())).toMatchObject({
+      kind: 'error',
+      exitCode: 3,
+      failure: { operation: 'event' },
+    });
   });
 
   it('completes when the end marker is glued to a partial output line', () => {
@@ -172,7 +329,15 @@ describe('CommandWatch evaluate', () => {
   it('restricts prompt detection to the delta when a baseline is given', () => {
     const watch = makeWatch();
     const baseline = '__HYSCODE_BEGIN_watch__\nContinue? [Y/n]\n';
-    watch.syncSnapshot(baseline, 5);
+    watch.syncFullSnapshot({
+      data: baseline,
+      fromSequence: 5,
+      toSequence: 5,
+      truncated: false,
+      alive: true,
+      exitCode: null,
+      failure: null,
+    });
     const deltaChars = baseline.length;
 
     expect(watch.evaluate(Date.now() + 10_000, deltaChars).kind).toBe('running');

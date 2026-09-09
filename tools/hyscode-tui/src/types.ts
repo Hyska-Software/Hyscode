@@ -1,4 +1,4 @@
-import type { AgentQuestion, AgentQuestionAnswer, AgentType, HarnessEvent } from '@hyscode/agent-harness';
+import { type AgentQuestion, type AgentQuestionAnswer, type AgentType, type HarnessEvent, type TerminalRuntimeFailure } from '@hyscode/agent-harness';
 import type { Message, TokenUsage } from '@hyscode/ai-providers';
 import type {
   BridgeMessage,
@@ -73,6 +73,9 @@ export type ToolView = {
   outputSequence: number;
   expanded: boolean;
   ownerId?: string;
+  failure?: TerminalRuntimeFailure | null;
+  terminalProvisional?: boolean;
+  terminalCanonical?: boolean;
 };
 
 export type FileChangeView = {

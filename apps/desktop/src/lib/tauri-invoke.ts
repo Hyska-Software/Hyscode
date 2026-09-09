@@ -2,6 +2,7 @@
 // Centralises invoke usage and provides per-command type safety.
 
 import { invoke } from '@tauri-apps/api/core';
+import type { TerminalRuntimeFailure, TerminalStopResult } from '@hyscode/agent-harness';
 import type { DiagnosticContract } from './diagnostics-types';
 
 // ─── Shared types ───────────────────────────────────────────────────────────
@@ -401,7 +402,7 @@ interface TauriCommands {
   };
   pty_write: { args: { ptyId: string; data: string }; ret: void };
   pty_resize: { args: { ptyId: string; cols: number; rows: number }; ret: void };
-  pty_kill: { args: { ptyId: string }; ret: void };
+  pty_kill: { args: { ptyId: string }; ret: TerminalStopResult };
   pty_exists: { args: { ptyId: string }; ret: boolean };
   pty_snapshot: {
     args: { ptyId: string; afterSequence?: number };
@@ -412,6 +413,7 @@ interface TauriCommands {
       truncated: boolean;
       alive: boolean;
       exit_code: number | null;
+      failure: TerminalRuntimeFailure | null;
     };
   };
   pty_interrupt: { args: { ptyId: string }; ret: void };

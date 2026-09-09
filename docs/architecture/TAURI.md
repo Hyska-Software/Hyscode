@@ -48,8 +48,37 @@ async fn fs_patch_file(path: String, old_text: String, new_text: String) -> Resu
 ### Terminal / PTY Commands
 
 ```rust
+#[derive(Serialize)]
+struct TerminalRuntimeFailure {
+    operation: String,
+    message: String,
+}
+
+#[derive(Serialize)]
+struct PtyStopResult {
+    status: "stopped" | "still_running" | "unknown",
+    failures: Vec<TerminalRuntimeFailure>,
+}
+
+#[derive(Serialize)]
+struct PtySnapshot {
+    data: String,
+    from_sequence: u64,
+    to_sequence: u64,
+    truncated: bool,
+    alive: bool,
+    exit_code: Option<u32>,
+    failure: Option<TerminalRuntimeFailure>,
+}
+
 #[tauri::command]
-async fn pty_spawn(shell: Option<String>, cwd: Option<String>, env: Option<HashMap<String, String>>) -> Result<PtyId, Error>;
+async fn pty_spawn(
+    shell: Option<String>,
+    cwd: Option<String>,
+    env: Option<HashMap<String, String>>,
+    cols: Option<u16>,
+    rows: Option<u16>,
+) -> Result<PtyId, Error>;
 
 #[tauri::command]
 async fn pty_write(pty_id: PtyId, data: String) -> Result<(), Error>;
@@ -58,12 +87,25 @@ async fn pty_write(pty_id: PtyId, data: String) -> Result<(), Error>;
 async fn pty_resize(pty_id: PtyId, cols: u16, rows: u16) -> Result<(), Error>;
 
 #[tauri::command]
-async fn pty_kill(pty_id: PtyId) -> Result<(), Error>;
 async fn pty_interrupt(pty_id: PtyId) -> Result<(), Error>;
+
+#[tauri::command]
+async fn pty_kill(pty_id: PtyId) -> Result<PtyStopResult, Error>;
+
+#[tauri::command]
 async fn pty_snapshot(pty_id: PtyId, after_sequence: Option<u64>) -> Result<PtySnapshot, Error>;
 
-// PTY output is ordered and replayable: emit("pty:data", { pty_id, sequence, data })
+// PTY output is ordered and replayable:
+// emit("pty:data", { pty_id, sequence, data })
+// emit("pty:exit", { pty_id, sequence, code: Option<u32>, failure: Option<TerminalRuntimeFailure> })
 ```
+
+`pty_snapshot` with an omitted or zero `after_sequence` returns the authoritative aggregate.
+A positive sequence is an output delta and must not replace newer lifecycle state in a client.
+Runtime calls are bounded at the adapter boundary. An unconfirmed stop returns `still_running` or
+`unknown`, retains the session for inspection/retry, and quarantines it from reuse. A failure is
+published before or with the one-shot `pty:exit` event and remains present in subsequent full
+snapshots.
 
 ### Git Commands
 
@@ -195,14 +237,14 @@ Tauri v2 uses **capabilities** to restrict what IPC commands each window/webview
 
 Tauri events for real-time communication between Rust and frontend:
 
-| Event            | Direction | Payload                                            |
-| ---------------- | --------- | -------------------------------------------------- |
-| `fs:changed`     | Rust → TS | `{ path, kind: "create" \| "modify" \| "delete" }` |
-| `pty:data`       | Rust → TS | `{ pty_id, sequence, data: string }`               |
-| `pty:exit`       | Rust → TS | `{ pty_id, sequence, code: number }`               |
-| `sandbox:output` | Rust → TS | `{ sandbox_id, stdout, stderr }`                   |
-| `sandbox:exit`   | Rust → TS | `{ sandbox_id, code, duration_ms }`                |
-| `db:migrated`    | Rust → TS | `{ version, applied: string[] }`                   |
+| Event            | Direction | Payload                                                                                             |
+| ---------------- | --------- | --------------------------------------------------------------------------------------------------- |
+| `fs:changed`     | Rust → TS | `{ path, kind: "create" \| "modify" \| "delete" }`                                                  |
+| `pty:data`       | Rust → TS | `{ pty_id, sequence, data: string }`                                                                |
+| `pty:exit`       | Rust → TS | `{ pty_id, sequence, code: number \| null, failure: { operation, message } \| null }`                |
+| `sandbox:output` | Rust → TS | `{ sandbox_id, stdout, stderr }`                                                                    |
+| `sandbox:exit`   | Rust → TS | `{ sandbox_id, code, duration_ms }`                                                                 |
+| `db:migrated`    | Rust → TS | `{ version, applied: string[] }`                                                                    |
 
 ---
 

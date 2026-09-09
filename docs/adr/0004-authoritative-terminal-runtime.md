@@ -31,6 +31,26 @@ and derives the command status from the native exit code or non-native PowerShel
 from stderr or `$?` alone. Explicit command redirections remain owned by the command and are never
 replayed by the wrapper.
 
+Runtime failures are first-class lifecycle data, not plain log text. `TerminalRuntimeFailure` carries
+the failing operation (`acquire`, `authorize`, `subscribe`, `snapshot`, `write`, `interrupt`, `kill`,
+`reader`, `wait`, `protocol`, `event`, `release`, or `timeout`) and a diagnostic message. A `pty:exit` event,
+terminal summary, and terminal progress record expose the failure when one is known; the exit event
+is emitted at most once. A full snapshot (`after_sequence` omitted or `0`) is the authoritative
+aggregate for output, sequence, exit code, and failure. A positive `after_sequence` request is an
+output delta and must not replace newer lifecycle state.
+
+Lifecycle calls use bounded deadlines. Cancellation and timeout await or observe the stop attempt
+before the harness reports the command outcome. `pty_kill` returns a structured
+`stopped`, `still_running`, or `unknown` status plus any failures. A session with unconfirmed
+liveness remains retained and quarantined; it is never reused or reported as cleanly stopped.
+Late acquire, write, interrupt, or kill settlements may add diagnostics but cannot resurrect a
+session, clear a newer owner, or emit a second exit.
+
+Live terminal progress is a provisional projection. It may surface a runtime failure before the
+canonical tool result is available, but it cannot synthesize a model result. A later canonical
+`tool_call_result` replaces provisional progress, while an explicit failure remains visible in
+terminal history and in read-only terminal inspection.
+
 Completed sessions remain inspectable until explicit cleanup or runtime shutdown.
 
 The bridge includes current terminal summaries in every `runtime_ready` payload and emits

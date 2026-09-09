@@ -150,6 +150,7 @@ describe('Harness lifecycle', () => {
         truncated: false,
         alive: true,
         exitCode: null,
+        failure: null,
       }),
       write: async (_terminalId, frame) => {
         const nonce = String(frame).match(/__HYSCODE_BEGIN_([a-z0-9]+)__/i)?.[1];
@@ -160,7 +161,7 @@ describe('Harness lifecycle', () => {
         );
       },
       interrupt: async () => undefined,
-      kill: async () => undefined,
+      kill: async () => ({ status: 'stopped', failures: [] }),
       subscribe: async (_terminalId, dataHandler) => {
         onData = dataHandler;
         return () => {

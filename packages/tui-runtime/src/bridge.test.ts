@@ -852,18 +852,16 @@ describe('shared harness bridge protocol', () => {
       const agentId = agentTerminal?.terminalId;
       if (!agentId) throw new Error('The agent terminal was not listed.');
       await expect(bridge.openUserTerminalHandoff(agentId)).rejects.toThrow('manual user terminals');
-      expect(successfulResult<{ killed: boolean }>(await bridge.handle({
+      const deniedKill = await bridge.handle({
         id: 'kill-agent-terminal',
         method: 'terminal_kill',
         params: { terminalId: agentId },
-      })).killed).toBe(true);
-      const afterKill = successfulResult<{ alive: boolean; exitCode: number | null }>(await bridge.handle({
-        id: 'snapshot-agent-terminal',
-        method: 'terminal_snapshot',
-        params: { terminalId: agentId },
-      }));
-      expect(afterKill.alive).toBe(false);
-      expect(afterKill.exitCode).not.toBeUndefined();
+      });
+      expect(deniedKill).toMatchObject({
+        type: 'response',
+        ok: false,
+      });
+      if (!deniedKill.ok) expect(deniedKill.error).toContain('Harness');
     } finally {
       registry.unregister('openai');
       await bridge.handle({ id: 'shutdown', method: 'shutdown', params: {} });

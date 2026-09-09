@@ -1,8 +1,7 @@
 import { useEffect, useRef, useCallback } from 'react';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
-import { invoke } from '@tauri-apps/api/core';
-import type { UnlistenFn } from '@tauri-apps/api/event';
+import { asTerminalRuntimeFailure } from '@hyscode/agent-harness';
 import { canUserWriteToTerminal, useTerminalStore } from '../../stores/terminal-store';
 import { useProjectStore } from '../../stores/project-store';
 import { useSettingsStore } from '../../stores/settings-store';
@@ -90,7 +89,16 @@ export function TerminalInstance({ sessionId, isActive }: TerminalInstanceProps)
       return null;
     }
   }, []);
-
+  const quarantinePty = useCallback((): void => {
+    void desktopTerminalRuntime.kill(sessionId).then((stop) => {
+      if (stop.status !== 'stopped') {
+        console.error('[Terminal] PTY quarantine was not confirmed', { sessionId, stop });
+      }
+    }).catch((error: unknown) => {
+      const failure = asTerminalRuntimeFailure(error, 'kill');
+      console.error('[Terminal] PTY quarantine failed', { sessionId, error: failure.message });
+    });
+  }, [sessionId]);
   const queueResize = useCallback((ptyId: string, viewport: TerminalViewport): void => {
     const previous = lastResizeRef.current;
     if (previous?.ptyId === ptyId && previous.viewport.cols === viewport.cols && previous.viewport.rows === viewport.rows) return;
@@ -104,19 +112,22 @@ export function TerminalInstance({ sessionId, isActive }: TerminalInstanceProps)
         pendingResizeRef.current = null;
         if (ptyIdRef.current !== next.ptyId) continue;
         try {
-          await invoke('pty_resize', { ptyId: next.ptyId, cols: next.viewport.cols, rows: next.viewport.rows });
+          await desktopTerminalRuntime.resize(sessionId, next.viewport.cols, next.viewport.rows);
         } catch (error: unknown) {
+          const failure = asTerminalRuntimeFailure(error, 'event');
+          useTerminalStore.getState().markPtyDead(sessionId, null, failure);
+          quarantinePty();
           console.error('[Terminal] PTY resize failed', {
             ptyId: next.ptyId,
             cols: next.viewport.cols,
             rows: next.viewport.rows,
-            error,
+            error: failure.message,
           });
         }
       }
       resizingRef.current = false;
     })();
-  }, []);
+  }, [quarantinePty, sessionId]);
 
   const handleResize = useCallback(() => {
     const viewport = measureViewport();
@@ -144,7 +155,7 @@ export function TerminalInstance({ sessionId, isActive }: TerminalInstanceProps)
     if (!container) return;
 
     let cancelled = false;
-    const unlistenFns: UnlistenFn[] = [];
+    const unlistenFns: Array<() => void> = [];
 
     const terminalSettings = terminalSettingsRef.current;
     const term = new Terminal({
@@ -180,7 +191,12 @@ export function TerminalInstance({ sessionId, isActive }: TerminalInstanceProps)
             useTerminalStore.getState().setAwaitingInput(sessionId, false);
           }
         }
-        invoke('pty_write', { ptyId: ptyIdRef.current, data }).catch(() => {});
+        void desktopTerminalRuntime.write(sessionId, data).catch((error: unknown) => {
+          const failure = asTerminalRuntimeFailure(error, 'write');
+          useTerminalStore.getState().markPtyDead(sessionId, null, failure);
+          quarantinePty();
+          if (!cancelled) term.writeln(`\r\n\x1b[31m[Terminal write failed] ${failure.message}\x1b[0m`);
+        });
       }
       // Track user-typed commands (non-agent sessions only)
       if (!isAgentSession) {
@@ -220,6 +236,7 @@ export function TerminalInstance({ sessionId, isActive }: TerminalInstanceProps)
       const measuredViewport = measureViewport();
       const initialViewport = measuredViewport ?? pendingViewportRef.current ?? DEFAULT_TERMINAL_VIEWPORT;
       pendingViewportRef.current = initialViewport;
+      let operation: 'acquire' | 'subscribe' = 'acquire';
 
       try {
         // Check if a PTY was already spawned (e.g., by the harness bridge for agent sessions)
@@ -228,20 +245,19 @@ export function TerminalInstance({ sessionId, isActive }: TerminalInstanceProps)
           .sessions.find((s) => s.id === sessionId);
         let ptyId: string;
 
-        if (existingSession?.ptyId) {
+        if (existingSession?.ptyId && !existingSession.isDead) {
           ptyId = existingSession.ptyId;
         } else {
-          ptyId = await invoke<string>('pty_spawn', {
-            shell: terminalSettingsRef.current.shell.trim() || null,
-            cwd: sessionCwd ?? null,
-            env: null,
-            cols: initialViewport.cols,
-            rows: initialViewport.rows,
-            interactive: !isAgentSession,
-          });
+          ptyId = await desktopTerminalRuntime.spawnUserTerminal(
+            sessionId,
+            sessionCwd ?? '',
+            initialViewport.cols,
+            initialViewport.rows,
+            !isAgentSession,
+          );
 
           if (cancelled) {
-            await invoke('pty_kill', { ptyId }).catch(() => {});
+            quarantinePty();
             return;
           }
 
@@ -250,7 +266,7 @@ export function TerminalInstance({ sessionId, isActive }: TerminalInstanceProps)
 
         ptyIdRef.current = ptyId;
         lastResizeRef.current = null;
-
+        operation = 'subscribe';
         const unsubscribe = await desktopTerminalRuntime.subscribe(
           sessionId,
           (data, sequence) => {
@@ -259,11 +275,16 @@ export function TerminalInstance({ sessionId, isActive }: TerminalInstanceProps)
               useTerminalStore.getState().setOutputSequence(sessionId, sequence);
             }
           },
-          () => {
+          (exitCode, failure) => {
             if (!cancelled) {
-              term.writeln('\r\n\x1b[90m[Process exited]\x1b[0m');
-              markPtyDead(sessionId);
+              term.writeln(failure
+                ? `\r\n\x1b[31m[Terminal ${failure.operation} failure] ${failure.message}\x1b[0m`
+                : exitCode === null
+                  ? '\r\n\x1b[90m[Process exited]\x1b[0m'
+                  : `\r\n\x1b[90m[Process exited with code ${exitCode}]\x1b[0m`);
             }
+            markPtyDead(sessionId, exitCode, failure);
+            if (failure) quarantinePty();
           },
         );
         unlistenFns.push(unsubscribe);
@@ -271,7 +292,10 @@ export function TerminalInstance({ sessionId, isActive }: TerminalInstanceProps)
         if (!cancelled) queueResize(ptyId, pendingViewportRef.current ?? initialViewport);
       } catch (err) {
         if (!cancelled) {
-          term.writeln(`\x1b[31mFailed to spawn terminal: ${err}\x1b[0m`);
+          const failure = asTerminalRuntimeFailure(err, operation);
+          markPtyDead(sessionId, null, failure);
+          quarantinePty();
+          term.writeln(`\x1b[31mFailed to ${operation === 'subscribe' ? 'attach' : 'spawn'} terminal: ${failure.message}\x1b[0m`);
         }
       }
     });

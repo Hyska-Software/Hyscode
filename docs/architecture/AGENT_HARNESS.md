@@ -572,7 +572,10 @@ CREATE TABLE agent_sdd_tasks (
 
 The harness owns provider-native assistant and tool-result blocks. It emits `transcript_message` events with immutable turn/conversation/iteration identity. Desktop adapters render and persist these blocks without reconstructing ordering.
 
-Cancellation is cooperative for PTY and provider operations. Native calls without cancellation support are awaited; if one completes after cancellation, the turn ends as `cancelled_partial`.
+Cancellation is cooperative for PTY and provider operations. Native calls without cancellation
+support are awaited or observed through bounded deadlines; if one completes after cancellation, or
+the runtime cannot confirm that a PTY stopped, the turn ends as `cancelled_partial`. Stop attempts
+report `stopped`, `still_running`, or `unknown` with structured failure details.
 
 Terminal execution is delegated through `TerminalRuntimeAdapter`. The harness owns framed command
 capture and the canonical result returned to the model. The adapter owns the runtime boundary and
@@ -582,6 +585,13 @@ Desktop uses the Rust PTY registry through `DesktopTerminalRuntime`; the standal
 terminals, reuse only the same owner/conversation/normalized `cwd`, expose resize, and retain an
 inspectable terminal summary after exit until shutdown.
 
+Terminal lifecycle failures are part of the shared contract. `TerminalRuntimeFailure` identifies the
+operation (`acquire`, `authorize`, `subscribe`, `snapshot`, `write`, `interrupt`, `kill`, `reader`,
+`wait`, `protocol`, `event`, `release`, or `timeout`) and a diagnostic message. Full snapshots are authoritative
+aggregates; positive `after_sequence` snapshots are output deltas only. A failure or unconfirmed
+stop keeps the terminal retained and quarantined, prevents reuse, and cannot be cleared by a late
+settlement or a newer owner.
+
 Terminal streams are replay-capable event hubs rather than one mutable listener. A subscriber is
 registered before its snapshot is captured, concurrent PTY data is queued, snapshot sequences are
 applied first, and queued events are drained only when newer. Sequence values are monotonic and exit
@@ -590,14 +600,23 @@ includes current terminals in every `runtime_ready`; the TUI consumes these by `
 keeps raw output only for parsing, normalizing ANSI and framing before display. Live
 `terminal_progress` events update tool activity but are not persisted as provider transcript blocks.
 
+The runner uses shell-specific framed markers as the completion authority. Prompt-like output is
+treated conservatively as `awaiting_input` only at a valid interaction boundary, and sensitive
+prompts remain user-only. Missing or malformed completion frames, reader/wait failures, adapter
+timeouts, and cleanup failures become structured tool errors rather than successful output. A
+valid completion frame remains authoritative over a later failure observed during the bounded drain.
+Live terminal progress is provisional; a canonical `tool_call_result` is the final model-facing
+record and overrides provisional progress.
+
 The TUI is an active, maintained client of this contract. `@hyscode/tui-runtime` remains the PTY
 lifecycle and ownership authority. Its in-process `TerminalHandoff` API is an additive local
 capability for the current conversation's manual user terminal only: it subscribes to raw PTY
 bytes, writes raw keyboard data, forwards validated viewport sizes, and detaches without killing
-the process. The TUI pauses its projected repaint and restores it on `Ctrl-]`, child exit, error,
-or signal. Agent terminals never enter handoff and remain Harness-controlled projections. The
-serialized `--protocol ndjson` loop remains non-interactive and does not transport raw stdin/stdout
-or handoff bytes.
+the process. Handoff returns either `detached` or `exited` with the exit code and optional runtime
+failure. The TUI pauses its projected repaint and restores it on `Ctrl-]`, child exit, error, or
+signal before surfacing the handoff error. Agent terminals never enter handoff and remain
+Harness-controlled projections. The serialized `--protocol ndjson` loop remains non-interactive and
+does not transport raw stdin/stdout or handoff bytes.
 
 An `awaiting_input` terminal is a guarded interaction: the agent can use the approved
 `respond_terminal_input` tool only for its owner and non-sensitive prompts. The TUI may write only

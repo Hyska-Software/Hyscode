@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { TerminalRuntimeAdapter, ToolExecutionContext } from './types';
+import type { TerminalRuntimeAdapter, TerminalRuntimeFailure, ToolExecutionContext } from './types';
 
 import { TerminalCommandRunner } from './terminal-command-runner';
 import {
@@ -41,10 +41,11 @@ function staticAdapter(overrides: Partial<TerminalRuntimeAdapter> = {}): Termina
       truncated: false,
       alive: true,
       exitCode: null,
+      failure: null,
     })),
     write: vi.fn(async () => undefined),
     interrupt: vi.fn(async () => undefined),
-    kill: vi.fn(async () => undefined),
+    kill: vi.fn(async () => ({ status: 'stopped' as const, failures: [] })),
     ...overrides,
   };
 }
@@ -62,6 +63,7 @@ describe('terminal command framing', () => {
       complete: true,
       output: 'hello',
       exitCode: 7,
+      protocolError: null,
     });
   });
 
@@ -77,6 +79,7 @@ describe('terminal command framing', () => {
         truncated: false,
         alive: true,
         exitCode: null,
+        failure: null,
       })),
       write: vi.fn(async (_terminalId, data) => {
         const frame = String(data);
@@ -90,7 +93,7 @@ describe('terminal command framing', () => {
         });
       }),
       interrupt: vi.fn(async () => undefined),
-      kill: vi.fn(async () => undefined),
+      kill: vi.fn(async () => ({ status: 'stopped' as const, failures: [] })),
       subscribe: vi.fn(async (_terminalId, onData) => {
         onDataHandler = onData;
         return () => {
@@ -134,6 +137,7 @@ describe('terminal command framing', () => {
         truncated: false,
         alive: true,
         exitCode: null,
+        failure: null,
       })),
       write: vi.fn(async (_terminalId, data) => {
         const nonce = String(data).match(/__HYSCODE_BEGIN_([a-z0-9]+)__/i)?.[1] ?? '';
@@ -145,7 +149,7 @@ describe('terminal command framing', () => {
         });
       }),
       interrupt: vi.fn(async () => undefined),
-      kill: vi.fn(async () => undefined),
+      kill: vi.fn(async () => ({ status: 'stopped' as const, failures: [] })),
       subscribe: vi.fn(async (_terminalId, onData) => {
         onDataHandler = onData;
         return () => {
@@ -179,6 +183,7 @@ describe('terminal command framing', () => {
         truncated: false,
         alive: true,
         exitCode: null,
+        failure: null,
       })),
       write: vi.fn(async (_terminalId, data) => {
         const frame = String(data);
@@ -187,7 +192,7 @@ describe('terminal command framing', () => {
         completed = true;
       }),
       interrupt: vi.fn(async () => undefined),
-      kill: vi.fn(async () => undefined),
+      kill: vi.fn(async () => ({ status: 'stopped' as const, failures: [] })),
       subscribe: vi.fn(async () => () => undefined),
     };
 
@@ -216,6 +221,7 @@ describe('terminal command framing', () => {
         truncated: false,
         alive: true,
         exitCode: null,
+        failure: null,
       })),
       write: vi.fn(async (_terminalId, data) => {
         const nonce = String(data).match(/__HYSCODE_BEGIN_([a-z0-9]+)__/i)?.[1] ?? '';
@@ -229,7 +235,7 @@ describe('terminal command framing', () => {
         }
       }),
       interrupt: vi.fn(async () => undefined),
-      kill: vi.fn(async () => undefined),
+      kill: vi.fn(async () => ({ status: 'stopped' as const, failures: [] })),
       subscribe: vi.fn(async (_terminalId, onData) => {
         onDataHandler = onData;
         return () => {
@@ -258,6 +264,7 @@ describe('terminal command framing', () => {
       complete: true,
       output: 'failed',
       exitCode: 1,
+      protocolError: null,
     });
   });
 
@@ -290,6 +297,7 @@ describe('terminal command framing', () => {
         truncated: false,
         alive: true,
         exitCode: null,
+        failure: null,
       })),
       write: vi.fn(async (_terminalId, data) => {
         const nonceMatch = String(data).match(/__HYSCODE_BEGIN_([a-z0-9]+)__/i);
@@ -305,7 +313,7 @@ describe('terminal command framing', () => {
         pushData?.(`${data}accepted\n`);
       }),
       interrupt: vi.fn(async () => undefined),
-      kill: vi.fn(async () => undefined),
+      kill: vi.fn(async () => ({ status: 'stopped' as const, failures: [] })),
       subscribe: vi.fn(async (_terminalId, onData) => {
         pushData = (chunk: string) => {
           sequence += 1;
@@ -391,7 +399,15 @@ describe('command watch', () => {
       startedAt: Date.now(),
     });
     const baseline = '__HYSCODE_BEGIN_watch-4__\nContinue? [Y/n]\n';
-    watch.syncSnapshot(baseline, 5);
+    watch.syncFullSnapshot({
+      data: baseline,
+      fromSequence: 5,
+      toSequence: 5,
+      truncated: false,
+      alive: true,
+      exitCode: null,
+      failure: null,
+    });
     expect(watch.evaluate(Date.now() + 10_000, baseline.length).kind).toBe('running');
 
     watch.pushData(6, '\nPassword:\n');
@@ -403,7 +419,7 @@ describe('command watch', () => {
 describe('terminal command runner — run paths', () => {
   function dataAdapter() {
     let dataHandler: ((data: string, sequence: number) => void) | null = null;
-    let exitHandler: ((code: number | null) => void) | null = null;
+    let exitHandler: ((code: number | null, failure?: TerminalRuntimeFailure | null) => void) | null = null;
     let lastNonce = '';
     const adapter = staticAdapter({
       subscribe: vi.fn(async (_terminalId, onData, onExit) => {
@@ -422,7 +438,7 @@ describe('terminal command runner — run paths', () => {
       adapter,
       nonce: () => lastNonce,
       emit: (chunk: string, sequence = 1) => dataHandler?.(chunk, sequence),
-      exit: (code: number | null) => exitHandler?.(code),
+      exit: (code: number | null, failure?: TerminalRuntimeFailure) => exitHandler?.(code, failure),
     };
   }
 
@@ -510,6 +526,7 @@ describe('terminal command runner — run paths', () => {
         truncated: true,
         alive: true,
         exitCode: null,
+        failure: null,
       })),
     });
     const result = await new TerminalCommandRunner().run(
@@ -568,6 +585,7 @@ describe('terminal command runner — run paths', () => {
         truncated: false,
         alive: !completed,
         exitCode: completed ? 0 : null,
+        failure: null,
       })),
       subscribe: vi.fn(async (_terminalId, _onData, onExit) => {
         exitHandler = onExit;
@@ -613,6 +631,7 @@ describe('terminal command runner — run paths', () => {
           truncated: false,
           alive: false,
           exitCode: 0,
+          failure: null,
         };
       }),
       subscribe: vi.fn(async (_terminalId, onData) => {
@@ -631,7 +650,7 @@ describe('terminal command runner — run paths', () => {
 
     expect(result).toMatchObject({ success: true, output: 'late output' });
     expect(snapshotCalls).toBeGreaterThanOrEqual(3);
-    expect(adapter.snapshot).toHaveBeenCalledWith('terminal-e', 9);
+    expect(adapter.snapshot).toHaveBeenCalledWith('terminal-e');
   });
 
   it('falls back to the raw event bus when the adapter has no subscribe', async () => {
@@ -671,9 +690,41 @@ describe('terminal command runner — run paths', () => {
     });
     const runner = new TerminalCommandRunner();
     const result = await runner.run({ command: 'echo hi' }, contextWith(adapter));
-    expect(result).toMatchObject({ success: false, error: 'Error: PTY closed' });
+    expect(result).toMatchObject({ success: false, error: 'PTY closed' });
     expect(release).toHaveBeenCalledWith('terminal-e', 'tool-1');
   });
+  it('finalizes a runtime failure once with structured cleanup metadata', async () => {
+    const { adapter, nonce, emit, exit } = dataAdapter();
+    const progress = vi.fn();
+    const runner = new TerminalCommandRunner();
+    const pending = runner.run(
+      { command: 'reader-failure', timeoutMs: 2_000 },
+      contextWith(adapter, { onTerminalProgress: progress }),
+    );
+    await flush();
+    emit(`__HYSCODE_BEGIN_${nonce()}__\nworking...\n`, 1);
+    exit(null, { operation: 'reader', message: 'PTY reader failed.' });
+
+    const result = await pending;
+    expect(result).toMatchObject({
+      success: false,
+      error: 'PTY reader failed.',
+      metadata: {
+        terminalState: 'error',
+        failure: { operation: 'reader', message: 'PTY reader failed.' },
+        stopStatus: 'stopped',
+      },
+    });
+    const finalProgress = progress.mock.calls.filter(([event]) =>
+      ['complete', 'error', 'cancelled', 'background'].includes(event.state),
+    );
+    expect(finalProgress).toHaveLength(1);
+    expect(finalProgress[0][0]).toMatchObject({
+      state: 'error',
+      failure: { operation: 'reader', message: 'PTY reader failed.' },
+    });
+  });
+
 });
 
 describe('terminal command runner — respond paths', () => {
@@ -686,6 +737,7 @@ describe('terminal command runner — respond paths', () => {
     let sequence = 0;
     let nonce = '';
     let pushData: ((data: string) => void) | null = null;
+    let exitHandler: ((code: number | null) => void) | null = null;
     const listeners = new Map<string, (payload: unknown) => void>();
     const adapter: TerminalRuntimeAdapter = {
       acquire: vi.fn(async () => mockBinding('terminal-i', 'pty-i')),
@@ -696,6 +748,7 @@ describe('terminal command runner — respond paths', () => {
         truncated: false,
         alive: true,
         exitCode: null,
+        failure: null,
       })),
       write: vi.fn(async (_terminalId, data) => {
         const nonceMatch = String(data).match(/__HYSCODE_BEGIN_([a-z0-9]+)__/i);
@@ -712,14 +765,16 @@ describe('terminal command runner — respond paths', () => {
         pushData?.(`${data}\n`);
       }),
       interrupt: vi.fn(async () => undefined),
-      kill: vi.fn(async () => undefined),
-      subscribe: vi.fn(async (_terminalId, onData) => {
+      kill: vi.fn(async () => ({ status: 'stopped' as const, failures: [] })),
+      subscribe: vi.fn(async (_terminalId, onData, onExit) => {
         pushData = (chunk: string) => {
           sequence += 1;
           onData(chunk, sequence);
         };
+        exitHandler = onExit;
         return () => {
           pushData = null;
+          exitHandler = null;
         };
       }),
     };
@@ -746,7 +801,10 @@ describe('terminal command runner — respond paths', () => {
         listeners.get('pty:data')?.({ pty_id: 'pty-i', sequence, data: chunk });
         pushData?.(chunk);
       },
-      exit: (code: number | null) => listeners.get('pty:exit')?.({ pty_id: 'pty-i', code }),
+      exit: (code: number | null) => {
+        exitHandler?.(code);
+        listeners.get('pty:exit')?.({ pty_id: 'pty-i', code, sequence, failure: null });
+      },
       getOutput: () => output,
       setOutput: (value: string) => {
         output = value;
@@ -785,7 +843,9 @@ describe('terminal command runner — respond paths', () => {
     const nonce = getOutput().match(/__HYSCODE_BEGIN_([a-z0-9]+)__/i)?.[1] ?? '';
     setOutput(`__HYSCODE_BEGIN_${nonce}__\ndone\n__HYSCODE_END_${nonce}__:0\n`);
 
-    const result = await runner.respond('terminal-i', 'Y', 1_000, context);
+    const pending = runner.respond('terminal-i', 'Y', 1_000, context);
+    await vi.advanceTimersByTimeAsync(2_000);
+    const result = await pending;
     expect(result).toMatchObject({
       success: false,
       error: 'Terminal is no longer waiting for input.',
@@ -888,11 +948,39 @@ describe('terminal command runner — respond paths', () => {
 
     const pending = runner.respond('terminal-i', 'Y', 5_000, context);
     controller.abort();
-    await vi.advanceTimersByTimeAsync(100);
+    await vi.advanceTimersByTimeAsync(2_000);
     const result = await pending;
 
     expect(result).toMatchObject({ success: false, error: 'Command cancelled.' });
   });
+  it('keeps confirmed cancellation distinct from stop diagnostics', async () => {
+    vi.useFakeTimers();
+    const controller = new AbortController();
+    const { adapter, context } = suspendedContext({ signal: controller.signal });
+    const runner = new TerminalCommandRunner();
+    await suspend(runner, context);
+    (adapter.kill as ReturnType<typeof vi.fn>).mockResolvedValue({
+      status: 'stopped',
+      failures: [{ operation: 'event', message: 'previous runtime diagnostic' }],
+    });
+    controller.abort();
+
+    const pending = runner.respond('terminal-i', 'Y', 5_000, context);
+    await vi.advanceTimersByTimeAsync(1_000);
+    const result = await pending;
+
+    expect(result).toMatchObject({
+      success: false,
+      error: 'Command cancelled.',
+      metadata: {
+        cancelled: true,
+        stopStatus: 'stopped',
+        stopFailures: [{ operation: 'event', message: 'previous runtime diagnostic' }],
+      },
+    });
+    expect(result.metadata).not.toHaveProperty('cancellationPartial');
+  });
+
 
   it('stops waiting when the process exits mid-response', async () => {
     vi.useFakeTimers();

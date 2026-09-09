@@ -21,11 +21,13 @@ import { useProjectStore } from '@/stores/project-store';
 import { useRulesStore } from '@/stores/rules-store';
 import { useSchemaDiagramStore } from '@/stores/schema-diagram-store';
 import { useSkillsStore } from '@/stores/skills-store';
-import { useTerminalStore } from '@/stores/terminal-store';
+import { TerminalValidationError, asTerminalRuntimeFailure } from '@hyscode/agent-harness';
 import { HarnessBridge } from './harness-bridge';
 import { mapPersistedAgentMessage } from './agent-message-persistence';
 import { areSameProjectPath, normalizeProjectPath } from './project-path';
 import { tauriInvoke } from './tauri-invoke';
+import { useTerminalStore } from '@/stores/terminal-store';
+import { desktopTerminalRuntime } from './terminal-runtime';
 import { vortexSessionRuntimeManager } from './vortex-session-runtime';
 
 export { areSameProjectPath } from './project-path';
@@ -349,6 +351,33 @@ export async function clearAllProjectState(
       vortexSessionRuntimeManager.hasActiveRuntimes());
   vortexSessionRuntimeManager.suspendProjection();
   vortexSessionRuntimeManager.clearFocus();
+
+  const sessions = preserveVortexRuntimes
+    ? []
+    : useTerminalStore.getState().sessions.filter((session) => session.ptyId);
+  const cleanupFailures: Array<{ terminalId: string; failure: ReturnType<typeof asTerminalRuntimeFailure> }> = [];
+  await Promise.all(sessions.map(async (session) => {
+    try {
+      const stop = await desktopTerminalRuntime.kill(session.id);
+      if (stop.status !== 'stopped') {
+        const failure = stop.failures[0] ?? {
+          operation: 'kill' as const,
+          message: `Terminal stop was not confirmed (${stop.status}).`,
+        };
+        cleanupFailures.push({ terminalId: session.id, failure });
+        console.error('[Project] PTY cleanup was not confirmed', { terminalId: session.id, stop });
+      } else if (stop.failures.length > 0) {
+        console.error('[Project] PTY cleanup completed with diagnostics', { terminalId: session.id, stop });
+      }
+    } catch (error) {
+      const failure = asTerminalRuntimeFailure(error, 'kill');
+      cleanupFailures.push({ terminalId: session.id, failure });
+      console.error('[Project] PTY cleanup failed', { terminalId: session.id, error: failure.message });
+    }
+  }));
+  const firstCleanupFailure = cleanupFailures[0]?.failure;
+  if (firstCleanupFailure) throw new TerminalValidationError(firstCleanupFailure);
+
   HarnessBridge.destroy();
   useLayoutStore.getState().resetProjectState();
   useFileStore.getState().closeFolder();
@@ -363,11 +392,7 @@ export async function clearAllProjectState(
   useRulesStore.getState().resetProjectState();
   useSchemaDiagramStore.getState().reset();
   useSkillsStore.getState().resetProjectState();
-
-  const ptyIds = preserveVortexRuntimes ? [] : useTerminalStore.getState().clearSessions();
-  await Promise.all(
-    ptyIds.map((ptyId) => tauriInvoke('pty_kill', { ptyId }).catch(() => undefined)),
-  );
+  if (!preserveVortexRuntimes) useTerminalStore.getState().clearSessions();
 }
 
 /**

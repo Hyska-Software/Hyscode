@@ -1,6 +1,6 @@
 /* @vitest-environment jsdom */
 
-import { cleanup, fireEvent, render } from '@testing-library/react';
+import { cleanup, fireEvent, render, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { TerminalPanel } from './terminal-panel';
 import { useTerminalStore, type TerminalSession } from '../../stores/terminal-store';
@@ -10,7 +10,9 @@ const invokeMock = vi.hoisted(() => vi.fn());
 vi.mock('@tauri-apps/api/core', () => ({
   invoke: (...args: unknown[]) => {
     invokeMock(...args);
-    return Promise.resolve();
+    return args[0] === 'pty_kill'
+      ? Promise.resolve({ status: 'stopped', failures: [] })
+      : Promise.resolve();
   },
 }));
 
@@ -27,6 +29,8 @@ function makeSession(overrides: Partial<TerminalSession>): TerminalSession {
     lastCommand: null,
     commandHistory: [],
     isDead: false,
+    exitCode: null,
+    failure: null,
     ownerConversationId: null,
     activeToolCallId: null,
     awaitingInput: false,
@@ -72,7 +76,7 @@ describe('TerminalPanel tab bar interactions', () => {
     expect(container).toBeTruthy();
   });
 
-  it('kills the PTY when closing a live session via middle click', () => {
+  it('kills the PTY when closing a live session via middle click', async () => {
     seedSessions([
       makeSession({ id: 'term-1', name: 'bash 1' }),
       makeSession({ id: 'term-2', name: 'bash 2', ptyId: 'pty-42' }),
@@ -81,7 +85,9 @@ describe('TerminalPanel tab bar interactions', () => {
 
     fireEvent.mouseDown(getTabByName('bash 2'), { button: 1 });
 
-    expect(useTerminalStore.getState().sessions.map((s) => s.id)).toEqual(['term-1']);
+    await waitFor(() => {
+      expect(useTerminalStore.getState().sessions.map((s) => s.id)).toEqual(['term-1']);
+    });
     expect(invokeMock).toHaveBeenCalledWith('pty_kill', { ptyId: 'pty-42' });
   });
 
