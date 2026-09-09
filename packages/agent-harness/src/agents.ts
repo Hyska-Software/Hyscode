@@ -73,11 +73,11 @@ Before creating, editing, deleting, or modifying ANY file, and before running AN
 - **Make multiple tool calls when needed.** A single read_file is rarely enough — read, search, edit, verify in sequence.
 
 ## Tool Call Contract (CRITICAL — follow exactly or calls fail)
-- **Use snake_case parameter names exactly as declared**: \`old_string\` (not oldString), \`new_string\`, \`replace_all\`, \`start_line\`, \`end_line\`, \`new_content\`, \`base_path\`, \`max_results\`, \`target_mode\`, \`context_summary\`. camelCase variants are tolerated but always prefer snake_case.
+- **Use snake_case parameter names exactly as declared**: \`path\`, \`content\`, \`old_string\` (not oldString), \`new_string\`, \`replace_all\`, \`start_line\`, \`end_line\`, \`new_content\`, \`base_path\`, \`max_results\`, \`target_mode\`, \`context_summary\`. camelCase variants are tolerated but always prefer snake_case.
 - **Emit valid JSON arguments**: double quotes for keys and strings, escape newlines inside strings as \\n, no trailing commas, no markdown fences around the arguments.
 - **Only call tools listed in your available tools.** If a tool name from these instructions is missing (e.g. \`spawn_subagent\` when sub-agents are disabled), do the work yourself — never guess an alternative name. Use \`search_tools\` to discover the exact name and schema of a tool you need, then call it directly (or via \`invoke_external_tool\` if instructed).
 - **Paths**: prefer workspace-relative paths with forward slashes (\`src/auth/jwt.ts\`). Absolute paths work too. Never invent paths — discover them with list_directory/find_files first.
-- **Edits**: the ONLY edit tools are \`edit_file\` (string replace), \`replace_lines\`, \`insert_lines\`, \`write_file\` (full overwrite), \`create_file\` (new files only). There is no \`grep_search\` — code search is \`search_code\`.
+- **Edits**: the ONLY edit tools are \`edit_file\` (string replace), \`replace_lines\`, \`insert_lines\`, \`write_file\` (full overwrite), \`create_file\` (new files only). \`create_file\` fails if the file exists — retry with \`write_file\`; \`write_file\` creates or overwrites — prefer it for new files unless you need the exists-guard. There is no \`grep_search\` — code search is \`search_code\`.
 - **If a call fails**, read the error text: it names the missing field, the expected type, or the closest valid tool name. Fix exactly that and retry once before trying another approach.
 
 ## Tool Efficiency — Parallel Batching (IMPORTANT)
@@ -481,8 +481,8 @@ const AGENTIC_MODE_FIXES: ReadonlyArray<readonly [string, string]> = [
     `- **Explore first**: List directories, search, and read files extensively to map the entire project structure before proposing anything`,
   ],
   [
-    `- You CAN and SHOULD save plans and context to .md files using \`write_file\` or \`create_file\`.`,
-    `- You CAN and SHOULD save plans and context to .md files (create/write them with your file tools).`,
+    `- You CAN and SHOULD save plans and context to .md files using \`write_file\` (preferred: creates or overwrites) or \`create_file\` (only when you need a fail-if-exists guard; on "File already exists" retry with \`write_file\`).`,
+    `- You CAN and SHOULD save plans and context to .md files (create/write them with your file tools; prefer the overwrite-capable write tool, and on "File already exists" retry with it).`,
   ],
   [
     `5. After creating and saving a plan, you MUST use \`request_mode_switch\` to hand off to the Build agent. Do NOT attempt to "complete" the implementation yourself.`,
@@ -805,7 +805,7 @@ You are a software architecture and planning specialist. You analyze codebases, 
 - Each plan should include: objective, affected files, step-by-step tasks, dependencies, acceptance criteria, and risks.
 
 ## File Output (CRITICAL)
-- You CAN and SHOULD save plans and context to .md files using \`write_file\` or \`create_file\`.
+- You CAN and SHOULD save plans and context to .md files using \`write_file\` (preferred: creates or overwrites) or \`create_file\` (only when you need a fail-if-exists guard; on "File already exists" retry with \`write_file\`).
 - Save plans to the project (e.g., \`.hyscode/plans/PLAN-<name>.md\`) so the Build agent can reference them.
 - Include full context in the plan file: codebase analysis findings, architectural decisions, step-by-step implementation guide.
 - Never write application code (no .ts, .tsx, .rs, .css files) — only documentation, specs, and plan files.

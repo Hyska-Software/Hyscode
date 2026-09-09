@@ -161,6 +161,72 @@ describe('ToolRouter', () => {
       expect.anything(),
     );
   });
+
+  it('reports received keys when a required field is missing', async () => {
+    const router = new ToolRouter();
+    router.register({
+      definition: {
+        name: 'create_file',
+        description: 'test create',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            path: { type: 'string' },
+            content: { type: 'string' },
+          },
+          required: ['path'],
+        },
+      },
+      category: 'filesystem',
+      requiresApproval: false,
+      execute: vi.fn(async () => ({ success: true, output: 'ok' })),
+    });
+    const record = await router.execute(
+      'create_file',
+      'call',
+      {},
+      context(new AbortController().signal),
+    );
+    expect(record.output.success).toBe(false);
+    expect(record.output.error).toContain('missing required field "path"');
+    expect(record.output.error).toContain('Received keys: [(none)]');
+  });
+
+  it('prefers the canonical path over the file alias', async () => {
+    const router = new ToolRouter();
+    const execute = vi.fn(async (input: Record<string, unknown>) => ({
+      success: true,
+      output: String(input.path),
+    }));
+    router.register({
+      definition: {
+        name: 'create_file',
+        description: 'test create',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            path: { type: 'string' },
+            content: { type: 'string' },
+          },
+          required: ['path'],
+        },
+      },
+      category: 'filesystem',
+      requiresApproval: false,
+      execute,
+    });
+    const record = await router.execute(
+      'create_file',
+      'call',
+      { path: 'n.ts', file: 'ignored.ts' },
+      context(new AbortController().signal),
+    );
+    expect(record.output.success).toBe(true);
+    expect(execute).toHaveBeenCalledWith(
+      expect.objectContaining({ path: 'n.ts' }),
+      expect.anything(),
+    );
+  });
 });
 
 describe('normalizeToolInput', () => {
@@ -187,6 +253,23 @@ describe('normalizeToolInput', () => {
     const input = { file_path: 'a.ts' };
     normalizeToolInput(schema, input);
     expect(input).toEqual({ file_path: 'a.ts' });
+  });
+
+  it('maps bare file to path and new_content to content', () => {
+    const fileSchema = {
+      type: 'object',
+      properties: {
+        path: { type: 'string' },
+        content: { type: 'string' },
+      },
+      required: ['path'],
+    };
+    expect(normalizeToolInput(fileSchema, { file: 'a.ts', new_content: 'hi' })).toEqual(
+      expect.objectContaining({ path: 'a.ts', content: 'hi' }),
+    );
+    expect(normalizeToolInput(fileSchema, { path: 'b.ts', file: 'a.ts' })).toEqual(
+      expect.objectContaining({ path: 'b.ts' }),
+    );
   });
 });
 

@@ -533,7 +533,7 @@ function validateInput(
   const required = Array.isArray(schema.required) ? (schema.required as string[]) : [];
   for (const key of required) {
     if (!(key in input) || input[key] === undefined || input[key] === null) {
-      return `Invalid tool input: missing required field "${key}".`;
+      return `Invalid tool input: missing required field "${key}". Received keys: [${Object.keys(input).join(', ') || '(none)'}].`;
     }
   }
   const properties = (schema.properties ?? {}) as Record<
@@ -567,13 +567,14 @@ function validateInput(
 
 /** Well-known parameter synonyms models emit instead of the canonical snake_case names. */
 const COMMON_PARAM_ALIASES: Record<string, string[]> = {
-  path: ['file_path', 'filepath', 'filePath', 'filename', 'file_name'],
+  path: ['file_path', 'filepath', 'filePath', 'filename', 'file_name', 'file'],
   old_string: ['oldString', 'old_text', 'oldText', 'search', 'find'],
   new_string: ['newString', 'new_text', 'newText', 'replace', 'replacement', 'content'],
   replace_all: ['replaceAll', 'replaceall', 'all'],
   start_line: ['startLine', 'start', 'from_line', 'fromLine'],
   end_line: ['endLine', 'end', 'to_line', 'toLine'],
   new_content: ['newContent', 'newcontent', 'content'],
+  content: ['new_content', 'newContent', 'newcontent'],
   base_path: ['basePath', 'basepath', 'root', 'dir', 'directory'],
   max_results: ['maxResults', 'maxresults', 'limit'],
   max_lines_per_file: ['maxLinesPerFile', 'max_lines', 'maxLines'],

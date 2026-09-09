@@ -163,7 +163,7 @@ export const readFileTool = defineTool(
 
 export const writeFileTool = defineTool(
   'write_file',
-  "Write content to a file. If the file exists, it will be overwritten. If parent directories don't exist, they will be created. " +
+  "Write content to a file (creates or overwrites). Parameters: path, content. If parent directories don't exist, they will be created. " +
     'For existing files prefer edit_file (surgical) over write_file (full rewrite). ' +
     'Arguments are JSON: pass content as a JSON string with newlines escaped as \\n.',
   {
@@ -430,19 +430,19 @@ export const insertLinesTool = defineTool(
 
 export const createFileTool = defineTool(
   'create_file',
-  'Create a new file with the specified content. Fails if the file already exists (use edit_file or write_file for existing files). ' +
+  'Create a new file. Parameters: path (workspace-relative or absolute), content (file text). Fails if the file already exists — on "File already exists" retry the same path with write_file or edit_file. ' +
     'Parent directories are created automatically. Arguments are JSON: pass content as a JSON string with newlines escaped as \\n.',
   {
     path: { type: 'string', description: 'Absolute or workspace-relative path for the new file' },
     content: { type: 'string', description: 'The content for the new file' },
   },
-  ['path', 'content'],
+  ['path'],
   'filesystem',
   true,
   async (input, ctx) => {
     try {
       const filePath = resolvePath(input.path as string, ctx.workspacePath, ctx);
-      const newContent = input.content as string;
+      const newContent = ((input.content as string) ?? '');
       await ctx.invoke('create_file', { path: filePath, content: newContent });
 
       // Notify UI — originalContent is null for brand-new files
