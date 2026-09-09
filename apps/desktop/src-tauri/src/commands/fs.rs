@@ -964,6 +964,23 @@ fn copy_dir_recursive(src: &PathBuf, dst: &PathBuf) -> Result<(), String> {
     Ok(())
 }
 
+/// Build the single `explorer` argument for `/select`.
+/// Explorer requires flag and path in one argv entry (`/select,<path>`).
+/// Splitting them makes Explorer drop the selection and open the default view.
+fn explorer_select_arg(path: &str) -> String {
+    format!("/select,{path}")
+}
+
+/// Resolve what to open on Linux, where `xdg-open` cannot select a file:
+/// directories open directly, files open via their parent directory.
+fn linux_reveal_target(path: &Path, is_dir: bool) -> PathBuf {
+    if is_dir {
+        path.to_path_buf()
+    } else {
+        path.parent().unwrap_or(path).to_path_buf()
+    }
+}
+
 /// Open the OS file manager and highlight/select the given path.
 #[tauri::command]
 pub fn reveal_path(path: String) -> Result<(), String> {
@@ -975,8 +992,7 @@ pub fn reveal_path(path: String) -> Result<(), String> {
     #[cfg(target_os = "windows")]
     {
         cmd("explorer")
-            .arg("/select,")
-            .arg(&path)
+            .arg(explorer_select_arg(&path))
             .spawn()
             .map_err(|e| format!("Failed to reveal: {}", e))?;
     }
@@ -992,12 +1008,9 @@ pub fn reveal_path(path: String) -> Result<(), String> {
 
     #[cfg(target_os = "linux")]
     {
-        // Try xdg-open on the parent directory
-        let target = if p.is_dir() {
-            p
-        } else {
-            p.parent().unwrap_or(&p).to_path_buf()
-        };
+        // `xdg-open` has no select/highlight mode, so open the containing
+        // directory for files (directly for directories).
+        let target = linux_reveal_target(&p, p.is_dir());
         cmd("xdg-open")
             .arg(target.to_string_lossy().to_string())
             .spawn()
@@ -1115,6 +1128,30 @@ mod tests {
             assert!(validate_file_name(illegal).is_err(), "{}", illegal);
         }
         assert!(validate_file_name("normal file (1).txt").is_ok());
+    }
+
+    #[test]
+    fn explorer_select_arg_stays_single_arg() {
+        // Regression: passing "/select," and the path as two argv entries
+        // makes Explorer drop the selection and open the default view.
+        assert_eq!(explorer_select_arg("C:\\a\\b.txt"), "/select,C:\\a\\b.txt");
+        assert_eq!(
+            explorer_select_arg("C:\\a dir\\b file.txt"),
+            "/select,C:\\a dir\\b file.txt"
+        );
+        assert_eq!(explorer_select_arg("C:\\"), "/select,C:\\");
+    }
+
+    #[test]
+    fn linux_reveal_target_opens_parent_for_files() {
+        assert_eq!(
+            linux_reveal_target(Path::new("/home/u/file.txt"), false),
+            PathBuf::from("/home/u")
+        );
+        assert_eq!(
+            linux_reveal_target(Path::new("/home/u/docs"), true),
+            PathBuf::from("/home/u/docs")
+        );
     }
 
     #[test]
