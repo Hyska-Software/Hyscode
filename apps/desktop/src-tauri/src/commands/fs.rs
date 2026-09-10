@@ -964,15 +964,18 @@ fn copy_dir_recursive(src: &PathBuf, dst: &PathBuf) -> Result<(), String> {
     Ok(())
 }
 
-/// Build the single `explorer` argument for `/select`.
-/// Explorer requires flag and path in one argv entry (`/select,<path>`).
-/// Splitting them makes Explorer drop the selection and open the default view.
-fn explorer_select_arg(path: &str) -> String {
-    format!("/select,{path}")
+/// Convert a path to the native Windows separator form. Projects are
+/// normalized with `/` on the frontend, but `explorer.exe` treats `/` in its
+/// arguments as a switch sigil (`/select`, `/root`, ...), so a path such as
+/// `D:/project/src` makes Explorer drop the target and open its default folder.
+#[cfg(any(target_os = "windows", test))]
+fn windows_native_path(path: &str) -> String {
+    path.replace('/', "\\")
 }
 
 /// Resolve what to open on Linux, where `xdg-open` cannot select a file:
 /// directories open directly, files open via their parent directory.
+#[cfg(any(target_os = "linux", test))]
 fn linux_reveal_target(path: &Path, is_dir: bool) -> PathBuf {
     if is_dir {
         path.to_path_buf()
@@ -981,9 +984,63 @@ fn linux_reveal_target(path: &Path, is_dir: bool) -> PathBuf {
     }
 }
 
+/// Reveal a path in Explorer through the shell PIDL API instead of a command
+/// line. Explorer does not parse argv like a standard program (its `/select,`
+/// syntax is comma-delimited and quoting-sensitive), so handing it a path with
+/// spaces or forward slashes silently opens the default folder.
+/// `SHOpenFolderAndSelectItems` performs no command-line parsing at all.
+#[cfg(target_os = "windows")]
+fn reveal_in_file_manager(path: &Path) -> Result<(), String> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Foundation::{S_FALSE, S_OK};
+    use windows_sys::Win32::System::Com::{
+        CoInitializeEx, CoUninitialize, COINIT_APARTMENTTHREADED,
+    };
+    use windows_sys::Win32::UI::Shell::{ILCreateFromPathW, ILFree, SHOpenFolderAndSelectItems};
+
+    let native = windows_native_path(&path.to_string_lossy());
+    let wide: Vec<u16> = std::ffi::OsStr::new(&native)
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect();
+
+    unsafe {
+        let init = CoInitializeEx(std::ptr::null(), COINIT_APARTMENTTHREADED as u32);
+        // `RPC_E_CHANGED_MODE` means COM is already initialized in another
+        // apartment: the shell call still works and must not be balanced by
+        // `CoUninitialize`.
+        let should_uninitialize = init == S_OK || init == S_FALSE;
+
+        let pidl = ILCreateFromPathW(wide.as_ptr());
+        if pidl.is_null() {
+            if should_uninitialize {
+                CoUninitialize();
+            }
+            return Err(format!("Failed to reveal: {}", path.display()));
+        }
+
+        let result = SHOpenFolderAndSelectItems(pidl, 0, std::ptr::null(), 0);
+        ILFree(pidl);
+        if should_uninitialize {
+            CoUninitialize();
+        }
+
+        if result < 0 {
+            return Err(format!(
+                "Failed to reveal {}: shell error 0x{:08X}",
+                path.display(),
+                result as u32
+            ));
+        }
+    }
+
+    Ok(())
+}
+
 /// Open the OS file manager and highlight/select the given path.
+/// Async so the (blocking) shell reveal call never runs on the UI thread.
 #[tauri::command]
-pub fn reveal_path(path: String) -> Result<(), String> {
+pub async fn reveal_path(path: String) -> Result<(), String> {
     let p = PathBuf::from(&path);
     if !p.exists() {
         return Err(format!("Path not found: {}", path));
@@ -991,10 +1048,7 @@ pub fn reveal_path(path: String) -> Result<(), String> {
 
     #[cfg(target_os = "windows")]
     {
-        cmd("explorer")
-            .arg(explorer_select_arg(&path))
-            .spawn()
-            .map_err(|e| format!("Failed to reveal: {}", e))?;
+        reveal_in_file_manager(&p)?;
     }
 
     #[cfg(target_os = "macos")]
@@ -1131,15 +1185,22 @@ mod tests {
     }
 
     #[test]
-    fn explorer_select_arg_stays_single_arg() {
-        // Regression: passing "/select," and the path as two argv entries
-        // makes Explorer drop the selection and open the default view.
-        assert_eq!(explorer_select_arg("C:\\a\\b.txt"), "/select,C:\\a\\b.txt");
+    fn windows_native_path_uses_backslashes() {
+        // Regression: project paths are normalized to `/` on the frontend and
+        // `explorer.exe` interprets `/` as a switch sigil, so reveal silently
+        // opened the default folder instead of the target.
         assert_eq!(
-            explorer_select_arg("C:\\a dir\\b file.txt"),
-            "/select,C:\\a dir\\b file.txt"
+            windows_native_path("D:/Hyscode/scripts"),
+            "D:\\Hyscode\\scripts"
         );
-        assert_eq!(explorer_select_arg("C:\\"), "/select,C:\\");
+        assert_eq!(
+            windows_native_path("D:\\Hyscode\\scripts"),
+            "D:\\Hyscode\\scripts"
+        );
+        assert_eq!(
+            windows_native_path("C:/a dir/über.txt"),
+            "C:\\a dir\\über.txt"
+        );
     }
 
     #[test]
