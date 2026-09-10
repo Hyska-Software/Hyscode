@@ -271,7 +271,7 @@ export function flowTitle(flow: CommandFlow | null): string {
   }
 }
 
-export function parseCliArgs(args: readonly string[], cwd = process.cwd(), version = '0.13.0'): CliParseResult {
+export function parseCliArgs(args: readonly string[], cwd = process.cwd(), version = '0.14.0'): CliParseResult {
   if (args[0] === 'update') return parseUpdateArgs(args.slice(1), cwd);
   if (args[0] === '--apply-update') {
     const statePath = args[1];
