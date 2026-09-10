@@ -1586,14 +1586,17 @@ pub fn git_log_graph(repo_path: String, limit: u32) -> Result<Vec<GraphCommit>, 
 }
 
 /// Clone a git repository into `target_path`, creating parent directories as
-/// needed. For github.com HTTPS URLs, the stored GitHub token is injected so
-/// private repositories can be cloned without extra credential configuration.
+/// needed. For github.com HTTPS URLs, the selected account token (active by
+/// default) is injected so private repositories can be cloned without extra
+/// credential configuration. The cloned `origin` remote is bound to the
+/// selected account so future push/pull/fetch keep using it.
 #[tauri::command]
 pub fn git_clone(
     keychain: State<'_, KeychainState>,
     url: String,
     target_path: String,
     branch: Option<String>,
+    account_id: Option<String>,
 ) -> Result<(), String> {
     let target = PathBuf::from(&target_path);
     let parent = target
@@ -1605,19 +1608,29 @@ pub fn git_clone(
             .map_err(|e| format!("Failed to create target directory: {}", e))?;
     }
 
+    let selected_account = account_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(String::from);
+    let token = {
+        let store = keychain.0.lock().map_err(|e| e.to_string())?;
+        match selected_account.as_deref() {
+            Some(account_id) => super::github_accounts::account_token(&store, account_id),
+            None => super::github_accounts::active_account_id(&store)
+                .and_then(|account_id| super::github_accounts::account_token(&store, &account_id)),
+        }
+    };
+
     let mut command = super::utils::cmd("git");
-    inject_github_auth(
-        &mut command,
-        &url,
-        super::github_repos::github_token_option(&keychain.0).as_deref(),
-    );
+    inject_github_auth(&mut command, &url, token.as_deref());
 
     let mut args = vec!["clone".to_string()];
     if let Some(branch) = branch.filter(|value| !value.trim().is_empty()) {
         args.push("--branch".to_string());
         args.push(branch);
     }
-    args.push(url);
+    args.push(url.clone());
     args.push(target_path.clone());
 
     let output = command
@@ -1629,6 +1642,16 @@ pub fn git_clone(
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr).to_string();
         return Err(stderr.trim().to_string());
+    }
+
+    if super::git_backend::is_github_https_url(&url) {
+        if let Some(account_id) = selected_account.as_deref() {
+            super::git_backend::set_remote_account_binding(
+                &target_path,
+                "origin",
+                Some(account_id),
+            )?;
+        }
     }
     Ok(())
 }
@@ -1653,6 +1676,28 @@ pub fn git_remote_set_url(repo_path: String, name: String, url: String) -> Resul
         ["remote", "set-url", name.as_str(), url.as_str()],
     )
     .map(|_| ())
+}
+
+/// Read which GitHub account is bound to a remote (local git config).
+#[tauri::command]
+pub fn git_remote_account_get(repo_path: String, remote: String) -> Result<Option<String>, String> {
+    Ok(super::git_backend::remote_account_binding(
+        &repo_path, &remote,
+    ))
+}
+
+/// Bind (or clear, with `null`) the GitHub account used by a remote.
+#[tauri::command]
+pub fn git_remote_account_set(
+    repo_path: String,
+    remote: String,
+    account_id: Option<String>,
+) -> Result<(), String> {
+    let account_id = account_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    super::git_backend::set_remote_account_binding(&repo_path, &remote, account_id)
 }
 
 #[tauri::command]

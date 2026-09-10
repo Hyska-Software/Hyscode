@@ -42,7 +42,7 @@ import {
   Link2,
 } from 'lucide-react';
 import { useGitStore, useEditorStore, useLayoutStore } from '../../../stores';
-import { useGithubStore } from '../../../stores/github-store';
+import { useGithubStore, githubAccountDisplayName } from '../../../stores/github-store';
 import { useSettingsStore } from '../../../stores/settings-store';
 import { getViewerType } from '../../../lib/utils';
 import { detectLanguage } from '../../../lib/lsp-bridge';
@@ -102,6 +102,8 @@ export function GitView() {
   const removeRemote = useGitStore((s) => s.removeRemote);
   const openCloneDialog = useGithubStore((s) => s.openCloneDialog);
   const openPublishDialog = useGithubStore((s) => s.openPublishDialog);
+  const githubAccounts = useGithubStore((s) => s.accounts);
+  const setRemoteAccount = useGitStore((s) => s.setRemoteAccount);
   const stashChanges = useGitStore((s) => s.stashChanges);
   const popStash = useGitStore((s) => s.popStash);
   const applyStash = useGitStore((s) => s.applyStash);
@@ -355,6 +357,13 @@ export function GitView() {
       await runOp('Remove Remote', () => removeRemote(name));
     },
     [removeRemote, runOp],
+  );
+
+  const handleBindRemoteAccount = useCallback(
+    (name: string, accountId: string | null) => {
+      void runOp('Bind Remote Account', () => setRemoteAccount(name, accountId));
+    },
+    [runOp, setRemoteAccount],
   );
 
   const handleCommit = useCallback(
@@ -1095,20 +1104,42 @@ export function GitView() {
               {remotes.map((remote) => (
                 <div
                   key={remote.name}
-                  className="group flex items-center gap-1 rounded-md px-1.5 py-1 hover:bg-muted transition-colors"
+                  className="group flex flex-col gap-0.5 rounded-md px-1.5 py-1 hover:bg-muted transition-colors"
                 >
-                  <Link2 className="h-3 w-3 shrink-0 text-muted-foreground" />
-                  <div className="min-w-0 flex-1 leading-tight">
-                    <p className="truncate text-[11px] text-foreground">{remote.name}</p>
-                    <p className="truncate text-[9px] text-muted-foreground">{remote.url}</p>
+                  <div className="flex items-center gap-1">
+                    <Link2 className="h-3 w-3 shrink-0 text-muted-foreground" />
+                    <div className="min-w-0 flex-1 leading-tight">
+                      <p className="truncate text-[11px] text-foreground">{remote.name}</p>
+                      <p className="truncate text-[9px] text-muted-foreground">{remote.url}</p>
+                    </div>
+                    <button
+                      onClick={() => void handleRemoveRemote(remote.name)}
+                      title={`Remove remote ${remote.name}`}
+                      className="flex h-5 w-5 shrink-0 items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 hover:text-destructive"
+                    >
+                      <Trash2 className="h-3 w-3" />
+                    </button>
                   </div>
-                  <button
-                    onClick={() => void handleRemoveRemote(remote.name)}
-                    title={`Remove remote ${remote.name}`}
-                    className="flex h-5 w-5 shrink-0 items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 hover:text-destructive"
-                  >
-                    <Trash2 className="h-3 w-3" />
-                  </button>
+                  {(githubAccounts.length > 1 || remote.account_id) && (
+                    <div className="flex items-center gap-1 pl-4">
+                      <Github className="h-2.5 w-2.5 shrink-0 text-muted-foreground" />
+                      <select
+                        value={remote.account_id ?? ''}
+                        onChange={(e) =>
+                          handleBindRemoteAccount(remote.name, e.target.value || null)
+                        }
+                        title="GitHub account used for this remote"
+                        className="min-w-0 flex-1 bg-transparent text-[9px] text-muted-foreground outline-none"
+                      >
+                        <option value="">Auto (active account)</option>
+                        {githubAccounts.map((account) => (
+                          <option key={account.id} value={account.id}>
+                            {githubAccountDisplayName(account)}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
                 </div>
               ))}
               <MenuBtn icon={ArrowUp} label="Push" onClick={handlePush} />

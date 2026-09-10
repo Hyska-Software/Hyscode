@@ -67,6 +67,9 @@ pub fn git_remote_info(repo_path: String) -> Result<GitRemoteInfo, String> {
                     return Ok(GitRemoteInfo {
                         name: name.to_string(),
                         url: url.to_string(),
+                        account_id: super::git_backend::remote_account_binding_from_repo(
+                            &repo, name,
+                        ),
                     });
                 }
             }
@@ -80,6 +83,7 @@ pub fn git_remote_info(repo_path: String) -> Result<GitRemoteInfo, String> {
                 return Ok(GitRemoteInfo {
                     name: name.to_string(),
                     url: url.to_string(),
+                    account_id: super::git_backend::remote_account_binding_from_repo(&repo, name),
                 });
             }
         }
@@ -88,7 +92,9 @@ pub fn git_remote_info(repo_path: String) -> Result<GitRemoteInfo, String> {
     Err("No remote found".to_string())
 }
 
-/// Create a pull request on GitHub using the dedicated repository token.
+/// Create a pull request on GitHub using an account token. The token is
+/// resolved as: explicit `account_id` → account bound to the head remote →
+/// active account.
 #[tauri::command]
 pub async fn github_create_pull_request(
     keychain: State<'_, KeychainState>,
@@ -96,6 +102,7 @@ pub async fn github_create_pull_request(
     mut payload: CreatePullRequestPayload,
     base_remote: String,
     head_remote: String,
+    account_id: Option<String>,
 ) -> Result<PullRequestResult, String> {
     // 1. Resolve the explicitly selected base/head GitHub remotes.
     let (base_remote_url, head_remote_url) = {
@@ -150,8 +157,16 @@ pub async fn github_create_pull_request(
         payload.head = format!("{head_owner}:{}", payload.head);
     }
 
-    // 2. Repository access: account OAuth token first, then manual PAT.
-    let token = super::github_repos::resolve_github_token(&keychain.0)?;
+    // 2. Repository access: explicit account, head-remote binding, then the
+    //    active account.
+    let resolved_account = account_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(String::from)
+        .or_else(|| super::git_backend::remote_account_binding(&repo_path, &head_remote));
+    let token =
+        super::github_repos::resolve_github_token(&keychain.0, resolved_account.as_deref())?;
 
     // 3. Build request
     let client = reqwest::Client::builder()
@@ -202,31 +217,4 @@ pub async fn github_create_pull_request(
         url: pr.html_url,
         number: pr.number,
     })
-}
-
-/// Store a generic GitHub personal access token in the keychain.
-#[tauri::command]
-pub async fn github_set_token(
-    keychain: State<'_, KeychainState>,
-    token: String,
-) -> Result<(), String> {
-    let mut store = keychain.0.lock().map_err(|e| e.to_string())?;
-    store.insert("hyscode:github_token".to_string(), token);
-    super::keychain::persist_keychain_ref(&store);
-    Ok(())
-}
-
-/// Check if the dedicated repository GitHub token is available.
-#[tauri::command]
-pub async fn github_has_token(keychain: State<'_, KeychainState>) -> Result<bool, String> {
-    let store = keychain.0.lock().map_err(|e| e.to_string())?;
-    Ok(store.contains_key("hyscode:github_token"))
-}
-
-#[tauri::command]
-pub async fn github_remove_token(keychain: State<'_, KeychainState>) -> Result<(), String> {
-    let mut store = keychain.0.lock().map_err(|e| e.to_string())?;
-    store.remove("hyscode:github_token");
-    super::keychain::persist_keychain_ref(&store);
-    Ok(())
 }

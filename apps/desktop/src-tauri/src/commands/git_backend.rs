@@ -33,10 +33,12 @@ pub struct GitStatusResult {
     pub conflicts: Vec<GitFile>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Clone)]
 pub struct GitRemoteInfo {
     pub name: String,
     pub url: String,
+    /// GitHub account id bound to this remote (`remote.<name>.hyscode-account`).
+    pub account_id: Option<String>,
 }
 
 // ── Repository helpers (libgit2 adapter) ────────────────────────────────────
@@ -243,6 +245,7 @@ pub fn list_remotes(repo: &Repository) -> Result<Vec<GitRemoteInfo>, String> {
             repo.find_remote(name).ok().map(|remote| GitRemoteInfo {
                 name: name.to_string(),
                 url: remote.url().unwrap_or("").to_string(),
+                account_id: remote_account_binding_from_repo(repo, name),
             })
         })
         .collect())
@@ -343,7 +346,7 @@ where
     run_git_command(&mut cmd("git"), repo_path, args)
 }
 
-fn is_github_https_url(url: &str) -> bool {
+pub(crate) fn is_github_https_url(url: &str) -> bool {
     url.starts_with("https://github.com/") || url.starts_with("http://github.com/")
 }
 
@@ -363,22 +366,112 @@ fn remote_url(repo_path: &str, remote_name: &str) -> Option<String> {
     remote.url().map(String::from)
 }
 
-/// Inject the stored GitHub token as an `http.extraheader` when the target
-/// remote points at github.com. Keeps private-repository auth working without
-/// persisting credentials in the repository config. Non-GitHub URLs (or a
-/// missing token) leave the command untouched.
-pub fn inject_github_auth(command: &mut Command, url: &str, token: Option<&str>) {
-    if is_github_https_url(url) {
-        if let Some(token) = token.filter(|value| !value.is_empty()) {
-            command
-                .arg("-c")
-                .arg(format!("http.extraheader={}", github_extraheader(token)));
+/// Read the GitHub account bound to a remote from the repository's local git
+/// config (`remote.<name>.hyscode-account`).
+pub fn remote_account_binding_from_repo(repo: &Repository, remote_name: &str) -> Option<String> {
+    let config = repo.config().ok()?;
+    config
+        .get_string(&format!("remote.{remote_name}.hyscode-account"))
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+pub fn remote_account_binding(repo_path: &str, remote_name: &str) -> Option<String> {
+    let repo = open_repo(repo_path).ok()?;
+    remote_account_binding_from_repo(&repo, remote_name)
+}
+
+/// Bind (or clear) the GitHub account used for a remote. Stored in the local
+/// git config so it travels with the repository and never leaves the machine.
+pub fn set_remote_account_binding(
+    repo_path: &str,
+    remote_name: &str,
+    account_id: Option<&str>,
+) -> Result<(), String> {
+    let key = format!("remote.{remote_name}.hyscode-account");
+    match account_id {
+        Some(account_id) => {
+            run_git_cli(repo_path, ["config", "--local", key.as_str(), account_id]).map(|_| ())
+        }
+        None => {
+            if remote_account_binding(repo_path, remote_name).is_none() {
+                return Ok(());
+            }
+            run_git_cli(repo_path, ["config", "--local", "--unset", key.as_str()]).map(|_| ())
         }
     }
 }
 
-/// Run a `git` CLI command, injecting the stored GitHub token as an
-/// `http.extraheader` when the target remote points at github.com.
+/// Resolve the token for a remote: the bound account when present and still
+/// connected, otherwise the active account.
+pub fn github_token_for_remote(
+    keychain: &KeychainState,
+    repo_path: &str,
+    remote_name: &str,
+) -> Option<String> {
+    let binding = remote_account_binding(repo_path, remote_name);
+    let store = keychain.0.lock().ok()?;
+    if let Some(binding) = binding {
+        if let Some(token) = super::github_accounts::account_token(&store, &binding) {
+            return Some(token);
+        }
+    }
+    let active = super::github_accounts::active_account_id(&store)?;
+    super::github_accounts::account_token(&store, &active)
+}
+
+/// Inject the token as a URL-scoped `http.<url>.extraheader` so different
+/// remotes in the same command can use different accounts. Credentials are
+/// never persisted in the repository config. Non-GitHub URLs (or a missing
+/// token) leave the command untouched.
+pub fn inject_github_auth(command: &mut Command, url: &str, token: Option<&str>) {
+    if is_github_https_url(url) {
+        if let Some(token) = token.filter(|value| !value.is_empty()) {
+            let config_url = url.trim_end_matches('/');
+            command.arg("-c").arg(format!(
+                "http.{config_url}.extraheader={}",
+                github_extraheader(token)
+            ));
+        }
+    }
+}
+
+fn upstream_remote(repo_path: &str) -> Option<String> {
+    run_git_cli(
+        repo_path,
+        [
+            "rev-parse",
+            "--abbrev-ref",
+            "--symbolic-full-name",
+            "@{upstream}",
+        ],
+    )
+    .ok()
+    .map(|upstream| upstream.trim().split('/').next().unwrap_or("").to_string())
+    .filter(|name| !name.is_empty())
+}
+
+/// Remote names that need auth for this command. `fetch --all` touches every
+/// remote; every other command targets one remote (hint or upstream).
+fn auth_remote_names(repo_path: &str, remote_hint: Option<&str>, args: &[String]) -> Vec<String> {
+    if args.iter().any(|arg| arg == "--all") {
+        if let Ok(repo) = open_repo(repo_path) {
+            if let Ok(remotes) = repo.remotes() {
+                return remotes.iter().flatten().map(String::from).collect();
+            }
+        }
+        return Vec::new();
+    }
+    remote_hint
+        .map(String::from)
+        .or_else(|| upstream_remote(repo_path))
+        .into_iter()
+        .collect()
+}
+
+/// Run a `git` CLI command, injecting per-remote GitHub tokens for github.com
+/// HTTPS remotes (bound account first, then the active account).
 pub fn run_git_cli_with_github_auth(
     keychain: &KeychainState,
     repo_path: &str,
@@ -386,29 +479,11 @@ pub fn run_git_cli_with_github_auth(
     args: Vec<String>,
 ) -> Result<String, String> {
     let mut command = cmd("git");
-
-    let remote_name = remote_hint.map(String::from).or_else(|| {
-        run_git_cli(
-            repo_path,
-            [
-                "rev-parse",
-                "--abbrev-ref",
-                "--symbolic-full-name",
-                "@{upstream}",
-            ],
-        )
-        .ok()
-        .map(|upstream| upstream.trim().split('/').next().unwrap_or("").to_string())
-        .filter(|name| !name.is_empty())
-    });
-
-    let token = super::github_repos::github_token_option(&keychain.0);
-    if let Some(url) = remote_name
-        .as_deref()
-        .and_then(|name| remote_url(repo_path, name))
-    {
-        inject_github_auth(&mut command, &url, token.as_deref());
+    for remote_name in auth_remote_names(repo_path, remote_hint, &args) {
+        if let Some(url) = remote_url(repo_path, &remote_name) {
+            let token = github_token_for_remote(keychain, repo_path, &remote_name);
+            inject_github_auth(&mut command, &url, token.as_deref());
+        }
     }
-
     run_git_command(&mut command, repo_path, args)
 }

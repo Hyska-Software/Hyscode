@@ -115,6 +115,8 @@ pub fn run() {
             commands::git::git_remote_add,
             commands::git::git_remote_remove,
             commands::git::git_remote_set_url,
+            commands::git::git_remote_account_get,
+            commands::git::git_remote_account_set,
             // PTY commands
             commands::pty::pty_spawn,
             commands::pty::pty_write,
@@ -173,12 +175,15 @@ pub fn run() {
             commands::github_oauth::github_copilot_ensure_token,
             commands::github_oauth::github_copilot_disconnect,
             commands::github_oauth::github_copilot_is_authenticated,
-            // GitHub Account commands
-            commands::github_oauth::github_account_oauth_start,
-            commands::github_oauth::github_account_oauth_poll,
-            commands::github_oauth::github_account_is_authenticated,
-            commands::github_oauth::github_account_scopes,
-            commands::github_oauth::github_account_disconnect,
+            // GitHub Account commands (multi-account)
+            commands::github_accounts::github_accounts_list,
+            commands::github_accounts::github_account_oauth_start,
+            commands::github_accounts::github_account_oauth_poll,
+            commands::github_accounts::github_account_add_token,
+            commands::github_accounts::github_account_refresh,
+            commands::github_accounts::github_account_switch,
+            commands::github_accounts::github_account_remove,
+            commands::github_accounts::github_account_scopes,
             // GitHub Repository commands
             commands::github_repos::github_account_user,
             commands::github_repos::github_list_repos,
@@ -187,9 +192,6 @@ pub fn run() {
             commands::github_repos::github_create_repo,
             // GitHub Pull Request commands
             commands::github_pr::github_create_pull_request,
-            commands::github_pr::github_set_token,
-            commands::github_pr::github_has_token,
-            commands::github_pr::github_remove_token,
             commands::github_pr::git_remote_info,
             // Database commands
             commands::db::db_ensure_project,

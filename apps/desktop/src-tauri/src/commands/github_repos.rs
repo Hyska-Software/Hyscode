@@ -15,10 +15,19 @@ const SEARCH_PER_PAGE: u32 = 50;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GitHubUser {
+    pub id: u64,
     pub login: String,
     pub name: Option<String>,
     pub avatar_url: String,
     pub html_url: String,
+}
+
+/// Result of `GET /user` with the token scopes reported by GitHub's
+/// `x-oauth-scopes` response header (absent for fine-grained tokens).
+#[derive(Debug, Clone)]
+pub struct GitHubUserIdentity {
+    pub user: GitHubUser,
+    pub scopes: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -57,32 +66,46 @@ struct GitHubSearchResponse {
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-/// Resolve the token used for GitHub API calls: account OAuth token first,
-/// then the manually configured Personal Access Token.
+/// Resolve the token used for GitHub API calls for an account. When
+/// `account_id` is absent the active account is used.
 pub fn resolve_github_token(
     keychain: &Arc<Mutex<HashMap<String, String>>>,
+    account_id: Option<&str>,
 ) -> Result<String, String> {
     let store = keychain.lock().map_err(|e| e.to_string())?;
-    if let Some(token) = store.get("hyscode:github_access_token") {
-        return Ok(token.clone());
-    }
-    if let Some(token) = store.get("hyscode:github_token") {
-        return Ok(token.clone());
-    }
-    Err(
-        "No GitHub authentication found. Sign in with your GitHub account or add a Personal Access Token in Settings → Git."
-            .to_string(),
-    )
+    super::github_accounts::resolve_account_token(&store, account_id).map(|(_, token)| token)
 }
 
-/// Optional token lookup used by git CLI operations to inject credentials for
-/// github.com remotes only.
-pub fn github_token_option(keychain: &Arc<Mutex<HashMap<String, String>>>) -> Option<String> {
-    let store = keychain.lock().ok()?;
-    store
-        .get("hyscode:github_access_token")
-        .cloned()
-        .or_else(|| store.get("hyscode:github_token").cloned())
+/// Fetch the authenticated user (and token scopes). `Err` carries the HTTP
+/// status so callers can distinguish revoked tokens (401) from other errors.
+pub async fn fetch_github_user(token: &str) -> Result<GitHubUserIdentity, (u16, String)> {
+    let client = api_client().map_err(|message| (0, message))?;
+    let resp = client
+        .get(format!("{GITHUB_API}/user"))
+        .header("Authorization", format!("Bearer {}", token))
+        .header("Accept", "application/vnd.github+json")
+        .header("X-GitHub-Api-Version", "2022-11-28")
+        .header("User-Agent", "HysCode/1.0")
+        .send()
+        .await
+        .map_err(|e| (0, format!("GitHub API request failed: {}", e)))?;
+    let status = resp.status();
+    let scopes = resp
+        .headers()
+        .get("x-oauth-scopes")
+        .and_then(|value| value.to_str().ok())
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
+    let body = resp
+        .bytes()
+        .await
+        .map_err(|e| (status.as_u16(), format!("Failed to read response: {}", e)))?;
+    if !status.is_success() {
+        return Err((status.as_u16(), api_error_message(status, &body)));
+    }
+    let user = serde_json::from_slice(&body)
+        .map_err(|e| (status.as_u16(), format!("Failed to parse response: {}", e)))?;
+    Ok(GitHubUserIdentity { user, scopes })
 }
 
 fn api_client() -> Result<reqwest::Client, String> {
@@ -137,47 +160,33 @@ async fn get_json<T: serde::de::DeserializeOwned>(token: &str, url: &str) -> Res
 
 // ── Commands ─────────────────────────────────────────────────────────────────
 
-/// Get the authenticated GitHub user, or `None` when no token is stored.
+/// Get the authenticated GitHub user for an account (active by default), or
+/// `None` when no account is connected or the stored token was revoked.
 #[tauri::command]
 pub async fn github_account_user(
     keychain: State<'_, KeychainState>,
+    account_id: Option<String>,
 ) -> Result<Option<GitHubUser>, String> {
-    let token = match resolve_github_token(&keychain.0) {
+    let token = match resolve_github_token(&keychain.0, account_id.as_deref()) {
         Ok(token) => token,
         Err(_) => return Ok(None),
     };
-    let client = api_client()?;
-    let resp = client
-        .get(format!("{GITHUB_API}/user"))
-        .header("Authorization", format!("Bearer {}", token))
-        .header("Accept", "application/vnd.github+json")
-        .header("X-GitHub-Api-Version", "2022-11-28")
-        .header("User-Agent", "HysCode/1.0")
-        .send()
-        .await
-        .map_err(|e| format!("GitHub API request failed: {}", e))?;
-    let status = resp.status();
-    if status == reqwest::StatusCode::UNAUTHORIZED {
-        return Ok(None);
+    match fetch_github_user(&token).await {
+        Ok(identity) => Ok(Some(identity.user)),
+        Err((401, _)) => Ok(None),
+        Err((_, message)) => Err(message),
     }
-    let body = resp
-        .bytes()
-        .await
-        .map_err(|e| format!("Failed to read response: {}", e))?;
-    if !status.is_success() {
-        return Err(api_error_message(status, &body));
-    }
-    serde_json::from_slice(&body).map_err(|e| format!("Failed to parse response: {}", e))
 }
 
-/// List repositories of the authenticated user, paginated (up to 1000).
+/// List repositories of an account, paginated (up to 1000).
 #[tauri::command]
 pub async fn github_list_repos(
     keychain: State<'_, KeychainState>,
+    account_id: Option<String>,
     affiliation: Option<String>,
     visibility: Option<String>,
 ) -> Result<Vec<GitHubRepo>, String> {
-    let token = resolve_github_token(&keychain.0)?;
+    let token = resolve_github_token(&keychain.0, account_id.as_deref())?;
     let mut repos = Vec::new();
     for page in 1..=MAX_LIST_REPOS_PAGES {
         let mut query = vec![
@@ -207,12 +216,13 @@ pub async fn github_list_repos(
     Ok(repos)
 }
 
-/// List the organizations the authenticated user belongs to.
+/// List the organizations an account belongs to (active by default).
 #[tauri::command]
 pub async fn github_list_orgs(
     keychain: State<'_, KeychainState>,
+    account_id: Option<String>,
 ) -> Result<Vec<GitHubOrg>, String> {
-    let token = resolve_github_token(&keychain.0)?;
+    let token = resolve_github_token(&keychain.0, account_id.as_deref())?;
     let url = format!("{GITHUB_API}/user/orgs?per_page={}", ORGS_PER_PAGE);
     get_json(&token, &url).await
 }
@@ -221,9 +231,10 @@ pub async fn github_list_orgs(
 #[tauri::command]
 pub async fn github_search_repos(
     keychain: State<'_, KeychainState>,
+    account_id: Option<String>,
     query: String,
 ) -> Result<Vec<GitHubRepo>, String> {
-    let token = resolve_github_token(&keychain.0)?;
+    let token = resolve_github_token(&keychain.0, account_id.as_deref())?;
     let url = format!(
         "{GITHUB_API}/search/repositories?q={}&per_page={}",
         urlencoding::encode(&query),
@@ -233,16 +244,17 @@ pub async fn github_search_repos(
     Ok(response.items)
 }
 
-/// Create a repository (user or organization) and return its info.
+/// Create a repository (account or organization) and return its info.
 #[tauri::command]
 pub async fn github_create_repo(
     keychain: State<'_, KeychainState>,
+    account_id: Option<String>,
     name: String,
     description: Option<String>,
     private: bool,
     org: Option<String>,
 ) -> Result<GitHubRepo, String> {
-    let token = resolve_github_token(&keychain.0)?;
+    let token = resolve_github_token(&keychain.0, account_id.as_deref())?;
     let url = match org.as_deref().filter(|value| !value.trim().is_empty()) {
         Some(org) => format!("{GITHUB_API}/orgs/{}/repos", org.trim()),
         None => format!("{GITHUB_API}/user/repos"),

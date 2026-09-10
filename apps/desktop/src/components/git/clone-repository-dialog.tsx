@@ -15,7 +15,7 @@ import {
   Lock,
   ExternalLink,
 } from 'lucide-react';
-import { useGithubStore, type GitHubRepo } from '../../stores/github-store';
+import { useGithubStore, githubAccountDisplayName, type GitHubRepo } from '../../stores/github-store';
 import { useGitStore } from '../../stores';
 import { pickFolder } from '../../lib/tauri-dialog';
 import { openProjectWorkspace } from '../../lib/project-persistence';
@@ -39,7 +39,8 @@ function sanitizeFolderName(name: string): string {
 
 export function CloneRepositoryDialog({ open, onClose }: CloneRepositoryDialogProps) {
   const authStatus = useGithubStore((s) => s.authStatus);
-  const user = useGithubStore((s) => s.user);
+  const accounts = useGithubStore((s) => s.accounts);
+  const activeAccountId = useGithubStore((s) => s.activeAccountId);
   const repos = useGithubStore((s) => s.repos);
   const orgs = useGithubStore((s) => s.orgs);
   const reposLoading = useGithubStore((s) => s.reposLoading);
@@ -51,6 +52,7 @@ export function CloneRepositoryDialog({ open, onClose }: CloneRepositoryDialogPr
   const checkAuth = useGithubStore((s) => s.checkAuth);
 
   const [tab, setTab] = useState<'github' | 'url'>('github');
+  const [accountId, setAccountId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [orgFilter, setOrgFilter] = useState('all');
   const [urlInput, setUrlInput] = useState('');
@@ -65,9 +67,13 @@ export function CloneRepositoryDialog({ open, onClose }: CloneRepositoryDialogPr
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const urlRef = useRef<HTMLInputElement>(null);
 
+  const effectiveAccountId = accountId ?? activeAccountId;
+  const selectedAccount = accounts.find((account) => account.id === effectiveAccountId) ?? null;
+
   useEffect(() => {
     if (!open) return;
     setTab('github');
+    setAccountId(null);
     setSearchQuery('');
     setOrgFilter('all');
     setUrlInput('');
@@ -77,12 +83,15 @@ export function CloneRepositoryDialog({ open, onClose }: CloneRepositoryDialogPr
     setStatus({ type: 'idle' });
     if (authStatus === 'unknown') {
       void checkAuth();
-    } else if (authStatus === 'signed-in') {
-      void loadRepos();
-      void loadOrgs();
     }
     setTimeout(() => urlRef.current?.focus(), 60);
-  }, [open, authStatus, checkAuth, loadRepos, loadOrgs]);
+  }, [open, authStatus, checkAuth]);
+
+  useEffect(() => {
+    if (!open || !effectiveAccountId) return;
+    void loadRepos(effectiveAccountId);
+    void loadOrgs(effectiveAccountId);
+  }, [open, effectiveAccountId, loadRepos, loadOrgs]);
 
   useEffect(() => {
     if (!open) return;
@@ -96,16 +105,16 @@ export function CloneRepositoryDialog({ open, onClose }: CloneRepositoryDialogPr
   useEffect(() => {
     if (searchTimer.current) clearTimeout(searchTimer.current);
     if (!searchQuery.trim()) {
-      void searchRepos('');
+      void searchRepos('', effectiveAccountId);
       return;
     }
     searchTimer.current = setTimeout(() => {
-      void searchRepos(searchQuery);
+      void searchRepos(searchQuery, effectiveAccountId);
     }, 350);
     return () => {
       if (searchTimer.current) clearTimeout(searchTimer.current);
     };
-  }, [searchQuery, searchRepos]);
+  }, [searchQuery, searchRepos, effectiveAccountId]);
 
   const visibleRepos = useMemo(() => {
     const filtered =
@@ -145,6 +154,7 @@ export function CloneRepositoryDialog({ open, onClose }: CloneRepositoryDialogPr
         effectiveUrl,
         targetPath,
         branchInput.trim() || null,
+        effectiveAccountId,
       );
       setStatus({ type: 'success', message: targetPath });
       await openProjectWorkspace(targetPath);
@@ -231,6 +241,29 @@ export function CloneRepositoryDialog({ open, onClose }: CloneRepositoryDialogPr
               </div>
             ) : (
               <>
+                {accounts.length > 1 && (
+                  <div className="flex items-center gap-2">
+                    <label className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+                      Account
+                    </label>
+                    <select
+                      value={effectiveAccountId ?? ''}
+                      onChange={(e) => {
+                        setAccountId(e.target.value);
+                        setOrgFilter('all');
+                        setSelectedRepo(null);
+                      }}
+                      className="flex-1 rounded-md border border-border bg-background px-2 py-1.5 text-[11px] text-foreground outline-none focus:border-primary/40"
+                    >
+                      {accounts.map((account) => (
+                        <option key={account.id} value={account.id}>
+                          {githubAccountDisplayName(account)}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+
                 <div>
                   <label className="mb-1 block text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
                     Search
@@ -258,7 +291,7 @@ export function CloneRepositoryDialog({ open, onClose }: CloneRepositoryDialogPr
                     onChange={(e) => setOrgFilter(e.target.value)}
                     className="flex-1 rounded-md border border-border bg-background px-2 py-1.5 text-[11px] text-foreground outline-none focus:border-primary/40"
                   >
-                    <option value="all">{user?.login ?? 'All repositories'}</option>
+                    <option value="all">{selectedAccount?.login ?? 'All repositories'}</option>
                     {orgs.map((org) => (
                       <option key={org.login} value={org.login}>
                         {org.login}

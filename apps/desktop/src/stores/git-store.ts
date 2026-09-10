@@ -57,6 +57,7 @@ export interface GitBranchInfo {
 export interface GitRemoteInfo {
   name: string;
   url: string;
+  account_id: string | null;
 }
 
 export interface GitStashEntry {
@@ -159,10 +160,11 @@ interface GitState {
   popStash: (index: number) => Promise<void>;
   applyStash: (index: number) => Promise<void>;
   initRepo: () => Promise<void>;
-  cloneRepository: (url: string, targetPath: string, branch?: string | null) => Promise<void>;
+  cloneRepository: (url: string, targetPath: string, branch?: string | null, accountId?: string | null) => Promise<void>;
   addRemote: (name: string, url: string) => Promise<void>;
   removeRemote: (name: string) => Promise<void>;
   setRemoteUrl: (name: string, url: string) => Promise<void>;
+  setRemoteAccount: (name: string, accountId: string | null) => Promise<void>;
   getFileContent: (
     filePath: string,
     mode?: 'staged' | 'unstaged' | 'conflict',
@@ -196,6 +198,7 @@ interface GitState {
     draft?: boolean;
     baseRemote: string;
     headRemote: string;
+    accountId?: string | null;
   }) => Promise<string>;
 
   startAutoRefresh: () => Promise<void>;
@@ -548,12 +551,13 @@ export const useGitStore = create<GitState>()(
       await get().refresh();
     },
 
-    cloneRepository: async (url, targetPath, branch = null) => {
+    cloneRepository: async (url, targetPath, branch = null, accountId = null) => {
       await runGitOperation('clone', () =>
         tauriInvoke('git_clone', {
           url,
           targetPath,
           branch: branch || null,
+          accountId: accountId || null,
         }),
       );
     },
@@ -586,6 +590,15 @@ export const useGitStore = create<GitState>()(
       );
       await get().refresh();
       await get().fetchBranches();
+    },
+
+    setRemoteAccount: async (name, accountId) => {
+      const rootPath = getRootPath();
+      if (!rootPath) return;
+      await runGitOperation('remote-set-account', () =>
+        tauriInvoke('git_remote_account_set', { repoPath: rootPath, remote: name, accountId }),
+      );
+      await get().refresh();
     },
 
     getFileContent: async (filePath, mode = 'unstaged') => {
@@ -790,6 +803,7 @@ export const useGitStore = create<GitState>()(
           repoPath: rootPath,
           baseRemote: opts.baseRemote,
           headRemote: opts.headRemote,
+          accountId: opts.accountId ?? null,
           payload: {
             title: opts.title,
             body: opts.body ?? null,

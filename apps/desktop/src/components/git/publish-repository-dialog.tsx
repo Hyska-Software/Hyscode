@@ -13,7 +13,7 @@ import {
   Globe,
   ExternalLink,
 } from 'lucide-react';
-import { useGithubStore, type GitHubRepo } from '../../stores/github-store';
+import { useGithubStore, githubAccountDisplayName, type GitHubRepo } from '../../stores/github-store';
 import { useGitStore } from '../../stores';
 import { useFileStore } from '../../stores/file-store';
 import { GithubAccountSection } from '../settings/tabs/github-account-section';
@@ -27,7 +27,8 @@ type PublishMode = 'create' | 'link';
 
 export function PublishRepositoryDialog({ open, onClose }: PublishRepositoryDialogProps) {
   const authStatus = useGithubStore((s) => s.authStatus);
-  const user = useGithubStore((s) => s.user);
+  const accounts = useGithubStore((s) => s.accounts);
+  const activeAccountId = useGithubStore((s) => s.activeAccountId);
   const repos = useGithubStore((s) => s.repos);
   const orgs = useGithubStore((s) => s.orgs);
   const reposLoading = useGithubStore((s) => s.reposLoading);
@@ -43,6 +44,7 @@ export function PublishRepositoryDialog({ open, onClose }: PublishRepositoryDial
   const hasCommits = headState === 'branch';
 
   const [mode, setMode] = useState<PublishMode>('create');
+  const [accountId, setAccountId] = useState<string | null>(null);
   const [owner, setOwner] = useState('');
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
@@ -54,11 +56,16 @@ export function PublishRepositoryDialog({ open, onClose }: PublishRepositoryDial
     url?: string;
   }>({ type: 'idle' });
 
+  const effectiveAccountId = accountId ?? activeAccountId;
+  const selectedAccount = accounts.find((account) => account.id === effectiveAccountId) ?? null;
+  const selectedLogin = selectedAccount?.login ?? null;
+
   useEffect(() => {
     if (!open) return;
     const folderName = (rootPath ?? '').split(/[\\/]/).pop() ?? '';
     setMode('create');
-    setOwner(user?.login ?? '');
+    setAccountId(null);
+    setOwner('');
     setName(folderName.replace(/[^a-zA-Z0-9._-]/g, '-'));
     setDescription('');
     setIsPrivate(true);
@@ -66,11 +73,24 @@ export function PublishRepositoryDialog({ open, onClose }: PublishRepositoryDial
     setStatus({ type: 'idle' });
     if (authStatus === 'unknown') {
       void checkAuth();
-    } else if (authStatus === 'signed-in') {
-      void loadRepos();
-      void loadOrgs();
     }
-  }, [open, authStatus, user, rootPath, checkAuth, loadRepos, loadOrgs]);
+  }, [open, authStatus, rootPath, checkAuth]);
+
+  useEffect(() => {
+    if (!open || !effectiveAccountId) return;
+    void loadRepos(effectiveAccountId);
+    void loadOrgs(effectiveAccountId);
+  }, [open, effectiveAccountId, loadRepos, loadOrgs]);
+
+  useEffect(() => {
+    if (!open) return;
+    setOwner((current) => {
+      if (current && (current === selectedLogin || orgs.some((org) => org.login === current))) {
+        return current;
+      }
+      return selectedLogin ?? orgs[0]?.login ?? '';
+    });
+  }, [open, selectedLogin, orgs]);
 
   useEffect(() => {
     if (!open) return;
@@ -92,10 +112,11 @@ export function PublishRepositoryDialog({ open, onClose }: PublishRepositoryDial
     try {
       if (mode === 'create') {
         const repo = await publishRepository({
+          accountId: effectiveAccountId,
           name: name.trim(),
           description: description.trim() || null,
           private: isPrivate,
-          org: owner !== user?.login ? owner : null,
+          org: owner !== selectedLogin ? owner : null,
         });
         setStatus({
           type: 'success',
@@ -107,7 +128,7 @@ export function PublishRepositoryDialog({ open, onClose }: PublishRepositoryDial
           setStatus({ type: 'error', message: 'Select a repository to link.' });
           return;
         }
-        await linkExistingRepository(selectedRepo);
+        await linkExistingRepository(selectedRepo, effectiveAccountId);
         setStatus({
           type: 'success',
           message: `Linked and published to ${selectedRepo.full_name}`,
@@ -124,6 +145,7 @@ export function PublishRepositoryDialog({ open, onClose }: PublishRepositoryDial
 
   const canPublish =
     authStatus === 'signed-in' &&
+    Boolean(effectiveAccountId) &&
     Boolean(name.trim()) &&
     (mode === 'create' || Boolean(selectedRepo)) &&
     status.type !== 'publishing';
@@ -203,6 +225,27 @@ export function PublishRepositoryDialog({ open, onClose }: PublishRepositoryDial
 
               {mode === 'create' ? (
                 <>
+                  {accounts.length > 1 && (
+                    <div>
+                      <label className="mb-1 block text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+                        Account
+                      </label>
+                      <select
+                        value={effectiveAccountId ?? ''}
+                        onChange={(e) => {
+                          setAccountId(e.target.value);
+                          setSelectedRepo(null);
+                        }}
+                        className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-[11px] text-foreground outline-none focus:border-primary/40"
+                      >
+                        {accounts.map((account) => (
+                          <option key={account.id} value={account.id}>
+                            {githubAccountDisplayName(account)}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
                   <div>
                     <label className="mb-1 block text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
                       Owner
@@ -212,7 +255,7 @@ export function PublishRepositoryDialog({ open, onClose }: PublishRepositoryDial
                       onChange={(e) => setOwner(e.target.value)}
                       className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-[11px] text-foreground outline-none focus:border-primary/40"
                     >
-                      {user && <option value={user.login}>{user.login}</option>}
+                      {selectedLogin && <option value={selectedLogin}>{selectedLogin}</option>}
                       {orgs.map((org) => (
                         <option key={org.login} value={org.login}>
                           {org.login}

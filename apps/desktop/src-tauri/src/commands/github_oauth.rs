@@ -74,7 +74,10 @@ const GITHUB_ACCOUNT_SCOPE: &str = "repo read:user workflow";
 
 // ── Shared device flow helpers ───────────────────────────────────────────────
 
-async fn start_device_flow(client_id: &str, scope: &str) -> Result<DeviceFlowResponse, String> {
+pub(crate) async fn start_device_flow(
+    client_id: &str,
+    scope: &str,
+) -> Result<DeviceFlowResponse, String> {
     let client = reqwest::Client::new();
 
     let resp = client
@@ -108,7 +111,7 @@ async fn start_device_flow(client_id: &str, scope: &str) -> Result<DeviceFlowRes
     })
 }
 
-async fn poll_device_flow(
+pub(crate) async fn poll_device_flow(
     client_id: &str,
     device_code: &str,
 ) -> Result<OAuthTokenResponse, String> {
@@ -345,77 +348,27 @@ pub async fn github_copilot_is_authenticated(
     Ok(store.contains_key("hyscode:github_copilot_access_token"))
 }
 
-// ─── GitHub Account (Device Flow) ────────────────────────────────────────────
-// Full GitHub account login for repository operations. Uses the HysCode OAuth
-// App client ID with `repo read:user` scopes. The token is stored as
-// `hyscode:github_access_token` and reused by the GitHub REST commands.
+// ─── GitHub Account device flow (multi-account) ──────────────────────────────
+// Repository operations use the HysCode OAuth App client ID with the
+// `repo read:user workflow` scopes. Account persistence (tokens + metadata +
+// active selection) lives in `github_accounts.rs`; this module only owns the
+// raw device flow calls so both flows share one implementation.
 
-/// Step 1: Start the device flow for the HysCode GitHub account.
-#[tauri::command]
-pub async fn github_account_oauth_start() -> Result<DeviceFlowResponse, String> {
-    eprintln!("[GitHubAccount] github_account_oauth_start");
+/// Start the device flow for adding a GitHub account.
+pub(crate) async fn start_account_device_flow() -> Result<DeviceFlowResponse, String> {
+    eprintln!("[GitHubAccount] start_account_device_flow");
     start_device_flow(HYSCODE_GITHUB_CLIENT_ID, GITHUB_ACCOUNT_SCOPE).await
 }
 
-/// Step 2: Poll for authorization and store the account access token.
-#[tauri::command]
-pub async fn github_account_oauth_poll(
-    keychain: State<'_, KeychainState>,
-    device_code: String,
+/// Poll the device flow for adding a GitHub account.
+pub(crate) async fn poll_account_device_flow(
+    device_code: &str,
 ) -> Result<OAuthTokenResponse, String> {
-    eprintln!("[GitHubAccount] github_account_oauth_poll");
-
-    let resp = poll_device_flow(HYSCODE_GITHUB_CLIENT_ID, &device_code).await?;
-
+    eprintln!("[GitHubAccount] poll_account_device_flow");
+    let resp = poll_device_flow(HYSCODE_GITHUB_CLIENT_ID, device_code).await?;
     eprintln!(
-        "[GitHubAccount] github_account_oauth_poll SUCCESS — scope: {:?}",
+        "[GitHubAccount] poll_account_device_flow SUCCESS — scope: {:?}",
         resp.scope
     );
-
-    {
-        let mut store = keychain.0.lock().map_err(|e| e.to_string())?;
-        store.insert(
-            "hyscode:github_access_token".to_string(),
-            resp.access_token.clone(),
-        );
-        store.insert(
-            "hyscode:github_access_scope".to_string(),
-            resp.scope.clone(),
-        );
-        super::keychain::persist_keychain_ref(&store);
-        eprintln!(
-            "[GitHubAccount] access_token stored in keychain — scope: {:?}",
-            resp.scope
-        );
-    }
-
     Ok(resp)
-}
-
-/// Check if the GitHub account is authenticated (has a stored access token).
-#[tauri::command]
-pub async fn github_account_is_authenticated(
-    keychain: State<'_, KeychainState>,
-) -> Result<bool, String> {
-    let store = keychain.0.lock().map_err(|e| e.to_string())?;
-    Ok(store.contains_key("hyscode:github_access_token"))
-}
-
-/// Return the scopes granted to the stored GitHub access token, if any.
-#[tauri::command]
-pub async fn github_account_scopes(
-    keychain: State<'_, KeychainState>,
-) -> Result<Option<String>, String> {
-    let store = keychain.0.lock().map_err(|e| e.to_string())?;
-    Ok(store.get("hyscode:github_access_scope").cloned())
-}
-
-/// Disconnect the GitHub account — remove the stored access token.
-#[tauri::command]
-pub async fn github_account_disconnect(keychain: State<'_, KeychainState>) -> Result<(), String> {
-    let mut store = keychain.0.lock().map_err(|e| e.to_string())?;
-    store.remove("hyscode:github_access_token");
-    store.remove("hyscode:github_access_scope");
-    super::keychain::persist_keychain_ref(&store);
-    Ok(())
 }

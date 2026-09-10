@@ -253,8 +253,13 @@ permanent and always requires confirmation.
 
 Branch selection is searchable and includes remote-tracking branches. Normal branch deletion
 is confirmed and uses Git's merged-branch protection; force deletion is a separate second
-confirmation. Pull-request creation requires explicit base/head remotes, a published head
-branch, and a dedicated GitHub repository token stored in the OS keychain.
+confirmation. Multiple GitHub accounts can be connected at once (OAuth device flow accounts and
+named personal-access-token accounts). One account is active and is used by default; the status
+bar exposes an account switcher, and each remote can be bound to a specific account in the remote
+menu (`remote.<name>.hyscode-account` in the local git config) so push, pull, fetch and
+`fetch --all` resolve credentials per remote. Pull-request creation requires explicit base/head
+remotes, a published head branch, and a connected account — the explicitly selected account, the
+account bound to the head remote, or the active account.
 
 AI commit-message generation is available only when staged changes exist. The model modal
 lists enabled models from configured providers, preserves an unavailable saved selection

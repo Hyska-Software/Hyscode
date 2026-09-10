@@ -40,11 +40,25 @@ export interface GitRepositorySnapshotContract {
   ahead: number;
   behind: number;
   operation_state: GitRepositoryOperation;
-  remotes: Array<{ name: string; url: string }>;
+  remotes: Array<{ name: string; url: string; account_id: string | null }>;
   staged: GitFileContract[];
   unstaged: GitFileContract[];
   untracked: GitFileContract[];
   conflicts: GitFileContract[];
+}
+
+export type GitHubAccountKind = 'oauth' | 'token';
+
+export interface GitHubAccountContract {
+  id: string;
+  kind: GitHubAccountKind;
+  login: string | null;
+  name: string | null;
+  avatar_url: string | null;
+  html_url: string | null;
+  label: string | null;
+  scopes: string | null;
+  added_at: number;
 }
 
 export interface GitCommitContextFileContract {
@@ -263,14 +277,25 @@ interface TauriCommands {
   };
   git_unstage: { args: { repoPath: string; paths: string[] }; ret: void };
   git_discard: { args: { repoPath: string; paths: string[] }; ret: void };
-  git_remote_list: { args: { repoPath: string }; ret: Array<{ name: string; url: string }> };
+  git_remote_list: {
+    args: { repoPath: string };
+    ret: Array<{ name: string; url: string; account_id: string | null }>;
+  };
   git_clone: {
-    args: { url: string; targetPath: string; branch?: string | null };
+    args: { url: string; targetPath: string; branch?: string | null; accountId?: string | null };
     ret: void;
   };
   git_remote_add: { args: { repoPath: string; name: string; url: string }; ret: void };
   git_remote_remove: { args: { repoPath: string; name: string }; ret: void };
   git_remote_set_url: { args: { repoPath: string; name: string; url: string }; ret: void };
+  git_remote_account_get: {
+    args: { repoPath: string; remote: string };
+    ret: string | null;
+  };
+  git_remote_account_set: {
+    args: { repoPath: string; remote: string; accountId: string | null };
+    ret: void;
+  };
   git_ahead_behind: { args: { repoPath: string }; ret: { ahead: number; behind: number } };
   git_stash: {
     args: { repoPath: string; message?: string | null; includeUntracked?: boolean | null };
@@ -374,6 +399,7 @@ interface TauriCommands {
       repoPath: string;
       baseRemote: string;
       headRemote: string;
+      accountId?: string | null;
       payload: {
         title: string;
         body?: string | null;
@@ -384,9 +410,6 @@ interface TauriCommands {
     };
     ret: { url: string; number: number };
   };
-  github_has_token: { args: Record<string, never>; ret: boolean };
-  github_set_token: { args: { token: string }; ret: void };
-  github_remove_token: { args: Record<string, never>; ret: void };
 
   // PTY — spawn returns the pty_id; output arrives via 'pty:data' events
   pty_spawn: {
@@ -512,7 +535,11 @@ interface TauriCommands {
   github_copilot_disconnect: { args: Record<string, never>; ret: void };
   github_copilot_is_authenticated: { args: Record<string, never>; ret: boolean };
 
-  // GitHub Account (OAuth Device Flow)
+  // GitHub Accounts (multi-account)
+  github_accounts_list: {
+    args: Record<string, never>;
+    ret: { accounts: GitHubAccountContract[]; active_account_id: string | null };
+  };
   github_account_oauth_start: {
     args: Record<string, never>;
     ret: {
@@ -525,14 +552,23 @@ interface TauriCommands {
   };
   github_account_oauth_poll: {
     args: { deviceCode: string };
-    ret: { access_token: string; token_type: string; scope: string };
+    ret: GitHubAccountContract;
   };
-  github_account_is_authenticated: { args: Record<string, never>; ret: boolean };
-  github_account_scopes: { args: Record<string, never>; ret: string | null };
-  github_account_disconnect: { args: Record<string, never>; ret: void };
+  github_account_add_token: {
+    args: { label: string; token: string };
+    ret: GitHubAccountContract;
+  };
+  github_account_refresh: {
+    args: { accountId: string };
+    ret: GitHubAccountContract;
+  };
+  github_account_switch: { args: { accountId: string }; ret: void };
+  github_account_remove: { args: { accountId: string }; ret: void };
+  github_account_scopes: { args: { accountId?: string | null }; ret: string | null };
   github_account_user: {
-    args: Record<string, never>;
+    args: { accountId?: string | null };
     ret: {
+      id: number;
       login: string;
       name: string | null;
       avatar_url: string;
@@ -542,7 +578,7 @@ interface TauriCommands {
 
   // GitHub Repository API
   github_list_repos: {
-    args: { affiliation?: string; visibility?: string };
+    args: { accountId?: string | null; affiliation?: string; visibility?: string };
     ret: Array<{
       id: number;
       name: string;
@@ -559,11 +595,11 @@ interface TauriCommands {
     }>;
   };
   github_list_orgs: {
-    args: Record<string, never>;
+    args: { accountId?: string | null };
     ret: Array<{ login: string; avatar_url: string; description: string | null }>;
   };
   github_search_repos: {
-    args: { query: string };
+    args: { accountId?: string | null; query: string };
     ret: Array<{
       id: number;
       name: string;
@@ -581,6 +617,7 @@ interface TauriCommands {
   };
   github_create_repo: {
     args: {
+      accountId?: string | null;
       name: string;
       description?: string | null;
       private: boolean;

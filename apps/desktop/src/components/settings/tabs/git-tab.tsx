@@ -25,9 +25,6 @@ export function GitTab() {
   const [gitUserName, setGitUserName] = useState('');
   const [gitUserEmail, setGitUserEmail] = useState('');
   const [identityStatus, setIdentityStatus] = useState<string | null>(null);
-  const [githubToken, setGithubToken] = useState('');
-  const [hasGithubToken, setHasGithubToken] = useState(false);
-  const [credentialStatus, setCredentialStatus] = useState<string | null>(null);
   const [aiTargets, setAiTargets] = useState<CommitMessageTarget[]>([]);
   const [aiTargetsError, setAiTargetsError] = useState<string | null>(null);
   const [isLoadingAiTargets, setIsLoadingAiTargets] = useState(true);
@@ -104,14 +101,6 @@ export function GitTab() {
   }, [identityScope, rootPath]);
 
   useEffect(() => {
-    void tauriInvoke('github_has_token', {})
-      .then(setHasGithubToken)
-      .catch((error: unknown) => {
-        setCredentialStatus(error instanceof Error ? error.message : String(error));
-      });
-  }, []);
-
-  useEffect(() => {
     void loadAiTargets();
   }, [loadAiTargets]);
 
@@ -127,30 +116,6 @@ export function GitTab() {
       setIdentityStatus(`Saved to ${identityScope} Git configuration`);
     } catch (error) {
       setIdentityStatus(error instanceof Error ? error.message : String(error));
-    }
-  };
-
-  const saveGithubToken = async (): Promise<void> => {
-    if (!githubToken.trim()) return;
-    setCredentialStatus(null);
-    try {
-      await tauriInvoke('github_set_token', { token: githubToken.trim() });
-      setGithubToken('');
-      setHasGithubToken(true);
-      setCredentialStatus('Repository token stored securely');
-    } catch (error) {
-      setCredentialStatus(error instanceof Error ? error.message : String(error));
-    }
-  };
-
-  const removeGithubToken = async (): Promise<void> => {
-    setCredentialStatus(null);
-    try {
-      await tauriInvoke('github_remove_token', {});
-      setHasGithubToken(false);
-      setCredentialStatus('Repository token removed');
-    } catch (error) {
-      setCredentialStatus(error instanceof Error ? error.message : String(error));
     }
   };
 
@@ -193,49 +158,10 @@ export function GitTab() {
       </SettingSection>
 
       <SettingSection
-        title="GitHub Account"
-        description="Sign in to clone, publish and manage public and private repositories."
+        title="GitHub Accounts"
+        description="Connect one or more GitHub accounts. The active account is used by default; personal access tokens can be added as named accounts, and each remote can be bound to a specific account in Source Control."
       >
         <GithubAccountSection />
-      </SettingSection>
-
-      <SettingSection
-        title="GitHub Pull Requests"
-        description="A repository-scoped token is stored in the system keychain and is separate from Copilot authentication. When no account is signed in, a manual token is used as fallback."
-      >
-        <SettingRow
-          label="Repository Token"
-          description={hasGithubToken ? 'Configured' : 'Not configured'}
-        >
-          <SettingTextInput
-            type="password"
-            value={githubToken}
-            onChange={setGithubToken}
-            placeholder={hasGithubToken ? 'Replace token…' : 'github_pat_…'}
-          />
-        </SettingRow>
-        <div className="flex items-center justify-end gap-2">
-          {credentialStatus && (
-            <span className="mr-auto text-[10px] text-muted-foreground">{credentialStatus}</span>
-          )}
-          {hasGithubToken && (
-            <button
-              type="button"
-              onClick={() => void removeGithubToken()}
-              className="rounded-md px-3 py-1.5 text-[11px] text-destructive hover:bg-destructive/10"
-            >
-              Remove
-            </button>
-          )}
-          <button
-            type="button"
-            onClick={() => void saveGithubToken()}
-            disabled={!githubToken.trim()}
-            className="rounded-md bg-primary px-3 py-1.5 text-[11px] text-primary-foreground disabled:opacity-40"
-          >
-            {hasGithubToken ? 'Replace Token' : 'Save Token'}
-          </button>
-        </div>
       </SettingSection>
 
       <SettingSection title="Defaults">

@@ -1,12 +1,21 @@
 import { useRef, useState, useEffect } from 'react';
-import { GitBranch, Circle, Blocks, Zap, Smartphone, Github, Hexagon } from 'lucide-react';
+import {
+  GitBranch,
+  Circle,
+  Blocks,
+  Zap,
+  Smartphone,
+  Github,
+  KeyRound,
+  Hexagon,
+} from 'lucide-react';
 import { useGitStore, useEditorStore, useExtensionStore, useCommandStore } from '../../stores';
-import { useGithubStore } from '../../stores/github-store';
-import { useSettingsStore } from '../../stores/settings-store';
+import { useGithubStore, githubAccountDisplayName } from '../../stores/github-store';
 import { useLspStore } from '../../stores/lsp-store';
 import { useDeviceStore } from '../../stores/device-store';
 import { detectLanguage } from '../../lib/lsp-bridge';
 import { BranchPicker } from '../git/branch-picker';
+import { GithubAccountSwitcher } from '../git/github-account-switcher';
 import { useAgentStore } from '../../stores/agent-store';
 import { getGitStatusBarPresentation } from '../../lib/git-workflow';
 
@@ -25,9 +34,11 @@ export function StatusBar() {
   const conflicts = useGitStore((s) => s.conflicts);
 
   const githubAuthStatus = useGithubStore((s) => s.authStatus);
-  const githubUser = useGithubStore((s) => s.user);
+  const githubAccounts = useGithubStore((s) => s.accounts);
+  const githubActiveAccountId = useGithubStore((s) => s.activeAccountId);
+  const activeGithubAccount =
+    githubAccounts.find((account) => account.id === githubActiveAccountId) ?? null;
   const githubCheckAuth = useGithubStore((s) => s.checkAuth);
-  const openSettingsOnTab = useSettingsStore((s) => s.openSettingsOnTab);
 
   const activeTabId = useEditorStore((s) => s.activeTabId);
   const tabs = useEditorStore((s) => s.tabs);
@@ -47,6 +58,8 @@ export function StatusBar() {
 
   const [branchPickerOpen, setBranchPickerOpen] = useState(false);
   const branchRef = useRef<HTMLButtonElement>(null);
+  const [githubSwitcherOpen, setGithubSwitcherOpen] = useState(false);
+  const githubRef = useRef<HTMLButtonElement>(null);
 
   const totalChanges = staged.length + unstaged.length + untracked.length + conflicts.length;
   const gitPresentation = getGitStatusBarPresentation({
@@ -104,25 +117,36 @@ export function StatusBar() {
               {connectionState === 'idle' ? 'Ready' : (connectionMessage ?? connectionState)}
             </span>
           </div>
-          {githubAuthStatus === 'signed-in' && githubUser && (
+          {githubAuthStatus === 'signed-in' && activeGithubAccount && (
             <button
+              ref={githubRef}
               className="flex items-center gap-1 text-muted-foreground hover:text-foreground transition-colors"
-              title={`GitHub: @${githubUser.login} — click to manage`}
-              onClick={() => openSettingsOnTab('git')}
+              title={`GitHub: ${githubAccountDisplayName(activeGithubAccount)} — click to switch accounts`}
+              onClick={() => setGithubSwitcherOpen((open) => !open)}
             >
-              <img
-                src={githubUser.avatar_url}
-                alt=""
-                className="h-3 w-3 rounded-full"
-              />
-              <span className="max-w-[90px] truncate">@{githubUser.login}</span>
+              {activeGithubAccount.avatar_url ? (
+                <img src={activeGithubAccount.avatar_url} alt="" className="h-3 w-3 rounded-full" />
+              ) : (
+                <KeyRound className="h-2.5 w-2.5" />
+              )}
+              <span className="max-w-[90px] truncate">
+                {activeGithubAccount.login
+                  ? `@${activeGithubAccount.login}`
+                  : githubAccountDisplayName(activeGithubAccount)}
+              </span>
+              {githubAccounts.length > 1 && (
+                <span className="rounded bg-muted px-1 text-[9px] text-muted-foreground">
+                  {githubAccounts.length}
+                </span>
+              )}
             </button>
           )}
           {githubAuthStatus === 'signed-out' && (
             <button
+              ref={githubRef}
               className="flex items-center gap-1 text-muted-foreground hover:text-primary transition-colors"
               title="Sign in with GitHub — clone, publish and manage repositories"
-              onClick={() => openSettingsOnTab('git')}
+              onClick={() => setGithubSwitcherOpen((open) => !open)}
             >
               <Github className="h-2.5 w-2.5" />
               <span>Sign in</span>
@@ -185,6 +209,11 @@ export function StatusBar() {
         open={branchPickerOpen}
         onClose={() => setBranchPickerOpen(false)}
         anchorRef={branchRef as React.RefObject<HTMLElement>}
+      />
+      <GithubAccountSwitcher
+        open={githubSwitcherOpen}
+        onClose={() => setGithubSwitcherOpen(false)}
+        anchorRef={githubRef as React.RefObject<HTMLElement>}
       />
     </>
   );

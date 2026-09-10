@@ -9,8 +9,8 @@ import {
   Eye,
 } from 'lucide-react';
 import { useGitStore } from '../../stores';
+import { useGithubStore, githubAccountDisplayName } from '../../stores/github-store';
 import { chooseDefaultGitRemote } from '../../lib/git-workflow';
-import { tauriInvoke } from '../../lib/tauri-invoke';
 
 interface PullRequestDialogProps {
   open: boolean;
@@ -21,6 +21,8 @@ export function PullRequestDialog({ open, onClose }: PullRequestDialogProps) {
   const branches = useGitStore((s) => s.branches);
   const remotes = useGitStore((s) => s.remotes);
   const upstream = useGitStore((s) => s.upstream);
+  const accounts = useGithubStore((s) => s.accounts);
+  const activeAccountId = useGithubStore((s) => s.activeAccountId);
 
   const [title, setTitle] = useState('');
   const [body, setBody] = useState('');
@@ -28,7 +30,7 @@ export function PullRequestDialog({ open, onClose }: PullRequestDialogProps) {
   const [headBranch, setHeadBranch] = useState('');
   const [baseRemote, setBaseRemote] = useState('');
   const [headRemote, setHeadRemote] = useState('');
-  const [hasToken, setHasToken] = useState(false);
+  const [accountId, setAccountId] = useState<string | null>(null);
   const [isDraft, setIsDraft] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [result, setResult] = useState<{
@@ -39,17 +41,17 @@ export function PullRequestDialog({ open, onClose }: PullRequestDialogProps) {
   const [showPreview, setShowPreview] = useState(false);
   const titleRef = useRef<HTMLInputElement>(null);
 
+  const effectiveAccountId = accountId ?? activeAccountId;
+
   // Refresh repository metadata once for each dialog opening. User edits are
   // intentionally not reset when branch data changes in the background.
   useEffect(() => {
     if (!open) return;
     let cancelled = false;
-    void Promise.all([
-      useGitStore.getState().fetchBranches(),
-      tauriInvoke('github_has_token', {}),
-      tauriInvoke('github_account_is_authenticated', {}),
-    ])
-      .then(([, tokenAvailable, accountAvailable]) => {
+    void useGitStore
+      .getState()
+      .fetchBranches()
+      .then(() => {
         if (cancelled) return;
         const git = useGitStore.getState();
         const localBranches = git.branches.filter((branch) => !branch.is_remote);
@@ -59,11 +61,15 @@ export function PullRequestDialog({ open, onClose }: PullRequestDialogProps) {
         const firstOther = localBranches.find((branch) => !branch.is_current);
         const preferredRemote =
           chooseDefaultGitRemote(git.upstream?.remote ?? null, git.remotes) ?? '';
+        const headRemoteName = git.upstream?.remote ?? preferredRemote;
         setHeadBranch(git.currentBranch);
         setBaseBranch(mainLike?.name ?? firstOther?.name ?? '');
         setBaseRemote(preferredRemote);
         setHeadRemote(git.upstream?.remote ?? preferredRemote);
-        setHasToken(tokenAvailable || accountAvailable);
+        setAccountId(
+          git.remotes.find((remote) => remote.name === headRemoteName)?.account_id ??
+            useGithubStore.getState().activeAccountId,
+        );
         setTitle('');
         setBody('');
         setResult(null);
@@ -93,6 +99,7 @@ export function PullRequestDialog({ open, onClose }: PullRequestDialogProps) {
         draft: isDraft,
         baseRemote,
         headRemote,
+        accountId: effectiveAccountId,
       });
       setResult({ type: 'success', msg: 'Pull request created', url });
     } catch (err: any) {
@@ -100,7 +107,16 @@ export function PullRequestDialog({ open, onClose }: PullRequestDialogProps) {
     } finally {
       setIsSubmitting(false);
     }
-  }, [title, body, baseBranch, headBranch, isDraft, baseRemote, headRemote]);
+  }, [
+    title,
+    body,
+    baseBranch,
+    headBranch,
+    isDraft,
+    baseRemote,
+    headRemote,
+    effectiveAccountId,
+  ]);
 
   // Close on Escape
   useEffect(() => {
@@ -125,7 +141,8 @@ export function PullRequestDialog({ open, onClose }: PullRequestDialogProps) {
     baseRemote &&
     headRemote &&
     hasRemote &&
-    hasToken &&
+    accounts.length > 0 &&
+    Boolean(effectiveAccountId) &&
     isHeadPublished &&
     !isSubmitting;
 
@@ -199,6 +216,25 @@ export function PullRequestDialog({ open, onClose }: PullRequestDialogProps) {
               </select>
             </div>
           </div>
+
+          {accounts.length > 0 && (
+            <div>
+              <label className="mb-1 block text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+                Create as
+              </label>
+              <select
+                value={effectiveAccountId ?? ''}
+                onChange={(event) => setAccountId(event.target.value)}
+                className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-[11px] text-foreground outline-none focus:border-primary/40"
+              >
+                {accounts.map((account) => (
+                  <option key={account.id} value={account.id}>
+                    {githubAccountDisplayName(account)}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
 
           {/* Branch selector */}
           <div className="grid grid-cols-2 gap-2">
@@ -299,10 +335,10 @@ export function PullRequestDialog({ open, onClose }: PullRequestDialogProps) {
             <span className="text-[11px] text-foreground">Create as draft</span>
           </label>
 
-          {!hasToken && (
+          {accounts.length === 0 && (
             <div className="flex items-center gap-1.5 rounded-md border border-warning/20 bg-warning/5 px-2 py-1.5 text-[10px] text-warning">
               <AlertCircle className="h-3 w-3 shrink-0" />
-              <span>Sign in with GitHub or add a repository token in Settings → Git.</span>
+              <span>Sign in with GitHub from the status bar or Settings → Git.</span>
             </div>
           )}
 
