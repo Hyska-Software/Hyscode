@@ -1,5 +1,5 @@
 import type { LspConnection } from './lsp-connection';
-import type { CompletionItem, CompletionList, Hover, Location, LspDiagnostic, DocumentSymbol, InlayHint } from './types';
+import type { CompletionItem, CompletionList, Hover, Location, LocationLink, LspDiagnostic, LspRange, DocumentSymbol, InlayHint } from './types';
 import { disableNativeTypeScriptValidation, enableNativeTypeScriptValidation } from './language-registry';
 
 type MonacoEditor = typeof import('monaco-editor');
@@ -12,6 +12,41 @@ function normalizeUri(u: string): string {
   } catch {
     return u.replace(/\\/g, '/').toLowerCase();
   }
+}
+
+function toMonacoRange(range: LspRange, monacoRef: MonacoEditor): import('monaco-editor').Range {
+  return new monacoRef.Range(
+    range.start.line + 1,
+    range.start.character + 1,
+    range.end.line + 1,
+    range.end.character + 1,
+  );
+}
+
+/**
+ * Convert any LSP location-ish result (Location, Location[], LocationLink or
+ * LocationLink[]) into Monaco locations. LocationLinks use
+ * `targetSelectionRange` for the cursor target, falling back to `targetRange`.
+ */
+function toMonacoLocations(
+  result: Location | Location[] | LocationLink | LocationLink[] | null | undefined,
+  monacoRef: MonacoEditor,
+): import('monaco-editor').languages.Location[] {
+  if (!result) return [];
+  const entries: Array<Location | LocationLink> = Array.isArray(result) ? result : [result];
+  return entries.map((entry) => {
+    if ('targetUri' in entry) {
+      const selectionRange = entry.targetSelectionRange ?? entry.targetRange;
+      return {
+        uri: monacoRef.Uri.parse(entry.targetUri),
+        range: toMonacoRange(selectionRange, monacoRef),
+      };
+    }
+    return {
+      uri: monacoRef.Uri.parse(entry.uri),
+      range: toMonacoRange(entry.range, monacoRef),
+    };
+  });
 }
 
 export class MonacoLspAdapter {
@@ -41,6 +76,15 @@ export class MonacoLspAdapter {
     }
     if (caps.definitionProvider) {
       this.registerDefinitionProvider(languageId);
+    }
+    if (caps.declarationProvider) {
+      this.registerDeclarationProvider(languageId);
+    }
+    if (caps.typeDefinitionProvider) {
+      this.registerTypeDefinitionProvider(languageId);
+    }
+    if (caps.implementationProvider) {
+      this.registerImplementationProvider(languageId);
     }
     if (caps.signatureHelpProvider) {
       this.registerSignatureHelpProvider(languageId, caps.signatureHelpProvider);
@@ -182,20 +226,68 @@ export class MonacoLspAdapter {
         const result = (await conn.definition(uri, position.lineNumber - 1, position.column - 1)) as
           | Location
           | Location[]
+          | LocationLink
+          | LocationLink[]
           | null;
 
-        if (!result) return null;
-        const locations = Array.isArray(result) ? result : [result];
+        return toMonacoLocations(result, monacoRef);
+      },
+    });
+    this.disposables.push(d);
+  }
 
-        return locations.map((loc) => ({
-          uri: monacoRef.Uri.parse(loc.uri),
-          range: new monacoRef.Range(
-            loc.range.start.line + 1,
-            loc.range.start.character + 1,
-            loc.range.end.line + 1,
-            loc.range.end.character + 1,
-          ),
-        }));
+  private registerDeclarationProvider(languageId: string) {
+    const conn = this.connection;
+    const monacoRef = this.monaco;
+    const d = this.monaco.languages.registerDeclarationProvider(languageId, {
+      provideDeclaration: async (model, position) => {
+        const uri = model.uri.toString();
+        const result = (await conn.declaration(uri, position.lineNumber - 1, position.column - 1)) as
+          | Location
+          | Location[]
+          | LocationLink
+          | LocationLink[]
+          | null;
+
+        return toMonacoLocations(result, monacoRef);
+      },
+    });
+    this.disposables.push(d);
+  }
+
+  private registerTypeDefinitionProvider(languageId: string) {
+    const conn = this.connection;
+    const monacoRef = this.monaco;
+    const d = this.monaco.languages.registerTypeDefinitionProvider(languageId, {
+      provideTypeDefinition: async (model, position) => {
+        const uri = model.uri.toString();
+        const result = (await conn.typeDefinition(uri, position.lineNumber - 1, position.column - 1)) as
+          | Location
+          | Location[]
+          | LocationLink
+          | LocationLink[]
+          | null;
+
+        return toMonacoLocations(result, monacoRef);
+      },
+    });
+    this.disposables.push(d);
+  }
+
+  private registerImplementationProvider(languageId: string) {
+    const conn = this.connection;
+    const monacoRef = this.monaco;
+    const d = this.monaco.languages.registerImplementationProvider(languageId, {
+      provideImplementation: async (model, position) => {
+        const uri = model.uri.toString();
+        const result = (await conn.implementation(uri, position.lineNumber - 1, position.column - 1)) as
+          | Location
+          | Location[]
+          | LocationLink
+          | LocationLink[]
+          | null;
+
+        return toMonacoLocations(result, monacoRef);
       },
     });
     this.disposables.push(d);

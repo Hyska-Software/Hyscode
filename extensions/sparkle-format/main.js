@@ -524,6 +524,34 @@ function formatCode(content, languageId, opts) {
 
 // ── Extension Entry Point ────────────────────────────────────────────────────
 
+/** Map a file path to a language id (mirrors the LSP extension map). */
+function languageFromPath(filePath) {
+  if (!filePath) return 'plaintext';
+  const ext = filePath.split('.').pop()?.toLowerCase() || '';
+  const langMap = {
+    js: 'javascript', ts: 'typescript', jsx: 'javascriptreact',
+    tsx: 'typescriptreact', html: 'html', htm: 'html', css: 'css',
+    scss: 'scss', less: 'less', json: 'json', py: 'python',
+    rs: 'rust', sql: 'sql', yaml: 'yaml', yml: 'yaml',
+    md: 'markdown', go: 'go', c: 'c', cpp: 'cpp', java: 'java',
+    php: 'php', rb: 'ruby', swift: 'swift', kt: 'kotlin',
+    dart: 'dart', toml: 'toml', lua: 'lua', sh: 'shell',
+    bash: 'bash', ps1: 'powershell', xml: 'xml',
+  };
+  return langMap[ext] || 'plaintext';
+}
+
+/** Resolve indentation options from the active editor / extension settings. */
+async function resolveIndentOptions(api, ctx) {
+  const tabSize = ctx && Number.isFinite(ctx.tabSize)
+    ? ctx.tabSize
+    : (await api.settings.get('tabSize', 2)) ?? 2;
+  const useTabs = ctx && typeof ctx.insertSpaces === 'boolean'
+    ? !ctx.insertSpaces
+    : (await api.settings.get('useTabs', false)) ?? false;
+  return { tabSize, useTabs };
+}
+
 export function activate(context, hyscode) {
   const api = hyscode || context._api || globalThis.hyscode;
 
@@ -539,37 +567,11 @@ export function activate(context, hyscode) {
         console.log(`[Sparkle Format] ✨ Formatting ${params.languageId}...`);
         return formatCode(params.content, params.languageId, {
           tabSize: params.tabSize,
-          insertSpaces: params.insertSpaces,
+          useTabs: params.insertSpaces === false,
         });
       },
     });
     context.subscriptions.push(formatter);
-
-    // Register a context menu item for quick formatting
-    const menuItem = api.ui.registerContextMenuItem({
-      id: 'sparkle-format.contextFormat',
-      label: '✨ Sparkle Format',
-      icon: 'sparkles',
-      group: 'formatting',
-      order: 1,
-      handler: async (ctx) => {
-        if (!ctx.filePath) return;
-        console.log(`[Sparkle Format] ✨ Context menu format for ${ctx.languageId}`);
-
-        // Get the current content from the editor
-        try {
-          const content = await api.workspace.readFile(ctx.filePath);
-          const formatted = formatCode(content, ctx.languageId || 'plaintext', {
-            tabSize: 2,
-          });
-          await api.workspace.writeFile(ctx.filePath, formatted);
-          api.notifications.showInfo('✨ Code formatted with Sparkle Format!');
-        } catch (err) {
-          api.notifications.showError('Failed to format: ' + (err.message || err));
-        }
-      },
-    });
-    context.subscriptions.push(menuItem);
 
     // Register a toolbar action
     const toolbarAction = api.ui.registerToolbarAction({
@@ -578,7 +580,7 @@ export function activate(context, hyscode) {
       icon: 'sparkles',
       tooltip: 'Format document with Sparkle Format',
       handler: async () => {
-        api.notifications.showInfo('✨ Use right-click → Sparkle Format or Shift+Alt+F');
+        api.notifications.showInfo('✨ Use Shift+Alt+F or right-click → Format Document');
       },
     });
     context.subscriptions.push(toolbarAction);
@@ -595,35 +597,51 @@ export function activate(context, hyscode) {
     context.subscriptions.push(statusItem);
   }
 
-  // Register the format command
+  // Register the format commands (document + selection)
   if (api && api.commands) {
-    const cmd = api.commands.registerCommand('sparkle-format.formatDocument', async () => {
+    const formatDocument = api.commands.registerCommand('sparkle-format.formatDocument', async () => {
       const filePath = api.editor.activeFilePath;
-      if (!filePath) return;
+      if (!filePath) {
+        api.notifications.showWarning('No active file to format.');
+        return;
+      }
+      const content = api.editor.getText();
+      if (typeof content !== 'string') {
+        api.notifications.showWarning('The active editor has no text to format.');
+        return;
+      }
 
       try {
-        const content = await api.workspace.readFile(filePath);
-        // Detect language from file extension
-        const ext = filePath.split('.').pop()?.toLowerCase() || '';
-        const langMap = {
-          js: 'javascript', ts: 'typescript', jsx: 'javascriptreact',
-          tsx: 'typescriptreact', html: 'html', htm: 'html', css: 'css',
-          scss: 'scss', less: 'less', json: 'json', py: 'python',
-          rs: 'rust', sql: 'sql', yaml: 'yaml', yml: 'yaml',
-          md: 'markdown', go: 'go', c: 'c', cpp: 'cpp', java: 'java',
-          php: 'php', rb: 'ruby', swift: 'swift', kt: 'kotlin',
-          dart: 'dart', toml: 'toml', lua: 'lua', sh: 'shell',
-          bash: 'bash', ps1: 'powershell', xml: 'xml',
-        };
-        const languageId = langMap[ext] || 'plaintext';
-        const formatted = formatCode(content, languageId, { tabSize: 2 });
-        await api.workspace.writeFile(filePath, formatted);
+        const languageId = languageFromPath(filePath);
+        const { tabSize, useTabs } = await resolveIndentOptions(api, null);
+        const formatted = formatCode(content, languageId, { tabSize, useTabs });
+        api.editor.setText(formatted);
         api.notifications.showInfo(`✨ Formatted as ${languageId}`);
       } catch (err) {
         api.notifications.showError('Format failed: ' + (err.message || err));
       }
     });
-    context.subscriptions.push(cmd);
+    context.subscriptions.push(formatDocument);
+
+    const formatSelection = api.commands.registerCommand('sparkle-format.formatSelection', async () => {
+      const filePath = api.editor.activeFilePath;
+      const selection = api.editor.getSelection();
+      if (!filePath || !selection || !selection.text) {
+        api.notifications.showWarning('Select code to format first.');
+        return;
+      }
+
+      try {
+        const languageId = languageFromPath(filePath);
+        const { tabSize, useTabs } = await resolveIndentOptions(api, null);
+        const formatted = formatCode(selection.text, languageId, { tabSize, useTabs });
+        api.editor.replaceSelection(formatted);
+        api.notifications.showInfo('✨ Selection formatted');
+      } catch (err) {
+        api.notifications.showError('Format selection failed: ' + (err.message || err));
+      }
+    });
+    context.subscriptions.push(formatSelection);
   }
 
   // Register settings tab

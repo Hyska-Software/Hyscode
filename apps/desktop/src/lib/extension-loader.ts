@@ -26,6 +26,8 @@ import type {
   InputBoxOptions,
   ViewContent,
   SettingsTabContent,
+  EditorSelection,
+  EditorDecoration,
 } from '@hyscode/extension-api';
 import { registerExtensionTheme } from './monaco-themes';
 import {
@@ -45,6 +47,14 @@ import { useTerminalStore } from '../stores/terminal-store';
 import { useLayoutStore } from '../stores/layout-store';
 import type { InstalledExtension } from '../stores/extension-store';
 import { desktopTerminalRuntime } from './terminal-runtime';
+import {
+  getActiveEditorContent,
+  getActiveEditorSelection,
+  insertIntoActiveEditor,
+  replaceActiveEditorContent,
+  replaceActiveEditorSelection,
+  applyEditorDecorations,
+} from './editor-service';
 
 // ── Singleton sandbox ────────────────────────────────────────────────────────
 
@@ -180,7 +190,9 @@ const _api: HyscodeAPI = {
 
   editor: {
     get activeFilePath(): string | null {
-      return useEditorStore.getState().activeTabId ?? null;
+      const { tabs, activeTabId } = useEditorStore.getState();
+      const active = tabs.find((t) => t.id === activeTabId);
+      return active?.filePath ?? null;
     },
     async openFile(path: string): Promise<void> {
       const { openTab } = useEditorStore.getState();
@@ -190,13 +202,36 @@ const _api: HyscodeAPI = {
       openTab({ id: path, filePath: path, fileName, language: ext || 'plaintext', viewerType: 'code' });
     },
     getSelectedText(): string | null {
-      return null;
+      return getActiveEditorSelection()?.text ?? null;
     },
-    insertText(_text: string): void {
-      console.warn('[HyscodeAPI] insertText not implemented');
+    insertText(text: string): void {
+      insertIntoActiveEditor(text);
     },
-    addDecorations(): Disposable {
-      return noop();
+    getText(): string | null {
+      return getActiveEditorContent();
+    },
+    setText(text: string): void {
+      replaceActiveEditorContent(text);
+    },
+    getSelection(): EditorSelection | null {
+      const selection = getActiveEditorSelection();
+      if (!selection) return null;
+      return {
+        text: selection.text,
+        startLineNumber: selection.startLineNumber,
+        startColumn: selection.startColumn,
+        endLineNumber: selection.endLineNumber,
+        endColumn: selection.endColumn,
+      };
+    },
+    replaceSelection(text: string): void {
+      replaceActiveEditorSelection(text);
+    },
+    addDecorations(filePath: string, decorations: EditorDecoration[]): Disposable {
+      const { tabs, activeTabId } = useEditorStore.getState();
+      const active = tabs.find((t) => t.id === activeTabId);
+      if (active?.filePath !== filePath) return noop();
+      return applyEditorDecorations(decorations);
     },
   },
 

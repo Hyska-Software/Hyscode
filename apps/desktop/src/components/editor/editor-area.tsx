@@ -29,6 +29,7 @@ import { useEditorStore, useFileStore, useLayoutStore, useSettingsStore } from '
 import { useAgentStore } from '../../stores/agent-store';
 import { useExtensionStore } from '../../stores/extension-store';
 import { tauriFs } from '../../lib/tauri-fs';
+import { setActiveEditor, getActiveEditor } from '../../lib/editor-service';
 import { LOAD_CHUNK_BYTES, isCancelError, loadFileText } from '../../lib/large-file-loader';
 import { saveFileDialog } from '../../lib/tauri-dialog';
 import { GIT_GUTTER_WIDTH, useGitDecorations } from '../../hooks/use-git-decorations';
@@ -527,6 +528,12 @@ export function EditorArea() {
     ) => {
       editorInstanceRef.current = editor;
       monacoInstanceRef.current = monaco;
+      setActiveEditor(editor);
+      if (editor) {
+        editor.onDidDispose(() => {
+          if (getActiveEditor() === editor) setActiveEditor(null);
+        });
+      }
       setEditorVersion((version) => version + 1);
       if (!editor || !monaco) return;
 
@@ -777,6 +784,14 @@ export function EditorArea() {
                       registerAllLanguages(monaco);
                       disableNativeTypeScriptValidation(monaco);
                       LspBridge.setMonaco(monaco);
+                      // Shift+Alt+F is routed through the app formatter pipeline
+                      // (format-document.ts), so unbind Monaco's built-in action.
+                      monaco.editor.addKeybindingRules([
+                        {
+                          keybinding: monaco.KeyMod.Shift | monaco.KeyMod.Alt | monaco.KeyCode.KeyF,
+                          command: null,
+                        },
+                      ]);
                     }}
                     options={{
                       fontFamily: `'${editorFontFamily}', 'JetBrains Mono', 'Fira Code', monospace`,

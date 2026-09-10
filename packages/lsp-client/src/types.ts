@@ -41,6 +41,9 @@ export interface ServerCapabilities {
   completionProvider?: { triggerCharacters?: string[]; resolveProvider?: boolean };
   hoverProvider?: boolean;
   definitionProvider?: boolean;
+  declarationProvider?: boolean | Record<string, unknown>;
+  typeDefinitionProvider?: boolean | Record<string, unknown>;
+  implementationProvider?: boolean | Record<string, unknown>;
   referencesProvider?: boolean;
   signatureHelpProvider?: { triggerCharacters?: string[] };
   documentFormattingProvider?: boolean;
@@ -113,6 +116,15 @@ export interface Hover {
 export interface Location {
   uri: string;
   range: LspRange;
+}
+
+/** Result shape used by declaration / typeDefinition / implementation when the
+ *  client advertises `linkSupport: true`. */
+export interface LocationLink {
+  originSelectionRange?: LspRange;
+  targetUri: string;
+  targetRange: LspRange;
+  targetSelectionRange?: LspRange;
 }
 
 // ── Code Action ──────────────────────────────────────────────────────────────

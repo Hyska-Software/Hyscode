@@ -133,6 +133,18 @@ export function buildLabel(parsed: ParsedKeybinding): string {
 }
 
 /**
+ * Build a human-readable label for a chord sequence, e.g. "Ctrl+K R".
+ * Chords are handled by the global dispatcher, not by `match()`.
+ */
+export function buildChordLabel(raw: string): string {
+  return raw
+    .trim()
+    .split(/\s+/)
+    .map((chord) => buildLabel(parseKeybinding(chord)))
+    .join(' ');
+}
+
+/**
  * Normalise a KeyboardEvent.key to match our keybinding keys.
  */
 function normaliseEventKey(e: KeyboardEvent): string {
@@ -154,6 +166,35 @@ function normaliseEventKey(e: KeyboardEvent): string {
     case ' ': return 'space';
     default: return key; // f1, f2, etc. are already fine
   }
+}
+
+/**
+ * Minimal evaluator for keybinding `when` clauses. Only `editorTextFocus`
+ * (and its negation) is supported; unknown clauses stay active so extension
+ * bindings without focus context keep working.
+ */
+function evaluateWhen(
+  when: string | undefined,
+  context: { editorTextFocus: boolean },
+): boolean {
+  if (!when || !when.trim()) return true;
+  for (const raw of when.split('&&')) {
+    let clause = raw.trim();
+    let negated = false;
+    if (clause.startsWith('!')) {
+      negated = true;
+      clause = clause.slice(1).trim();
+    }
+    if (clause.toLowerCase() !== 'editortextfocus') continue;
+    if (negated ? context.editorTextFocus : !context.editorTextFocus) return false;
+  }
+  return true;
+}
+
+function isEditorFocused(): boolean {
+  if (typeof document === 'undefined') return false;
+  const active = document.activeElement;
+  return !!active && typeof active.closest === 'function' && !!active.closest('.monaco-editor');
 }
 
 /**
@@ -179,7 +220,9 @@ export const useKeybindingStore = create<KeybindingState>()(
 
     register: (binding) => {
       const parsed = parseKeybinding(binding.key);
-      const label = buildLabel(parsed);
+      const label = /\s/.test(binding.key.trim())
+        ? buildChordLabel(binding.key)
+        : buildLabel(parsed);
       const entry: RegisteredKeybinding = {
         command: binding.command,
         raw: binding.key,
@@ -220,9 +263,12 @@ export const useKeybindingStore = create<KeybindingState>()(
     match: (e) => {
       // Later matches take priority (extension overrides)
       const bindings = get().bindings;
+      const context = { editorTextFocus: isEditorFocused() };
       for (let i = bindings.length - 1; i >= 0; i--) {
-        if (matchesEvent(bindings[i].parsed, e)) {
-          return bindings[i].command;
+        const binding = bindings[i];
+        if (!evaluateWhen(binding.when, context)) continue;
+        if (matchesEvent(binding.parsed, e)) {
+          return binding.command;
         }
       }
       return null;

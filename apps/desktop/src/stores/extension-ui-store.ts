@@ -125,6 +125,11 @@ export const useExtensionUiStore = create<ExtensionUiState>()(
 
     addContextMenuItem: (extensionName, item) => {
       set((s) => {
+        // Replace any previous registration with the same id so repeated
+        // manifest registration does not duplicate entries.
+        s.contextMenuItems = s.contextMenuItems.filter(
+          (r) => !(r.extensionName === extensionName && r.item.id === item.id),
+        );
         s.contextMenuItems.push({ extensionName, item });
       });
       return {

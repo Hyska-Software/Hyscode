@@ -3,7 +3,7 @@
 
 import { create } from 'zustand';
 import { immer } from 'zustand/middleware/immer';
-import type { LspConnectionStatus } from '@hyscode/lsp-client';
+import type { LspConnectionStatus, ServerCapabilities } from '@hyscode/lsp-client';
 
 export interface LspServerInfo {
   serverId: string;
@@ -17,6 +17,9 @@ export interface LspServerInfo {
 interface LspState {
   /** Status of each active language server, keyed by languageId */
   serverStatuses: Record<string, LspServerInfo>;
+
+  /** Server capabilities, keyed by languageId (normalized server key) */
+  serverCapabilities: Record<string, ServerCapabilities>;
 
   /** Probe results: command → isInstalled on system PATH */
   probeResults: Record<string, boolean>;
@@ -32,6 +35,7 @@ interface LspState {
 
   // Actions
   setServerStatus: (languageId: string, info: LspServerInfo) => void;
+  setServerCapabilities: (languageId: string, capabilities: ServerCapabilities) => void;
   removeServer: (languageId: string) => void;
   setProbeResult: (command: string, found: boolean) => void;
   setProbeComplete: (complete: boolean) => void;
@@ -43,6 +47,7 @@ interface LspState {
 export const useLspStore = create<LspState>()(
   immer((set) => ({
     serverStatuses: {},
+    serverCapabilities: {},
     probeResults: {},
     disabledServers: new Set(),
     probeComplete: false,
@@ -53,9 +58,15 @@ export const useLspStore = create<LspState>()(
         s.serverStatuses[languageId] = info;
       }),
 
+    setServerCapabilities: (languageId, capabilities) =>
+      set((s) => {
+        s.serverCapabilities[languageId] = capabilities;
+      }),
+
     removeServer: (languageId) =>
       set((s) => {
         delete s.serverStatuses[languageId];
+        delete s.serverCapabilities[languageId];
       }),
 
     setProbeResult: (command, found) =>
@@ -85,6 +96,7 @@ export const useLspStore = create<LspState>()(
     clearAll: () =>
       set((s) => {
         s.serverStatuses = {};
+        s.serverCapabilities = {};
         s.probeResults = {};
         s.probeComplete = false;
       }),

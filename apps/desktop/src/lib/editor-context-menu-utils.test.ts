@@ -5,10 +5,10 @@ import {
   hasNonEmptySelection,
   trimSelectionText,
   buildPathWithLine,
-  clampMenuPosition,
   evaluateWhenClause,
   groupExtensionItems,
   isLspActionAvailable,
+  getLspActionAvailability,
 } from './editor-context-menu-utils';
 
 describe('dirnameOf', () => {
@@ -100,26 +100,6 @@ describe('buildPathWithLine', () => {
   });
 });
 
-describe('clampMenuPosition', () => {
-  it('keeps the requested position when it fits', () => {
-    const pos = clampMenuPosition(100, 100, 280, 400, 1280, 800);
-    expect(pos).toEqual({ left: 100, top: 100, flipX: false });
-  });
-
-  it('clamps right/bottom overflow and flips the flyout', () => {
-    const pos = clampMenuPosition(1200, 750, 280, 400, 1280, 800);
-    expect(pos.left).toBe(1280 - 280 - 8);
-    expect(pos.top).toBe(800 - 400 - 8);
-    expect(pos.flipX).toBe(true);
-  });
-
-  it('clamps negative coordinates to the margin', () => {
-    const pos = clampMenuPosition(-50, -20, 280, 400, 1280, 800);
-    expect(pos.left).toBe(8);
-    expect(pos.top).toBe(8);
-  });
-});
-
 describe('evaluateWhenClause', () => {
   const ctx = { hasSelection: true, languageId: 'typescript' };
 
@@ -138,6 +118,13 @@ describe('evaluateWhenClause', () => {
     expect(evaluateWhenClause('resourceLangId == typescript', ctx)).toBe(true);
     expect(evaluateWhenClause('resourceLangId != typescript', ctx)).toBe(false);
     expect(evaluateWhenClause('resourceLangId == rust', ctx)).toBe(false);
+  });
+
+  it('treats editorLangId as an alias of resourceLangId', () => {
+    expect(evaluateWhenClause('editorLangId == typescript', ctx)).toBe(true);
+    expect(evaluateWhenClause('editorLangId != typescript', ctx)).toBe(false);
+    expect(evaluateWhenClause('editorLangId == go', ctx)).toBe(false);
+    expect(evaluateWhenClause('editorLangId != go', ctx)).toBe(true);
   });
 
   it('supports && combinations and ignores unknown clauses', () => {
@@ -192,5 +179,54 @@ describe('isLspActionAvailable', () => {
     expect(isLspActionAvailable('rust', 'starting')).toBe(false);
     expect(isLspActionAvailable('rust', undefined)).toBe(false);
     expect(isLspActionAvailable(null, 'ready')).toBe(false);
+  });
+});
+
+describe('getLspActionAvailability', () => {
+  it('enables native TS/JS actions without any server', () => {
+    const availability = getLspActionAvailability('typescript', undefined, undefined);
+    expect(availability.definition).toBe(true);
+    expect(availability.typeDefinition).toBe(true);
+    expect(availability.implementation).toBe(true);
+    expect(availability.references).toBe(true);
+    expect(availability.rename).toBe(true);
+    expect(availability.codeAction).toBe(true);
+    expect(availability.documentSymbol).toBe(true);
+    // The TS worker has no declaration provider — the menu falls back to definition.
+    expect(availability.declaration).toBe(false);
+    expect(availability.declarationFallback).toBe(true);
+  });
+
+  it('gates each action by its own server capability', () => {
+    const availability = getLspActionAvailability('rust', 'ready', {
+      definitionProvider: true,
+      referencesProvider: true,
+    });
+    expect(availability.definition).toBe(true);
+    expect(availability.references).toBe(true);
+    expect(availability.typeDefinition).toBe(false);
+    expect(availability.implementation).toBe(false);
+    expect(availability.rename).toBe(false);
+    expect(availability.codeAction).toBe(false);
+    expect(availability.declaration).toBe(false);
+    expect(availability.declarationFallback).toBe(true);
+  });
+
+  it('keeps everything disabled while the server is not ready', () => {
+    const availability = getLspActionAvailability('rust', 'starting', {
+      definitionProvider: true,
+      declarationProvider: true,
+    });
+    expect(availability.definition).toBe(false);
+    expect(availability.declaration).toBe(false);
+    expect(availability.declarationFallback).toBe(false);
+  });
+
+  it('returns no fallback when the server provides neither declaration nor definition', () => {
+    const availability = getLspActionAvailability('rust', 'ready', {
+      referencesProvider: true,
+    });
+    expect(availability.definition).toBe(false);
+    expect(availability.declarationFallback).toBe(false);
   });
 });

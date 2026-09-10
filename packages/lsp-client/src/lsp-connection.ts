@@ -71,6 +71,9 @@ export class LspConnection {
           hover: { dynamicRegistration: false, contentFormat: ['markdown', 'plaintext'] },
           signatureHelp: { dynamicRegistration: false },
           definition: { dynamicRegistration: false, linkSupport: true },
+          declaration: { dynamicRegistration: false, linkSupport: true },
+          typeDefinition: { dynamicRegistration: false, linkSupport: true },
+          implementation: { dynamicRegistration: false, linkSupport: true },
           references: { dynamicRegistration: false },
           documentSymbol: { dynamicRegistration: false, hierarchicalDocumentSymbolSupport: true },
           codeAction: {
@@ -160,6 +163,27 @@ export class LspConnection {
 
   definition(uri: string, line: number, character: number) {
     return this.sendRequest('textDocument/definition', {
+      textDocument: { uri },
+      position: { line, character },
+    });
+  }
+
+  declaration(uri: string, line: number, character: number) {
+    return this.sendRequest('textDocument/declaration', {
+      textDocument: { uri },
+      position: { line, character },
+    });
+  }
+
+  typeDefinition(uri: string, line: number, character: number) {
+    return this.sendRequest('textDocument/typeDefinition', {
+      textDocument: { uri },
+      position: { line, character },
+    });
+  }
+
+  implementation(uri: string, line: number, character: number) {
+    return this.sendRequest('textDocument/implementation', {
       textDocument: { uri },
       position: { line, character },
     });

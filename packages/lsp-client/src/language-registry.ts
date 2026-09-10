@@ -288,6 +288,20 @@ export function detectLspLanguage(filePath: string): string {
   return 'plaintext';
 }
 
+/** Languages that share the same underlying server process. */
+const LSP_SERVER_KEY_NORMALIZATION: Record<string, string> = {
+  typescriptreact: 'typescript',
+  javascriptreact: 'javascript',
+};
+
+/**
+ * Normalize an LSP language ID to the key used for server status and
+ * capability lookups (e.g. `typescriptreact` → `typescript`).
+ */
+export function normalizeLspLanguage(languageId: string): string {
+  return LSP_SERVER_KEY_NORMALIZATION[languageId] ?? languageId;
+}
+
 /**
  * Get all known language IDs (for probing/config).
  */

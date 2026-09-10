@@ -38,6 +38,7 @@ import { startSharedConfigSync } from './lib/shared-config-sync';
 import { LspBridge } from './lib/lsp-bridge';
 import { startExtensionLspSync } from './lib/extension-lsp-bridge';
 import { getViewerType } from './lib/utils';
+import { formatActiveDocument } from './lib/format-document';
 import { UpdateDialog } from './components/updater/update-dialog';
 import { StartupNotification } from './components/notifications/startup-notification';
 import { TaskBoardSurface } from './components/tasks/task-board-surface';
@@ -437,6 +438,31 @@ export function App() {
         if (activeId) closeTab(activeId);
       },
       { category: 'View', key: 'ctrl+f4' },
+    );
+
+    builtin(
+      'workbench.action.revealInExplorer',
+      'Reveal in File Explorer',
+      async () => {
+        const { tabs, activeTabId } = useEditorStore.getState();
+        const filePath = tabs.find((t) => t.id === activeTabId)?.filePath;
+        if (!filePath || filePath.startsWith('untitled:')) return;
+        try {
+          await tauriInvoke('reveal_path', { path: filePath });
+        } catch (err) {
+          console.error('[Reveal in Explorer] Failed:', err);
+        }
+      },
+      { category: 'File', key: 'ctrl+k r' },
+    );
+
+    builtin(
+      'workbench.action.formatDocument',
+      'Format Document',
+      async () => {
+        await formatActiveDocument();
+      },
+      { category: 'Editor', key: 'shift+alt+f' },
     );
 
     builtin(
@@ -1005,6 +1031,12 @@ export function App() {
           e.preventDefault();
           clearChord();
           await useCommandStore.getState().executeCommand('workbench.action.closeFolder');
+          return;
+        }
+        if (e.key === 'r') {
+          e.preventDefault();
+          clearChord();
+          await useCommandStore.getState().executeCommand('workbench.action.revealInExplorer');
           return;
         }
       }

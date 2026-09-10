@@ -106,41 +106,6 @@ export function buildPathWithLine(
   return `${filePath}:${pos?.lineNumber ?? 1}`;
 }
 
-// ── Position / clamping helpers ──────────────────────────────────────────────
-
-export interface ClampedPosition {
-  left: number;
-  top: number;
-  /** True when a right-side flyout would overflow and must open to the left. */
-  flipX: boolean;
-}
-
-const MENU_MARGIN = 8;
-export const MENU_MIN_WIDTH = 240;
-export const HISTORY_FLYOUT_WIDTH = 240;
-
-/**
- * Clamp a fixed-position menu inside the viewport on all four edges and
- * report whether a right-side flyout submenu fits or must flip left.
- */
-export function clampMenuPosition(
-  x: number,
-  y: number,
-  menuWidth: number,
-  menuHeight: number,
-  viewportWidth: number,
-  viewportHeight: number,
-  flyoutWidth: number = HISTORY_FLYOUT_WIDTH,
-): ClampedPosition {
-  const width = Math.max(menuWidth, MENU_MIN_WIDTH);
-  const maxLeft = Math.max(MENU_MARGIN, viewportWidth - width - MENU_MARGIN);
-  const maxTop = Math.max(MENU_MARGIN, viewportHeight - menuHeight - MENU_MARGIN);
-  const left = Math.min(Math.max(x, MENU_MARGIN), maxLeft);
-  const top = Math.min(Math.max(y, MENU_MARGIN), maxTop);
-  const flipX = left + width + flyoutWidth > viewportWidth - MENU_MARGIN;
-  return { left, top, flipX };
-}
-
 // ── Extension `when`-clause evaluation ───────────────────────────────────────
 
 /**
@@ -149,6 +114,7 @@ export function clampMenuPosition(
  * Supported (case-insensitive, `&&`-joined) clauses:
  * - `editorHasSelection` / `!editorHasSelection`
  * - `resourceLangId == <lang>` / `resourceLangId != <lang>`
+ * - `editorLangId == <lang>` / `editorLangId != <lang>` (alias)
  *
  * Unknown clauses evaluate to `true` so legacy extensions that use
  * unsupported keys stay visible instead of silently disappearing.
@@ -171,7 +137,7 @@ export function evaluateWhenClause(
     if (lower === 'editorhasselection') {
       result = context.hasSelection;
     } else {
-      const match = clause.match(/^resourceLangId\s*(==|!=)\s*([A-Za-z0-9#+_-]+)$/i);
+      const match = clause.match(/^(?:resourceLangId|editorLangId)\s*(==|!=)\s*([A-Za-z0-9#+_-]+)$/i);
       if (match) {
         const equals = match[1] === '==';
         const same =
@@ -266,4 +232,90 @@ export function isLspActionAvailable(
   if (!lspLanguage) return false;
   if (NATIVE_INTELLISENSE_LANGUAGES.has(lspLanguage)) return true;
   return lspStatus === 'ready';
+}
+
+// ── Per-action LSP availability ──────────────────────────────────────────────
+
+/** Structural subset of `ServerCapabilities` used for menu gating. */
+export interface LspCapabilitiesLike {
+  definitionProvider?: unknown;
+  declarationProvider?: unknown;
+  typeDefinitionProvider?: unknown;
+  implementationProvider?: unknown;
+  referencesProvider?: unknown;
+  renameProvider?: unknown;
+  codeActionProvider?: unknown;
+  documentSymbolProvider?: unknown;
+}
+
+export interface LspActionAvailability {
+  definition: boolean;
+  /** True when the server exposes a real declaration provider. */
+  declaration: boolean;
+  /** True when declaration is unavailable but definition can be used instead. */
+  declarationFallback: boolean;
+  typeDefinition: boolean;
+  implementation: boolean;
+  references: boolean;
+  rename: boolean;
+  codeAction: boolean;
+  documentSymbol: boolean;
+}
+
+/**
+ * Actions Monaco's built-in TS/JS worker provides without any LSP server.
+ * Declaration is intentionally absent: the worker has no declaration provider.
+ */
+const NATIVE_ACTION_SUPPORT: ReadonlySet<keyof LspCapabilitiesLike> = new Set([
+  'definitionProvider',
+  'typeDefinitionProvider',
+  'implementationProvider',
+  'referencesProvider',
+  'renameProvider',
+  'codeActionProvider',
+  'documentSymbolProvider',
+]);
+
+function capabilityDeclared(
+  capabilities: LspCapabilitiesLike | null | undefined,
+  key: keyof LspCapabilitiesLike,
+): boolean {
+  const value = capabilities?.[key];
+  return value !== undefined && value !== null && value !== false;
+}
+
+/**
+ * Resolve which intellisense actions are actually backed by a provider:
+ * either a capability-declaring, ready LSP server or the native TS/JS worker.
+ */
+export function getLspActionAvailability(
+  lspLanguage: string | null | undefined,
+  lspStatus: string | undefined,
+  capabilities: LspCapabilitiesLike | null | undefined,
+): LspActionAvailability {
+  const native = !!lspLanguage && NATIVE_INTELLISENSE_LANGUAGES.has(lspLanguage);
+  const ready = lspStatus === 'ready';
+
+  const lsp = (key: keyof LspCapabilitiesLike): boolean =>
+    ready && capabilityDeclared(capabilities, key);
+
+  const supported = (key: keyof LspCapabilitiesLike): boolean =>
+    (native && NATIVE_ACTION_SUPPORT.has(key)) || lsp(key);
+
+  const definition = supported('definitionProvider');
+  const declaration = lsp('declarationProvider');
+  const typeDefinition = supported('typeDefinitionProvider');
+  const implementation = supported('implementationProvider');
+
+  return {
+    definition,
+    declaration,
+    declarationFallback: !declaration && definition,
+    typeDefinition,
+    implementation,
+    references: supported('referencesProvider'),
+    rename: supported('renameProvider'),
+    codeAction: supported('codeActionProvider'),
+    documentSymbol: supported('documentSymbolProvider'),
+  };
 }

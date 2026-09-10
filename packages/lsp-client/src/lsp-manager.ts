@@ -1,9 +1,10 @@
 import type { LspContribution } from '@hyscode/extension-api';
 import { LspConnection } from './lsp-connection';
 import type { LspConnectionStatus } from './lsp-connection';
+import type { ServerCapabilities } from './types';
 import { TauriLspTransport } from './tauri-transport';
 import { MonacoLspAdapter } from './monaco-adapter';
-import { enableNativeTypeScriptValidation, disableNativeTypeScriptValidation } from './language-registry';
+import { enableNativeTypeScriptValidation, disableNativeTypeScriptValidation, normalizeLspLanguage } from './language-registry';
 
 type MonacoEditor = typeof import('monaco-editor');
 type TauriInvoke = (cmd: string, args?: Record<string, unknown>) => Promise<unknown>;
@@ -19,18 +20,16 @@ interface ActiveServer {
   serverKey: string;
 }
 
-type StatusChangeHandler = (languageId: string, status: LspConnectionStatus) => void;
-
-/** Languages that share the same underlying server process */
-const SERVER_KEY_NORMALIZATION: Record<string, string> = {
-  typescriptreact: 'typescript',
-  javascriptreact: 'javascript',
-};
+type StatusChangeHandler = (
+  languageId: string,
+  status: LspConnectionStatus,
+  capabilities?: ServerCapabilities,
+) => void;
 
 const TSJS_IDS = new Set(['typescript', 'javascript']);
 
 function normalizeServerKey(languageId: string): string {
-  return SERVER_KEY_NORMALIZATION[languageId] ?? languageId;
+  return normalizeLspLanguage(languageId);
 }
 
 /** Grace period (ms) before stopping a server when all its documents close.
@@ -127,8 +126,9 @@ export class LspManager {
 
     const connection = new LspConnection(startResult.server_id, serverKey, transport);
     connection.onStatusChange((status) => {
+      const capabilities = status === 'ready' ? connection.capabilities ?? undefined : undefined;
       for (const listener of this.statusListeners) {
-        listener(serverKey, status);
+        listener(serverKey, status, capabilities);
       }
       // Toggle Monaco native TS validation based on LSP health
       if (TSJS_IDS.has(serverKey)) {
@@ -234,6 +234,11 @@ export class LspManager {
   getStatus(languageId: string): LspConnectionStatus | undefined {
     const serverKey = normalizeServerKey(languageId);
     return this.servers.get(serverKey)?.connection.status;
+  }
+
+  getCapabilities(languageId: string): ServerCapabilities | null | undefined {
+    const serverKey = normalizeServerKey(languageId);
+    return this.servers.get(serverKey)?.connection.capabilities;
   }
 
   getActiveLanguages(): string[] {

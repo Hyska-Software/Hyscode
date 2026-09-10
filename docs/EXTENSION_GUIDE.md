@@ -457,6 +457,8 @@ O arquivo de snippets segue o formato VS Code:
 }
 ```
 
+> **Nota:** `menus["editor/context"]` é metadado declarativo do manifest (compatibilidade com o formato VS Code) e não é renderizado no menu de contexto do editor. Para adicionar itens ao menu, use `api.ui.registerContextMenuItem()` em `main.js` (veja a seção da API `ui`), com `when` aceitando `editorHasSelection`, `resourceLangId ==/!= <lang>` e `editorLangId ==/!= <lang>`.
+
 ### `iconThemes` — Temas de Ícones
 
 ```json
@@ -591,14 +593,30 @@ if (!nome) return; // usuário cancelou
 // Abrir arquivo
 await hyscode.editor.openFile('/caminho/arquivo.ts');
 
-// Obter seleção
-const sel = hyscode.editor.getSelection();
+// Caminho do arquivo ativo
+const path = hyscode.editor.activeFilePath;
 
-// Inserir texto
-await hyscode.editor.insertText('texto inserido');
+// Texto completo do buffer ativo (null quando não há editor)
+const texto = hyscode.editor.getText();
 
-// Decorações
-const deco = hyscode.editor.addDecoration({ /* ... */ });
+// Substituir o buffer inteiro (preserva undo/redo e marca o arquivo como dirty)
+hyscode.editor.setText('novo conteúdo');
+
+// Seleção atual (texto + range)
+const sel = hyscode.editor.getSelection(); // { text, startLineNumber, ... }
+
+// Texto selecionado / substituir seleção / inserir no cursor
+const selecionado = hyscode.editor.getSelectedText();
+hyscode.editor.replaceSelection('substitui a seleção');
+hyscode.editor.insertText('insere no cursor');
+
+// Decorações (aplicadas somente quando o arquivo está ativo)
+const deco = hyscode.editor.addDecorations('/caminho/arquivo.ts', [
+  {
+    range: { startLine: 1, startColumn: 1, endLine: 1, endColumn: 5 },
+    options: { className: 'minha-classe' },
+  },
+]);
 ```
 
 ### themes — Temas
@@ -817,11 +835,14 @@ const output = await api.process.exec(
 // Abrir arquivo
 await api.editor.openFile('/caminho/arquivo.ts');
 
-// Obter seleção
-const sel = api.editor.getSelection();
+// Ler/substituir o buffer ativo
+const texto = api.editor.getText();
+api.editor.setText('novo conteúdo');
 
-// Inserir texto
-await api.editor.insertText('texto inserido');
+// Seleção e edição no cursor
+const sel = api.editor.getSelection();
+api.editor.replaceSelection('substitui a seleção');
+api.editor.insertText('insere no cursor');
 ```
 
 ---
@@ -853,7 +874,7 @@ const ativo = api.themes.getActiveThemeId();
 | `workspace` | `readFile()`, `writeFile()`, `listDir()`, `onDidOpenFile()`, `onDidSaveFile()` |
 | `commands` | `register()`, `registerCommand()`, `executeCommand()` |
 | `window` | `showQuickPick()`, `showInputBox()` |
-| `editor` | `openFile()`, `getSelection()`, `insertText()`, `addDecoration()` |
+| `editor` | `openFile()`, `getText()`, `setText()`, `getSelection()`, `replaceSelection()`, `insertText()`, `addDecorations()` |
 | `settings` | `get()`, `set()`, `onDidChange()`, `updateTabContent()`, `onTabVisible()` |
 | `git` | `getBranch()`, `getStatus()`, `getDiff()` |
 | `themes` | `registerTheme()`, `getActiveThemeId()` |

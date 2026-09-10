@@ -562,10 +562,26 @@ export interface EditorAPI {
   openFile(path: string): Promise<void>;
   getSelectedText(): string | null;
   insertText(text: string): void;
+  /** Full text of the active editor buffer, or null when no editor is focused. */
+  getText(): string | null;
+  /** Replace the entire active editor buffer with `text`. */
+  setText(text: string): void;
+  /** Current selection with range information, or null when no editor is focused. */
+  getSelection(): EditorSelection | null;
+  /** Replace the current selection with `text`. */
+  replaceSelection(text: string): void;
   addDecorations(
     filePath: string,
     decorations: EditorDecoration[],
   ): Disposable;
+}
+
+export interface EditorSelection {
+  text: string;
+  startLineNumber: number;
+  startColumn: number;
+  endLineNumber: number;
+  endColumn: number;
 }
 
 export interface EditorDecoration {
@@ -755,6 +771,11 @@ export interface MenuActionContext {
   selectedText: string | null;
   cursorLine: number;
   cursorColumn: number;
+  /** Active editor indentation settings, when available. */
+  tabSize?: number;
+  insertSpaces?: boolean;
+  /** Active selection range, when available. */
+  selection?: EditorSelection | null;
 }
 
 export interface DocumentFormatter {

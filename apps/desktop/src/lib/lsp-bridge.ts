@@ -19,7 +19,7 @@ import {
 import type { LspContribution } from '@hyscode/extension-api';
 import { useLspStore } from '@/stores/lsp-store';
 import type { LspServerInfo } from '@/stores/lsp-store';
-import type { LspConnectionStatus } from '@hyscode/lsp-client';
+import type { LspConnectionStatus, ServerCapabilities } from '@hyscode/lsp-client';
 import { useSettingsStore } from '@/stores/settings-store';
 
 type MonacoInstance = typeof import('monaco-editor');
@@ -67,8 +67,8 @@ class LspBridgeImpl {
     this.manager.setRootUri(this.rootUri);
 
     // Register status change listener → lsp-store
-    this.manager.onStatusChange((languageId, status) => {
-      this.updateStoreStatus(languageId, status);
+    this.manager.onStatusChange((languageId, status, capabilities) => {
+      this.updateStoreStatus(languageId, status, capabilities);
     });
 
     // Register built-in server configs
@@ -351,9 +351,14 @@ class LspBridgeImpl {
   }
 
   /**
-   * Update the Zustand store with server status changes.
+   * Update the Zustand store with server status changes and publish the
+   * server capabilities once the server reports `ready`.
    */
-  private updateStoreStatus(languageId: string, status: LspConnectionStatus): void {
+  private updateStoreStatus(
+    languageId: string,
+    status: LspConnectionStatus,
+    capabilities?: ServerCapabilities,
+  ): void {
     const store = useLspStore.getState();
     const builtinConfig = getBuiltinServerForLanguage(languageId);
 
@@ -366,6 +371,13 @@ class LspBridgeImpl {
     };
 
     store.setServerStatus(languageId, info);
+
+    if (status === 'ready') {
+      const resolved = capabilities ?? this.manager?.getCapabilities(languageId) ?? undefined;
+      if (resolved) {
+        store.setServerCapabilities(languageId, resolved);
+      }
+    }
   }
 
   /**
