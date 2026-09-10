@@ -39,6 +39,12 @@ The frontend is a React 19 SPA running inside Tauri's WebView. It uses shadcn/ui
 - Panel layout state persisted in `layoutStore`
 - Default ratios: File Tree 15% | Editor 50% | Agent 35%
 
+Terminal docking, visibility, active sidebar tab, the editor/bottom-terminal split,
+and the right-panel width are persisted per project root in
+`layoutStore.terminalLayoutPrefs`. Opening or switching a project restores that
+project's terminal layout; projects without a stored record inherit the previous
+terminal visibility and use the default sizes.
+
 ### VORTEX Right Surface Tabs
 
 VORTEX uses `AgentRightPanel` for project-aware right-side surfaces: Changes,

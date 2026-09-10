@@ -106,8 +106,10 @@ describe('project workspace lifecycle', () => {
     terminalStore.useTerminalStore.setState({ sessions: [], activeSessionId: null, nextIndex: 1 });
     layoutStore.useLayoutStore.setState({
       workspaceMode: 'editor',
+      terminalLocation: 'bottom',
       terminalVisible: false,
       sidebarActiveTab: 'chat',
+      terminalLayoutPrefs: {},
     });
   });
 
@@ -155,6 +157,36 @@ describe('project workspace lifecycle', () => {
     expect(openFolderMock).toHaveBeenCalledWith('C:/new-project');
     expect(invokeMock).toHaveBeenCalledWith('pty_kill', { ptyId: 'old-pty' });
     expect(destroyMock).toHaveBeenCalled();
+  });
+
+  it('restores the terminal layout stored for each project', async () => {
+    projectStore.useProjectStore.getState().openProject('C:/project-a');
+    fileStore.useFileStore.setState({ rootPath: 'C:/project-a' });
+    fileStore.useFileStore.setState({
+      openFolder: vi.fn(async (path: string) => {
+        fileStore.useFileStore.setState({ rootPath: path, tree: [] });
+      }),
+    });
+
+    const layout = layoutStore.useLayoutStore.getState();
+    layout.moveTerminalToSidebar();
+    layout.setTerminalLayoutPrefs({ bottomPanelSize: 48 });
+
+    await persistence.openProjectWorkspace('C:/project-b');
+    expect(layoutStore.useLayoutStore.getState().terminalLocation).toBe('bottom');
+
+    layoutStore.useLayoutStore.getState().moveTerminalToBottom();
+
+    await persistence.openProjectWorkspace('C:/project-a');
+    expect(layoutStore.useLayoutStore.getState().terminalLocation).toBe('sidebar');
+    expect(layoutStore.useLayoutStore.getState().terminalVisible).toBe(true);
+    expect(layoutStore.useLayoutStore.getState().sidebarActiveTab).toBe('terminal');
+    expect(
+      layoutStore.resolveTerminalLayoutPrefs(
+        layoutStore.useLayoutStore.getState().terminalLayoutPrefs,
+        'C:/project-a',
+      ).bottomPanelSize,
+    ).toBe(48);
   });
 
   it('switches VORTEX projects and restores the explicitly selected conversation', async () => {

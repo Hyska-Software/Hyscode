@@ -4,8 +4,10 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   DEFAULT_RIGHT_TAB_ORDER,
   DEFAULT_RIGHT_TAB_VISIBILITY,
+  DEFAULT_TERMINAL_LAYOUT_PREFS,
   agentRightTabProjectKey,
   normalizeAgentRightTabPrefs,
+  resolveTerminalLayoutPrefs,
   type AgentRightTabPrefs,
   type RightTab,
 } from './layout-store';
@@ -14,12 +16,26 @@ import { useProjectStore } from './project-store';
 
 beforeEach(() => {
   useProjectStore.setState({ rootPath: 'C:/layout-store-test' });
-  useLayoutStore.setState({ agentRightTab: 'changes', agentRightTabPrefs: {} });
+  useLayoutStore.setState({
+    agentRightTab: 'changes',
+    agentRightTabPrefs: {},
+    terminalLocation: 'bottom',
+    terminalVisible: true,
+    sidebarActiveTab: 'chat',
+    terminalLayoutPrefs: {},
+  });
 });
 
 afterEach(() => {
   useProjectStore.setState({ rootPath: null });
-  useLayoutStore.setState({ agentRightTab: 'changes', agentRightTabPrefs: {} });
+  useLayoutStore.setState({
+    agentRightTab: 'changes',
+    agentRightTabPrefs: {},
+    terminalLocation: 'bottom',
+    terminalVisible: true,
+    sidebarActiveTab: 'chat',
+    terminalLayoutPrefs: {},
+  });
 });
 
 describe('agent right tab preferences', () => {
@@ -109,5 +125,90 @@ describe('agent right tab preferences', () => {
 
     store.setAgentSelectedChangeFile('src/app.ts');
     expect(useLayoutStore.getState().agentRightTab).toBe('changes');
+  });
+});
+
+describe('terminal layout preferences', () => {
+  it('resolves defaults for projects without stored preferences', () => {
+    expect(resolveTerminalLayoutPrefs(undefined, 'C:/unknown-project')).toEqual(
+      DEFAULT_TERMINAL_LAYOUT_PREFS,
+    );
+    expect(
+      resolveTerminalLayoutPrefs(useLayoutStore.getState().terminalLayoutPrefs, null),
+    ).toEqual(DEFAULT_TERMINAL_LAYOUT_PREFS);
+  });
+
+  it('persists docking, visibility, tab and sizes per project', () => {
+    const store = useLayoutStore.getState();
+    store.moveTerminalToSidebar();
+    store.setTerminalLayoutPrefs({ bottomPanelSize: 42, rightPanelSize: 38 });
+
+    const stored = useLayoutStore.getState().terminalLayoutPrefs[
+      agentRightTabProjectKey('C:/layout-store-test')
+    ];
+    expect(stored).toMatchObject({
+      location: 'sidebar',
+      visible: true,
+      sidebarActiveTab: 'terminal',
+      bottomPanelSize: 42,
+      rightPanelSize: 38,
+    });
+
+    useProjectStore.setState({ rootPath: 'C:/another-project' });
+    const otherPrefs = resolveTerminalLayoutPrefs(
+      useLayoutStore.getState().terminalLayoutPrefs,
+      'C:/another-project',
+    );
+    expect(otherPrefs).toEqual(DEFAULT_TERMINAL_LAYOUT_PREFS);
+  });
+
+  it('persists visibility toggles performed through existing actions', () => {
+    const store = useLayoutStore.getState();
+    store.toggleTerminal();
+    expect(
+      useLayoutStore.getState().terminalLayoutPrefs[agentRightTabProjectKey('C:/layout-store-test')]
+        ?.visible,
+    ).toBe(false);
+
+    store.setTerminalVisible(true);
+    expect(
+      useLayoutStore.getState().terminalLayoutPrefs[agentRightTabProjectKey('C:/layout-store-test')]
+        ?.visible,
+    ).toBe(true);
+  });
+
+  it('restores a stored layout and falls back to the previous visibility', () => {
+    const store = useLayoutStore.getState();
+    store.setTerminalLayoutPrefs({ bottomPanelSize: 48 });
+    store.moveTerminalToSidebar();
+
+    useProjectStore.setState({ rootPath: 'C:/another-project' });
+    store.applyTerminalLayoutState({
+      location: 'bottom',
+      visible: false,
+      sidebarActiveTab: 'chat',
+    });
+
+    store.restoreTerminalLayout('C:/another-project', false);
+    expect(useLayoutStore.getState().terminalLocation).toBe('bottom');
+    expect(useLayoutStore.getState().terminalVisible).toBe(false);
+
+    store.restoreTerminalLayout('C:/layout-store-test', false);
+    expect(useLayoutStore.getState().terminalLocation).toBe('sidebar');
+    expect(useLayoutStore.getState().terminalVisible).toBe(true);
+    expect(useLayoutStore.getState().sidebarActiveTab).toBe('terminal');
+    expect(
+      resolveTerminalLayoutPrefs(
+        useLayoutStore.getState().terminalLayoutPrefs,
+        'C:/layout-store-test',
+      ).bottomPanelSize,
+    ).toBe(48);
+  });
+
+  it('uses the fallback visibility for projects with no record', () => {
+    useLayoutStore.getState().restoreTerminalLayout('C:/never-opened', false);
+    expect(useLayoutStore.getState().terminalVisible).toBe(false);
+    expect(useLayoutStore.getState().terminalLocation).toBe('bottom');
+    expect(useLayoutStore.getState().sidebarActiveTab).toBe('chat');
   });
 });

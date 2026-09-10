@@ -14,6 +14,26 @@ export interface AgentRightTabPrefs {
   visible: Record<RightTab, boolean>;
 }
 
+/** Per-project terminal docking, visibility, tab and panel-size preferences */
+export interface TerminalLayoutPrefs {
+  location: TerminalLocation;
+  visible: boolean;
+  sidebarActiveTab: 'chat' | 'terminal';
+  /** Percentage of the editor vertical split owned by the bottom terminal */
+  bottomPanelSize: number;
+  /** Percentage of the editor horizontal split owned by the right panel */
+  rightPanelSize: number;
+}
+
+/** Defaults mirror the previous hardcoded panel sizes in the editor layout */
+export const DEFAULT_TERMINAL_LAYOUT_PREFS: TerminalLayoutPrefs = {
+  location: 'bottom',
+  visible: true,
+  sidebarActiveTab: 'chat',
+  bottomPanelSize: 35,
+  rightPanelSize: 34,
+};
+
 /** Default order for the agent right panel tabs */
 export const DEFAULT_RIGHT_TAB_ORDER: RightTab[] = [
   'changes',
@@ -50,6 +70,20 @@ export function normalizeAgentRightTabPrefs(
 /** Resolve the project key for a given root path (or the global fallback) */
 export function agentRightTabProjectKey(rootPath: string | null): string {
   return rootPath ?? GLOBAL_PROJECT_KEY;
+}
+
+/** Resolve the project key used by terminal layout preferences */
+export function terminalLayoutProjectKey(rootPath: string | null): string {
+  return rootPath ?? GLOBAL_PROJECT_KEY;
+}
+
+/** Build complete terminal layout prefs for a project from a possibly-partial record */
+export function resolveTerminalLayoutPrefs(
+  prefs: Record<string, TerminalLayoutPrefs> | undefined,
+  rootPath: string | null,
+): TerminalLayoutPrefs {
+  const stored = prefs?.[terminalLayoutProjectKey(rootPath)];
+  return { ...DEFAULT_TERMINAL_LAYOUT_PREFS, ...(stored ?? {}) };
 }
 
 function normalizePrefs(prefs: AgentRightTabPrefs | undefined): AgentRightTabPrefs {
@@ -133,6 +167,8 @@ interface LayoutState {
   agentRightCollapsed: boolean;
   /** Whether the shared Desktop Kanban surface is open. */
   kanbanOpen: boolean;
+  /** Per-project terminal layout preferences keyed by project root path */
+  terminalLayoutPrefs: Record<string, TerminalLayoutPrefs>;
 
   setWorkspaceMode: (mode: WorkspaceMode) => void;
   setTerminalLocation: (location: TerminalLocation) => void;
@@ -158,6 +194,16 @@ interface LayoutState {
   setAgentRightCollapsed: (collapsed: boolean) => void;
   setKanbanOpen: (open: boolean) => void;
   toggleKanban: () => void;
+  /** Persist a partial terminal layout preference for the active project */
+  setTerminalLayoutPrefs: (patch: Partial<TerminalLayoutPrefs>) => void;
+  /** Apply the terminal layout stored for a project (falls back to `fallbackVisible`) */
+  restoreTerminalLayout: (rootPath: string, fallbackVisible: boolean) => void;
+  /** Apply terminal layout fields without persisting them (project-switch rollback) */
+  applyTerminalLayoutState: (layout: {
+    location: TerminalLocation;
+    visible: boolean;
+    sidebarActiveTab: 'chat' | 'terminal';
+  }) => void;
   /** Reset transient layout state before another project becomes active. */
   resetProjectState: () => void;
   toggleTerminal: () => void;
@@ -185,11 +231,21 @@ export const useLayoutStore = create<LayoutState>()(
       agentLeftCollapsed: false,
       agentRightCollapsed: false,
       kanbanOpen: false,
+      terminalLayoutPrefs: {},
 
       setWorkspaceMode: (mode) => set({ workspaceMode: mode }),
-      setTerminalLocation: (location) => set({ terminalLocation: location }),
-      setTerminalVisible: (visible) => set({ terminalVisible: visible }),
-      setSidebarActiveTab: (tab) => set({ sidebarActiveTab: tab }),
+      setTerminalLocation: (location) => {
+        set({ terminalLocation: location });
+        get().setTerminalLayoutPrefs({ location });
+      },
+      setTerminalVisible: (visible) => {
+        set({ terminalVisible: visible });
+        get().setTerminalLayoutPrefs({ visible });
+      },
+      setSidebarActiveTab: (tab) => {
+        set({ sidebarActiveTab: tab });
+        get().setTerminalLayoutPrefs({ sidebarActiveTab: tab });
+      },
       setAgentRightTab: (tab) => {
         if (tab === null) {
           set({ agentRightTab: null });
@@ -283,6 +339,42 @@ export const useLayoutStore = create<LayoutState>()(
       setKanbanOpen: (open) => set({ kanbanOpen: open }),
       toggleKanban: () => set((state) => ({ kanbanOpen: !state.kanbanOpen })),
 
+      setTerminalLayoutPrefs: (patch) =>
+        set((state) => {
+          const key = getProjectKey();
+          const active = {
+            location: state.terminalLocation,
+            visible: state.terminalVisible,
+            sidebarActiveTab: state.sidebarActiveTab,
+          };
+          return {
+            terminalLayoutPrefs: {
+              ...state.terminalLayoutPrefs,
+              [key]: {
+                ...DEFAULT_TERMINAL_LAYOUT_PREFS,
+                ...state.terminalLayoutPrefs[key],
+                ...active,
+                ...patch,
+              },
+            },
+          };
+        }),
+
+      restoreTerminalLayout: (rootPath, fallbackVisible) => {
+        const stored = get().terminalLayoutPrefs[terminalLayoutProjectKey(rootPath)];
+        const prefs = stored
+          ? { ...DEFAULT_TERMINAL_LAYOUT_PREFS, ...stored }
+          : { ...DEFAULT_TERMINAL_LAYOUT_PREFS, visible: fallbackVisible };
+        set({
+          terminalLocation: prefs.location,
+          terminalVisible: prefs.visible,
+          sidebarActiveTab: prefs.sidebarActiveTab,
+        });
+      },
+
+      applyTerminalLayoutState: ({ location, visible, sidebarActiveTab }) =>
+        set({ terminalLocation: location, terminalVisible: visible, sidebarActiveTab }),
+
       resetProjectState: () =>
         set({
           workspaceMode: 'editor',
@@ -301,16 +393,25 @@ export const useLayoutStore = create<LayoutState>()(
           kanbanOpen: false,
         }),
 
-      toggleTerminal: () => set((state) => ({ terminalVisible: !state.terminalVisible })),
+      toggleTerminal: () => get().setTerminalVisible(!get().terminalVisible),
 
       toggleSidebar: () => set((state) => ({ sidebarVisible: !state.sidebarVisible })),
 
       focusSidebarView: (view) => set({ sidebarActiveView: view, sidebarVisible: true }),
 
-      moveTerminalToSidebar: () =>
-        set({ terminalLocation: 'sidebar', sidebarActiveTab: 'terminal', terminalVisible: true }),
+      moveTerminalToSidebar: () => {
+        set({ terminalLocation: 'sidebar', sidebarActiveTab: 'terminal', terminalVisible: true });
+        get().setTerminalLayoutPrefs({
+          location: 'sidebar',
+          sidebarActiveTab: 'terminal',
+          visible: true,
+        });
+      },
 
-      moveTerminalToBottom: () => set({ terminalLocation: 'bottom', terminalVisible: true }),
+      moveTerminalToBottom: () => {
+        set({ terminalLocation: 'bottom', terminalVisible: true });
+        get().setTerminalLayoutPrefs({ location: 'bottom', visible: true });
+      },
     }),
     {
       name: 'hyscode-layout',
@@ -324,6 +425,7 @@ export const useLayoutStore = create<LayoutState>()(
         agentRightCollapsed: state.agentRightCollapsed,
         agentRightTabPrefs: state.agentRightTabPrefs,
         agentChangesFilter: state.agentChangesFilter,
+        terminalLayoutPrefs: state.terminalLayoutPrefs,
       }),
     },
   ),

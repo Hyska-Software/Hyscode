@@ -447,7 +447,11 @@ async function performProjectOpen(
 
   const switchId = ++projectSwitchGeneration;
   const currentRootPath = useProjectStore.getState().rootPath;
-  const previousTerminalVisible = useLayoutStore.getState().terminalVisible;
+  const previousTerminalLayout = {
+    location: useLayoutStore.getState().terminalLocation,
+    visible: useLayoutStore.getState().terminalVisible,
+    sidebarActiveTab: useLayoutStore.getState().sidebarActiveTab,
+  };
   const preserveVortexRuntimes =
     useLayoutStore.getState().workspaceMode === 'agent' &&
     vortexSessionRuntimeManager.hasActiveRuntimes();
@@ -494,12 +498,12 @@ async function performProjectOpen(
     if (!isCurrent()) return;
 
     useProjectStore.getState().setLoading(false);
-    useLayoutStore.getState().setTerminalVisible(previousTerminalVisible);
+    useLayoutStore.getState().restoreTerminalLayout(rootPath, previousTerminalLayout.visible);
     vortexSessionRuntimeManager.resumeProjection();
   } catch (error) {
     if (isCurrentProjectSwitch(switchId, rootPath)) {
       useProjectStore.getState().setLoading(false);
-      useLayoutStore.getState().setTerminalVisible(previousTerminalVisible);
+      useLayoutStore.getState().applyTerminalLayoutState(previousTerminalLayout);
     }
     throw error;
   }
