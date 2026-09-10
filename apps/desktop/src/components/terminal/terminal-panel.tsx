@@ -1,4 +1,4 @@
-import { useEffect, useCallback, useRef } from 'react';
+import { useEffect, useCallback, useMemo, useRef } from 'react';
 import { Terminal, Plus, X, GripVertical, Bot } from 'lucide-react';
 import { asTerminalRuntimeFailure } from '@hyscode/agent-harness';
 import { useTerminalStore } from '../../stores/terminal-store';
@@ -7,8 +7,28 @@ import { desktopTerminalRuntime } from '../../lib/terminal-runtime';
 import { TerminalInstance } from './terminal-instance';
 
 export function TerminalPanel() {
-  const allSessions = useTerminalStore((s) => s.sessions);
-  const sessions = allSessions.filter((session) => session.location === 'panel');
+  // Subscribe to a compact signature instead of the sessions array so high-rate
+  // output sequence updates never re-render the tab bar or terminal instances.
+  const sessionSignature = useTerminalStore((s) =>
+    s.sessions
+      .filter((session) => session.location === 'panel')
+      .map((session) =>
+        [
+          session.id,
+          session.name,
+          session.isAgentSession ? '1' : '0',
+          session.activeToolCallId ?? '',
+          session.awaitingInput ? '1' : '0',
+          session.ptyId ?? '',
+          session.isDead ? '1' : '0',
+        ].join(':'),
+      )
+      .join('|'),
+  );
+  const sessions = useMemo(
+    () => useTerminalStore.getState().sessions.filter((session) => session.location === 'panel'),
+    [sessionSignature],
+  );
   const activeSessionId = useTerminalStore((s) => s.activeSessionId);
   const createSession = useTerminalStore((s) => s.createSession);
   const setActiveSession = useTerminalStore((s) => s.setActiveSession);

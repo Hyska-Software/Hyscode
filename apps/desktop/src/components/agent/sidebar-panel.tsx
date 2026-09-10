@@ -3,7 +3,7 @@ import { useLayoutStore } from '@/stores/layout-store';
 import { useSettingsStore } from '@/stores';
 import { AgentPanel } from '@/components/agent';
 import { TerminalPanel } from '@/components/terminal';
-import { useCallback } from 'react';
+import { useCallback, useEffect } from 'react';
 import { cn } from '@/lib/utils';
 
 /**
@@ -16,9 +16,17 @@ export function SidebarPanel() {
   const activeTab = useLayoutStore((s) => s.sidebarActiveTab);
   const setSidebarActiveTab = useLayoutStore((s) => s.setSidebarActiveTab);
   const showAgentChat = useSettingsStore((s) => s.showAgentChatPanel);
+  const agentCenterPanelMode = useSettingsStore((s) => s.agentCenterPanelMode);
 
   const terminalInSidebar = terminalLocation === 'sidebar' && terminalVisible;
   const showTabs = terminalInSidebar && showAgentChat;
+  const showTerminalTab = agentCenterPanelMode !== 'terminal';
+
+  useEffect(() => {
+    if (!showTerminalTab && activeTab === 'terminal') {
+      setSidebarActiveTab('chat');
+    }
+  }, [showTerminalTab, activeTab, setSidebarActiveTab]);
 
   // ── Drag source: terminal tab can be dragged out ──
   const handleDragStart = useCallback(
@@ -55,21 +63,23 @@ export function SidebarPanel() {
           <Bot className="h-3.5 w-3.5 shrink-0" />
           Chat
         </button>
-        <button
-          draggable
-          onDragStart={handleDragStart}
-          onClick={() => setSidebarActiveTab('terminal')}
-          className={cn(
-            'flex h-8 items-center gap-1.5 px-3 text-[11px] font-medium transition-colors cursor-grab active:cursor-grabbing',
-            activeTab === 'terminal'
-              ? 'bg-surface text-foreground'
-              : 'text-muted-foreground hover:text-foreground hover:bg-muted',
-          )}
-        >
-          <Terminal className="h-3 w-3 shrink-0" />
-          Terminal
-          <GripVertical className="h-2.5 w-2.5 text-muted-foreground/50" />
-        </button>
+        {showTerminalTab && (
+          <button
+            draggable
+            onDragStart={handleDragStart}
+            onClick={() => setSidebarActiveTab('terminal')}
+            className={cn(
+              'flex h-8 items-center gap-1.5 px-3 text-[11px] font-medium transition-colors cursor-grab active:cursor-grabbing',
+              activeTab === 'terminal'
+                ? 'bg-surface text-foreground'
+                : 'text-muted-foreground hover:text-foreground hover:bg-muted',
+            )}
+          >
+            <Terminal className="h-3 w-3 shrink-0" />
+            Terminal
+            <GripVertical className="h-2.5 w-2.5 text-muted-foreground/50" />
+          </button>
+        )}
       </div>
 
       {/* Content */}
@@ -77,9 +87,11 @@ export function SidebarPanel() {
         <div className={cn('absolute inset-0', activeTab === 'chat' ? 'z-10' : 'z-0 invisible')}>
           <AgentPanel />
         </div>
-        <div className={cn('absolute inset-0', activeTab === 'terminal' ? 'z-10' : 'z-0 invisible')}>
-          <TerminalPanel />
-        </div>
+        {showTerminalTab && (
+          <div className={cn('absolute inset-0', activeTab === 'terminal' ? 'z-10' : 'z-0 invisible')}>
+            <TerminalPanel />
+          </div>
+        )}
       </div>
     </div>
   );

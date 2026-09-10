@@ -258,7 +258,7 @@ describe('TerminalInstance', () => {
 
     mocks.settings.terminalFontFamily = 'Cascadia Mono';
     mocks.settings.terminalFontSize = 18;
-    view.rerender(<TerminalInstance sessionId="session-1" isActive />);
+    view.rerender(<TerminalInstance sessionId="session-1" isActive={false} />);
 
     await waitFor(() => expect(mocks.terminals[0]?.options).toMatchObject({
       fontFamily: "Cascadia Mono, Consolas, 'Courier New', monospace",

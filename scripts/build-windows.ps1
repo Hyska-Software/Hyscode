@@ -94,6 +94,13 @@ node scripts/copy-sidecars.mjs `
   --target (Join-Path $TAURI_DIR "target" $Target "release") `
   --target (Join-Path $TAURI_DIR "target" "release")
 
+# ── Step 3.6: Copy the modern Windows ConPTY next to the app exe ────────────
+Write-Host ""
+Write-Host "  Copying ConPTY binaries..." -ForegroundColor Yellow
+node scripts/copy-conpty.mjs `
+  --target (Join-Path $TAURI_DIR "target" $Target "release") `
+  --target (Join-Path $TAURI_DIR "target" "release")
+
 # ── Step 4: Build Tauri (NSIS + MSI) ────────────────────────────────────────
 if (-not $InnoOnly) {
     Write-Host ""

@@ -46,6 +46,18 @@ liveness remains retained and quarantined; it is never reused or reported as cle
 Late acquire, write, interrupt, or kill settlements may add diagnostics but cannot resurrect a
 session, clear a newer owner, or emit a second exit.
 
+The PTY data plane never blocks the command surface. Each Desktop session owns a dedicated writer
+thread fed by a channel, so `pty_write`, `pty_interrupt`, and lifecycle commands never hold the
+registry lock across pipe I/O; a slow or saturated ConPTY input pipe can therefore not wedge output
+draining or unrelated sessions. The reader decodes UTF-8 incrementally so multi-byte glyphs split
+across reads are preserved and keeps buffering after the child exits instead of discarding late
+output, while the waiter observes a bounded drain grace before publishing `pty:exit` so the final
+frame of a full-screen application is delivered before the exit event. On Windows the child shell
+and every descendant are placed in a kill-on-close job object, and the runtime confirms termination
+through `try_wait` instead of trusting the platform kill result. Desktop ships the modern OpenConsole
+`conpty.dll` next to the executable so portable-pty does not fall back to the legacy inbox ConPTY,
+which is known to hang full-screen TUI applications.
+
 Live terminal progress is a provisional projection. It may surface a runtime failure before the
 canonical tool result is available, but it cannot synthesize a model result. A later canonical
 `tool_call_result` replaces provisional progress, while an explicit failure remains visible in
@@ -76,6 +88,13 @@ separate user-terminal path and never bypasses agent ownership or approval bound
 - User input cannot write to an agent terminal unless that terminal is waiting for input, has no
   active tool owner, and the approval mode permits manual input; sensitive prompts remain user-only.
 - PTY output combines stdout and stderr; consumers must not claim separate streams.
+- `pty_write` acknowledges enqueueing to the session writer thread, not physical delivery to the
+  child; asynchronous write failures surface through the session lifecycle and `pty:exit`.
+- Stopping a session terminates the process tree, including TUI grandchildren, so closing a terminal
+  cannot leave a full-screen application running without its console.
+- On Windows the modern ConPTY binaries must be staged next to the executable
+  (`scripts/copy-conpty.mjs` for dev and `bundle.resources` for installers); `pty_diagnostics`
+  reports whether the sideloaded DLL was loaded.
 - Timeout and cancellation interrupt the process and escalate to terminating an unresponsive PTY.
 - A process exit is not treated as a timeout: the runtime drains buffered output, and an exit without
   a completion marker is reported immediately with its exit code when available.

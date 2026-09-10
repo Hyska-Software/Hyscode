@@ -68,6 +68,10 @@ Name: "associatewithfiles"; Description: "Register {#MyAppName} as an editor for
 Source: "{#SourceDir}\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#SourceDir}\*.dll"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
 Source: "{#SourceDir}\resources\*"; DestDir: "{app}\resources"; Flags: ignoreversion recursesubdirs createallsubdirs skipifsourcedoesntexist
+; Modern ConPTY host shipped next to the exe so portable-pty does not fall back
+; to the legacy inbox implementation (known to hang full-screen TUIs).
+Source: "{#SourceDir}\conpty.dll"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
+Source: "{#SourceDir}\OpenConsole.exe"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
 ; AI agent sidecars (copied next to the exe by scripts/build-windows.ps1)
 Source: "{#SourceDir}\claude-agent.exe"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
 Source: "{#SourceDir}\codex-sidecar.exe"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist

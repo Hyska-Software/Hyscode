@@ -14,6 +14,7 @@ apps/desktop/src-tauri/gen/
 apps/desktop/src-tauri/binaries/*.exe
 apps/desktop/src-tauri/binaries/claude-agent
 apps/desktop/src-tauri/binaries/codex-sidecar
+apps/desktop/src-tauri/resources/conpty/
 
 # IDE
 .vscode/

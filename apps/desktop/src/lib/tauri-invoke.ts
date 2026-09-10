@@ -417,6 +417,10 @@ interface TauriCommands {
     };
   };
   pty_interrupt: { args: { ptyId: string }; ret: void };
+  pty_diagnostics: {
+    args: Record<string, never>;
+    ret: { conpty_source: string; conpty_path: string | null };
+  };
 
   // Keychain
   keychain_set: { args: { service: string; account: string; password: string }; ret: void };

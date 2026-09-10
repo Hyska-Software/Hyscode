@@ -1,4 +1,4 @@
-import { useEffect, useRef, useCallback } from 'react';
+import { useEffect, useRef, useCallback, memo } from 'react';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { asTerminalRuntimeFailure } from '@hyscode/agent-harness';
@@ -19,8 +19,13 @@ type TerminalViewport = { cols: number; rows: number };
 
 const DEFAULT_TERMINAL_VIEWPORT: TerminalViewport = { cols: 80, rows: 24 };
 const MAX_TERMINAL_DIMENSION = 4096;
+const OUTPUT_SEQUENCE_STORE_INTERVAL = 16;
 
-export function TerminalInstance({ sessionId, isActive }: TerminalInstanceProps) {
+function detectWindowsConpty(): boolean {
+  return typeof navigator !== 'undefined' && navigator.userAgent.includes('Windows');
+}
+
+function TerminalInstanceComponent({ sessionId, isActive }: TerminalInstanceProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const xtermRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
@@ -31,6 +36,8 @@ export function TerminalInstance({ sessionId, isActive }: TerminalInstanceProps)
   const resizingRef = useRef(false);
   /** Tracks what the user is typing so we can log commands on Enter */
   const inputBufferRef = useRef<string>('');
+  /** Last sequence pushed to the store; intermediate chunks are coalesced. */
+  const lastStoredSequenceRef = useRef(0);
 
   const setPtyId = useTerminalStore((s) => s.setPtyId);
   const markPtyDead = useTerminalStore((s) => s.markPtyDead);
@@ -167,6 +174,7 @@ export function TerminalInstance({ sessionId, isActive }: TerminalInstanceProps)
       letterSpacing: 0,
       lineHeight: 1,
       theme: getXtermTheme(themeIdRef.current),
+      ...(detectWindowsConpty() ? { windowsPty: { backend: 'conpty' as const } } : {}),
     });
 
     const fitAddon = new FitAddon();
@@ -272,7 +280,10 @@ export function TerminalInstance({ sessionId, isActive }: TerminalInstanceProps)
           (data, sequence) => {
             if (!cancelled) {
               term.write(data);
-              useTerminalStore.getState().setOutputSequence(sessionId, sequence);
+              if (sequence - lastStoredSequenceRef.current >= OUTPUT_SEQUENCE_STORE_INTERVAL) {
+                lastStoredSequenceRef.current = sequence;
+                useTerminalStore.getState().setOutputSequence(sessionId, sequence);
+              }
             }
           },
           (exitCode, failure) => {
@@ -341,3 +352,5 @@ export function TerminalInstance({ sessionId, isActive }: TerminalInstanceProps)
     />
   );
 }
+
+export const TerminalInstance = memo(TerminalInstanceComponent);

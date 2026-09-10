@@ -935,6 +935,7 @@ export function AgentRightPanel() {
   const reorderAgentRightTabs = useLayoutStore((s) => s.reorderAgentRightTabs);
   const tabPrefsMap = useLayoutStore((s) => s.agentRightTabPrefs);
   const rootPath = useFileStore((s) => s.rootPath);
+  const agentCenterPanelMode = useSettingsStore((s) => s.agentCenterPanelMode);
 
   // Per-project tab order + visibility
   const { order, visible } = useMemo(() => {
@@ -942,7 +943,10 @@ export function AgentRightPanel() {
     return normalizeAgentRightTabPrefs(tabPrefsMap[key]);
   }, [tabPrefsMap, rootPath]);
 
-  const visibleTabs = useMemo(() => order.filter((id) => visible[id]), [order, visible]);
+  const visibleTabs = useMemo(
+    () => order.filter((id) => visible[id] && !(id === 'terminal' && agentCenterPanelMode === 'terminal')),
+    [order, visible, agentCenterPanelMode],
+  );
 
   // Keep legacy or partially hydrated state from pointing at an unavailable surface.
   useEffect(() => {
@@ -1038,11 +1042,13 @@ export function AgentRightPanel() {
         <div className={cn('absolute inset-0', activeTab === 'preview' ? 'z-10' : 'z-0 invisible')}>
           <PreviewTab />
         </div>
-        <div
-          className={cn('absolute inset-0', activeTab === 'terminal' ? 'z-10' : 'z-0 invisible')}
-        >
-          <TerminalPanel />
-        </div>
+        {agentCenterPanelMode !== 'terminal' && (
+          <div
+            className={cn('absolute inset-0', activeTab === 'terminal' ? 'z-10' : 'z-0 invisible')}
+          >
+            <TerminalPanel />
+          </div>
+        )}
       </div>
     </div>
   );

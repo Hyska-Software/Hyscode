@@ -123,6 +123,7 @@ pub fn run() {
             commands::pty::pty_exists,
             commands::pty::pty_snapshot,
             commands::pty::pty_interrupt,
+            commands::pty::pty_diagnostics,
             // Extension commands
             commands::extension::extension_install,
             commands::extension::extension_install_zip,

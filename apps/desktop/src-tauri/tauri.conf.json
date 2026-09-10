@@ -4,9 +4,9 @@
   "version": "0.13.0-build.111",
   "identifier": "com.hyscode.app",
   "build": {
-    "beforeDevCommand": "npm run build:sidecars && npm run frontend:dev",
+    "beforeDevCommand": "npm run build:sidecars && npm run copy:conpty && npm run frontend:dev",
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "npm run build:sidecars && npm run build",
+    "beforeBuildCommand": "npm run build:sidecars && npm run stage:conpty && npm run build",
     "frontendDist": "../dist"
   },
   "app": {

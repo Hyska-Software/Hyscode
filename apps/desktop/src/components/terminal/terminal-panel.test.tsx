@@ -6,6 +6,7 @@ import { TerminalPanel } from './terminal-panel';
 import { useTerminalStore, type TerminalSession } from '../../stores/terminal-store';
 
 const invokeMock = vi.hoisted(() => vi.fn());
+const instanceRenders = vi.hoisted(() => ({ count: 0 }));
 
 vi.mock('@tauri-apps/api/core', () => ({
   invoke: (...args: unknown[]) => {
@@ -16,7 +17,12 @@ vi.mock('@tauri-apps/api/core', () => ({
   },
 }));
 
-vi.mock('./terminal-instance', () => ({ TerminalInstance: () => null }));
+vi.mock('./terminal-instance', () => ({
+  TerminalInstance: () => {
+    instanceRenders.count += 1;
+    return null;
+  },
+}));
 
 function makeSession(overrides: Partial<TerminalSession>): TerminalSession {
   return {
@@ -54,6 +60,7 @@ describe('TerminalPanel tab bar interactions', () => {
   afterEach(() => {
     cleanup();
     invokeMock.mockReset();
+    instanceRenders.count = 0;
     seedSessions([]);
   });
 
@@ -103,6 +110,15 @@ describe('TerminalPanel tab bar interactions', () => {
     const state = useTerminalStore.getState();
     expect(state.sessions.map((s) => s.id)).toEqual(['term-1', 'term-2']);
     expect(invokeMock).not.toHaveBeenCalled();
+  });
+
+  it('does not re-render terminal instances when only the output sequence changes', () => {
+    render(<TerminalPanel />);
+    const rendersAfterMount = instanceRenders.count;
+
+    useTerminalStore.getState().setOutputSequence('term-1', 5);
+
+    expect(instanceRenders.count).toBe(rendersAfterMount);
   });
 
   it('scrolls the tab bar horizontally from vertical wheel input once tabs overflow', () => {
