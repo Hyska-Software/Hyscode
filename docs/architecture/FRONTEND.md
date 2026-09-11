@@ -228,6 +228,17 @@ const MonacoEditor = lazy(() => import('@monaco-editor/react'));
 - Each agent edit creates an **undo checkpoint** so user can revert individual agent edits
 - Diff view toggle: side-by-side before/after for any agent edit
 
+### LSP Document URIs
+
+Editor models are created with canonical `file:` URIs (`pathToFileUri` from
+`@hyscode/lsp-client`) instead of raw filesystem paths. `monaco.Uri.parse` of a
+Windows path produces a one-letter scheme with percent-encoded backslashes
+(`D:/x%5Cy.rs`), which LSP servers reject with `url is not a file`. The Monaco
+adapter normalizes every model URI before sending requests and skips models that
+are not backed by a real file (history snapshots, diff/in-memory models,
+untitled buffers). `textDocument/inlayHint` requests forward the visible range
+required by servers such as rust-analyzer.
+
 ---
 
 ## Terminal Integration
@@ -259,6 +270,31 @@ Using **TanStack Router** for type-safe routing:
 ```
 
 Most navigation is panel-based (not route-based). Routes are used for full-page views only.
+
+---
+
+## Build Pipeline
+
+The production frontend is built with Vite 6 (`vite build`) from `apps/desktop`.
+
+### Build Target
+
+`build.target` is pinned to `['es2021', 'edge88', 'firefox79', 'chrome87', 'safari14']`
+in `apps/desktop/vite.config.ts`. This keeps the same browser baseline as Vite's
+default `'modules'` target while preventing esbuild from lowering logical
+assignment operators (`||=`, `&&=`, `??=`). esbuild 0.25.x miscompiles a lowered
+logical assignment whose target variable is dead into an undeclared reference
+(`(void 0 || (i = {}))` without the `let`), which produced
+`ReferenceError: i is not defined` in xterm's `InputHandler.requestMode` whenever a
+terminal application sent a DECRQM sequence (`CSI Ps $ p`).
+
+`scripts/verify-frontend-bundle.mjs` runs after `vite build` (wired into the
+`@hyscode/desktop` build script) and fails the build if the broken pattern
+reappears in `dist/assets/index-*.js`.
+
+> esbuild 0.28.2 fixes the minifier bug, but it is incompatible with Vite 6.4.2
+> in this project (it aborts on destructuring lowering for the Monaco bundle), so
+> the dependency version is intentionally not overridden.
 
 ---
 

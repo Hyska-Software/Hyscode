@@ -2,7 +2,7 @@ use super::utils::cmd;
 use serde::Serialize;
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
-use std::process::{Child, Stdio};
+use std::process::{Child, Command, Stdio};
 use std::sync::{Mutex, OnceLock};
 use tauri::{Emitter, Manager};
 
@@ -82,56 +82,33 @@ pub async fn lsp_start(
     println!("[lsp_start] id={id} command={command} args={args:?} root_path={root_path} resolved_root={resolved_root}");
     // Resolve the full path to the command if it's not directly on PATH.
     let resolved = resolve_lsp_command(&command);
+    // Windows refuses to launch binaries whose final path component is a
+    // reparse point when the host process enforces RedirectionGuard
+    // (ERROR_UNTRUSTED_MOUNT_POINT, os error 448). Resolve symlinks and rustup
+    // proxies to a real binary before spawning.
+    let resolved = resolve_spawnable_command(&command, &resolved, &resolved_root);
     println!("[lsp_start] resolved={resolved}");
 
-    // On Windows, .cmd/.bat wrappers must be executed via cmd.exe /C
-    // because std::process::Command cannot spawn them directly.
-    #[cfg(target_os = "windows")]
-    let (program, extra_args): (&str, Vec<String>) =
-        if resolved.to_ascii_lowercase().ends_with(".cmd")
-            || resolved.to_ascii_lowercase().ends_with(".bat")
-        {
-            ("cmd", vec!["/C".to_string(), resolved.clone()])
-        } else {
-            (&resolved, vec![])
-        };
-
-    #[cfg(not(target_os = "windows"))]
-    let (program, extra_args): (&str, Vec<String>) = (&resolved, vec![]);
-
-    let mut child_cmd = cmd(program);
-    child_cmd
-        .args(&extra_args)
-        .args(&args)
-        .current_dir(&resolved_root)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-
-    // Merge user PATH from the Windows registry so that .bat/.cmd wrappers
-    // and shims can find their own dependencies even when Tauri was launched
-    // from the taskbar (which only gets the system PATH).
-    #[cfg(target_os = "windows")]
-    {
-        let current_path = std::env::var("PATH").unwrap_or_default();
-        let user_dirs: Vec<String> = windows_user_path_dirs()
-            .iter()
-            .map(|p| p.to_string_lossy().to_string())
-            .collect();
-        if !user_dirs.is_empty() {
-            let extra = user_dirs.join(";");
-            let merged = if current_path.is_empty() {
-                extra
+    let mut child = match spawn_lsp_process(&resolved, &args, &resolved_root) {
+        Ok(child) => child,
+        Err(error) if error.raw_os_error() == Some(ERROR_UNTRUSTED_MOUNT_POINT) => {
+            // Re-resolve once in case the first pass missed a reparse point,
+            // then report an actionable error if it still fails.
+            let retry_path = resolve_spawnable_command(&command, &resolved, &resolved_root);
+            if retry_path != resolved {
+                spawn_lsp_process(&retry_path, &args, &resolved_root)
+                    .map_err(|retry_error| untrusted_mount_error(&command, &retry_error))?
             } else {
-                format!("{};{}", extra, current_path)
-            };
-            child_cmd.env("PATH", merged);
+                return Err(untrusted_mount_error(&command, &error));
+            }
         }
-    }
-
-    let mut child = child_cmd
-        .spawn()
-        .map_err(|e| format!("Failed to spawn LSP process '{}': {}", command, e))?;
+        Err(error) => {
+            return Err(format!(
+                "Failed to spawn LSP process '{}': {}",
+                command, error
+            ))
+        }
+    };
 
     let stdout = child
         .stdout
@@ -204,6 +181,210 @@ pub async fn lsp_start(
         server_id,
         root_path: resolved_root,
     })
+}
+
+/// Windows `ERROR_UNTRUSTED_MOUNT_POINT` (`STATUS_UNTRUSTED_MOUNT_POINT`).
+/// Raised by `CreateProcess` when the host process enforces RedirectionGuard and
+/// the executable path ends in a reparse point created by a non-admin process.
+const ERROR_UNTRUSTED_MOUNT_POINT: i32 = 448;
+
+/// Build and spawn the LSP process. On Windows `.cmd`/`.bat` wrappers are
+/// executed via `cmd.exe /C` because `std::process::Command` cannot spawn them
+/// directly. PATH is extended with the rustup toolchain bin directory and the
+/// user PATH from the registry.
+fn spawn_lsp_process(resolved: &str, args: &[String], root: &str) -> std::io::Result<Child> {
+    #[cfg(target_os = "windows")]
+    let (program, extra_args): (&str, Vec<String>) =
+        if resolved.to_ascii_lowercase().ends_with(".cmd")
+            || resolved.to_ascii_lowercase().ends_with(".bat")
+        {
+            ("cmd", vec!["/C".to_string(), resolved.to_string()])
+        } else {
+            (resolved, Vec::new())
+        };
+
+    #[cfg(not(target_os = "windows"))]
+    let (program, extra_args): (&str, Vec<String>) = (resolved, Vec::new());
+
+    let mut child_cmd = cmd(program);
+    child_cmd
+        .args(&extra_args)
+        .args(args)
+        .current_dir(root)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    apply_child_path(&mut child_cmd, resolved);
+
+    child_cmd.spawn()
+}
+
+/// Extend the child PATH with the rustup toolchain bin directory (so nested
+/// `cargo`/`rustc` calls bypass the `.cargo/bin` proxy symlinks) and the user
+/// PATH read from the Windows registry (GUI apps launched from the taskbar only
+/// inherit the system PATH).
+fn apply_child_path(child_cmd: &mut Command, resolved: &str) {
+    #[cfg(target_os = "windows")]
+    {
+        let mut prefix: Vec<String> = Vec::new();
+        if let Some(bin_dir) = rustup_toolchain_bin_dir(resolved) {
+            prefix.push(bin_dir);
+        }
+        prefix.extend(
+            windows_user_path_dirs()
+                .iter()
+                .map(|p| p.to_string_lossy().to_string()),
+        );
+        if prefix.is_empty() {
+            return;
+        }
+        let current_path = std::env::var("PATH").unwrap_or_default();
+        let merged = if current_path.is_empty() {
+            prefix.join(";")
+        } else {
+            format!("{};{}", prefix.join(";"), current_path)
+        };
+        child_cmd.env("PATH", merged);
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = (child_cmd, resolved);
+    }
+}
+
+/// Return the `bin` directory of a rustup toolchain when `resolved` points inside
+/// `.../.rustup/toolchains/<toolchain>/bin/...`.
+#[cfg(target_os = "windows")]
+fn rustup_toolchain_bin_dir(resolved: &str) -> Option<String> {
+    let bin_dir = std::path::Path::new(resolved).parent()?;
+    if !bin_dir
+        .file_name()
+        .map(|name| name.eq_ignore_ascii_case("bin"))
+        .unwrap_or(false)
+    {
+        return None;
+    }
+    let toolchain_dir = bin_dir.parent()?;
+    let toolchains_dir = toolchain_dir.parent()?;
+    if !toolchains_dir
+        .file_name()
+        .map(|name| name.eq_ignore_ascii_case("toolchains"))
+        .unwrap_or(false)
+    {
+        return None;
+    }
+    Some(bin_dir.to_string_lossy().to_string())
+}
+
+/// Resolve a Windows reparse point (file symlink / shim) to a path that
+/// `CreateProcess` can traverse. rustup proxies (`rust-analyzer.exe ->
+/// rustup.exe`) are resolved through `rustup which` because canonicalizing them
+/// would yield `rustup.exe` and lose the argv0-based proxy identity. Other
+/// symlinks are canonicalized to their final target.
+fn resolve_spawnable_command(command: &str, resolved: &str, root: &str) -> String {
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::fs::MetadataExt;
+
+        const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x0000_0400;
+
+        let path = std::path::Path::new(resolved);
+        let is_reparse = std::fs::symlink_metadata(path)
+            .map(|meta| meta.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0)
+            .unwrap_or(false);
+        if !is_reparse {
+            return resolved.to_string();
+        }
+
+        if is_rustup_proxy(path) {
+            if let Some(real_binary) = rustup_which(path, command, root) {
+                return real_binary;
+            }
+            // Do not canonicalize a proxy: that resolves to rustup.exe and the
+            // proxy would no longer know which tool it must run.
+            return resolved.to_string();
+        }
+
+        if let Ok(canonical) = std::fs::canonicalize(path) {
+            let text = canonical.to_string_lossy();
+            return if let Some(stripped) = text.strip_prefix(r"\\?\") {
+                stripped.to_string()
+            } else {
+                text.to_string()
+            };
+        }
+        resolved.to_string()
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = (command, root);
+        resolved.to_string()
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn is_rustup_proxy(path: &std::path::Path) -> bool {
+    std::fs::read_link(path)
+        .ok()
+        .and_then(|target| {
+            target
+                .file_name()
+                .map(|name| name.to_string_lossy().to_string())
+        })
+        .map(|name| {
+            name.eq_ignore_ascii_case("rustup.exe") || name.eq_ignore_ascii_case("rustup-init.exe")
+        })
+        .unwrap_or(false)
+}
+
+/// Ask rustup for the real binary behind a proxy. Runs with `root` as the
+/// working directory so `rust-toolchain.toml` overrides are honored.
+#[cfg(target_os = "windows")]
+fn rustup_which(proxy_path: &std::path::Path, command: &str, root: &str) -> Option<String> {
+    let adjacent = proxy_path.parent()?.join("rustup.exe");
+    let rustup = if adjacent.is_file() {
+        adjacent
+    } else {
+        let output = cmd("where").arg("rustup.exe").output().ok()?;
+        if !output.status.success() {
+            return None;
+        }
+        let first = String::from_utf8_lossy(&output.stdout)
+            .lines()
+            .map(|line| line.trim())
+            .find(|line| !line.is_empty())?
+            .to_string();
+        std::path::PathBuf::from(first)
+    };
+    if !rustup.is_file() {
+        return None;
+    }
+
+    let mut rustup_cmd = cmd(&rustup);
+    rustup_cmd.args(["which", command]);
+    if std::path::Path::new(root).is_dir() {
+        rustup_cmd.current_dir(root);
+    }
+    let output = rustup_cmd.output().ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let real_binary = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if real_binary.is_empty() || !std::path::Path::new(&real_binary).is_file() {
+        return None;
+    }
+    Some(real_binary)
+}
+
+fn untrusted_mount_error(command: &str, error: &std::io::Error) -> String {
+    format!(
+        "Failed to spawn LSP process '{}': {}. Windows blocked a symlink or junction in the \
+         binary path (RedirectionGuard/untrusted mount point). Point the server to a real \
+         binary path or set a custom path in Settings > Language Servers.",
+        command, error
+    )
 }
 
 #[tauri::command]
@@ -644,4 +825,38 @@ fn resolve_lsp_command(command: &str) -> String {
 
     // Last resort: return command as-is and let the OS try
     command.to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn rustup_toolchain_bin_dir_detects_toolchain_binary() {
+        let path =
+            r"C:\Users\dev\.rustup\toolchains\stable-x86_64-pc-windows-msvc\bin\rust-analyzer.exe";
+        assert_eq!(
+            super::rustup_toolchain_bin_dir(path).as_deref(),
+            Some(r"C:\Users\dev\.rustup\toolchains\stable-x86_64-pc-windows-msvc\bin")
+        );
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn rustup_toolchain_bin_dir_ignores_non_toolchain_paths() {
+        assert_eq!(
+            super::rustup_toolchain_bin_dir(r"C:\tools\bin\rust-analyzer.exe"),
+            None
+        );
+        assert_eq!(
+            super::rustup_toolchain_bin_dir(r"C:\Users\dev\.cargo\bin\rustup.exe"),
+            None
+        );
+    }
+
+    #[test]
+    fn resolve_spawnable_command_keeps_real_files() {
+        let current = std::env::current_exe().expect("current_exe");
+        let path = current.to_string_lossy().to_string();
+        assert_eq!(super::resolve_spawnable_command("probe", &path, "."), path);
+    }
 }

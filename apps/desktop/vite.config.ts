@@ -7,6 +7,13 @@ const host = process.env.TAURI_DEV_HOST;
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
+  build: {
+    // Keep logical assignment operators (`||=`, `&&=`, `??=`) untransformed.
+    // esbuild 0.25.x lowers them to broken code when the target includes ES2020
+    // or Firefox 78, which produced an undeclared-variable ReferenceError in
+    // xterm's InputHandler.requestMode (see docs/architecture/FRONTEND.md).
+    target: ['es2021', 'edge88', 'firefox79', 'chrome87', 'safari14'],
+  },
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),

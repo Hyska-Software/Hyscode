@@ -4,7 +4,7 @@ import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels';
 import { useSettingsStore } from '../../../stores';
 import type { MarkdownViewMode } from '../../../stores/editor-store';
 import { defineAllMonacoThemes, getMonacoThemeName } from '../../../lib/monaco-themes';
-import { registerAllLanguages, disableNativeTypeScriptValidation } from '@hyscode/lsp-client';
+import { registerAllLanguages, disableNativeTypeScriptValidation, pathToFileUri } from '@hyscode/lsp-client';
 import { LspBridge } from '../../../lib/lsp-bridge';
 import { GIT_GUTTER_WIDTH } from '../../../hooks/use-git-decorations';
 import { MarkdownDocumentPreview } from './markdown-document-preview';
@@ -103,7 +103,7 @@ function MarkdownCodeEditor({
       }
     >
       <MonacoEditor
-        path={filePath}
+        path={filePath.startsWith('untitled:') ? filePath : pathToFileUri(filePath)}
         language={language}
         value={content}
         onChange={(value) => {

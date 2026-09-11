@@ -1,6 +1,7 @@
 import type { LspConnection } from './lsp-connection';
 import type { CompletionItem, CompletionList, Hover, Location, LocationLink, LspDiagnostic, LspRange, DocumentSymbol, InlayHint } from './types';
 import { disableNativeTypeScriptValidation, enableNativeTypeScriptValidation } from './language-registry';
+import { documentUriFromModelUri } from './uri';
 
 type MonacoEditor = typeof import('monaco-editor');
 
@@ -129,7 +130,8 @@ export class MonacoLspAdapter {
     const d = this.monaco.languages.registerCompletionItemProvider(languageId, {
       triggerCharacters: options.triggerCharacters ?? ['.'],
       provideCompletionItems: async (model, position) => {
-        const uri = model.uri.toString();
+        const uri = documentUriFromModelUri(model.uri);
+        if (!uri) return { suggestions: [] };
         const result = (await conn.completion(uri, position.lineNumber - 1, position.column - 1)) as
           | CompletionList
           | CompletionItem[]
@@ -189,7 +191,8 @@ export class MonacoLspAdapter {
     const conn = this.connection;
     const d = this.monaco.languages.registerHoverProvider(languageId, {
       provideHover: async (model, position) => {
-        const uri = model.uri.toString();
+        const uri = documentUriFromModelUri(model.uri);
+        if (!uri) return null;
         const result = (await conn.hover(uri, position.lineNumber - 1, position.column - 1)) as Hover | null;
         if (!result) return null;
 
@@ -222,7 +225,8 @@ export class MonacoLspAdapter {
     const monacoRef = this.monaco;
     const d = this.monaco.languages.registerDefinitionProvider(languageId, {
       provideDefinition: async (model, position) => {
-        const uri = model.uri.toString();
+        const uri = documentUriFromModelUri(model.uri);
+        if (!uri) return null;
         const result = (await conn.definition(uri, position.lineNumber - 1, position.column - 1)) as
           | Location
           | Location[]
@@ -241,7 +245,8 @@ export class MonacoLspAdapter {
     const monacoRef = this.monaco;
     const d = this.monaco.languages.registerDeclarationProvider(languageId, {
       provideDeclaration: async (model, position) => {
-        const uri = model.uri.toString();
+        const uri = documentUriFromModelUri(model.uri);
+        if (!uri) return null;
         const result = (await conn.declaration(uri, position.lineNumber - 1, position.column - 1)) as
           | Location
           | Location[]
@@ -260,7 +265,8 @@ export class MonacoLspAdapter {
     const monacoRef = this.monaco;
     const d = this.monaco.languages.registerTypeDefinitionProvider(languageId, {
       provideTypeDefinition: async (model, position) => {
-        const uri = model.uri.toString();
+        const uri = documentUriFromModelUri(model.uri);
+        if (!uri) return null;
         const result = (await conn.typeDefinition(uri, position.lineNumber - 1, position.column - 1)) as
           | Location
           | Location[]
@@ -279,7 +285,8 @@ export class MonacoLspAdapter {
     const monacoRef = this.monaco;
     const d = this.monaco.languages.registerImplementationProvider(languageId, {
       provideImplementation: async (model, position) => {
-        const uri = model.uri.toString();
+        const uri = documentUriFromModelUri(model.uri);
+        if (!uri) return null;
         const result = (await conn.implementation(uri, position.lineNumber - 1, position.column - 1)) as
           | Location
           | Location[]
@@ -301,7 +308,8 @@ export class MonacoLspAdapter {
     const d = this.monaco.languages.registerSignatureHelpProvider(languageId, {
       signatureHelpTriggerCharacters: options.triggerCharacters ?? ['(', ','],
       provideSignatureHelp: async (model, position) => {
-        const uri = model.uri.toString();
+        const uri = documentUriFromModelUri(model.uri);
+        if (!uri) return null;
         const result = (await conn.signatureHelp(uri, position.lineNumber - 1, position.column - 1)) as {
           signatures: Array<{
             label: string;
@@ -341,7 +349,8 @@ export class MonacoLspAdapter {
     const monacoRef = this.monaco;
     const d = this.monaco.languages.registerDocumentFormattingEditProvider(languageId, {
       provideDocumentFormattingEdits: async (model, options) => {
-        const uri = model.uri.toString();
+        const uri = documentUriFromModelUri(model.uri);
+        if (!uri) return [];
         const result = (await conn.formatting(uri, options.tabSize, options.insertSpaces)) as
           | Array<{ range: { start: { line: number; character: number }; end: { line: number; character: number } }; newText: string }>
           | null;
@@ -367,7 +376,8 @@ export class MonacoLspAdapter {
     const monacoRef = this.monaco;
     const d = this.monaco.languages.registerCodeActionProvider(languageId, {
       provideCodeActions: async (model, range, context) => {
-        const uri = model.uri.toString();
+        const uri = documentUriFromModelUri(model.uri);
+        if (!uri) return { actions: [], dispose: () => {} };
         const lspRange = {
           start: { line: range.startLineNumber - 1, character: range.startColumn - 1 },
           end: { line: range.endLineNumber - 1, character: range.endColumn - 1 },
@@ -442,7 +452,8 @@ export class MonacoLspAdapter {
     const monacoRef = this.monaco;
     const d = this.monaco.languages.registerDocumentSymbolProvider(languageId, {
       provideDocumentSymbols: async (model) => {
-        const uri = model.uri.toString();
+        const uri = documentUriFromModelUri(model.uri);
+        if (!uri) return [];
         const result = (await conn.documentSymbol(uri)) as
           | DocumentSymbol[]
           | Array<{
@@ -517,7 +528,8 @@ export class MonacoLspAdapter {
     const monacoRef = this.monaco;
     const d = this.monaco.languages.registerReferenceProvider(languageId, {
       provideReferences: async (model, position, context) => {
-        const uri = model.uri.toString();
+        const uri = documentUriFromModelUri(model.uri);
+        if (!uri) return [];
         const result = (await conn.references(
           uri,
           position.lineNumber - 1,
@@ -546,7 +558,8 @@ export class MonacoLspAdapter {
     const monacoRef = this.monaco;
     const d = this.monaco.languages.registerRenameProvider(languageId, {
       provideRenameEdits: async (model, position, newName) => {
-        const uri = model.uri.toString();
+        const uri = documentUriFromModelUri(model.uri);
+        if (!uri) return null;
         const result = (await conn.rename(
           uri,
           position.lineNumber - 1,
@@ -588,7 +601,8 @@ export class MonacoLspAdapter {
     const monacoRef = this.monaco;
     const d = this.monaco.languages.registerDocumentHighlightProvider(languageId, {
       provideDocumentHighlights: async (model, position) => {
-        const uri = model.uri.toString();
+        const uri = documentUriFromModelUri(model.uri);
+        if (!uri) return [];
         const result = (await conn.documentHighlight(
           uri,
           position.lineNumber - 1,
@@ -624,7 +638,8 @@ export class MonacoLspAdapter {
     const monacoRef = this.monaco;
     const d = this.monaco.languages.registerSelectionRangeProvider(languageId, {
       provideSelectionRanges: async (model, positions) => {
-        const uri = model.uri.toString();
+        const uri = documentUriFromModelUri(model.uri);
+        if (!uri) return [];
         const lspPositions = positions.map((p) => ({
           line: p.lineNumber - 1,
           character: p.column - 1,
@@ -670,9 +685,14 @@ export class MonacoLspAdapter {
     const conn = this.connection;
     const monacoRef = this.monaco;
     const d = this.monaco.languages.registerInlayHintsProvider(languageId, {
-      provideInlayHints: async (model) => {
-        const uri = model.uri.toString();
-        const result = (await conn.inlayHints(uri)) as InlayHint[] | null;
+      provideInlayHints: async (model, range) => {
+        const uri = documentUriFromModelUri(model.uri);
+        if (!uri) return { hints: [], dispose: () => {} };
+        const lspRange = {
+          start: { line: range.startLineNumber - 1, character: range.startColumn - 1 },
+          end: { line: range.endLineNumber - 1, character: range.endColumn - 1 },
+        };
+        const result = (await conn.inlayHints(uri, lspRange)) as InlayHint[] | null;
 
         if (!result) return { hints: [], dispose: () => {} };
 
@@ -698,7 +718,8 @@ export class MonacoLspAdapter {
     const monacoRef = this.monaco;
     const d = this.monaco.languages.registerDocumentRangeFormattingEditProvider(languageId, {
       provideDocumentRangeFormattingEdits: async (model, range, options) => {
-        const uri = model.uri.toString();
+        const uri = documentUriFromModelUri(model.uri);
+        if (!uri) return [];
         const lspRange = {
           start: { line: range.startLineNumber - 1, character: range.startColumn - 1 },
           end: { line: range.endLineNumber - 1, character: range.endColumn - 1 },

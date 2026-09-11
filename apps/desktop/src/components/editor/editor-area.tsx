@@ -40,7 +40,7 @@ import { useInlineCompletion } from '../../hooks/use-inline-completion';
 import { defineAllMonacoThemes, getMonacoThemeName } from '../../lib/monaco-themes';
 import { LspBridge, detectLanguage, detectLspLanguage } from '../../lib/lsp-bridge';
 import { LspMissingBanner } from './lsp-missing-banner';
-import { registerAllLanguages, disableNativeTypeScriptValidation } from '@hyscode/lsp-client';
+import { registerAllLanguages, disableNativeTypeScriptValidation, pathToFileUri } from '@hyscode/lsp-client';
 import { getViewerType } from '../../lib/utils';
 import type * as monacoEditor from 'monaco-editor';
 
@@ -771,7 +771,11 @@ export function EditorArea() {
               <div className="flex-1 overflow-hidden">
                 <Suspense fallback={<EditorLoading />}>
                   <MonacoEditor
-                    path={activeTab.filePath}
+                    path={
+                      activeTab.filePath.startsWith('untitled:')
+                        ? activeTab.filePath
+                        : pathToFileUri(activeTab.filePath)
+                    }
                     language={detectLanguage(activeTab.filePath)}
                     value={content ?? ''}
                     onChange={handleEditorChange}

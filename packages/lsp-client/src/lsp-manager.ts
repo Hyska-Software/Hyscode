@@ -5,6 +5,7 @@ import type { ServerCapabilities } from './types';
 import { TauriLspTransport } from './tauri-transport';
 import { MonacoLspAdapter } from './monaco-adapter';
 import { enableNativeTypeScriptValidation, disableNativeTypeScriptValidation, normalizeLspLanguage } from './language-registry';
+import { fileUriToPath, pathToFileUri } from './uri';
 
 type MonacoEditor = typeof import('monaco-editor');
 type TauriInvoke = (cmd: string, args?: Record<string, unknown>) => Promise<unknown>;
@@ -104,7 +105,7 @@ export class LspManager {
     if (!config || !this.monaco || !this.rootUri) return;
 
     const serverId = `lsp-${serverKey}-${Date.now()}`;
-    const rootPath = this.rootUri.replace(/^file:\/\/\/?/, '');
+    const rootPath = fileUriToPath(this.rootUri);
     console.log('[LspManager] lsp_start serverKey=', serverKey, 'rootUri=', this.rootUri, 'rootPath=', rootPath, 'filePath=', filePath);
 
     try {
@@ -117,9 +118,7 @@ export class LspManager {
       }) as { server_id: string; root_path: string };
 
       const resolvedRootPath = startResult.root_path ?? rootPath;
-      const resolvedRootUri = resolvedRootPath.startsWith('/')
-        ? `file://${resolvedRootPath}`
-        : `file:///${resolvedRootPath.replace(/\\/g, '/')}`;
+      const resolvedRootUri = pathToFileUri(resolvedRootPath);
 
       const transport = new TauriLspTransport(startResult.server_id, this.invoke, this.listen);
       await transport.start();

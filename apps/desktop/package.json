@@ -7,7 +7,7 @@
     "dev": "node ../../scripts/tauri-dev.mjs",
     "dev:tauri": "tauri dev",
     "frontend:dev": "vite",
-    "build": "tsc -b && vite build",
+    "build": "tsc -b && vite build && node ../../scripts/verify-frontend-bundle.mjs dist",
     "build:sidecars": "turbo build --filter=@hyscode/codex-sidecar --filter=@hyscode/claude-agent-sidecar",
     "copy:conpty": "node ../../scripts/copy-conpty.mjs",
     "stage:conpty": "node ../../scripts/copy-conpty.mjs --stage",

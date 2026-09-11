@@ -247,9 +247,10 @@ export class LspConnection {
     });
   }
 
-  inlayHints(uri: string) {
+  inlayHints(uri: string, range: LspRange) {
     return this.sendRequest('textDocument/inlayHint', {
       textDocument: { uri },
+      range,
     });
   }
 
