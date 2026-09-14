@@ -3,6 +3,7 @@ import { useProjectStore } from '@/stores/project-store';
 import { HarnessBridge } from './harness-bridge';
 import { vortexSessionRuntimeManager } from './vortex-session-runtime';
 import type { AgentMode } from '@/stores/agent-store';
+import type { GoalEditInput, GoalState } from '@hyscode/agent-harness';
 
 function isVortexLayout(): boolean {
   return useLayoutStore.getState().workspaceMode === 'agent';
@@ -61,4 +62,34 @@ export function setActiveAgentType(mode: AgentMode): void {
     return;
   }
   HarnessBridge.get().setAgentType(mode);
+}
+
+export async function createActiveGoal(objective: string): Promise<GoalState> {
+  const bridge = getActiveAgentBridge();
+  const state = await bridge.createGoal(objective);
+  void bridge.startGoalExecution().catch(() => undefined);
+  return state;
+}
+
+export async function pauseActiveGoal(): Promise<GoalState> {
+  return getActiveAgentBridge().pauseGoal();
+}
+
+export async function resumeActiveGoal(): Promise<GoalState> {
+  const bridge = getActiveAgentBridge();
+  const state = await bridge.resumeGoal();
+  void bridge.startGoalExecution().catch(() => undefined);
+  return state;
+}
+
+export async function editActiveGoal(updates: GoalEditInput): Promise<GoalState> {
+  return getActiveAgentBridge().editGoal(updates);
+}
+
+export async function cancelActiveGoal(): Promise<GoalState> {
+  return getActiveAgentBridge().cancelGoal();
+}
+
+export async function clearActiveGoal(): Promise<void> {
+  await getActiveAgentBridge().clearGoal();
 }

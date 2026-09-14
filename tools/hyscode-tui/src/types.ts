@@ -1,4 +1,4 @@
-import { type AgentQuestion, type AgentQuestionAnswer, type AgentType, type HarnessEvent, type TerminalRuntimeFailure } from '@hyscode/agent-harness';
+import { type AgentQuestion, type AgentQuestionAnswer, type AgentType, type GoalState, type HarnessEvent, type TerminalRuntimeFailure } from '@hyscode/agent-harness';
 import type { Message, TokenUsage } from '@hyscode/ai-providers';
 import type {
   BridgeMessage,
@@ -206,7 +206,7 @@ export type InteractionState =
 
 export type Overlay = 'none' | 'help' | 'sessions' | 'projects' | 'commands';
 
-export type MainPanel = 'chat' | 'terminal' | 'sdd' | 'activity' | 'subagents';
+export type MainPanel = 'chat' | 'terminal' | 'sdd' | 'activity' | 'subagents' | 'goal';
 export type SelectionFlowAction = 'approval' | 'context' | 'terminal' | 'diffs' | 'sdd' | 'tab' | 'subagents';
 export type RecoveryView = { action: 'continue' | 'retry'; partialText: string; retryCount: number; possibleDuplicateCharge: boolean };
 
@@ -277,6 +277,7 @@ export type UiState = {
   updates: UpdateView;
   connectionState: string;
   recovery: RecoveryView | null;
+  goal: GoalState | null;
   mainPanel: MainPanel;
   capabilities: RuntimeCapabilities | null;
   rules: RuleView[];

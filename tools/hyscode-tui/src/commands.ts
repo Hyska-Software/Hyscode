@@ -41,6 +41,7 @@ export const COMMANDS: readonly CommandSpec[] = [
   { name: '/terminal', aliases: ['/term', '/!'], category: 'context', description: 'Choose a persistent-terminal action or attach a manual TUI terminal', usage: '/terminal [list|open|focus|attach|read|interrupt|kill] [id]' },
   { name: '/diffs', aliases: ['/changes'], category: 'context', description: 'Choose a file-change review action', usage: '/diffs' },
   { name: '/sdd', aliases: ['/spec'], category: 'runtime', description: 'Choose an SDD action or enter a description', usage: '/sdd' },
+  { name: '/goal', aliases: ['/goals'], category: 'runtime', description: 'Create and control the persistent execution goal in Build mode; edit while paused', usage: '/goal [create|edit|pause|resume|stop|clear|status] [text]' },
   { name: '/retry', aliases: ['/again'], category: 'session', description: 'Retry the last user message', usage: '/retry' },
   { name: '/continue', aliases: ['/resume-partial'], category: 'session', description: 'Continue a recoverable partial response', usage: '/continue' },
   { name: '/cancel', aliases: ['/stop'], category: 'runtime', description: 'Cancel the active turn', usage: '/cancel' },

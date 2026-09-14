@@ -55,6 +55,8 @@ export interface ToolHandler {
 export interface ToolExecutionContext {
   workspacePath: string;
   conversationId: string;
+  /** Stable canonical identity of the owning Harness turn. */
+  turnId?: string;
   /** The ID of the current tool call (set per-call by the harness) */
   toolCallId: string;
   /** Aborted when the owning turn is cancelled or times out. */
@@ -62,6 +64,8 @@ export interface ToolExecutionContext {
   /** 0 = main agent, >0 = nested delegation depth (sub-agents). Tools can
    *  use this to reject interactions that only make sense at the top level. */
   delegationLevel?: number;
+  /** Agent mode that owns this tool execution. Goal tools require Build. */
+  agentType?: AgentType;
   /** Stable owner of this execution context (sub-agent id for children).
    *  Used to isolate terminal sessions and other per-owner resources. */
   ownerId?: string;
@@ -614,6 +618,9 @@ export type TurnRequest = {
   ruleTargetPaths?: string[];
   /** Present only for a durable Desktop Kanban task run. */
   taskContext?: AgentTaskContext;
+  /** Internal steering context for one persistent-goal turn. It is never
+   * written as a user message, but is rendered in the model context. */
+  goalContext?: string;
 };
 
 export type TurnOutcome = {

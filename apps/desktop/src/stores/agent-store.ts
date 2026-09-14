@@ -9,6 +9,7 @@ import type {
   TurnTerminalStatus,
   ExternalPathAccessRequest,
   TerminalRuntimeFailure,
+  GoalState,
 } from '@hyscode/agent-harness';
 import type { MessageContent, TokenUsage } from '@hyscode/ai-providers';
 import type { ProviderErrorDetails } from '@hyscode/ai-providers';
@@ -92,6 +93,7 @@ export interface PerTabState {
   connectionState: AgentConnectionState;
   connectionMessage: string | null;
   recoverableError: AgentTurnError | null;
+  goal: GoalState | null;
 }
 
 export interface TabMeta {
@@ -133,6 +135,7 @@ export function defaultPerTabState(mode: AgentMode = 'chat'): PerTabState {
     connectionState: 'idle',
     connectionMessage: null,
     recoverableError: null,
+    goal: null,
   };
 }
 export type MessageRole = 'user' | 'assistant' | 'tool';
@@ -351,6 +354,7 @@ export interface AgentState {
   connectionState: AgentConnectionState;
   connectionMessage: string | null;
   recoverableError: AgentTurnError | null;
+  goal: GoalState | null;
 
   // ─── Multi-tab management ─────────────────────────────────────────────
   /** Ordered list of open tabs (visible in the switcher). */
@@ -473,6 +477,7 @@ export interface AgentState {
   setTerminalStatus: (status: TurnTerminalStatus | null) => void;
   setConnectionState: (state: AgentConnectionState, message?: string | null) => void;
   setRecoverableError: (error: AgentTurnError | null) => void;
+  setGoal: (goal: GoalState | null) => void;
 
   // Sub-agents
   subAgents: SubAgentState[];
@@ -527,6 +532,7 @@ export const createAgentStore = () =>
     connectionState: 'idle',
     connectionMessage: null,
     recoverableError: null,
+    goal: null,
     sessions: [],
     sessionsLoading: false,
     historyOpen: false,
@@ -728,6 +734,7 @@ export const createAgentStore = () =>
         state.pendingModeSwitch = null;
         state.delegationChain = [];
         state.pendingUserQuestion = null;
+        state.goal = null;
       }),
 
     resetProjectState: () => {
@@ -1032,6 +1039,11 @@ export const createAgentStore = () =>
         state.recoverableError = recoverableError;
       }),
 
+    setGoal: (goal) =>
+      set((state) => {
+        state.goal = goal;
+      }),
+
     // ─── Sub-Agent Actions ────────────────────────────────────────────
 
     addSubAgent: (agent) =>
@@ -1242,6 +1254,7 @@ function _extractTab(s: AgentState): PerTabState {
     connectionState: s.connectionState ?? 'idle',
     connectionMessage: s.connectionMessage ?? null,
     recoverableError: s.recoverableError ?? null,
+    goal: s.goal,
   };
 }
 
@@ -1279,4 +1292,5 @@ function _applyTab(s: AgentState, ps: PerTabState): void {
   s.connectionState = ps.connectionState ?? 'idle';
   s.connectionMessage = ps.connectionMessage ?? null;
   s.recoverableError = ps.recoverableError ?? null;
+  s.goal = ps.goal ?? null;
 }

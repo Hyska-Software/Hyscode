@@ -3,6 +3,7 @@ import type { UiState } from './types';
 import { TerminalRenderer, terminalCellWidth } from './renderer';
 import { CLI_LOGO } from './logo';
 import { BUILTIN_THEMES } from '@hyscode/tui-runtime';
+import type { GoalState } from '@hyscode/agent-harness';
 
 function state(overrides: Partial<UiState> = {}): UiState {
   return {
@@ -44,6 +45,7 @@ function state(overrides: Partial<UiState> = {}): UiState {
     updates: { status: 'idle', channel: 'stable', checkForUpdatesOnStartup: true, autoDownload: false, release: null, progress: null, installation: null, error: null },
     connectionState: 'connected',
     recovery: null,
+    goal: null,
     mainPanel: 'chat',
     capabilities: null,
     rules: [],
@@ -67,6 +69,40 @@ function state(overrides: Partial<UiState> = {}): UiState {
 }
 
 describe('TUI renderer', () => {
+  it('renders the goal panel even before the conversation has transcript messages', () => {
+    const goal: GoalState = {
+      goal: {
+        id: 'goal-1',
+        conversationId: 'session-123456',
+        projectId: 'C:/workspace/hyscode',
+        objective: 'Keep the persistent execution loop observable',
+        status: 'active',
+        verification: 'unverified',
+        version: 2,
+        budget: { maxTokens: 1000, maxTurns: 5, maxDurationMs: 60000, maxToolCalls: 20, maxCostUsd: null, maxConsecutiveErrors: 3 },
+        usage: { inputTokens: 4, outputTokens: 6, totalTokens: 10, turns: 1, toolCalls: 2, durationMs: 50, costUsd: null, consecutiveErrors: 0, lastTurnAt: '2026-09-14T00:00:00.000Z' },
+        checkpoint: 'The renderer now shows the active control-plane state.',
+        lastError: null,
+        currentRunId: null,
+        createdAt: '2026-09-14T00:00:00.000Z',
+        updatedAt: '2026-09-14T00:00:00.000Z',
+        completedAt: null,
+      },
+      criteria: [{ id: 'criterion-1', goalId: 'goal-1', description: 'The TUI shows a timeline', kind: 'review', config: {}, required: true, status: 'pending', verificationNote: null, evidenceId: null }],
+      evidence: [],
+      blockers: [],
+      runs: [],
+      events: [{ id: 'event-1', goalId: 'goal-1', type: 'progress', message: 'Checkpoint recorded', turnId: null, createdAt: '2026-09-14T00:00:00.000Z' }],
+    };
+    const rendered = new TerminalRenderer().render(state({ mainPanel: 'goal', goal, transcript: [], width: 120, height: 60 }));
+
+    expect(rendered).toContain('PERSISTENT GOAL');
+    expect(rendered).toContain('Keep the persistent execution loop observable');
+    expect(rendered).toContain('Checkpoint recorded');
+    expect(rendered).toContain('/∞ tokens');
+    expect(rendered).toContain('/∞ turn(s)');
+  });
+
   it('renders the mandatory external access warning and session-scoped actions', () => {
     const rendered = new TerminalRenderer().render(state({
       interaction: {

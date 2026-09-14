@@ -108,6 +108,7 @@ export class TuiController {
       updates: emptyUpdates(),
       connectionState: 'connecting',
       recovery: null,
+      goal: null,
       mainPanel: 'chat',
       capabilities: null,
       rules: [],
@@ -311,6 +312,9 @@ export class TuiController {
       case 'terminal_updated':
         this.applyTerminalUpdated(message.payload);
         break;
+      case 'goal_updated':
+        this.applyGoal(message.payload);
+        break;
       case 'context_updated':
         this.applyContext(message.payload);
         break;
@@ -429,6 +433,17 @@ export class TuiController {
         this.applySdd(response.result as SddStatePayload);
         this.state.mainPanel = 'sdd';
         break;
+      case 'goal_get':
+      case 'goal_create':
+      case 'goal_edit':
+      case 'goal_pause':
+      case 'goal_resume':
+      case 'goal_cancel':
+      case 'goal_clear':
+        this.applyGoal(response.result as import('@hyscode/agent-harness').GoalState | null);
+        this.state.mainPanel = 'goal';
+        this.state.status = method === 'goal_clear' ? 'Goal cleared' : 'Goal updated';
+        break;
       case 'session_delete':
       case 'session_rename':
         if (method === 'session_delete' && typeof requestParams.id === 'string') {
@@ -466,6 +481,7 @@ export class TuiController {
     this.state.projectId = payload.projectId;
     this.currentConversationId = payload.session?.id ?? this.currentConversationId;
     this.state.mode = payload.activeAgentType;
+    if (payload.activeAgentType !== 'build' && this.state.mainPanel === 'goal') this.state.mainPanel = 'chat';
     this.state.provider = payload.activeProviderId;
     this.state.model = payload.activeModelId;
     if (payload.git) this.state.git = payload.git;
@@ -519,6 +535,7 @@ export class TuiController {
     this.currentTurnId = null;
     this.state.sessionTitle = session.title || 'Untitled session';
     this.state.sessionMessageCount = session.messageCount;
+    this.state.goal = session.goal ?? null;
     this.state.tabs = [
       ...this.state.tabs.filter((tab) => tab.sessionId !== session.id).map((tab) => ({ ...tab, active: false })),
       { id: `tab-${session.id}`, title: session.title || 'Untitled session', sessionId: session.id, active: true },
@@ -848,6 +865,15 @@ export class TuiController {
       selectedTask: Math.min(this.state.sdd.selectedTask, Math.max(0, payload.tasks.length - 1)),
     };
     if (payload.phase) this.state.status = `SDD · ${payload.phase}`;
+  }
+
+  private applyGoal(goal: import('@hyscode/agent-harness').GoalState | null): void {
+    this.state.goal = goal;
+    if (!goal) {
+      this.state.status = 'No persistent goal';
+      return;
+    }
+    this.state.status = `Goal · ${goal.goal.status} · ${goal.goal.usage.turns} turn(s)`;
   }
 
   private applyFileChangeState(payload: { toolCallId: string; toolName: string; filePath: string; originalContent: string | null; newContent: string; status: 'pending' | 'accepted' | 'rejected' }): void {
@@ -1604,6 +1630,9 @@ export class TuiController {
         if (!args) this.openActionFlow('sdd');
         else await this.runSddCommand(args);
         break;
+      case '/goal':
+        await this.runGoalCommand(args);
+        break;
       case '/retry':
         this.state.running = true;
         await this.request('retry_turn', {});
@@ -1629,6 +1658,63 @@ export class TuiController {
         this.append('system', `Unknown command: ${name}`);
         break;
     }
+  }
+
+  private async runGoalCommand(args: string): Promise<void> {
+    const trimmed = args.trim();
+    if (this.state.mode !== 'build') {
+      this.state.status = 'Goal mode is available in Build mode only.';
+      return;
+    }
+    if (!trimmed || trimmed.toLowerCase() === 'status') {
+      this.state.mainPanel = 'goal';
+      await this.request('goal_get', {});
+      return;
+    }
+    const [action, ...rest] = trimmed.split(/\s+/u);
+    const text = rest.join(' ').trim();
+    const normalized = action.toLowerCase();
+    if (normalized === 'create') {
+      if (!text) {
+        this.state.status = 'Usage: /goal create <objective>';
+        return;
+      }
+      await this.request('goal_create', { objective: text });
+      return;
+    }
+    if (normalized === 'edit') {
+      if (!text) {
+        this.state.status = 'Usage: /goal edit <objective>';
+        return;
+      }
+      if (!this.state.goal) {
+        this.state.status = 'No persistent goal is active.';
+        return;
+      }
+      if (this.state.goal.goal.status !== 'paused') {
+        this.state.status = 'Pause the goal before editing its objective.';
+        return;
+      }
+      await this.request('goal_edit', { objective: text });
+      return;
+    }
+    if (['criteria', 'budget', 'progress', 'evidence', 'blocker', 'complete'].includes(normalized)) {
+      this.state.status = 'Goal criteria, progress, evidence, blockers, and completion are managed by the agent.';
+      return;
+    }
+    const methods: Record<string, BridgeRequest['method']> = {
+      pause: 'goal_pause',
+      resume: 'goal_resume',
+      cancel: 'goal_cancel',
+      stop: 'goal_cancel',
+      clear: 'goal_clear',
+    };
+    const method = methods[normalized];
+    if (!method) {
+      await this.request('goal_create', { objective: trimmed });
+      return;
+    }
+    await this.request(method, text ? { reason: text } : {});
   }
 
   private openActionFlow(action: 'approval' | 'context' | 'terminal' | 'diffs' | 'sdd' | 'tab' | 'subagents'): void {

@@ -139,6 +139,10 @@ export interface HarnessOptions {
   externalPathAccess?: ExternalPathAccessRegistry;
   /** Optional Desktop-only persistent Kanban integration. */
   taskIntegration?: KanbanTaskIntegration;
+  /** Goal tools supplied by the host's persistent-goal service. */
+  goalTools?: ToolHandler[];
+  /** Goal tools are available only while the host is in Build mode. */
+  goalToolsEnabled?: () => boolean;
   /** 0 = main agent (default), >0 = nested delegation depth. Exposed to tools
    *  via ToolExecutionContext.delegationLevel. */
   delegationLevel?: number;
@@ -205,6 +209,8 @@ export class Harness {
   private hasDirtyBuffers: (() => boolean) | undefined;
   private delegationLevel = 0;
   private ownerId: string | null = null;
+  private readonly goalToolNames: ReadonlySet<string>;
+  private readonly goalToolsEnabled: (() => boolean) | undefined;
   private environment: HarnessEnvironment;
   private readCache = new Map<string, string>();
   private externalPathAccess: ExternalPathAccessRegistry;
@@ -224,6 +230,8 @@ export class Harness {
     this.hasDirtyBuffers = options.hasDirtyBuffers;
     this.delegationLevel = options.delegationLevel ?? 0;
     this.externalPathAccess = options.externalPathAccess ?? new ExternalPathAccessRegistry();
+    this.goalToolNames = new Set((options.goalTools ?? []).map((tool) => tool.definition.name));
+    this.goalToolsEnabled = options.goalToolsEnabled;
     this.environment = {
       workspacePath: options.workspacePath,
       projectId: options.projectId,
@@ -242,6 +250,8 @@ export class Harness {
       hasDirtyBuffers: options.hasDirtyBuffers,
       externalPathAccess: this.externalPathAccess,
       taskIntegration: options.taskIntegration,
+      goalTools: options.goalTools,
+      goalToolsEnabled: options.goalToolsEnabled,
     };
 
     // Agent terminal integration
@@ -295,6 +305,7 @@ export class Harness {
         this.toolRouter.register(tool);
       }
     }
+    for (const tool of options.goalTools ?? []) this.toolRouter.register(tool);
     this.registerProgressiveToolAccess();
 
     // Register post-tool hooks
@@ -684,10 +695,12 @@ export class Harness {
     const userMessage =
       typeof requestOrMessage === 'string' ? requestOrMessage : requestOrMessage.userMessage;
     let ruleTargetPaths = this.ruleTargetPaths;
+    let goalContext: string | undefined;
     if (typeof requestOrMessage !== 'string') {
       history = requestOrMessage.history;
       imageContent = requestOrMessage.images;
       ruleTargetPaths = requestOrMessage.ruleTargetPaths ?? [];
+      goalContext = requestOrMessage.goalContext;
     }
     const activeTurn = this.turnController.begin();
     this.cancelled = false;
@@ -697,6 +710,18 @@ export class Harness {
     this.readCache.clear();
     this.readLoop.reset();
     this.contextManager.beginTurn();
+    if (goalContext?.trim()) {
+      this.contextManager.addSource({
+        id: 'persistent-goal-context',
+        type: 'context_chip',
+        priority: 'always',
+        content: goalContext,
+        tokenEstimate: Math.ceil(goalContext.length / 4),
+        origin: 'automatic',
+        identity: 'persistent-goal-context',
+        expiresAfterTurn: this.contextManager.getTurnNumber(),
+      });
+    }
     await this.refreshRules(ruleTargetPaths);
     const turnStart = Date.now();
 
@@ -785,6 +810,7 @@ export class Harness {
     let selectedTools: import('@hyscode/ai-providers').ToolDefinition[] | null = null;
     let toolSelectionDecisions: ToolSelectionDecision[] = [];
     let selectedToolMode: AgentType | null = null;
+    let selectedGoalToolsEnabled: boolean | null = null;
     let outputBudget = this.config.costOptimization
       ? initialOutputBudget(this.agentType, policy.maxOutputTokens)
       : policy.maxOutputTokens;
@@ -813,11 +839,16 @@ export class Harness {
       this.injectDelegationChain();
 
       // Build context snapshot (use policy-based limits)
+      const goalToolsEnabled = this.agentType === 'build' && this.goalToolsEnabled?.() !== false;
       const availableTools = this.toolRouter.getToolDefinitionsFiltered(
         policy.allowedToolCategories,
         agentDef.toolOverrides,
-      );
-      if (!selectedTools || selectedToolMode !== this.agentType) {
+      ).filter((tool) => goalToolsEnabled || !this.goalToolNames.has(tool.name));
+      if (
+        !selectedTools
+        || selectedToolMode !== this.agentType
+        || selectedGoalToolsEnabled !== goalToolsEnabled
+      ) {
         const toolPlan = this.config.costOptimization
           ? selectToolPlan(
               availableTools,
@@ -836,6 +867,7 @@ export class Harness {
         selectedTools = toolPlan.tools;
         toolSelectionDecisions = toolPlan.decisions;
         selectedToolMode = this.agentType;
+        selectedGoalToolsEnabled = goalToolsEnabled;
       }
       const tools = selectedTools;
       // Resolve the provider up-front so the system prompt can be adapted for
@@ -1344,9 +1376,11 @@ export class Harness {
       const executionContext: ToolExecutionContext = {
         workspacePath: this.workspacePath,
         conversationId: this.conversationId,
+        turnId: activeTurn.turnId,
         toolCallId: '', // set per-call below
         signal: activeTurn.signal,
         delegationLevel: this.delegationLevel,
+        agentType: this.agentType,
         ownerId: this.ownerId ?? undefined,
         invoke: this.invoke,
         listen: this.listen,
