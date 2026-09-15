@@ -196,7 +196,7 @@ function cachedMarkdownLines(item: TranscriptItem, width: number): string[] {
 }
 
 function transcriptView(items: TranscriptItem[], width: number, state: UiState): string[] {
-  if (items.length === 0) return emptyTranscript(state, width);
+  if (items.length === 0) return appendMainPanel(emptyTranscript(state, width), state, width);
   const lines: string[] = [];
   // Keep rendering resilient if replay or an older client supplied duplicate cards.
   const renderedToolIds = new Set<string>();
@@ -220,10 +220,15 @@ function transcriptView(items: TranscriptItem[], width: number, state: UiState):
     }
     lines.push('');
   }
+  return appendMainPanel(lines, state, width);
+}
+
+function appendMainPanel(lines: string[], state: UiState, width: number): string[] {
   if (state.mainPanel === 'terminal') lines.push(...terminalPanel(state, width));
   else if (state.mainPanel === 'sdd') lines.push(...sddPanel(state, width));
   else if (state.mainPanel === 'activity') lines.push(...activityPanel(state, width));
   else if (state.mainPanel === 'subagents') lines.push(...subagentsPanel(state, width));
+  else if (state.mainPanel === 'goal') lines.push(...goalPanel(state, width));
   return lines;
 }
 
@@ -297,6 +302,36 @@ function sddPanel(state: UiState, width: number): string[] {
     lines.push(...wrapText(sdd.review, Math.max(12, width - 4)).slice(0, 5).map((line) => `${SOFT}${line}${RESET}`));
   }
   lines.push(`${DIM}/sdd approve-spec · approve-plan · resume · ↑↓ select · enter details${RESET}`, '');
+  return lines;
+}
+
+function goalPanel(state: UiState, width: number): string[] {
+  const goal = state.goal;
+  if (!goal) return [`${MUTED}No persistent goal. Use /goal create <objective>.${RESET}`, ''];
+  const required = goal.criteria.filter((criterion) => criterion.required);
+  const passed = required.filter((criterion) => criterion.status === 'passed').length;
+  const percent = required.length > 0 ? Math.round((passed / required.length) * 100) : goal.goal.status === 'complete' ? 100 : 0;
+  const lines = [
+    `${ACCENT}${BOLD}PERSISTENT GOAL${RESET} ${DIM}· ${goal.goal.status} · ${goal.goal.verification}${RESET}`,
+    `${SOFT}${shorten(goal.goal.objective, Math.max(12, width - 4))}${RESET}`,
+    `${MUTED}checkpoint${RESET} · ${shorten(goal.goal.checkpoint, Math.max(12, width - 16))}`,
+    `${MUTED}progress${RESET} · ${percent}% · ${goal.goal.usage.turns}/∞ turn(s) · ${goal.goal.usage.totalTokens.toLocaleString()}/∞ tokens · ${goal.goal.usage.toolCalls}/∞ tool call(s)`,
+  ];
+  if (goal.criteria.length) {
+    lines.push(`${MUTED}CRITERIA · ${passed}/${required.length} required passed${RESET}`);
+    for (const criterion of goal.criteria.slice(0, 8)) {
+      const marker = criterion.status === 'passed' ? `${SUCCESS}✓${RESET}` : criterion.status === 'failed' ? `${ERROR}×${RESET}` : `${WARNING}·${RESET}`;
+      lines.push(`  ${marker} ${shorten(criterion.description, Math.max(12, width - 14))} ${DIM}${criterion.status}${RESET}`);
+    }
+  } else {
+    lines.push(`${MUTED}CRITERIA · agent will define acceptance criteria before completion${RESET}`);
+  }
+  const recent = goal.events.slice(-6);
+  if (recent.length) {
+    lines.push(`${MUTED}TIMELINE${RESET}`);
+    for (const event of recent) lines.push(`  ${DIM}${event.type}${RESET} ${shorten(event.message, Math.max(12, width - 14))}`);
+  }
+  lines.push(`${DIM}/goal create|edit|pause|resume|stop|clear · /goal status${RESET}`, '');
   return lines;
 }
 

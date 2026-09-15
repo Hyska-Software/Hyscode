@@ -212,6 +212,10 @@ pub fn run() {
             commands::db::db_create_turn_record,
             commands::db::db_commit_agent_turn,
             commands::db::db_get_conversation_token_usage,
+            // Persistent goals
+            commands::db::db_goal_load_state,
+            commands::db::db_goal_save_state,
+            commands::db::db_goal_clear_state,
             // Trace commands
             commands::db::db_create_trace,
             commands::db::db_list_traces,

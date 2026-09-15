@@ -6,7 +6,7 @@
 //
 // Toolchain: `spectralang` CLI (run/check/compile/lint/fmt/new) + `spectra-lsp`
 // (IntelliSense, registered natively in packages/lsp-client).
-import * as monaco from 'monaco-editor';
+import type * as monaco from 'monaco-editor';
 import { invoke } from '@tauri-apps/api/core';
 import { useCommandStore } from '@/stores/command-store';
 import { useKeybindingStore } from '@/stores/keybinding-store';
@@ -110,8 +110,9 @@ async function runInTerminal(cli: string, args: string[]): Promise<void> {
 
 // ── Editor insertion (API actions) ───────────────────────────────────────────
 
-function getActiveCodeEditor(): monaco.editor.ICodeEditor | undefined {
-  const editors = monaco.editor.getEditors?.() ?? [];
+async function getActiveCodeEditor(): Promise<monaco.editor.ICodeEditor | undefined> {
+  const monacoModule = await import('monaco-editor');
+  const editors = monacoModule.editor.getEditors?.() ?? [];
   const focused = editors.find((e) => e.hasTextFocus());
   if (focused) return focused;
 
@@ -130,7 +131,7 @@ function getActiveCodeEditor(): monaco.editor.ICodeEditor | undefined {
 
 async function insertLines(lines: string[]): Promise<void> {
   if (lines.length === 0) return;
-  const editor = getActiveCodeEditor();
+  const editor = await getActiveCodeEditor();
   if (!editor) {
     notify('warning', 'Open a Spectra file to insert the snippet.');
     return;

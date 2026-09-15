@@ -1,43 +1,43 @@
 {
-  "name": "hyscode",
-  "version": "0.14.0",
-  "private": true,
-  "packageManager": "npm@11.12.1",
-  "workspaces": [
-    "apps/*",
-    "packages/*",
-    "tools/*"
-  ],
-  "scripts": {
-    "dev": "turbo dev",
-    "build": "turbo build",
-    "build:sidecars": "turbo build --filter=@hyscode/codex-sidecar --filter=@hyscode/claude-agent-sidecar",
-    "build:tui": "pwsh -ExecutionPolicy Bypass -File ./scripts/build-tui.ps1",
-    "build:vortex": "node ./scripts/build-vortex.mjs",
-    "install:vortex": "node ./scripts/build-vortex.mjs --install",
-    "copy:sidecars": "node scripts/copy-sidecars.mjs",
-    "lint": "turbo lint",
-    "typecheck": "turbo typecheck",
-    "test": "turbo test",
-    "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,css,md}\"",
-    "format:check": "prettier --check \"**/*.{ts,tsx,js,jsx,json,css,md}\"",
-    "release:local": "pwsh -ExecutionPolicy Bypass -File ./scripts/release-local.ps1",
-    "build:prod": "pwsh -ExecutionPolicy Bypass -File ./scripts/build-windows.ps1",
-    "build:prod:nsis": "pwsh -ExecutionPolicy Bypass -File ./scripts/build-windows.ps1 -NsisOnly",
-    "build:prod:inno": "pwsh -ExecutionPolicy Bypass -File ./scripts/build-windows.ps1 -InnoOnly"
-  },
-  "devDependencies": {
-    "@tauri-apps/cli": "^2.10.1",
-    "eslint": "^9.39.4",
-    "eslint-plugin-react-hooks": "^5.2.0",
-    "prettier": "^3.5.0",
-    "turbo": "^2.5.0",
-    "typescript": "^5.8.0",
-    "typescript-eslint": "^8.62.1",
-    "vitest": "^3.2.6"
-  },
-  "dependencies": {
-    "@xterm/addon-fit": "^0.11.0",
-    "@xterm/xterm": "^6.0.0"
-  }
+    "name":  "hyscode",
+    "version":  "0.15.0",
+    "private":  true,
+    "packageManager":  "npm@11.12.1",
+    "workspaces":  [
+                       "apps/*",
+                       "packages/*",
+                       "tools/*"
+                   ],
+    "scripts":  {
+                    "dev":  "turbo dev",
+                    "build":  "turbo build",
+                    "build:sidecars":  "turbo build --filter=@hyscode/codex-sidecar --filter=@hyscode/claude-agent-sidecar",
+                    "build:tui":  "pwsh -ExecutionPolicy Bypass -File ./scripts/build-tui.ps1",
+                    "build:vortex":  "node ./scripts/build-vortex.mjs",
+                    "install:vortex":  "node ./scripts/build-vortex.mjs --install",
+                    "copy:sidecars":  "node scripts/copy-sidecars.mjs",
+                    "lint":  "turbo lint",
+                    "typecheck":  "turbo typecheck",
+                    "test":  "turbo test",
+                    "format":  "prettier --write \"**/*.{ts,tsx,js,jsx,json,css,md}\"",
+                    "format:check":  "prettier --check \"**/*.{ts,tsx,js,jsx,json,css,md}\"",
+                    "release:local":  "pwsh -ExecutionPolicy Bypass -File ./scripts/release-local.ps1",
+                    "build:prod":  "pwsh -ExecutionPolicy Bypass -File ./scripts/build-windows.ps1",
+                    "build:prod:nsis":  "pwsh -ExecutionPolicy Bypass -File ./scripts/build-windows.ps1 -NsisOnly",
+                    "build:prod:inno":  "pwsh -ExecutionPolicy Bypass -File ./scripts/build-windows.ps1 -InnoOnly"
+                },
+    "devDependencies":  {
+                            "@tauri-apps/cli":  "^2.10.1",
+                            "eslint":  "^9.39.4",
+                            "eslint-plugin-react-hooks":  "^5.2.0",
+                            "prettier":  "^3.5.0",
+                            "turbo":  "^2.5.0",
+                            "typescript":  "^5.8.0",
+                            "typescript-eslint":  "^8.62.1",
+                            "vitest":  "^3.2.6"
+                        },
+    "dependencies":  {
+                         "@xterm/addon-fit":  "^0.11.0",
+                         "@xterm/xterm":  "^6.0.0"
+                     }
 }

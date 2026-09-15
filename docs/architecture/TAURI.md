@@ -107,6 +107,47 @@ Runtime calls are bounded at the adapter boundary. An unconfirmed stop returns `
 published before or with the one-shot `pty:exit` event and remains present in subsequent full
 snapshots.
 
+### Language Server Commands
+
+```rust
+#[tauri::command]
+async fn lsp_start(
+    id: String,
+    command: String,
+    args: Vec<String>,
+    root_path: String,
+    file_path: Option<String>,
+) -> Result<LspStartResult, Error>;
+
+#[tauri::command]
+async fn lsp_send(id: String, content: String) -> Result<(), Error>;
+
+#[tauri::command]
+async fn lsp_stop(id: String);
+
+#[tauri::command]
+async fn lsp_list_active() -> Result<Vec<String>, Error>;
+
+#[tauri::command]
+async fn lsp_probe_server(command: String) -> Result<bool, Error>;
+```
+
+Server stdout is streamed as `emit("lsp:message:<id>", body)`.
+
+On Windows the host process (Tauri/WebView2) enforces RedirectionGuard, so
+`CreateProcess` fails with `ERROR_UNTRUSTED_MOUNT_POINT` (os error 448) when the
+executable path ends in a reparse point (file symlink). `lsp_start` therefore:
+
+- resolves rustup proxies (`~/.cargo/bin/rust-analyzer.exe -> rustup.exe`) through
+  `rustup which <command>`, so the real toolchain binary is spawned;
+- canonicalizes other symlinks to their final target;
+- prepends the rustup toolchain `bin` directory to the child `PATH` so nested
+  `cargo`/`rustc` lookups do not go through the proxy symlinks;
+- retries once on error 448 and returns an actionable message if it persists.
+
+`lsp_probe_server` only checks that a binary exists; it does not validate that
+Windows will allow spawning it.
+
 ### Git Commands
 
 ```rust

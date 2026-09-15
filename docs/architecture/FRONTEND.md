@@ -6,6 +6,41 @@ The frontend is a React 19 SPA running inside Tauri's WebView. It uses shadcn/ui
 
 ---
 
+## Desktop Bootstrap and Development Profile
+
+`apps/desktop/index.html` loads `apps/desktop/public/boot.js` before the React
+module. The bootstrap layer renders a solid loading surface with an
+indeterminate progress bar and rotating status copy. It remains visible until
+React calls `ready()` after mounting; it intentionally has no timeout or error
+panel. This keeps the startup surface quiet while the local interface is
+initializing instead of showing a second recovery flow.
+
+The bootstrap surface also renders temporary window controls. The controls
+module uses the same Tauri window API as the main titlebar for minimize,
+maximize/restore, and close, while the top drag region uses
+`data-tauri-drag-region` so the window can be moved before React mounts.
+
+The desktop development launcher applies the isolated Tauri identifier
+`com.hyscode.dev` through a dev-only configuration merge. This keeps the
+WebView2 profile used by `npm run dev` separate from the installed
+`com.hyscode.app` profile, avoiding shared browser-cache state between an
+installed release and a local build. Set `HYSCODE_TAURI_DEV_IDENTIFIER` when a
+different local profile is required.
+
+Development also passes `--disable-http-cache` to WebView2 while preserving any
+existing `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS`. This prevents a stale Vite
+optimized module from being reused after dependency or version changes.
+
+The version bump script validates this identity boundary before and after a
+bump. It never derives the production identifier from the version, because
+doing so would break installation and application-data continuity.
+
+The Rust database path remains the shared HysCode data directory; the
+identifier isolation is specifically for the desktop WebView2 profile and its
+cache/session state.
+
+---
+
 ## Application Shell Layout
 
 ```
@@ -228,6 +263,17 @@ const MonacoEditor = lazy(() => import('@monaco-editor/react'));
 - Each agent edit creates an **undo checkpoint** so user can revert individual agent edits
 - Diff view toggle: side-by-side before/after for any agent edit
 
+### LSP Document URIs
+
+Editor models are created with canonical `file:` URIs (`pathToFileUri` from
+`@hyscode/lsp-client`) instead of raw filesystem paths. `monaco.Uri.parse` of a
+Windows path produces a one-letter scheme with percent-encoded backslashes
+(`D:/x%5Cy.rs`), which LSP servers reject with `url is not a file`. The Monaco
+adapter normalizes every model URI before sending requests and skips models that
+are not backed by a real file (history snapshots, diff/in-memory models,
+untitled buffers). `textDocument/inlayHint` requests forward the visible range
+required by servers such as rust-analyzer.
+
 ---
 
 ## Terminal Integration
@@ -259,6 +305,31 @@ Using **TanStack Router** for type-safe routing:
 ```
 
 Most navigation is panel-based (not route-based). Routes are used for full-page views only.
+
+---
+
+## Build Pipeline
+
+The production frontend is built with Vite 6 (`vite build`) from `apps/desktop`.
+
+### Build Target
+
+`build.target` is pinned to `['es2021', 'edge88', 'firefox79', 'chrome87', 'safari14']`
+in `apps/desktop/vite.config.ts`. This keeps the same browser baseline as Vite's
+default `'modules'` target while preventing esbuild from lowering logical
+assignment operators (`||=`, `&&=`, `??=`). esbuild 0.25.x miscompiles a lowered
+logical assignment whose target variable is dead into an undeclared reference
+(`(void 0 || (i = {}))` without the `let`), which produced
+`ReferenceError: i is not defined` in xterm's `InputHandler.requestMode` whenever a
+terminal application sent a DECRQM sequence (`CSI Ps $ p`).
+
+`scripts/verify-frontend-bundle.mjs` runs after `vite build` (wired into the
+`@hyscode/desktop` build script) and fails the build if the broken pattern
+reappears in `dist/assets/index-*.js`.
+
+> esbuild 0.28.2 fixes the minifier bug, but it is incompatible with Vite 6.4.2
+> in this project (it aborts on destructuring lowering for the Monaco bundle), so
+> the dependency version is intentionally not overridden.
 
 ---
 

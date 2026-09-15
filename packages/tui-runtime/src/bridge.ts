@@ -5,6 +5,9 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import {
   Harness,
+  createDefaultGoalValidator,
+  createGoalTools,
+  GoalService,
   MemoryManager,
   asTerminalRuntimeFailure,
   invalidateTerminalInput,
@@ -48,6 +51,12 @@ import {
   type ApprovalDecision,
   type ToolApprovalRequest,
   type Trace,
+  type GoalChangeEvent,
+  type GoalEditInput,
+  type GoalCompletionRequest,
+  type GoalRun,
+  type GoalRepository,
+  type GoalState,
 } from '@hyscode/agent-harness';
 import {
   getProviderRegistry,
@@ -168,6 +177,9 @@ export class TuiBridge {
   private readonly pendingFileChanges = new Map<string, FileChangeState>();
   private readonly childAgents = new Map<string, Harness>();
   private output: BridgeOutput | null = null;
+  private goalService: GoalService | null = null;
+  private readonly goalContinuationTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  private readonly goalContinuationInFlight = new Set<string>();
 
   constructor(output?: BridgeOutput) {
     this.output = output ?? null;
@@ -264,6 +276,26 @@ export class TuiBridge {
           return this.ok(request.id, await this.exportSession(String(request.params?.id ?? this.session?.id ?? '')));
         case 'trace_list':
           return this.ok(request.id, await this.listTraces());
+        case 'goal_get':
+          this.requireBuildGoalMode();
+          return this.ok(request.id, await this.requireGoalService().getState(this.requireSession().id));
+        case 'goal_create':
+          {
+            const state = await this.createGoal(request.params ?? {});
+            void this.startGoalExecution().catch((error) => this.emitDiagnostic({ level: 'error', message: error instanceof Error ? error.message : String(error) }));
+            return this.ok(request.id, state);
+          }
+        case 'goal_edit':
+          return this.ok(request.id, await this.editGoal(request.params ?? {}));
+        case 'goal_pause':
+          return this.ok(request.id, await this.pauseGoal());
+        case 'goal_resume':
+          return this.ok(request.id, await this.resumeGoal());
+        case 'goal_cancel':
+          return this.ok(request.id, await this.cancelGoal());
+        case 'goal_clear':
+          await this.clearGoal();
+          return this.ok(request.id, null);
         case 'host_response':
           return this.ok(request.id, this.resolveHostResponse(request.params ?? {}));
         case 'host_event':
@@ -331,6 +363,7 @@ export class TuiBridge {
     // The host_response/host_event protocol remains available for older
     // integrations and tests that provide an explicit remote host adapter.
     this.host = new CliHost(workspacePath, this.dataStore, this.keyStore);
+    this.goalService = this.createGoalService();
     await this.refreshGitSummary();
     this.attachments.clear();
     this.pendingFileChanges.clear();
@@ -362,6 +395,8 @@ export class TuiBridge {
       onModeSwitchRequest: (request) => this.requestModeSwitch(request),
       onUserQuestionRequest: (id, questions, title) => this.requestUserQuestions(id, questions, title),
       terminalRuntime,
+      goalTools: createGoalTools(this.requireGoalService(), this.projectId, () => this.requireHarness().getAgentType() === 'build'),
+      goalToolsEnabled: () => this.requireHarness().getAgentType() === 'build',
       memoryManager: new MemoryManager((command, args) => this.requireHost().invoke(command, args)),
       sddDb,
       savePlanFile: async (sessionId, spec, tasks) => this.savePlanFile(sessionId, spec, tasks),
@@ -434,6 +469,20 @@ export class TuiBridge {
     // isolated from the persisted session array so persistTurn can append the
     // completed turn exactly once.
     const history = [...(params.history ?? this.session?.messages ?? [])];
+    let goalRun: GoalRun | null = null;
+    let goalState: GoalState | null = null;
+    const conversationId = this.session?.id;
+    if (conversationId && this.requireHarness().getAgentType() === 'build') {
+      goalState = await this.requireGoalService().getState(conversationId);
+      if (goalState?.goal.status === 'active') {
+        if (effectiveParams.goalRunId) {
+          goalRun = goalState.runs.find((candidate) => candidate.id === effectiveParams.goalRunId) ?? null;
+          if (!goalRun) throw new Error(`Goal run ${effectiveParams.goalRunId} was not found.`);
+        } else {
+          goalRun = await this.requireGoalService().startRun(conversationId, params.goalSource ?? 'user');
+        }
+      }
+    }
     this.activeTurnId = null;
     this.activeTurnMessages = [];
     const run = this.harness.run({
@@ -441,6 +490,7 @@ export class TuiBridge {
       history,
       images: effectiveParams.images,
       ruleTargetPaths: effectiveParams.ruleTargetPaths,
+      goalContext: effectiveParams.goalContext ?? (goalState ? this.requireGoalService().buildContext(goalState) : undefined),
     });
     this.activeRun = run;
     try {
@@ -451,7 +501,43 @@ export class TuiBridge {
         outcome.turnRecord.tokenUsage,
         outcome.turnRecord.trace,
       );
+      if (goalRun && goalState) {
+        try {
+          const decision = await this.requireGoalService().finishTurn(goalState.goal.conversationId, {
+            runId: goalRun.id,
+            turnId: outcome.turnId,
+            status: outcome.status,
+            response: outcome.response,
+            tokenUsage: outcome.turnRecord.tokenUsage,
+            toolCalls: outcome.turnRecord.toolCalls,
+            durationMs: outcome.turnRecord.durationMs,
+            completionRequest: extractGoalCompletionRequest(outcome.turnRecord, outcome.turnId),
+          });
+          this.emit({ type: 'event', event: 'goal_updated', payload: decision.state });
+          if (decision.shouldContinue) this.scheduleGoalContinuation(decision.state.goal.conversationId);
+        } catch (goalError) {
+          this.emitDiagnostic({ level: 'error', message: `Failed to persist goal turn: ${goalError instanceof Error ? goalError.message : String(goalError)}` });
+        }
+      }
       return outcome;
+    } catch (error) {
+      if (goalRun && goalState) {
+        try {
+          const decision = await this.requireGoalService().finishTurn(goalState.goal.conversationId, {
+            runId: goalRun.id,
+            turnId: this.activeTurnId ?? crypto.randomUUID(),
+            status: 'error',
+            tokenUsage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
+            toolCalls: [],
+            durationMs: 0,
+            error: error instanceof Error ? error.message : String(error),
+          });
+          this.emit({ type: 'event', event: 'goal_updated', payload: decision.state });
+        } catch (goalError) {
+          this.emitDiagnostic({ level: 'error', message: `Failed to account goal error: ${goalError instanceof Error ? goalError.message : String(goalError)}` });
+        }
+      }
+      throw error;
     } finally {
       this.activeRun = null;
       this.activeTurnId = null;
@@ -487,6 +573,7 @@ export class TuiBridge {
   private async setMode(rawParams: Record<string, unknown>): Promise<RuntimeReadyPayload> {
     const harness = this.requireHarness();
     const agentType = normalizeAgentType(rawParams.agentType ?? rawParams.mode ?? harness.getAgentType());
+    if (agentType !== 'build') await this.pauseActiveGoalBeforeLeavingBuild();
     harness.setAgentType(agentType);
     harness.setMode(agentType === 'chat' ? 'chat' : 'agent');
     const settings = this.requireSettings();
@@ -953,6 +1040,9 @@ export class TuiBridge {
       firstFailure ??= asTerminalRuntimeFailure(error, operation);
     };
     const activeRun = this.activeRun;
+    for (const timer of this.goalContinuationTimers.values()) clearTimeout(timer);
+    this.goalContinuationTimers.clear();
+    this.goalContinuationInFlight.clear();
     this.cancel();
     await activeRun?.catch((error: unknown) => capture(error, 'event'));
     for (const pending of this.hostRequests.values()) pending.reject(new Error('Runtime host was shut down.'));
@@ -1044,7 +1134,7 @@ export class TuiBridge {
         : undefined,
     ));
     const hasAssistantResponse = turnMessages.some((message) => message.role === 'assistant' && message.content.some((block) => block.type === 'text' && block.text === response));
-    const messages = [...this.session.messages, user, ...turnMessages];
+    const messages = [...this.session.messages, ...(params.hidden ? [] : [user]), ...turnMessages];
     if (response && !hasAssistantResponse) {
       messages.push(
         makeSessionMessage(
@@ -1069,6 +1159,143 @@ export class TuiBridge {
     };
     await this.dataStore.saveSession(this.session);
     this.emit({ type: 'event', event: 'session_updated', payload: this.session });
+  }
+
+  private createGoalService(): GoalService {
+    const repository: GoalRepository = {
+      load: async (conversationId) => {
+        const raw = await this.dataStore.invoke<string | null>('db_goal_load_state', { conversationId });
+        return raw ? JSON.parse(raw) as GoalState : null;
+      },
+      save: async (state, expectedVersion) => {
+        const raw = await this.dataStore.invoke<string>('db_goal_save_state', {
+          stateJson: JSON.stringify(state),
+          expectedVersion,
+        });
+        return JSON.parse(raw) as GoalState;
+      },
+      clear: async (conversationId) => {
+        await this.dataStore.invoke('db_goal_clear_state', { conversationId });
+      },
+    };
+    return new GoalService(
+      repository,
+      (event: GoalChangeEvent) => {
+        this.emit({ type: 'event', event: 'goal_updated', payload: event.state });
+        if (this.session && this.session.id === event.state?.goal.conversationId) {
+          this.session = { ...this.session, goal: event.state };
+        }
+      },
+      createDefaultGoalValidator((command, args) => this.requireHost().invoke(command, args)),
+    );
+  }
+
+  private async createGoal(rawParams: Record<string, unknown>): Promise<GoalState> {
+    this.requireBuildGoalMode();
+    return this.requireGoalService().createGoal(
+      this.requireSession().id,
+      this.projectId,
+      String(rawParams.objective ?? ''),
+    );
+  }
+
+  private async editGoal(rawParams: Record<string, unknown>): Promise<GoalState> {
+    this.requireBuildGoalMode();
+    const updates: GoalEditInput = {};
+    if (typeof rawParams.objective === 'string') updates.objective = rawParams.objective;
+    if ('criteria' in rawParams || 'budget' in rawParams) {
+      throw new Error('Goal criteria and budget are defined by the agent after the objective is created.');
+    }
+    return this.requireGoalService().editGoal(this.requireSession().id, updates);
+  }
+
+  private async startGoalExecution(): Promise<void> {
+    this.requireBuildGoalMode();
+    const session = this.requireSession();
+    if (this.activeRun) return;
+    const state = await this.requireGoalService().getState(session.id);
+    if (!state || state.goal.status !== 'active') return;
+    const run = await this.requireGoalService().startRun(session.id, 'user');
+    await this.sendMessage({
+      message: 'Continue the active persistent goal from its current checkpoint. Take the next concrete step and keep working until the goal is complete or a real blocker is reached.',
+      hidden: true,
+      goalRunId: run.id,
+      goalSource: 'user',
+    });
+  }
+
+  private async pauseGoal(): Promise<GoalState> {
+    this.requireBuildGoalMode();
+    const session = this.requireSession();
+    const state = await this.requireGoalService().pauseGoal(session.id);
+    this.clearGoalContinuationTimer(session.id);
+    if (this.activeRun) this.cancel();
+    return state;
+  }
+
+  private async resumeGoal(): Promise<GoalState> {
+    this.requireBuildGoalMode();
+    const session = this.requireSession();
+    const state = await this.requireGoalService().resumeGoal(session.id);
+    void this.startGoalExecution().catch((error) => this.emitDiagnostic({ level: 'error', message: error instanceof Error ? error.message : String(error) }));
+    return state;
+  }
+
+  private async cancelGoal(): Promise<GoalState> {
+    this.requireBuildGoalMode();
+    const session = this.requireSession();
+    const state = await this.requireGoalService().cancelGoal(session.id);
+    this.clearGoalContinuationTimer(session.id);
+    if (this.activeRun) this.cancel();
+    return state;
+  }
+
+  private async clearGoal(): Promise<void> {
+    this.requireBuildGoalMode();
+    const session = this.requireSession();
+    this.clearGoalContinuationTimer(session.id);
+    if (this.activeRun) this.cancel();
+    await this.requireGoalService().clearGoal(session.id);
+  }
+
+  private scheduleGoalContinuation(conversationId: string): void {
+    if (this.goalContinuationTimers.has(conversationId) || this.goalContinuationInFlight.has(conversationId)) return;
+    const timer = setTimeout(() => {
+      this.goalContinuationTimers.delete(conversationId);
+      void this.runGoalContinuation(conversationId).catch((error) => {
+        this.emitDiagnostic({ level: 'error', message: `Goal continuation stopped: ${error instanceof Error ? error.message : String(error)}` });
+      });
+    }, 100);
+    this.goalContinuationTimers.set(conversationId, timer);
+  }
+
+  private async runGoalContinuation(conversationId: string): Promise<void> {
+    if (this.goalContinuationInFlight.has(conversationId) || this.session?.id !== conversationId) return;
+    if (this.requireHarness().getAgentType() !== 'build') return;
+    if (this.activeRun) {
+      this.scheduleGoalContinuation(conversationId);
+      return;
+    }
+    const state = await this.requireGoalService().getState(conversationId);
+    if (!state || state.goal.status !== 'active') return;
+    this.goalContinuationInFlight.add(conversationId);
+    try {
+      const run = await this.requireGoalService().startRun(conversationId, 'continuation');
+      await this.sendMessage({
+        message: 'Continue the active persistent goal from its current checkpoint. Take the next concrete step and keep working until the goal is complete or a real blocker is reached.',
+        hidden: true,
+        goalRunId: run.id,
+        goalSource: 'continuation',
+      });
+    } finally {
+      this.goalContinuationInFlight.delete(conversationId);
+    }
+  }
+
+  private clearGoalContinuationTimer(conversationId: string): void {
+    const timer = this.goalContinuationTimers.get(conversationId);
+    if (timer) clearTimeout(timer);
+    this.goalContinuationTimers.delete(conversationId);
   }
 
   private async connectMcpServers(): Promise<void> {
@@ -1393,6 +1620,7 @@ export class TuiBridge {
         terminalInput: true,
         terminalResize: true,
         ndjsonProtocol: true,
+        goals: true,
       },
       context: this.contextState(),
       sdd: {
@@ -1556,6 +1784,33 @@ export class TuiBridge {
   private requireSettings(): SharedTuiSettings {
     if (!this.settings) throw new Error('Shared settings are not initialized.');
     return this.settings;
+  }
+
+  private requireGoalService(): GoalService {
+    if (!this.goalService) throw new Error('Goal service is not initialized.');
+    return this.goalService;
+  }
+
+  private requireBuildGoalMode(): void {
+    if (this.requireHarness().getAgentType() !== 'build') {
+      throw new Error('Goal mode is available in Build mode only.');
+    }
+  }
+
+  private async pauseActiveGoalBeforeLeavingBuild(): Promise<void> {
+    const session = this.session;
+    if (!session) return;
+    const goalService = this.requireGoalService();
+    const state = await goalService.getState(session.id);
+    if (!state || state.goal.status !== 'active') return;
+    await goalService.pauseGoal(session.id);
+    this.clearGoalContinuationTimer(session.id);
+    if (this.activeRun) this.cancel();
+  }
+
+  private requireSession(): SessionRecord {
+    if (!this.session) throw new Error('No active session.');
+    return this.session;
   }
 
   private ok(id: string, result: unknown): BridgeResponse {
@@ -2645,6 +2900,24 @@ function mergeTokenUsage(previous: TokenUsage | undefined, current: TokenUsage):
   return merged;
 }
 
+function extractGoalCompletionRequest(
+  record: import('@hyscode/agent-harness').TurnRecord,
+  turnId: string,
+): GoalCompletionRequest | undefined {
+  for (let index = record.toolCalls.length - 1; index >= 0; index -= 1) {
+    const metadata = record.toolCalls[index].output.metadata;
+    if (!metadata || metadata.action !== 'goal_completion_requested') continue;
+    const summary = typeof metadata.summary === 'string' ? metadata.summary.trim() : '';
+    if (!summary) return undefined;
+    return {
+      summary,
+      evidence: typeof metadata.evidence === 'string' ? metadata.evidence : undefined,
+      turnId,
+    };
+  }
+  return undefined;
+}
+
 function sumOptional(left: number | undefined, right: number | undefined): number | undefined {
   if (left === undefined && right === undefined) return undefined;
   return (left ?? 0) + (right ?? 0);
@@ -2787,10 +3060,16 @@ function normalizeSendParams(raw: Record<string, unknown>): SendMessageParams {
     : undefined;
   return {
     message: String(raw.message ?? ''),
+    hidden: raw.hidden === true,
     history: Array.isArray(raw.history) ? raw.history as Message[] : undefined,
     images,
     ruleTargetPaths,
     contextAttachments,
+    goalContext: typeof raw.goalContext === 'string' ? raw.goalContext : undefined,
+    goalRunId: typeof raw.goalRunId === 'string' ? raw.goalRunId : undefined,
+    goalSource: raw.goalSource === 'continuation' || raw.goalSource === 'resume' || raw.goalSource === 'user'
+      ? raw.goalSource
+      : undefined,
   };
 }
 

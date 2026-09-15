@@ -38,13 +38,14 @@ import { useAgentDecorations } from '../../hooks/use-agent-decorations';
 import { useDiagnosticsSync } from '../../hooks/use-diagnostics-sync';
 import { useInlineCompletion } from '../../hooks/use-inline-completion';
 import { defineAllMonacoThemes, getMonacoThemeName } from '../../lib/monaco-themes';
+import { loadMonacoEditor } from '../../lib/monaco-loader';
 import { LspBridge, detectLanguage, detectLspLanguage } from '../../lib/lsp-bridge';
 import { LspMissingBanner } from './lsp-missing-banner';
-import { registerAllLanguages, disableNativeTypeScriptValidation } from '@hyscode/lsp-client';
+import { registerAllLanguages, disableNativeTypeScriptValidation, pathToFileUri } from '@hyscode/lsp-client';
 import { getViewerType } from '../../lib/utils';
 import type * as monacoEditor from 'monaco-editor';
 
-const MonacoEditor = lazy(() => import('@monaco-editor/react'));
+const MonacoEditor = lazy(() => loadMonacoEditor());
 
 function formatLoadMB(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
@@ -771,7 +772,11 @@ export function EditorArea() {
               <div className="flex-1 overflow-hidden">
                 <Suspense fallback={<EditorLoading />}>
                   <MonacoEditor
-                    path={activeTab.filePath}
+                    path={
+                      activeTab.filePath.startsWith('untitled:')
+                        ? activeTab.filePath
+                        : pathToFileUri(activeTab.filePath)
+                    }
                     language={detectLanguage(activeTab.filePath)}
                     value={content ?? ''}
                     onChange={handleEditorChange}

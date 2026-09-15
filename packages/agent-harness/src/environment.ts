@@ -55,6 +55,10 @@ export interface HarnessEnvironment {
   externalPathAccess?: ExternalPathAccessRegistry;
   /** Optional Desktop-only persistent Kanban integration. */
   taskIntegration?: KanbanTaskIntegration;
+  /** Shared persistent-goal tools inherited by child harnesses. */
+  goalTools?: ToolHandler[];
+  /** Whether persistent-goal tools may be exposed and executed in this mode. */
+  goalToolsEnabled?: () => boolean;
 }
 
 export type ChildHarnessOptions = {

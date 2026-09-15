@@ -61,6 +61,7 @@ vi.mock('../../../lib/monaco-themes', () => ({
 vi.mock('@hyscode/lsp-client', () => ({
   registerAllLanguages: vi.fn(),
   disableNativeTypeScriptValidation: vi.fn(),
+  pathToFileUri: (path: string) => `file:///${path.replace(/\\/g, '/')}`,
 }));
 
 vi.mock('../../../lib/lsp-bridge', () => ({

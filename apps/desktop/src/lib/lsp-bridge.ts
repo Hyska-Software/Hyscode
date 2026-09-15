@@ -15,6 +15,8 @@ import {
   getBuiltinServerForLanguage,
   registerAllLanguages,
   detectLspLanguage,
+  fileUriToPath,
+  pathToFileUri,
 } from '@hyscode/lsp-client';
 import type { LspContribution } from '@hyscode/extension-api';
 import { useLspStore } from '@/stores/lsp-store';
@@ -40,6 +42,11 @@ function getNextVersion(uri: string): number {
 const changeTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const CHANGE_DEBOUNCE_MS = 300;
 
+/** Untitled buffers have no file on disk and must not be sent to a server. */
+function isNonFileDocument(filePath: string): boolean {
+  return filePath.startsWith('untitled:');
+}
+
 class LspBridgeImpl {
   private manager: LspManager | null = null;
   private invoke: TauriInvoke | null = null;
@@ -59,8 +66,7 @@ class LspBridgeImpl {
     if (this.initialized) return;
 
     this.invoke = invoke;
-    const normalized = rootPath.replace(/\\/g, '/');
-    this.rootUri = normalized.startsWith('/') ? `file://${normalized}` : `file:///${normalized}`;
+    this.rootUri = pathToFileUri(rootPath);
     console.log('[LspBridge] init rootPath=', rootPath, 'rootUri=', this.rootUri);
 
     this.manager = new LspManager(invoke, listen);
@@ -125,7 +131,7 @@ class LspBridgeImpl {
    * Starts the appropriate LSP server (if available) and sends didOpen.
    */
   async onFileOpened(filePath: string, languageId: string, content: string): Promise<void> {
-    if (!this.manager || !this.initialized) return;
+    if (!this.manager || !this.initialized || isNonFileDocument(filePath)) return;
 
     const uri = this.filePathToUri(filePath);
 
@@ -148,7 +154,7 @@ class LspBridgeImpl {
    * Debounced to avoid flooding the server.
    */
   onFileChanged(filePath: string, languageId: string, content: string): void {
-    if (!this.manager || !this.initialized) return;
+    if (!this.manager || !this.initialized || isNonFileDocument(filePath)) return;
 
     const uri = this.filePathToUri(filePath);
 
@@ -175,7 +181,7 @@ class LspBridgeImpl {
    * Called when a file is saved.
    */
   onFileSaved(filePath: string, languageId: string, content: string): void {
-    if (!this.manager || !this.initialized) return;
+    if (!this.manager || !this.initialized || isNonFileDocument(filePath)) return;
 
     const uri = this.filePathToUri(filePath);
     const connection = this.manager.getConnection(languageId);
@@ -188,7 +194,7 @@ class LspBridgeImpl {
    * Called when a file is closed in the editor.
    */
   async onFileClosed(filePath: string, languageId: string): Promise<void> {
-    if (!this.manager || !this.initialized) return;
+    if (!this.manager || !this.initialized || isNonFileDocument(filePath)) return;
 
     const uri = this.filePathToUri(filePath);
 
@@ -408,13 +414,11 @@ class LspBridgeImpl {
   // ── Helpers ─────────────────────────────────────────────────────────────
 
   private filePathToUri(filePath: string): string {
-    const normalized = filePath.replace(/\\/g, '/');
-    if (normalized.startsWith('file://')) return normalized;
-    return `file:///${normalized.replace(/^\//, '')}`;
+    return pathToFileUri(filePath);
   }
 
   private uriToFilePath(uri: string): string {
-    return uri.replace('file:///', '').replace('file://', '');
+    return fileUriToPath(uri);
   }
 }
 

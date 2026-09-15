@@ -30,6 +30,7 @@ import type { TokenUsage } from '@/stores/agent-store';
 import { useSettingsStore } from '@/stores/settings-store';
 import { useKanbanStore } from '@/stores/kanban-store';
 import { AgentTaskContextCard } from './agent-task-context-card';
+import { GoalCard } from './goal-card';
 import { getProviderRegistry } from '@hyscode/ai-providers';
 import { TerminalPanel } from '@/components/terminal';
 import type { AIModel } from '@hyscode/ai-providers';
@@ -364,6 +365,7 @@ export function AgentPanel() {
   const sddPhase = useAgentStore((s) => s.sddPhase);
   const sddSpec = useAgentStore((s) => s.sddSpec);
   const sddTasks = useAgentStore((s) => s.sddTasks);
+  const agentMode = useAgentStore((s) => s.mode);
   const clearConversation = useAgentStore((s) => s.clearConversation);
   const messageCount = useAgentStore((s) => s.messages.length);
   const tokenUsage = useAgentStore((s) => s.tokenUsage);
@@ -384,7 +386,13 @@ export function AgentPanel() {
   const closeTab = useAgentStore((s) => s.closeTab);
   const openNewTab = useAgentStore((s) => s.openNewTab);
   const conversationId = useAgentStore((s) => s.conversationId);
+  const [goalModeEnabled, setGoalModeEnabled] = useState(false);
   const kanbanTasks = useKanbanStore((s) => s.tasks);
+
+  useEffect(() => {
+    if (agentMode !== 'build' || !conversationId) setGoalModeEnabled(false);
+  }, [agentMode, conversationId]);
+
   const linkedTask = useMemo(
     () =>
       kanbanTasks.find(
@@ -619,8 +627,14 @@ export function AgentPanel() {
           {/* Messages */}
           <AgentMessages />
 
+          {/* Goal dock appears above the composer only while Goal mode is enabled in Build */}
+          <GoalCard enabled={goalModeEnabled && agentMode === 'build'} />
+
           {/* Input + selectors at the bottom */}
-          <AgentInput />
+          <AgentInput
+            goalModeEnabled={goalModeEnabled}
+            onGoalModeChange={setGoalModeEnabled}
+          />
         </>
       )}
     </div>

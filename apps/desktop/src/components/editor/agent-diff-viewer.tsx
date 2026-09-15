@@ -2,10 +2,11 @@ import { Suspense, lazy } from 'react';
 import { Loader2 } from 'lucide-react';
 import { useSettingsStore } from '@/stores';
 import { defineAllMonacoThemes, getMonacoThemeName } from '@/lib/monaco-themes';
+import { loadMonacoEditor } from '@/lib/monaco-loader';
 import type { PendingFileChange } from '@/stores/agent-store';
 
 const MonacoDiffEditor = lazy(() =>
-  import('@monaco-editor/react').then((mod) => ({ default: mod.DiffEditor })),
+  loadMonacoEditor().then((mod) => ({ default: mod.DiffEditor })),
 );
 
 function DiffLoading() {

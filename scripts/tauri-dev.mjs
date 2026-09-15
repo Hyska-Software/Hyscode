@@ -6,6 +6,34 @@ import { dirname, join, resolve } from "node:path";
 const scriptDirectory = dirname(fileURLToPath(import.meta.url));
 const desktopDirectory = resolve(scriptDirectory, "..", "apps", "desktop");
 const forwardedArguments = process.argv.slice(2);
+const productionIdentifier = "com.hyscode.app";
+const defaultDevIdentifier = "com.hyscode.dev";
+const devIdentifier = process.env.HYSCODE_TAURI_DEV_IDENTIFIER?.trim() || defaultDevIdentifier;
+const webViewCacheArgument = "--disable-http-cache";
+
+if (devIdentifier === productionIdentifier) {
+  throw new Error(
+    `HYSCODE_TAURI_DEV_IDENTIFIER must differ from the production identifier (${productionIdentifier}).`,
+  );
+}
+
+const configureDevWebView = (environment) => {
+  const existingArguments = environment.WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS?.trim() ?? "";
+  const hasCacheOverride = existingArguments
+    .split(/\s+/)
+    .some((argument) => argument === webViewCacheArgument);
+
+  if (hasCacheOverride) {
+    return environment;
+  }
+
+  return {
+    ...environment,
+    WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: [existingArguments, webViewCacheArgument]
+      .filter(Boolean)
+      .join(" "),
+  };
+};
 
 const listDirectories = (directoryPath) => {
   try {
@@ -154,11 +182,17 @@ const loadMsvcEnvironment = () => {
 };
 
 const main = () => {
-  const environment = loadMsvcEnvironment();
+  const environment = configureDevWebView(loadMsvcEnvironment());
   const npmCommand = process.platform === "win32" ? process.execPath : "npm";
+  const tauriArguments = [
+    ...forwardedArguments,
+    "--config",
+    JSON.stringify({ identifier: devIdentifier }),
+  ];
   const npmArguments = process.platform === "win32"
-    ? [findNpmCli(), "run", "dev:tauri", "--", ...forwardedArguments]
-    : ["run", "dev:tauri", "--", ...forwardedArguments];
+    ? [findNpmCli(), "run", "dev:tauri", "--", ...tauriArguments]
+    : ["run", "dev:tauri", "--", ...tauriArguments];
+  console.log(`[hyscode] Using isolated Tauri dev identifier: ${devIdentifier}`);
   const result = spawnSync(
     npmCommand,
     npmArguments,

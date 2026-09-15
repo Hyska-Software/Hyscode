@@ -18,6 +18,10 @@ import {
   asTerminalRuntimeFailure,
   validateTerminalExitEvent,
   validateTerminalFailure,
+  createGoalTools,
+  GoalService,
+  type GoalChangeEvent,
+  type GoalState,
 } from '@hyscode/agent-harness';
 import type {
   HarnessEvent,
@@ -37,6 +41,11 @@ import type {
   ApprovalDecision,
   ToolApprovalRequest,
   AgentTaskContext,
+  GoalEditInput,
+  GoalRun,
+  GoalRunSource,
+  GoalCompletionRequest,
+  TurnOutcome,
 } from '@hyscode/agent-harness';
 import type { Message, ToolDefinition, MessageContent, TokenUsage } from '@hyscode/ai-providers';
 import { tauriInvoke, tauriInvokeRaw } from './tauri-invoke';
@@ -80,6 +89,7 @@ import {
   type TaskExecutionTarget,
 } from './task-execution-coordinator';
 import { normalizeAgentHistory } from './agent-history';
+import { createDesktopGoalService } from './goal-runtime';
 
 // ─── Error Parser ────────────────────────────────────────────────────────────
 // Converts raw technical error messages into friendly user-facing text.
@@ -163,6 +173,21 @@ function collectRuleTargetPaths(workspacePath: string, contextFiles: readonly st
       ),
     ),
   );
+}
+
+function extractGoalCompletionRequest(record: TurnRecord, turnId: string): GoalCompletionRequest | undefined {
+  for (let index = record.toolCalls.length - 1; index >= 0; index -= 1) {
+    const metadata = record.toolCalls[index].output.metadata;
+    if (!metadata || metadata.action !== 'goal_completion_requested') continue;
+    const summary = typeof metadata.summary === 'string' ? metadata.summary.trim() : '';
+    if (!summary) return undefined;
+    return {
+      summary,
+      evidence: typeof metadata.evidence === 'string' ? metadata.evidence : undefined,
+      turnId,
+    };
+  }
+  return undefined;
 }
 
 function createSddDatabase(): SddDatabase {
@@ -258,6 +283,9 @@ export class HarnessBridge {
   private activeTaskContext: AgentTaskContext | null = null;
   private taskTargetUnregister: (() => void) | null = null;
   private ptyExitUnsubscribe: (() => void) | null = null;
+  private goalService: GoalService;
+  private goalContinuationTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  private goalContinuationInFlight = new Set<string>();
 
   // ─── Agent Terminal Integration ───────────────────────────────────
   /** Last terminal command, isolated by conversation for deterministic context injection. */
@@ -300,6 +328,7 @@ export class HarnessBridge {
     this.isolatedRuntime = isolatedRuntime;
     const useAgentStore = this.agentStore;
     this._projectId = projectId;
+    this.goalService = createDesktopGoalService(tauriInvokeRaw, (event) => this.handleGoalChange(event));
     const settings = useSettingsStore.getState();
     this.subAgentCoordinator = new SubAgentCoordinator(
       settings.subAgentMaxConcurrent ?? 2,
@@ -456,6 +485,8 @@ export class HarnessBridge {
       onUserQuestionRequest: (id, questions, title, signal) =>
         this.handleUserQuestionRequest(id, questions, title, signal),
       terminalRuntime: desktopTerminalRuntime,
+      goalTools: createGoalTools(this.goalService, projectId, () => this.agentStore.getState().mode === 'build'),
+      goalToolsEnabled: () => this.agentStore.getState().mode === 'build',
       onTerminalCommand: (command, output, exitCode) =>
         this.recordTerminalCommand(command, output, exitCode),
       skillLoader,
@@ -687,8 +718,11 @@ export class HarnessBridge {
       providerId?: string;
       modelId?: string;
       taskContext?: AgentTaskContext;
+      goalContext?: string;
+      goalRunId?: string;
+      goalSource?: GoalRunSource;
     } = {},
-  ): Promise<void> {
+  ): Promise<TurnOutcome | null> {
     const useAgentStore = this.agentStore;
     const store = useAgentStore.getState();
     const settings = useSettingsStore.getState();
@@ -762,7 +796,7 @@ export class HarnessBridge {
     const contextFiles = store.contextFiles;
     const ruleTargetPaths = collectRuleTargetPaths(this.harness.getWorkspacePath(), contextFiles);
     await this.loadRules(ruleTargetPaths);
-    if (this.disposed) return;
+    if (this.disposed) return null;
 
     // Sync active skills from skills store → harness (respects per-mode assignments)
     const activeSkillNames = this.isolatedRuntime
@@ -933,6 +967,8 @@ export class HarnessBridge {
     });
 
     let notificationOutcome: 'success' | 'cancelled' | 'error' = 'error';
+    let goalRun: GoalRun | null = null;
+    let goalState: GoalState | null = null;
     try {
       // Build history from store messages (use fresh state after addMessage calls)
       // Exclude the last 2 messages (user + placeholder assistant for this turn)
@@ -948,6 +984,19 @@ export class HarnessBridge {
 
       await conversationReady;
 
+      const conversationId = useAgentStore.getState().conversationId;
+      if (conversationId && store.mode === 'build') {
+        goalState = await this.goalService.getState(conversationId);
+        if (goalState?.goal.status === 'active') {
+          if (options.goalRunId) {
+            goalRun = goalState.runs.find((run) => run.id === options.goalRunId) ?? null;
+            if (!goalRun) throw new Error(`Goal run ${options.goalRunId} was not found.`);
+          } else {
+            goalRun = await this.goalService.startRun(conversationId, options.goalSource ?? 'user');
+          }
+        }
+      }
+
       // Reset iteration tracking for the new turn
       // The conversation-scoped terminal runtime acquires a visible session only
       // when a terminal tool actually executes.
@@ -962,13 +1011,15 @@ export class HarnessBridge {
 
       dbg(`Sending to LLM (${history.length} msgs in history)...`);
 
-      const { turnId, response, turnRecord, status } = await this.harness.run({
+      const outcome = await this.harness.run({
         userMessage,
         history,
         images: imageContent.length > 0 ? imageContent : undefined,
         ruleTargetPaths,
         taskContext: options.taskContext,
+        goalContext: options.goalContext ?? (goalState ? this.goalService.buildContext(goalState) : undefined),
       });
+      const { turnId, response, turnRecord, status } = outcome;
       this.lastCompletedTurnId = turnId;
       notificationOutcome =
         status === 'complete'
@@ -999,11 +1050,50 @@ export class HarnessBridge {
       await this.commitTurn(userMessage, turnRecord, providerId, modelId);
       await this.persistTurnRecord(turnRecord, true);
       await this.refreshSessionUsage();
+      if (goalRun && goalState) {
+        try {
+          const decision = await this.goalService.finishTurn(goalState.goal.conversationId, {
+            runId: goalRun.id,
+            turnId,
+            status,
+            response,
+            tokenUsage: turnRecord.tokenUsage,
+            toolCalls: turnRecord.toolCalls,
+            durationMs: turnRecord.durationMs,
+            completionRequest: extractGoalCompletionRequest(turnRecord, turnId),
+          });
+          this.handleGoalChange({
+            state: decision.state,
+            type: decision.state.goal.status === 'complete' ? 'completed' : 'run_completed',
+          });
+          if (decision.shouldContinue) this.scheduleGoalContinuation(decision.state.goal.conversationId);
+        } catch (goalError) {
+          dbg(`Failed to persist goal turn: ${goalError instanceof Error ? goalError.message : String(goalError)}`);
+        }
+      }
+      return outcome;
     } catch (err) {
       const rawMsg = err instanceof Error ? err.message : 'Unknown error';
       const friendlyMsg = parseProviderError(rawMsg);
       dbg(`ERROR: ${rawMsg}`);
       useAgentStore.getState().updateLastAssistantError(friendlyMsg);
+      if (goalRun && goalState) {
+        try {
+          const decision = await this.goalService.finishTurn(goalState.goal.conversationId, {
+            runId: goalRun.id,
+            turnId: this.activeTurnId ?? crypto.randomUUID(),
+            status: 'error',
+            tokenUsage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
+            toolCalls: [],
+            durationMs: 0,
+            error: rawMsg,
+          });
+          this.handleGoalChange({ state: decision.state, type: 'run_completed' });
+        } catch (goalError) {
+          dbg(`Failed to account goal turn: ${goalError instanceof Error ? goalError.message : String(goalError)}`);
+        }
+      }
+      return null;
     } finally {
       useAgentStore.getState().setStreaming(false);
       if (useAgentStore.getState().connectionState !== 'degraded') {
@@ -1188,6 +1278,9 @@ export class HarnessBridge {
       }
     }
     this.cancel();
+    for (const timer of this.goalContinuationTimers.values()) clearTimeout(timer);
+    this.goalContinuationTimers.clear();
+    this.goalContinuationInFlight.clear();
   }
 
   /** Cancel a single sub-agent: queued children never start; active ones abort. */
@@ -1428,6 +1521,12 @@ Investigate the error, fix the underlying issue in the affected files, and verif
 
   setAgentType(type: AgentType): void {
     const useAgentStore = this.agentStore;
+    const current = useAgentStore.getState();
+    if (type !== 'build' && this.harness.getAgentType() === 'build' && current.goal?.goal.status === 'active') {
+      void this.pauseActiveGoalBeforeLeavingBuild().catch((error: unknown) => {
+        this.debug(`Could not pause the active goal before leaving Build mode: ${error instanceof Error ? error.message : String(error)}`);
+      });
+    }
     this.harness.setAgentType(type);
     useAgentStore.getState().setMode(type as import('@/stores/agent-store').AgentMode);
   }
@@ -1621,7 +1720,163 @@ Investigate the error, fix the underlying issue in the affected files, and verif
     // Refresh cumulative token usage for the restored session from the DB.
     useAgentStore.getState().setSessionTokenUsage(null);
     void this.refreshSessionUsage();
+    void this.restoreGoalForConversation(conversationId);
     this.debug(`Session restored: ${conversationId}`);
+  }
+
+  async getGoal(): Promise<GoalState | null> {
+    this.requireBuildGoalMode();
+    const conversationId = this.agentStore.getState().conversationId;
+    if (!conversationId) return null;
+    const state = await this.goalService.getState(conversationId);
+    this.handleGoalChange({ state, type: state ? 'updated' : 'cleared' });
+    return state;
+  }
+
+  async createGoal(
+    objective: string,
+  ): Promise<GoalState> {
+    this.requireBuildGoalMode();
+    let conversationId = this.agentStore.getState().conversationId;
+    if (!conversationId) {
+      conversationId = crypto.randomUUID();
+      this.agentStore.getState().setConversationId(conversationId);
+      this.harness.setConversationId(conversationId);
+      this.bindTaskExecutionTarget(conversationId);
+    }
+    await this.ensureConversationExists(objective);
+    const state = await this.goalService.createGoal(
+      conversationId,
+      this._projectId,
+      objective,
+    );
+    this.handleGoalChange({ state, type: 'created' });
+    return state;
+  }
+
+  async pauseGoal(): Promise<GoalState> {
+    this.requireBuildGoalMode();
+    const state = await this.goalService.pauseGoal(this.ensureGoalConversationId());
+    this.clearGoalContinuationTimer(state.goal.conversationId);
+    if (this.agentStore.getState().isStreaming) this.cancel();
+    return state;
+  }
+
+  async resumeGoal(): Promise<GoalState> {
+    this.requireBuildGoalMode();
+    return this.goalService.resumeGoal(this.ensureGoalConversationId());
+  }
+
+  async editGoal(updates: GoalEditInput): Promise<GoalState> {
+    this.requireBuildGoalMode();
+    return this.goalService.editGoal(this.ensureGoalConversationId(), updates);
+  }
+
+  async cancelGoal(): Promise<GoalState> {
+    this.requireBuildGoalMode();
+    const state = await this.goalService.cancelGoal(this.ensureGoalConversationId());
+    this.clearGoalContinuationTimer(state.goal.conversationId);
+    if (this.agentStore.getState().isStreaming) this.cancel();
+    return state;
+  }
+
+  async clearGoal(): Promise<void> {
+    this.requireBuildGoalMode();
+    const conversationId = this.ensureGoalConversationId();
+    this.clearGoalContinuationTimer(conversationId);
+    if (this.agentStore.getState().isStreaming) this.cancel();
+    await this.goalService.clearGoal(conversationId);
+  }
+
+  async startGoalExecution(): Promise<void> {
+    this.requireBuildGoalMode();
+    const conversationId = this.ensureGoalConversationId();
+    if (this.agentStore.getState().isStreaming) return;
+    const state = await this.goalService.getState(conversationId);
+    if (!state || state.goal.status !== 'active') return;
+    const run = await this.goalService.startRun(conversationId, 'user');
+    await this.sendMessage(
+      'Continue the active persistent goal from its current checkpoint. Take the next concrete step and keep working until the goal is complete or a real blocker is reached.',
+      { hidden: true, goalRunId: run.id, goalSource: 'user' },
+    );
+  }
+
+  private scheduleGoalContinuation(conversationId: string): void {
+    if (this.disposed || this.goalContinuationTimers.has(conversationId) || this.goalContinuationInFlight.has(conversationId)) return;
+    const timer = setTimeout(() => {
+      this.goalContinuationTimers.delete(conversationId);
+      void this.runGoalContinuation(conversationId).catch((error) => {
+        this.debug(`Goal continuation stopped: ${error instanceof Error ? error.message : String(error)}`);
+      });
+    }, 100);
+    this.goalContinuationTimers.set(conversationId, timer);
+  }
+
+  private async runGoalContinuation(conversationId: string): Promise<void> {
+    if (this.disposed || this.goalContinuationInFlight.has(conversationId)) return;
+    if (this.agentStore.getState().conversationId !== conversationId) return;
+    if (this.agentStore.getState().mode !== 'build') return;
+    if (this.agentStore.getState().isStreaming) {
+      this.scheduleGoalContinuation(conversationId);
+      return;
+    }
+    const state = await this.goalService.getState(conversationId);
+    if (!state || state.goal.status !== 'active') return;
+    this.goalContinuationInFlight.add(conversationId);
+    try {
+      const run = await this.goalService.startRun(conversationId, 'continuation');
+      await this.sendMessage(
+        'Continue the active persistent goal from its current checkpoint. Take the next concrete step and keep working until the goal is complete or a real blocker is reached.',
+        { hidden: true, goalRunId: run.id, goalSource: 'continuation' },
+      );
+    } finally {
+      this.goalContinuationInFlight.delete(conversationId);
+    }
+  }
+
+  private clearGoalContinuationTimer(conversationId: string): void {
+    const timer = this.goalContinuationTimers.get(conversationId);
+    if (timer) clearTimeout(timer);
+    this.goalContinuationTimers.delete(conversationId);
+  }
+
+  private ensureGoalConversationId(): string {
+    const conversationId = this.agentStore.getState().conversationId;
+    if (!conversationId) throw new Error('Create or restore a conversation before using a goal.');
+    return conversationId;
+  }
+
+  private requireBuildGoalMode(): void {
+    if (this.agentStore.getState().mode !== 'build') {
+      throw new Error('Goal mode is available in Build mode only.');
+    }
+  }
+
+  private async pauseActiveGoalBeforeLeavingBuild(): Promise<void> {
+    const conversationId = this.agentStore.getState().conversationId;
+    if (!conversationId) return;
+    const state = await this.goalService.getState(conversationId);
+    if (!state || state.goal.status !== 'active') return;
+    await this.goalService.pauseGoal(conversationId);
+    this.clearGoalContinuationTimer(conversationId);
+    if (this.agentStore.getState().isStreaming) this.cancel();
+  }
+
+  private async restoreGoalForConversation(conversationId: string): Promise<void> {
+    try {
+      const state = await this.goalService.getState(conversationId);
+      if (this.agentStore.getState().conversationId === conversationId) {
+        this.agentStore.getState().setGoal(state);
+      }
+    } catch (error) {
+      this.debug(`Failed to restore goal: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  private handleGoalChange(event: GoalChangeEvent): void {
+    const conversationId = this.agentStore.getState().conversationId;
+    if (!conversationId || (event.state && event.state.goal.conversationId !== conversationId)) return;
+    this.agentStore.getState().setGoal(event.state);
   }
 
   private async restoreSddForConversation(conversationId: string): Promise<void> {

@@ -4,6 +4,8 @@ export { TauriLspTransport } from './tauri-transport';
 export { MonacoLspAdapter } from './monaco-adapter';
 export { LspManager } from './lsp-manager';
 export { registerAllLanguages, detectLanguage, detectLspLanguage, normalizeLspLanguage, disableNativeTypeScriptValidation } from './language-registry';
+export { documentUriFromModelUri, fileUriToPath, pathToFileUri } from './uri';
+export type { UriLike } from './uri';
 export { BUILTIN_SERVERS, getBuiltinServerForLanguage, getBuiltinServerById, getUniqueServerCommands } from './builtin-servers';
 export type { BuiltinServerConfig } from './builtin-servers';
 export type {

@@ -76,6 +76,36 @@ export type {
   MemoryQuery,
   MemoryExtraction,
 } from './types';
+export type {
+  Goal,
+  GoalBlocker,
+  GoalBudget,
+  GoalBudgetInput,
+  GoalChangeEvent,
+  GoalCompletionRequest,
+  GoalCriterion,
+  GoalCriterionInput,
+  GoalCriterionKind,
+  GoalCriterionStatus,
+  GoalEditInput,
+  GoalEvidence,
+  GoalEvidenceSource,
+  GoalEvent,
+  GoalEventType,
+  GoalRepository,
+  GoalRun,
+  GoalRunSource,
+  GoalRunStatus,
+  GoalState,
+  GoalStatus,
+  GoalToolRuntime,
+  GoalTurnAccounting,
+  GoalTurnDecision,
+  GoalValidationContext,
+  GoalValidationResult,
+  GoalValidator,
+  GoalVerification,
+} from './goal';
 export {
   DEFAULT_HARNESS_CONFIG,
   SAFE_TOOLS,
@@ -127,6 +157,13 @@ export { getAgentDefinition, getAllAgentDefinitions, getAgentTypes } from './age
 
 // ─── Tools ──────────────────────────────────────────────────────────────────
 export { getAllBuiltinTools, invalidateTerminalInput } from './tools';
+export {
+  createDefaultGoalBudget,
+  createDefaultGoalValidator,
+  createGoalTools,
+  DEFAULT_GOAL_BUDGET,
+  GoalService,
+} from './goal';
 export { createKanbanTools } from './task-integration';
 export type {
   KanbanTaskColumnKey,

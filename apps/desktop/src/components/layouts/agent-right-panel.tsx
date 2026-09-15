@@ -35,6 +35,7 @@ import { useTerminalStore } from '@/stores/terminal-store';
 import { getActiveAgentBridge } from '@/lib/active-agent-bridge';
 import { tauriFs } from '@/lib/tauri-fs';
 import { defineAllMonacoThemes, getMonacoThemeName } from '@/lib/monaco-themes';
+import { loadMonacoEditor } from '@/lib/monaco-loader';
 import { cn, getViewerType } from '@/lib/utils';
 import { GIT_GUTTER_WIDTH, useGitDecorations } from '@/hooks/use-git-decorations';
 import { TabBadge } from '../ui/tab-badge';
@@ -56,7 +57,7 @@ import {
   type ChangeFilter,
 } from '@/lib/session-changes';
 
-const MonacoEditor = lazy(() => import('@monaco-editor/react'));
+const MonacoEditor = lazy(() => loadMonacoEditor());
 import { DiffViewer } from '@/components/diff-viewer';
 import type * as monacoEditor from 'monaco-editor';
 

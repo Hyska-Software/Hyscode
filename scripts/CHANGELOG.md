@@ -5,6 +5,28 @@ Todas as mudanças notáveis deste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/),
 e este projeto adere ao [Semantic Versioning](https://semver.org/lang/pt-BR/).
 
+## [Unreleased]
+
+### Corrigido
+
+- **LSP (Windows):** o `rust-analyzer` não iniciava em builds instalados
+  (`os error 448`, `ERROR_UNTRUSTED_MOUNT_POINT`). O `CreateProcess` recusava o
+  symlink proxy do rustup (`~/.cargo/bin/rust-analyzer.exe -> rustup.exe`).
+  Agora o binário real da toolchain é resolvido com `rustup which`, o `PATH` do
+  processo filho inclui o `bin` da toolchain (para `cargo`/`rustc`) e há retry
+  único com mensagem acionável em caso de reparse point.
+- **Terminal (xterm):** `Uncaught ReferenceError: i is not defined` em
+  `InputHandler.requestMode` ao receber DECRQM. O `build.target` do Vite foi
+  fixado em ES2021 para impedir o lowering de `||=` pelo esbuild 0.25.x, e um
+  guard de pós-build (`scripts/verify-frontend-bundle.mjs`) falha o build se o
+  padrão quebrado reaparecer no bundle.
+- **LSP (URIs de documento):** os providers Monaco enviavam paths Windows crus
+  (`monaco.Uri.parse('D:\\...')`), gerando URIs inválidas e erros
+  `-32603: url is not a file` / `-32602: missing field range` no rust-analyzer.
+  Os modelos agora usam URIs `file:///d%3A/...` canônicas, modelos sem arquivo
+  real (history/diff/untitled) são ignorados e `textDocument/inlayHint` passa o
+  `range` visível exigido pelos servidores.
+
 ## [0.1.0] - 2026-04-16
 
 ### Adicionado

@@ -44,7 +44,7 @@ class FakeRuntime implements RuntimeClient {
   async handle(request: BridgeRequest): Promise<BridgeResponse> {
     this.requests.push(request);
     this.onRequest?.(request);
-    const result = request.method === 'initialize' || request.method === 'set_config' ? this.createReadyPayload(String(request.params?.workspacePath ?? 'C:/workspace')) : request.method === 'diagnostics' ? [] : request.method === 'shutdown' ? { shutdown: true } : request.method === 'resolve_interaction' ? { resolved: true } : { ok: true };
+    const result = request.method === 'initialize' || request.method === 'set_config' ? this.createReadyPayload(String(request.params?.workspacePath ?? 'C:/workspace')) : request.method === 'diagnostics' ? [] : request.method === 'shutdown' ? { shutdown: true } : request.method === 'resolve_interaction' ? { resolved: true } : request.method.startsWith('goal_') ? null : { ok: true };
     return { type: 'response', id: request.id, ok: true, result };
   }
 }
@@ -272,6 +272,21 @@ describe('TUI controller', () => {
     expect(controller.state.input).toBe('/mode ');
     expect(controller.state.commandFlow).toBeNull();
     expect(controller.state.overlay).toBe('none');
+  });
+
+  it('keeps goal criteria and budget agent-owned', async () => {
+    const runtime = new FakeRuntime();
+    const controller = new TuiController({ workspace: 'C:/workspace' }, runtime);
+    await controller.start();
+    controller.state.mode = 'build';
+
+    await controller.handleKey({ type: 'character', value: '/goal budget {"maxTurns":12}' });
+    await controller.handleKey({ type: 'enter' });
+    await controller.handleKey({ type: 'character', value: '/goal criteria [{"description":"The check passes","kind":"command","config":{"command":"npm test"}}]' });
+    await controller.handleKey({ type: 'enter' });
+
+    expect(runtime.requests.filter((request) => request.method === 'goal_edit')).toHaveLength(0);
+    expect(controller.state.status).toContain('managed by the agent');
   });
 
   it('opens the interactive theme selector and persists the selected theme through the runtime', async () => {

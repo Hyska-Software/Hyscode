@@ -20,9 +20,11 @@ import {
   X,
   ImageIcon,
   AlertTriangle,
+  Target,
 } from 'lucide-react';
-import { memo, useState, useRef, useMemo, useCallback } from 'react';
+import { memo, useState, useRef, useMemo, useCallback, useEffect } from 'react';
 import { ContextMentionPicker } from './context-mention-picker';
+import { GoalModeToggle } from './goal-mode-toggle';
 import { desktopTerminalRuntime } from '@/lib/terminal-runtime';
 import { Textarea } from '@/components/ui/textarea';
 import { Button } from '@/components/ui/button';
@@ -43,6 +45,12 @@ import {
   cancelActiveAgentRun,
   sendActiveAgentMessage,
   setActiveAgentType,
+  createActiveGoal,
+  editActiveGoal,
+  pauseActiveGoal,
+  resumeActiveGoal,
+  cancelActiveGoal,
+  clearActiveGoal,
 } from '@/lib/active-agent-bridge';
 import type { AgentMode, AttachedImage } from '@/stores/agent-store';
 import type { ApprovalMode } from '@/stores/settings-store';
@@ -248,10 +256,16 @@ const APPROVAL_MODES: ApprovalMode[] = [
 // ─── Provider & model catalog (mirrors ai-tab.tsx) ──────────────────────────
 // (Moved to @/lib/provider-catalog — imported above)
 
-export function AgentInput() {
+type AgentInputProps = {
+  goalModeEnabled?: boolean;
+  onGoalModeChange?: (enabled: boolean) => void;
+};
+
+export function AgentInput({ goalModeEnabled = false, onGoalModeChange }: AgentInputProps) {
   const [input, setInput] = useState('');
   const [mentionPickerOpen, setMentionPickerOpen] = useState(false);
   const [isDragOver, setIsDragOver] = useState(false);
+  const [goalModeNotice, setGoalModeNotice] = useState<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const inputWrapperRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -279,6 +293,10 @@ export function AgentInput() {
   const currentThinking = thinkingSettings[thinkingKey] ?? { enabled: false };
 
   const currentCap = AGENT_CAPABILITIES[mode];
+
+  useEffect(() => {
+    if (mode !== 'build' && goalModeEnabled) onGoalModeChange?.(false);
+  }, [goalModeEnabled, mode, onGoalModeChange]);
 
   // Single-provider mode: enabled models for the active provider
   const availableModels = useMemo(
@@ -316,11 +334,69 @@ export function AgentInput() {
   const handleSend = () => {
     const hasImages = useAgentStore.getState().attachedImages.length > 0;
     const hasTerminal = Boolean(useAgentStore.getState().attachedTerminal);
-    if ((!input.trim() && !hasImages && !hasTerminal) || isStreaming) return;
+    const trimmedInput = input.trim();
+    const isGoalCommand =
+      trimmedInput.toLowerCase() === '/goal' || trimmedInput.toLowerCase().startsWith('/goal ');
+    if (isGoalCommand) {
+      if (mode !== 'build') {
+        setGoalModeNotice('Goal mode is available in Build only.');
+        return;
+      }
+      if (!goalModeEnabled) {
+        setGoalModeNotice('Enable Goal mode with the Target icon before using Goal commands.');
+        return;
+      }
+      void runGoalCommand(trimmedInput)
+        .then(() => setGoalModeNotice(null))
+        .catch((error: unknown) => {
+          setGoalModeNotice(error instanceof Error ? error.message : 'Goal command failed.');
+        });
+      setInput('');
+      return;
+    }
+    if ((!trimmedInput && !hasImages && !hasTerminal) || isStreaming) return;
     void sendActiveAgentMessage(
-      input.trim() || (hasTerminal ? '(terminal output attached)' : '(image attached)'),
+      trimmedInput || (hasTerminal ? '(terminal output attached)' : '(image attached)'),
     ).catch(() => undefined);
     setInput('');
+  };
+
+  const runGoalCommand = async (command: string): Promise<void> => {
+    const args = command.replace(/^\/goal\s*/iu, '').trim();
+    if (!args || args.toLowerCase() === 'status') return;
+    const [action, ...rest] = args.split(/\s+/u);
+    const remainder = rest.join(' ').trim();
+    switch (action.toLowerCase()) {
+      case 'create':
+        if (remainder) await createActiveGoal(remainder);
+        break;
+      case 'edit':
+        if (remainder) await editActiveGoal({ objective: remainder });
+        break;
+      case 'pause':
+        await pauseActiveGoal();
+        break;
+      case 'resume':
+        await resumeActiveGoal();
+        break;
+      case 'cancel':
+      case 'stop':
+        await cancelActiveGoal();
+        break;
+      case 'clear':
+        await clearActiveGoal();
+        break;
+      case 'criteria':
+      case 'budget':
+      case 'progress':
+      case 'evidence':
+      case 'blocker':
+      case 'complete':
+        throw new Error('Goal criteria, progress, evidence, blockers, and completion are managed by the agent.');
+      default:
+        await createActiveGoal(args);
+        break;
+    }
   };
 
   const handleStop = () => {
@@ -330,6 +406,10 @@ export function AgentInput() {
   const handleModeChange = (newMode: AgentMode) => {
     setActiveAgentType(newMode);
     setMode(newMode);
+    if (newMode !== 'build') {
+      onGoalModeChange?.(false);
+      setGoalModeNotice(null);
+    }
   };
 
   const handleApprovalChange = (mode: ApprovalMode) => {
@@ -434,6 +514,24 @@ export function AgentInput() {
         <div className="mb-2 flex items-center gap-1.5 text-[10px] text-warning">
           <AlertTriangle className="h-3 w-3 shrink-0" />
           <span>{activeModel.name} does not support vision. Images will be ignored.</span>
+        </div>
+      )}
+
+      {goalModeNotice && (
+        <div
+          role="status"
+          className="mb-2 flex items-start gap-1.5 rounded-md border border-warning/30 bg-warning/5 px-2.5 py-2 text-[10px] text-warning"
+        >
+          <Target className="mt-0.5 h-3 w-3 shrink-0" />
+          <span className="min-w-0 flex-1">{goalModeNotice}</span>
+          <button
+            type="button"
+            aria-label="Dismiss goal mode notice"
+            className="shrink-0 text-warning/70 transition-colors hover:text-warning"
+            onClick={() => setGoalModeNotice(null)}
+          >
+            <X className="h-3 w-3" />
+          </button>
         </div>
       )}
 
@@ -851,6 +949,15 @@ export function AgentInput() {
               </TooltipTrigger>
               <TooltipContent side="top">Add context (@)</TooltipContent>
             </Tooltip>
+
+            <GoalModeToggle
+              mode={mode}
+              enabled={goalModeEnabled}
+              onChange={(enabled) => {
+                onGoalModeChange?.(enabled);
+                setGoalModeNotice(null);
+              }}
+            />
 
             <Tooltip>
               <TooltipTrigger

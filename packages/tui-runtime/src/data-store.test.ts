@@ -2,6 +2,7 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
+import { GoalService, type GoalRepository, type GoalState } from '@hyscode/agent-harness';
 import { CliDataStore, makeSessionMessage } from './data-store';
 
 const temporaryDirectories: string[] = [];
@@ -105,5 +106,37 @@ describe('CLI persistence adapter', () => {
     const reopened = new CliDataStore(store.path);
     await reopened.load();
     expect(await reopened.loadCodexThread(session.id, 'prefix-a')).toBe('thread-1');
+  });
+
+  it('persists a goal graph through the same adapter and removes it with its session', async () => {
+    const { store, directory } = await dataStore();
+    const session = await store.createSession(directory, 'build', null, null);
+    const repository: GoalRepository = {
+      async load(conversationId): Promise<GoalState | null> {
+        const raw = await store.invoke<string | null>('db_goal_load_state', { conversationId });
+        return raw ? JSON.parse(raw) as GoalState : null;
+      },
+      async save(state, expectedVersion): Promise<GoalState> {
+        const raw = await store.invoke<string>('db_goal_save_state', {
+          stateJson: JSON.stringify(state),
+          expectedVersion,
+        });
+        return JSON.parse(raw) as GoalState;
+      },
+      async clear(conversationId): Promise<void> {
+        await store.invoke('db_goal_clear_state', { conversationId });
+      },
+    };
+    const service = new GoalService(repository);
+    const created = await service.createGoal(session.id, directory, 'Persist the TUI goal');
+    await service.editGoal(session.id, { objective: 'Persist and restore the TUI goal' });
+
+    const reopened = new CliDataStore(store.path);
+    await reopened.load();
+    expect(reopened.loadSession(session.id)?.goal?.goal.objective).toBe('Persist and restore the TUI goal');
+    expect(created.goal.id).toBe(reopened.loadSession(session.id)?.goal?.goal.id);
+
+    await reopened.deleteSession(session.id);
+    expect(await reopened.invoke<string | null>('db_goal_load_state', { conversationId: session.id })).toBeNull();
   });
 });

@@ -1,7 +1,7 @@
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import type { AgentType, Memory, MemoryType } from '@hyscode/agent-harness';
+import type { AgentType, GoalState, Memory, MemoryType } from '@hyscode/agent-harness';
 import type { Message, TokenUsage } from '@hyscode/ai-providers';
 import type { ProjectSummary, SessionMessage, SessionRecord, SessionSummary } from './protocol';
 
@@ -45,6 +45,7 @@ type PersistedData = {
   sddSessions: Record<string, string>;
   sddTasks: Record<string, string[]>;
   traces: Array<Record<string, unknown>>;
+  goals: Record<string, GoalState>;
 };
 
 const EMPTY_DATA: PersistedData = {
@@ -53,6 +54,7 @@ const EMPTY_DATA: PersistedData = {
   sddSessions: {},
   sddTasks: {},
   traces: [],
+  goals: {},
 };
 
 function defaultDataPath(): string {
@@ -110,6 +112,7 @@ export class CliDataStore {
         sddSessions: parsed.sddSessions ?? {},
         sddTasks: parsed.sddTasks ?? {},
         traces: Array.isArray(parsed.traces) ? parsed.traces : [],
+        goals: parsed.goals && typeof parsed.goals === 'object' ? parsed.goals : {},
       };
     } catch {
       this.data = cloneData(EMPTY_DATA);
@@ -174,6 +177,13 @@ export class CliDataStore {
           String(args.threadId ?? ''),
         );
         return undefined as T;
+      case 'db_goal_load_state':
+        return this.loadGoalState(String(args.conversationId ?? '')) as T;
+      case 'db_goal_save_state':
+        return (await this.saveGoalState(String(args.stateJson ?? ''), args.expectedVersion)) as T;
+      case 'db_goal_clear_state':
+        await this.clearGoalState(String(args.conversationId ?? ''));
+        return undefined as T;
       default:
         throw new Error(`CLI data store does not implement command "${command}"`);
     }
@@ -206,13 +216,16 @@ export class CliDataStore {
 
   loadSession(id: string): SessionRecord | null {
     const conversation = this.data.conversations.find((candidate) => candidate.id === id);
-    return conversation ? { ...this.toSummary(conversation), messages: [...conversation.messages] } : null;
+    return conversation
+      ? { ...this.toSummary(conversation), messages: [...conversation.messages], goal: this.data.goals[id] ?? null }
+      : null;
   }
 
   async deleteSession(id: string): Promise<boolean> {
     const before = this.data.conversations.length;
     this.data.conversations = this.data.conversations.filter((conversation) => conversation.id !== id);
     if (this.data.conversations.length === before) return false;
+    delete this.data.goals[id];
     await this.persist();
     return true;
   }
@@ -223,7 +236,7 @@ export class CliDataStore {
     conversation.title = title.trim().slice(0, 160) || 'Untitled session';
     conversation.updatedAt = now();
     await this.persist();
-    return { ...this.toSummary(conversation), messages: [...conversation.messages] };
+    return { ...this.toSummary(conversation), messages: [...conversation.messages], goal: this.data.goals[id] ?? null };
   }
 
   async saveSession(session: SessionRecord): Promise<void> {
@@ -284,6 +297,31 @@ export class CliDataStore {
     return session;
   }
 
+  private loadGoalState(conversationId: string): string | null {
+    const state = this.data.goals[conversationId];
+    return state ? JSON.stringify(state) : null;
+  }
+
+  private async saveGoalState(stateJson: string, expectedVersion: unknown): Promise<string> {
+    const state = JSON.parse(stateJson) as GoalState;
+    const conversationId = state.goal?.conversationId;
+    if (!conversationId) throw new Error('Goal state is missing conversationId.');
+    const current = this.data.goals[conversationId];
+    const expected = typeof expectedVersion === 'number' ? expectedVersion : null;
+    const currentVersion = current?.goal.version ?? null;
+    if (currentVersion !== expected) {
+      throw new Error(`Goal version conflict for conversation ${conversationId} (expected ${String(expected)}, found ${String(currentVersion)}).`);
+    }
+    this.data.goals[conversationId] = JSON.parse(JSON.stringify(state)) as GoalState;
+    await this.persist();
+    return JSON.stringify(this.data.goals[conversationId]);
+  }
+
+  private async clearGoalState(conversationId: string): Promise<void> {
+    delete this.data.goals[conversationId];
+    await this.persist();
+  }
+
   private toSummary(conversation: PersistedConversation): SessionSummary {
     return {
       id: conversation.id,
@@ -295,6 +333,7 @@ export class CliDataStore {
       updatedAt: conversation.updatedAt,
       messageCount: conversation.messages.length,
       tokenUsage: conversation.tokenUsage,
+      goalStatus: this.data.goals[conversation.id]?.goal.status,
     };
   }
 

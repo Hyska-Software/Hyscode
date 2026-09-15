@@ -34,6 +34,8 @@ pub fn open_database(app_dir: &std::path::Path) -> Connection {
         .expect("failed to run migration 009");
     conn.execute_batch(include_str!("../../migrations/016_kanban.sql"))
         .expect("failed to run migration 016");
+    conn.execute_batch(include_str!("../../migrations/017_goals.sql"))
+        .expect("failed to run migration 017");
     apply_migration_010(&conn);
     apply_migration_011(&conn);
     apply_migration_012(&conn);
@@ -1014,6 +1016,545 @@ pub fn db_get_conversation_token_usage(
         )
         .map_err(|e| e.to_string())?;
     Ok(row)
+}
+
+// ─── Persistent goal commands ──────────────────────────────────────────────
+
+#[derive(Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct GoalBudgetPayload {
+    max_tokens: Option<i64>,
+    max_turns: Option<i64>,
+    max_duration_ms: Option<i64>,
+    max_tool_calls: Option<i64>,
+    max_cost_usd: Option<f64>,
+    max_consecutive_errors: Option<i64>,
+}
+
+#[derive(Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct GoalUsagePayload {
+    input_tokens: i64,
+    output_tokens: i64,
+    total_tokens: i64,
+    turns: i64,
+    tool_calls: i64,
+    duration_ms: i64,
+    cost_usd: Option<f64>,
+    consecutive_errors: i64,
+    last_turn_at: Option<String>,
+}
+
+#[derive(Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct GoalPayload {
+    id: String,
+    conversation_id: String,
+    project_id: String,
+    objective: String,
+    status: String,
+    verification: String,
+    version: i64,
+    budget: GoalBudgetPayload,
+    usage: GoalUsagePayload,
+    checkpoint: String,
+    last_error: Option<String>,
+    current_run_id: Option<String>,
+    created_at: String,
+    updated_at: String,
+    completed_at: Option<String>,
+}
+
+#[derive(Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct GoalCriterionPayload {
+    id: String,
+    goal_id: String,
+    description: String,
+    kind: String,
+    config: serde_json::Value,
+    required: bool,
+    status: String,
+    verification_note: Option<String>,
+    evidence_id: Option<String>,
+}
+
+#[derive(Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct GoalEvidencePayload {
+    id: String,
+    goal_id: String,
+    criterion_id: Option<String>,
+    source: String,
+    summary: String,
+    details: Option<String>,
+    passed: bool,
+    verified: bool,
+    turn_id: Option<String>,
+    created_at: String,
+}
+
+#[derive(Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct GoalBlockerPayload {
+    id: String,
+    goal_id: String,
+    fingerprint: String,
+    summary: String,
+    details: Option<String>,
+    consecutive_turns: i64,
+    first_seen_at: String,
+    last_seen_at: String,
+    last_turn_id: Option<String>,
+    resolved_at: Option<String>,
+}
+
+#[derive(Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct GoalRunPayload {
+    id: String,
+    goal_id: String,
+    turn_id: Option<String>,
+    source: String,
+    status: String,
+    started_at: Option<String>,
+    completed_at: Option<String>,
+    token_usage: serde_json::Value,
+    tool_calls: i64,
+    duration_ms: i64,
+    error: Option<String>,
+}
+
+#[derive(Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct GoalEventPayload {
+    id: String,
+    goal_id: String,
+    #[serde(rename = "type")]
+    event_type: String,
+    message: String,
+    turn_id: Option<String>,
+    created_at: String,
+}
+
+#[derive(Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct GoalStatePayload {
+    goal: GoalPayload,
+    criteria: Vec<GoalCriterionPayload>,
+    evidence: Vec<GoalEvidencePayload>,
+    blockers: Vec<GoalBlockerPayload>,
+    runs: Vec<GoalRunPayload>,
+    events: Vec<GoalEventPayload>,
+}
+
+#[tauri::command]
+pub fn db_goal_load_state(
+    state: State<'_, DbState>,
+    conversation_id: String,
+) -> Result<Option<String>, String> {
+    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let goal = conn
+        .query_row(
+            "SELECT id, conversation_id, project_id, objective, status, verification, version,
+                    budget_max_tokens, budget_max_turns, budget_max_duration,
+                    budget_max_tool_calls, budget_max_cost_usd, budget_max_errors,
+                    usage_input_tokens, usage_output_tokens, usage_total_tokens, usage_turns,
+                    usage_tool_calls, usage_duration_ms, usage_cost_usd, usage_consecutive_errors,
+                    usage_last_turn_at, checkpoint, last_error, current_run_id, created_at,
+                    updated_at, completed_at
+             FROM persistent_goals WHERE conversation_id = ?1",
+            params![conversation_id],
+            |row| {
+                Ok(GoalPayload {
+                    id: row.get(0)?,
+                    conversation_id: row.get(1)?,
+                    project_id: row.get(2)?,
+                    objective: row.get(3)?,
+                    status: row.get(4)?,
+                    verification: row.get(5)?,
+                    version: row.get(6)?,
+                    budget: GoalBudgetPayload {
+                        max_tokens: row.get(7)?,
+                        max_turns: row.get(8)?,
+                        max_duration_ms: row.get(9)?,
+                        max_tool_calls: row.get(10)?,
+                        max_cost_usd: row.get(11)?,
+                        max_consecutive_errors: row.get(12)?,
+                    },
+                    usage: GoalUsagePayload {
+                        input_tokens: row.get(13)?,
+                        output_tokens: row.get(14)?,
+                        total_tokens: row.get(15)?,
+                        turns: row.get(16)?,
+                        tool_calls: row.get(17)?,
+                        duration_ms: row.get(18)?,
+                        cost_usd: row.get(19)?,
+                        consecutive_errors: row.get(20)?,
+                        last_turn_at: row.get(21)?,
+                    },
+                    checkpoint: row.get(22)?,
+                    last_error: row.get(23)?,
+                    current_run_id: row.get(24)?,
+                    created_at: row.get(25)?,
+                    updated_at: row.get(26)?,
+                    completed_at: row.get(27)?,
+                })
+            },
+        )
+        .optional()
+        .map_err(|e| e.to_string())?;
+    let Some(goal) = goal else { return Ok(None) };
+
+    let criteria = conn
+        .prepare(
+            "SELECT id, goal_id, description, kind, config, required, status,
+                    verification_note, evidence_id
+             FROM persistent_goal_criteria WHERE goal_id = ?1 ORDER BY rowid",
+        )
+        .map_err(|e| e.to_string())?
+        .query_map(params![goal.id], |row| {
+            let config: String = row.get(4)?;
+            Ok(GoalCriterionPayload {
+                id: row.get(0)?,
+                goal_id: row.get(1)?,
+                description: row.get(2)?,
+                kind: row.get(3)?,
+                config: serde_json::from_str(&config).unwrap_or_else(|_| serde_json::json!({})),
+                required: row.get::<_, i64>(5)? != 0,
+                status: row.get(6)?,
+                verification_note: row.get(7)?,
+                evidence_id: row.get(8)?,
+            })
+        })
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+    let evidence = conn
+        .prepare(
+            "SELECT id, goal_id, criterion_id, source, summary, details, passed, verified,
+                    turn_id, created_at
+             FROM persistent_goal_evidence WHERE goal_id = ?1 ORDER BY created_at, rowid",
+        )
+        .map_err(|e| e.to_string())?
+        .query_map(params![goal.id], |row| {
+            Ok(GoalEvidencePayload {
+                id: row.get(0)?,
+                goal_id: row.get(1)?,
+                criterion_id: row.get(2)?,
+                source: row.get(3)?,
+                summary: row.get(4)?,
+                details: row.get(5)?,
+                passed: row.get::<_, i64>(6)? != 0,
+                verified: row.get::<_, i64>(7)? != 0,
+                turn_id: row.get(8)?,
+                created_at: row.get(9)?,
+            })
+        })
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+    let blockers = conn
+        .prepare(
+            "SELECT id, goal_id, fingerprint, summary, details, consecutive_turns,
+                    first_seen_at, last_seen_at, last_turn_id, resolved_at
+             FROM persistent_goal_blockers WHERE goal_id = ?1 ORDER BY last_seen_at, rowid",
+        )
+        .map_err(|e| e.to_string())?
+        .query_map(params![goal.id], |row| {
+            Ok(GoalBlockerPayload {
+                id: row.get(0)?,
+                goal_id: row.get(1)?,
+                fingerprint: row.get(2)?,
+                summary: row.get(3)?,
+                details: row.get(4)?,
+                consecutive_turns: row.get(5)?,
+                first_seen_at: row.get(6)?,
+                last_seen_at: row.get(7)?,
+                last_turn_id: row.get(8)?,
+                resolved_at: row.get(9)?,
+            })
+        })
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+    let runs = conn
+        .prepare(
+            "SELECT id, goal_id, turn_id, source, status, started_at, completed_at,
+                    token_usage, tool_calls, duration_ms, error
+             FROM persistent_goal_runs WHERE goal_id = ?1 ORDER BY rowid",
+        )
+        .map_err(|e| e.to_string())?
+        .query_map(params![goal.id], |row| {
+            let token_usage: String = row.get(7)?;
+            Ok(GoalRunPayload {
+                id: row.get(0)?,
+                goal_id: row.get(1)?,
+                turn_id: row.get(2)?,
+                source: row.get(3)?,
+                status: row.get(4)?,
+                started_at: row.get(5)?,
+                completed_at: row.get(6)?,
+                token_usage: serde_json::from_str(&token_usage)
+                    .unwrap_or_else(|_| serde_json::json!({})),
+                tool_calls: row.get(8)?,
+                duration_ms: row.get(9)?,
+                error: row.get(10)?,
+            })
+        })
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+    let events = conn
+        .prepare(
+            "SELECT id, goal_id, event_type, message, turn_id, created_at
+             FROM persistent_goal_events WHERE goal_id = ?1 ORDER BY created_at, rowid",
+        )
+        .map_err(|e| e.to_string())?
+        .query_map(params![goal.id], |row| {
+            Ok(GoalEventPayload {
+                id: row.get(0)?,
+                goal_id: row.get(1)?,
+                event_type: row.get(2)?,
+                message: row.get(3)?,
+                turn_id: row.get(4)?,
+                created_at: row.get(5)?,
+            })
+        })
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+
+    serde_json::to_string(&GoalStatePayload {
+        goal,
+        criteria,
+        evidence,
+        blockers,
+        runs,
+        events,
+    })
+    .map(Some)
+    .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+pub fn db_goal_save_state(
+    state: State<'_, DbState>,
+    state_json: String,
+    expected_version: Option<i64>,
+) -> Result<String, String> {
+    let payload: GoalStatePayload = serde_json::from_str(&state_json).map_err(|e| e.to_string())?;
+    let mut conn = state.0.lock().map_err(|e| e.to_string())?;
+    let current: Option<i64> = conn
+        .query_row(
+            "SELECT version FROM persistent_goals WHERE conversation_id = ?1",
+            params![payload.goal.conversation_id],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|e| e.to_string())?;
+    if current != expected_version {
+        return Err(format!(
+            "Goal version conflict for conversation {} (expected {:?}, found {:?}).",
+            payload.goal.conversation_id, expected_version, current
+        ));
+    }
+    let transaction = conn.transaction().map_err(|e| e.to_string())?;
+    let goal = &payload.goal;
+    transaction
+        .execute(
+            "INSERT INTO persistent_goals
+             (id, conversation_id, project_id, objective, status, verification, version,
+              budget_max_tokens, budget_max_turns, budget_max_duration, budget_max_tool_calls,
+              budget_max_cost_usd, budget_max_errors, usage_input_tokens, usage_output_tokens,
+              usage_total_tokens, usage_turns, usage_tool_calls, usage_duration_ms, usage_cost_usd,
+              usage_consecutive_errors, usage_last_turn_at, checkpoint, last_error, current_run_id,
+              created_at, updated_at, completed_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15,
+                     ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28)
+             ON CONFLICT(id) DO UPDATE SET
+              conversation_id = excluded.conversation_id, project_id = excluded.project_id,
+              objective = excluded.objective, status = excluded.status,
+              verification = excluded.verification, version = excluded.version,
+              budget_max_tokens = excluded.budget_max_tokens, budget_max_turns = excluded.budget_max_turns,
+              budget_max_duration = excluded.budget_max_duration,
+              budget_max_tool_calls = excluded.budget_max_tool_calls,
+              budget_max_cost_usd = excluded.budget_max_cost_usd,
+              budget_max_errors = excluded.budget_max_errors,
+              usage_input_tokens = excluded.usage_input_tokens, usage_output_tokens = excluded.usage_output_tokens,
+              usage_total_tokens = excluded.usage_total_tokens, usage_turns = excluded.usage_turns,
+              usage_tool_calls = excluded.usage_tool_calls, usage_duration_ms = excluded.usage_duration_ms,
+              usage_cost_usd = excluded.usage_cost_usd, usage_consecutive_errors = excluded.usage_consecutive_errors,
+              usage_last_turn_at = excluded.usage_last_turn_at, checkpoint = excluded.checkpoint,
+              last_error = excluded.last_error, current_run_id = excluded.current_run_id,
+              created_at = excluded.created_at, updated_at = excluded.updated_at,
+              completed_at = excluded.completed_at",
+            params![
+                goal.id,
+                goal.conversation_id,
+                goal.project_id,
+                goal.objective,
+                goal.status,
+                goal.verification,
+                goal.version,
+                goal.budget.max_tokens,
+                goal.budget.max_turns,
+                goal.budget.max_duration_ms,
+                goal.budget.max_tool_calls,
+                goal.budget.max_cost_usd,
+                goal.budget.max_consecutive_errors,
+                goal.usage.input_tokens,
+                goal.usage.output_tokens,
+                goal.usage.total_tokens,
+                goal.usage.turns,
+                goal.usage.tool_calls,
+                goal.usage.duration_ms,
+                goal.usage.cost_usd,
+                goal.usage.consecutive_errors,
+                goal.usage.last_turn_at,
+                goal.checkpoint,
+                goal.last_error,
+                goal.current_run_id,
+                goal.created_at,
+                goal.updated_at,
+                goal.completed_at,
+            ],
+        )
+        .map_err(|e| e.to_string())?;
+    for table in [
+        "persistent_goal_criteria",
+        "persistent_goal_evidence",
+        "persistent_goal_blockers",
+        "persistent_goal_runs",
+        "persistent_goal_events",
+    ] {
+        transaction
+            .execute(
+                &format!("DELETE FROM {table} WHERE goal_id = ?1"),
+                params![goal.id],
+            )
+            .map_err(|e| e.to_string())?;
+    }
+    for criterion in &payload.criteria {
+        transaction
+            .execute(
+                "INSERT INTO persistent_goal_criteria
+                 (id, goal_id, description, kind, config, required, status, verification_note, evidence_id)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                params![
+                    criterion.id,
+                    criterion.goal_id,
+                    criterion.description,
+                    criterion.kind,
+                    serde_json::to_string(&criterion.config).map_err(|e| e.to_string())?,
+                    criterion.required as i64,
+                    criterion.status,
+                    criterion.verification_note,
+                    criterion.evidence_id,
+                ],
+            )
+            .map_err(|e| e.to_string())?;
+    }
+    for evidence in &payload.evidence {
+        transaction
+            .execute(
+                "INSERT INTO persistent_goal_evidence
+                 (id, goal_id, criterion_id, source, summary, details, passed, verified, turn_id, created_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                params![
+                    evidence.id,
+                    evidence.goal_id,
+                    evidence.criterion_id,
+                    evidence.source,
+                    evidence.summary,
+                    evidence.details,
+                    evidence.passed as i64,
+                    evidence.verified as i64,
+                    evidence.turn_id,
+                    evidence.created_at,
+                ],
+            )
+            .map_err(|e| e.to_string())?;
+    }
+    for blocker in &payload.blockers {
+        transaction
+            .execute(
+                "INSERT INTO persistent_goal_blockers
+                 (id, goal_id, fingerprint, summary, details, consecutive_turns, first_seen_at,
+                  last_seen_at, last_turn_id, resolved_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                params![
+                    blocker.id,
+                    blocker.goal_id,
+                    blocker.fingerprint,
+                    blocker.summary,
+                    blocker.details,
+                    blocker.consecutive_turns,
+                    blocker.first_seen_at,
+                    blocker.last_seen_at,
+                    blocker.last_turn_id,
+                    blocker.resolved_at,
+                ],
+            )
+            .map_err(|e| e.to_string())?;
+    }
+    for run in &payload.runs {
+        transaction
+            .execute(
+                "INSERT INTO persistent_goal_runs
+                 (id, goal_id, turn_id, source, status, started_at, completed_at, token_usage,
+                  tool_calls, duration_ms, error)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+                params![
+                    run.id,
+                    run.goal_id,
+                    run.turn_id,
+                    run.source,
+                    run.status,
+                    run.started_at,
+                    run.completed_at,
+                    serde_json::to_string(&run.token_usage).map_err(|e| e.to_string())?,
+                    run.tool_calls,
+                    run.duration_ms,
+                    run.error,
+                ],
+            )
+            .map_err(|e| e.to_string())?;
+    }
+    for event in &payload.events {
+        transaction
+            .execute(
+                "INSERT INTO persistent_goal_events
+                 (id, goal_id, event_type, message, turn_id, created_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                params![
+                    event.id,
+                    event.goal_id,
+                    event.event_type,
+                    event.message,
+                    event.turn_id,
+                    event.created_at
+                ],
+            )
+            .map_err(|e| e.to_string())?;
+    }
+    transaction.commit().map_err(|e| e.to_string())?;
+    serde_json::to_string(&payload).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn db_goal_clear_state(
+    state: State<'_, DbState>,
+    conversation_id: String,
+) -> Result<(), String> {
+    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    conn.execute(
+        "DELETE FROM persistent_goals WHERE conversation_id = ?1",
+        params![conversation_id],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 // ─── Trace commands ─────────────────────────────────────────────────────────
@@ -2326,12 +2867,34 @@ pub fn db_sdd_get_tasks(
 mod database_tests {
     use super::{
         list_vortex_project_sessions, load_codex_thread, open_database, save_codex_thread, DbState,
-        UPSERT_CONVERSATION_SQL,
+        GoalEventPayload, UPSERT_CONVERSATION_SQL,
     };
     use rusqlite::params;
     use std::error::Error;
     use std::sync::Mutex;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn goal_event_payload_round_trips_the_typescript_type_field() -> Result<(), Box<dyn Error>> {
+        let event = GoalEventPayload {
+            id: "event-1".to_string(),
+            goal_id: "goal-1".to_string(),
+            event_type: "progress".to_string(),
+            message: "Checkpoint recorded".to_string(),
+            turn_id: Some("turn-1".to_string()),
+            created_at: "2026-09-14T00:00:00.000Z".to_string(),
+        };
+
+        let json = serde_json::to_value(&event)?;
+        assert_eq!(
+            json.get("type").and_then(|value| value.as_str()),
+            Some("progress")
+        );
+        assert!(json.get("eventType").is_none());
+        let decoded: GoalEventPayload = serde_json::from_value(json)?;
+        assert_eq!(decoded.event_type, "progress");
+        Ok(())
+    }
 
     #[test]
     fn migrates_legacy_sdd_rows() -> Result<(), Box<dyn Error>> {

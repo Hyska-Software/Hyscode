@@ -128,6 +128,45 @@ propagated to provider streams, tool execution, approvals, mode switches, and
 agent questions through a shared `AbortSignal`. A harness rejects concurrent
 turns rather than allowing their events to interleave.
 
+### Persistent goal execution
+
+Persistent autonomous work is modeled as a control-plane entity owned by one
+conversation, not as a special transcript message. `GoalService` stores one
+goal, its acceptance criteria, evidence, blockers, runs, events, budgets, and
+usage counters. Optimistic versions protect persistence boundaries, while an
+active-run guard prevents two continuations from owning the same goal at once.
+If a persisted run is left unfinished by a runtime restart, the next owner
+records it as failed before taking over, so recovery cannot double-count it.
+
+Desktop stores the goal graph in SQLite migration `017_goals.sql` through typed
+Tauri commands. The standalone TUI uses the same domain service and bridge
+contracts over its isolated `CliDataStore` JSON file. Both clients restore the
+goal with the session and emit `goal_updated`. Goal creation accepts only the
+user objective. The main agent then owns the acceptance criteria, checkpoint,
+evidence, and blocker metadata through its goal tools; user-facing controls
+are limited to create, edit the objective while paused, pause, resume, cancel,
+and clear.
+Goal tools are exposed and executable only when the owning agent is in Build
+mode; switching away from Build pauses active execution and hides the tools.
+
+For each goal turn, the bridge starts a `GoalRun`, injects a fresh goal
+context into the Harness without writing it as a user message, and accounts the
+canonical Harness `turnId`, token usage, tool calls, duration, completion
+request, and errors. A successful turn schedules a queued continuation while
+the goal remains active; the queue stops when the goal is complete, paused,
+cancelled, or blocked. Goal token, turn, duration, tool-call, cost, and error
+budgets are unlimited. The Harness exposes `get_goal`, `create_goal`,
+`edit_goal`, `report_goal_progress`, `report_goal_blocker`, and `complete_goal`
+to the main Build agent; delegated children cannot mutate its control plane.
+
+Completion is evidence-aware. The agent must define at least one required
+criterion with `edit_goal`, and deterministic criteria (`file_exists`,
+`command`, and `tool_success`) must pass a runtime validator before a goal is
+marked verified. A completion request without criteria is denied and the goal
+remains active. The same blocker fingerprint must be reported on three
+distinct turns before the runtime enters `blocked`, preventing a single
+transient error from stopping autonomous work.
+
 ### Prompt Cache Observability and Persistence
 
 Prompt-cache measurements travel through the shared `TokenUsage` and `Trace`

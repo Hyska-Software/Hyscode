@@ -2,6 +2,9 @@ import type {
   AgentQuestion,
   AgentQuestionAnswer,
   AgentType,
+  GoalState,
+  GoalStatus,
+  GoalRunSource,
   FileChangePending,
   GatheredContextEntry,
   ApprovalMode,
@@ -58,6 +61,13 @@ export type BridgeRequest = {
     | 'session_rename'
     | 'session_export'
     | 'trace_list'
+    | 'goal_get'
+    | 'goal_create'
+    | 'goal_edit'
+    | 'goal_pause'
+    | 'goal_resume'
+    | 'goal_cancel'
+    | 'goal_clear'
     | 'host_response'
     | 'host_event'
     | 'shutdown';
@@ -80,6 +90,7 @@ export type BridgeEvent =
   | { type: 'event'; event: 'sdd_updated'; payload: SddStatePayload }
   | { type: 'event'; event: 'scoped_harness_event'; payload: ScopedHarnessEventPayload }
   | { type: 'event'; event: 'terminal_updated'; payload: TerminalUpdatedPayload }
+  | { type: 'event'; event: 'goal_updated'; payload: GoalState | null }
   | { type: 'event'; event: 'fatal'; payload: { message: string } };
 
 export type BridgeMessage = BridgeResponse | BridgeEvent;
@@ -141,6 +152,7 @@ export type RuntimeCapabilities = {
   terminalInput?: boolean;
   terminalResize?: boolean;
   ndjsonProtocol?: boolean;
+  goals?: boolean;
 };
 
 export type GitSummary = {
@@ -292,6 +304,7 @@ export type SessionSummary = {
   messageCount: number;
   /** Cumulative usage for the session, including measured prompt-cache metrics. */
   tokenUsage?: TokenUsage;
+  goalStatus?: GoalStatus;
 };
 
 export type SessionMessage = Message & {
@@ -302,6 +315,7 @@ export type SessionMessage = Message & {
 
 export type SessionRecord = SessionSummary & {
   messages: SessionMessage[];
+  goal?: GoalState | null;
 };
 
 export type ProjectSummary = {
@@ -322,10 +336,14 @@ export type InitializeParams = {
 
 export type SendMessageParams = {
   message: string;
+  hidden?: boolean;
   history?: Message[];
   images?: Array<{ base64: string; mediaType: string }>;
   ruleTargetPaths?: string[];
   contextAttachments?: ContextAttachment[];
+  goalContext?: string;
+  goalRunId?: string;
+  goalSource?: GoalRunSource;
 };
 
 export type SetConfigParams = {

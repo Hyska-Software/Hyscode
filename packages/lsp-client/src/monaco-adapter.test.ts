@@ -23,9 +23,17 @@ function createFakeMonaco() {
       registerDeclarationProvider: capture('declaration'),
       registerTypeDefinitionProvider: capture('typeDefinition'),
       registerImplementationProvider: capture('implementation'),
+      registerInlayHintsProvider: capture('inlayHints'),
+      InlayHintKind: { Parameter: 2, Type: 1 },
     },
     Uri: {
       parse: (value: string) => ({ toString: () => value, value }),
+    },
+    Position: class FakePosition {
+      constructor(
+        public lineNumber: number,
+        public character: number,
+      ) {}
     },
     Range: class FakeRange {
       constructor(
@@ -64,12 +72,19 @@ function createFakeConnection(
       calls.push({ method: 'implementation', args: [line, character] });
       return responses.implementation ?? null;
     }),
+    inlayHints: vi.fn(async () => responses.inlayHints ?? null),
     onNotification: vi.fn(),
   };
   return { connection: connection as unknown as LspConnection, calls };
 }
 
-const model = { uri: { toString: () => 'file:///proj/main.rs' } };
+const model = {
+  uri: {
+    scheme: 'file',
+    path: '/proj/main.rs',
+    toString: () => 'file:///proj/main.rs',
+  },
+};
 const position = { lineNumber: 3, column: 5 };
 
 describe('MonacoLspAdapter declaration/typeDefinition/implementation', () => {
@@ -153,5 +168,64 @@ describe('MonacoLspAdapter declaration/typeDefinition/implementation', () => {
 
     const result = await provider.provider.provideTypeDefinition(model, position);
     expect(result).toEqual([]);
+  });
+
+  it('sends the visible range with inlay hint requests', async () => {
+    const { monaco, registrations } = createFakeMonaco();
+    const { connection } = createFakeConnection({ inlayHintProvider: true }, {});
+    const adapter = new MonacoLspAdapter(connection, monaco as never);
+    adapter.register('rust');
+    const provider = registrations.get('inlayHints')!;
+
+    await provider.provider.provideInlayHints(model, {
+      startLineNumber: 2,
+      startColumn: 3,
+      endLineNumber: 8,
+      endColumn: 1,
+    });
+
+    expect(connection.inlayHints).toHaveBeenCalledWith('file:///proj/main.rs', {
+      start: { line: 1, character: 2 },
+      end: { line: 7, character: 0 },
+    });
+  });
+
+  it('rebuilds canonical uris for models parsed from raw windows paths', async () => {
+    const { monaco, registrations } = createFakeMonaco();
+    const { connection } = createFakeConnection({ definitionProvider: true }, {});
+    const adapter = new MonacoLspAdapter(connection, monaco as never);
+    adapter.register('rust');
+    const provider = registrations.get('definition')!;
+    const windowsModel = {
+      uri: {
+        scheme: 'D',
+        path: '/Lang/SpectraLang\\midend\\src\\lib.rs',
+        toString: () => 'D:/Lang/SpectraLang%5Cmidend%5Csrc%5Clib.rs',
+      },
+    };
+
+    await provider.provider.provideDefinition(windowsModel, position);
+
+    expect(connection.definition).toHaveBeenCalledWith(
+      'file:///d%3A/Lang/SpectraLang/midend/src/lib.rs',
+      2,
+      4,
+    );
+  });
+
+  it('skips requests for non-file models', async () => {
+    const { monaco, registrations } = createFakeMonaco();
+    const { connection } = createFakeConnection({ definitionProvider: true }, {});
+    const adapter = new MonacoLspAdapter(connection, monaco as never);
+    adapter.register('rust');
+    const provider = registrations.get('definition')!;
+    const historyModel = {
+      uri: { scheme: 'history', path: 'abc', toString: () => 'history:abc' },
+    };
+
+    const result = await provider.provider.provideDefinition(historyModel, position);
+
+    expect(result).toBeNull();
+    expect(connection.definition).not.toHaveBeenCalled();
   });
 });
