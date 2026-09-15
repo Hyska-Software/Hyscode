@@ -5,13 +5,14 @@ import { useSettingsStore } from '../../../stores';
 import { useRulesStore } from '../../../stores/rules-store';
 import { useProjectStore } from '../../../stores/project-store';
 import { defineAllMonacoThemes, getMonacoThemeName } from '../../../lib/monaco-themes';
+import { loadMonacoEditor } from '../../../lib/monaco-loader';
 import { tauriFs } from '../../../lib/tauri-fs';
 import { HarnessBridge } from '../../../lib/harness-bridge';
 import { getActiveAgentBridge } from '../../../lib/active-agent-bridge';
 import type { RuleScope } from '@hyscode/agent-harness';
 import { SettingInput, SettingSelect } from '../controls';
 
-const MonacoEditor = lazy(() => import('@monaco-editor/react'));
+const MonacoEditor = lazy(() => loadMonacoEditor());
 
 interface RuleEditorDialogProps {
   open: boolean;

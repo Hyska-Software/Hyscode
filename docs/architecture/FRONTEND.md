@@ -6,6 +6,41 @@ The frontend is a React 19 SPA running inside Tauri's WebView. It uses shadcn/ui
 
 ---
 
+## Desktop Bootstrap and Development Profile
+
+`apps/desktop/index.html` loads `apps/desktop/public/boot.js` before the React
+module. The bootstrap layer renders a solid loading surface with an
+indeterminate progress bar and rotating status copy. It remains visible until
+React calls `ready()` after mounting; it intentionally has no timeout or error
+panel. This keeps the startup surface quiet while the local interface is
+initializing instead of showing a second recovery flow.
+
+The bootstrap surface also renders temporary window controls. The controls
+module uses the same Tauri window API as the main titlebar for minimize,
+maximize/restore, and close, while the top drag region uses
+`data-tauri-drag-region` so the window can be moved before React mounts.
+
+The desktop development launcher applies the isolated Tauri identifier
+`com.hyscode.dev` through a dev-only configuration merge. This keeps the
+WebView2 profile used by `npm run dev` separate from the installed
+`com.hyscode.app` profile, avoiding shared browser-cache state between an
+installed release and a local build. Set `HYSCODE_TAURI_DEV_IDENTIFIER` when a
+different local profile is required.
+
+Development also passes `--disable-http-cache` to WebView2 while preserving any
+existing `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS`. This prevents a stale Vite
+optimized module from being reused after dependency or version changes.
+
+The version bump script validates this identity boundary before and after a
+bump. It never derives the production identifier from the version, because
+doing so would break installation and application-data continuity.
+
+The Rust database path remains the shared HysCode data directory; the
+identifier isolation is specifically for the desktop WebView2 profile and its
+cache/session state.
+
+---
+
 ## Application Shell Layout
 
 ```

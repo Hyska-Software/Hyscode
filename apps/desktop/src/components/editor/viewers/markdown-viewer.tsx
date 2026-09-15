@@ -4,13 +4,14 @@ import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels';
 import { useSettingsStore } from '../../../stores';
 import type { MarkdownViewMode } from '../../../stores/editor-store';
 import { defineAllMonacoThemes, getMonacoThemeName } from '../../../lib/monaco-themes';
+import { loadMonacoEditor } from '../../../lib/monaco-loader';
 import { registerAllLanguages, disableNativeTypeScriptValidation, pathToFileUri } from '@hyscode/lsp-client';
 import { LspBridge } from '../../../lib/lsp-bridge';
 import { GIT_GUTTER_WIDTH } from '../../../hooks/use-git-decorations';
 import { MarkdownDocumentPreview } from './markdown-document-preview';
 import type * as monacoEditor from 'monaco-editor';
 
-const MonacoEditor = lazy(() => import('@monaco-editor/react'));
+const MonacoEditor = lazy(() => loadMonacoEditor());
 
 export interface MarkdownViewerProps {
   content: string;

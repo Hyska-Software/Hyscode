@@ -21,6 +21,8 @@
       6. VORTEX TUI hardcoded version fallbacks (tools/hyscode-tui/src/main.ts,
          tools/hyscode-tui/src/commands.ts, scripts/build-vortex.mjs) used for
          local builds without an explicit --version
+      7. validates that the production Tauri identifier remains stable and that
+         the development launcher uses a separate WebView2 profile
 
     The next push to main will append "-build.<run_number>" to the
     desktop/runtime files via .github/workflows/release.yml while retaining
@@ -78,8 +80,15 @@ $RootPkg          = Join-Path $RepoRoot 'package.json'
 $PackageLock      = Join-Path $RepoRoot 'package-lock.json'
 $DesktopPkg       = Join-Path $RepoRoot 'apps/desktop/package.json'
 $TauriConf        = Join-Path $RepoRoot 'apps/desktop/src-tauri/tauri.conf.json'
+$TauriDevLauncher  = Join-Path $RepoRoot 'scripts/tauri-dev.mjs'
 $CargoToml        = Join-Path $RepoRoot 'apps/desktop/src-tauri/Cargo.toml'
 $CargoLock        = Join-Path $RepoRoot 'apps/desktop/src-tauri/Cargo.lock'
+
+# The production identifier is an installation and data identity. It must not
+# change with the application version. Development uses a separate WebView2
+# profile through scripts/tauri-dev.mjs.
+$ProductionIdentifier = 'com.hyscode.app'
+$DevelopmentIdentifier = 'com.hyscode.dev'
 
 $TuiPkg           = Join-Path $RepoRoot 'tools/hyscode-tui/package.json'
 $TuiRuntimePkg    = Join-Path $RepoRoot 'packages/tui-runtime/package.json'
@@ -110,6 +119,45 @@ function Read-JsonVersion {
         throw "Could not find a top-level version in $Path."
     }
     return [string]$json.version
+}
+
+function Read-TauriIdentifier {
+    $json = [System.IO.File]::ReadAllText($TauriConf) | ConvertFrom-Json
+    if (-not $json.identifier) {
+        throw "Could not find a top-level identifier in $TauriConf."
+    }
+    return [string]$json.identifier
+}
+
+function Assert-DesktopProfileIsolation {
+    $productionIdentifier = Read-TauriIdentifier
+    if ($productionIdentifier -ne $ProductionIdentifier) {
+        throw "Unexpected Tauri application identifier '$productionIdentifier'. Expected the stable production identifier '$ProductionIdentifier'."
+    }
+
+    if (-not (Test-Path -LiteralPath $TauriDevLauncher -PathType Leaf)) {
+        throw "The development launcher is missing: $TauriDevLauncher"
+    }
+
+    $launcherText = [System.IO.File]::ReadAllText($TauriDevLauncher)
+    $defaultIdentifierMatch = [regex]::Match(
+        $launcherText,
+        'defaultDevIdentifier\s*=\s*["''](?<identifier>[^"'']+)["'']'
+    )
+    if (-not $defaultIdentifierMatch.Success) {
+        throw "The development launcher does not declare a default isolated Tauri identifier."
+    }
+
+    $developmentIdentifier = $defaultIdentifierMatch.Groups['identifier'].Value
+    if ($developmentIdentifier -ne $DevelopmentIdentifier) {
+        throw "Unexpected development Tauri identifier '$developmentIdentifier'. Expected '$DevelopmentIdentifier'."
+    }
+    if ($developmentIdentifier -eq $productionIdentifier) {
+        throw "Development and production Tauri identifiers must be different to avoid sharing the WebView2 profile."
+    }
+    if ($launcherText -notmatch 'JSON\.stringify\(\{\s*identifier:\s*devIdentifier\s*\}\)') {
+        throw "The development launcher does not pass its isolated identifier to Tauri."
+    }
 }
 
 function Read-LockRegexVersion {
@@ -272,6 +320,7 @@ function Assert-SynchronizedVersions {
     $tuiMainFallback = Read-FallbackVersion -Path $TuiMain -Regex $TuiMainRegex
     $tuiCommandsFallback = Read-FallbackVersion -Path $TuiCommands -Regex $TuiCommandsRegex
     $buildVortexFallback = Read-FallbackVersion -Path $BuildVortex -Regex $BuildVortexRegex
+    Assert-DesktopProfileIsolation
 
     $mismatches = @()
     if ($SkipRoot) {
@@ -375,6 +424,7 @@ function Read-ValidatedVersion {
 # -----------------------------------------------------------------------------
 # Read current state
 # -----------------------------------------------------------------------------
+Assert-DesktopProfileIsolation
 $currentRaw = Read-RootVersion
 $current    = Split-Semver -Raw $currentRaw
 
@@ -547,6 +597,9 @@ $tuiRuntimeOut = (($tuiRuntimeJson | ConvertTo-Json -Depth 100) -replace "`r?`n"
 
 # 3) apps/desktop/src-tauri/tauri.conf.json
 $tauriJson = [System.IO.File]::ReadAllText($TauriConf) | ConvertFrom-Json
+if ([string]$tauriJson.identifier -ne $ProductionIdentifier) {
+    throw "Refusing to rewrite $TauriConf because its production identifier is not '$ProductionIdentifier'."
+}
 $tauriJson.version = $targetRaw
 $tauriOut = (($tauriJson | ConvertTo-Json -Depth 100) -replace "`r?`n", "`n") + "`n"
 [System.IO.File]::WriteAllText($TauriConf, $tauriOut)
