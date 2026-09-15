@@ -1,4 +1,9 @@
-#requires -Version 7.0
+#requires -Version 5.1
+
+# Compatibilidade: roda em Windows PowerShell 5.1 e PowerShell 7+.
+# O pwsh (7+) continua recomendado, mas nao e mais obrigatorio.
+# Nao usar construcoes exclusivas do PS7 (ex.: ConvertFrom-Json -AsHashtable,
+# operadores ?? / ?. / ternario). Manter tudo compativel com 5.1.
 
 <#
 .SYNOPSIS
@@ -7,7 +12,7 @@
 .DESCRIPTION
     Updates the application version in the package and runtime metadata tracked
     by the release workflow, including both lockfiles:
-      1. package.json and package-lock.json (root — used as build base)
+      1. package.json and package-lock.json (root - used as build base)
       2. apps/desktop/package.json and its package-lock entry
       3. apps/desktop/src-tauri/tauri.conf.json
       4. apps/desktop/src-tauri/Cargo.toml and the hyscode package in Cargo.lock
@@ -66,9 +71,9 @@ $ErrorActionPreference = 'Stop'
 
 $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 # File targets
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 $RootPkg          = Join-Path $RepoRoot 'package.json'
 $PackageLock      = Join-Path $RepoRoot 'package-lock.json'
 $DesktopPkg       = Join-Path $RepoRoot 'apps/desktop/package.json'
@@ -89,9 +94,9 @@ $TuiMainRegex     = [regex]"HYSCODE_TUI_VERSION \?\? '(?<version>[^']*)'"
 $TuiCommandsRegex = [regex]"version = '(?<version>[^']*)'\): CliParseResult"
 $BuildVortexRegex = [regex]"VORTEX_VERSION \?\? '(?<version>[^']*)'"
 
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 # Helpers
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 function Read-RootVersion {
     $pkg = [System.IO.File]::ReadAllText($RootPkg) | ConvertFrom-Json
     return $pkg.version
@@ -107,24 +112,37 @@ function Read-JsonVersion {
     return [string]$json.version
 }
 
+function Read-LockRegexVersion {
+    param(
+        [Parameter(Mandatory)][string]$Text,
+        [Parameter(Mandatory)][string]$Pattern,
+        [Parameter(Mandatory)][string]$Description
+    )
+
+    $match = [regex]::Match($Text, $Pattern)
+    if (-not $match.Success) {
+        throw "package-lock.json is missing $Description."
+    }
+    return $match.Groups['version'].Value
+}
+
 function Read-PackageLockVersions {
-    $lock = [System.IO.File]::ReadAllText($PackageLock) | ConvertFrom-Json -AsHashtable
-    $rootEntry = $lock.packages['']
-    $desktopEntry = $lock.packages['apps/desktop']
-    $tuiEntry = $lock.packages['tools/hyscode-tui']
-    $tuiRuntimeEntry = $lock.packages['packages/tui-runtime']
-    if (-not $rootEntry -or -not $desktopEntry) {
-        throw "package-lock.json is missing the root or apps/desktop package entry."
+    # Nao usa ConvertFrom-Json aqui: o Windows PowerShell 5.1 usa o
+    # JavaScriptSerializer, que rejeita a chave vazia ("") do pacote raiz
+    # e arquivos grandes. Leitura via regex funciona no 5.1 e no 7+.
+    $text = [System.IO.File]::ReadAllText($PackageLock)
+
+    $topMatch = [regex]::Match($text, '(?m)^  "version"\s*:\s*"(?<version>[^"]*)"')
+    if (-not $topMatch.Success) {
+        throw "package-lock.json is missing the top-level version."
     }
-    if (-not $tuiEntry -or -not $tuiRuntimeEntry) {
-        throw "package-lock.json is missing the tools/hyscode-tui or packages/tui-runtime package entry."
-    }
+
     return [pscustomobject]@{
-        TopLevel   = [string]$lock.version
-        Root       = [string]$rootEntry.version
-        Desktop    = [string]$desktopEntry.version
-        Tui        = [string]$tuiEntry.version
-        TuiRuntime = [string]$tuiRuntimeEntry.version
+        TopLevel   = $topMatch.Groups['version'].Value
+        Root       = Read-LockRegexVersion -Text $text -Pattern '(?ms)(^    ""\s*:\s*\{\s*\r?\n(?:(?!^    "[^"\r\n]+"\s*:).)*?^      "version"\s*:\s*"(?<version>[^"]*)")' -Description 'the root package entry'
+        Desktop    = Read-LockRegexVersion -Text $text -Pattern '(?ms)(^    "apps/desktop"\s*:\s*\{\s*\r?\n(?:(?!^    "[^"\r\n]+"\s*:).)*?^      "version"\s*:\s*"(?<version>[^"]*)")' -Description 'the apps/desktop package entry'
+        Tui        = Read-LockRegexVersion -Text $text -Pattern '(?ms)(^    "tools/hyscode-tui"\s*:\s*\{\s*\r?\n(?:(?!^    "[^"\r\n]+"\s*:).)*?^      "version"\s*:\s*"(?<version>[^"]*)")' -Description 'the tools/hyscode-tui package entry'
+        TuiRuntime = Read-LockRegexVersion -Text $text -Pattern '(?ms)(^    "packages/tui-runtime"\s*:\s*\{\s*\r?\n(?:(?!^    "[^"\r\n]+"\s*:).)*?^      "version"\s*:\s*"(?<version>[^"]*)")' -Description 'the packages/tui-runtime package entry'
     }
 }
 
@@ -335,7 +353,7 @@ function Read-Choice {
         if ($raw -match '^\d+$' -and ($raw -as [int]) -in $Valid) {
             return [int]$raw
         }
-        Write-Host "  ✗ Invalid choice. Enter one of: $($Valid -join ', ')" -ForegroundColor Yellow
+        Write-Host "  x  Invalid choice. Enter one of: $($Valid -join ', ')" -ForegroundColor Yellow
     }
 }
 
@@ -343,20 +361,20 @@ function Read-ValidatedVersion {
     while ($true) {
         $raw = (Read-Host "  Enter version (e.g. 1.2.3 or 0.5.0-beta.1)").Trim()
         if ([string]::IsNullOrWhiteSpace($raw)) {
-            Write-Host "  ✗ Empty input." -ForegroundColor Yellow
+            Write-Host "  x  Empty input." -ForegroundColor Yellow
             continue
         }
         try {
             return (Split-Semver -Raw $raw) | ForEach-Object { Format-Semver -Semver $_ }
         } catch {
-            Write-Host "  ✗ $($_.Exception.Message)" -ForegroundColor Yellow
+            Write-Host "  x  $($_.Exception.Message)" -ForegroundColor Yellow
         }
     }
 }
 
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 # Read current state
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 $currentRaw = Read-RootVersion
 $current    = Split-Semver -Raw $currentRaw
 
@@ -364,9 +382,9 @@ if ($current.Pre) {
     Write-Warning "Root package.json currently has a pre-release identifier ('$($current.Pre)'). Numeric base will be used as the starting point."
 }
 
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 # Interactive menu (runs when no CLI args are provided)
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 $useMenu = -not $Type -and -not $Version -and -not $DryRun -and -not $Force
 
 if ($useMenu) {
@@ -374,18 +392,18 @@ if ($useMenu) {
         try { Clear-Host } catch { <# non-interactive host #> }
     }
     Write-Host ''
-    Write-Host '  HysCode — version bump' -ForegroundColor Cyan
-    Write-Host '  ─────────────────────────────────────────' -ForegroundColor DarkGray
+    Write-Host '  HysCode - version bump' -ForegroundColor Cyan
+    Write-Host '  -----------------------------------------' -ForegroundColor DarkGray
     Write-Host ("  Current base : {0}" -f $currentRaw)
-    Write-Host '  ─────────────────────────────────────────' -ForegroundColor DarkGray
+    Write-Host '  -----------------------------------------' -ForegroundColor DarkGray
     Write-Host ''
 
     Write-Host '   [1] Major bump  ' -NoNewline -ForegroundColor White
-    Write-Host ('→ ' + (Format-Semver -Semver (Bump-Semver -Semver $current -Type major))) -ForegroundColor Yellow
+    Write-Host ('-> ' + (Format-Semver -Semver (Bump-Semver -Semver $current -Type major))) -ForegroundColor Yellow
     Write-Host '   [2] Minor bump  ' -NoNewline -ForegroundColor White
-    Write-Host ('→ ' + (Format-Semver -Semver (Bump-Semver -Semver $current -Type minor))) -ForegroundColor Yellow
+    Write-Host ('-> ' + (Format-Semver -Semver (Bump-Semver -Semver $current -Type minor))) -ForegroundColor Yellow
     Write-Host '   [3] Patch bump  ' -NoNewline -ForegroundColor White
-    Write-Host ('→ ' + (Format-Semver -Semver (Bump-Semver -Semver $current -Type patch))) -ForegroundColor Yellow
+    Write-Host ('-> ' + (Format-Semver -Semver (Bump-Semver -Semver $current -Type patch))) -ForegroundColor Yellow
     Write-Host '   [4] Custom version' -ForegroundColor White
     Write-Host '   [5] Preview all options (dry run)' -ForegroundColor White
     Write-Host '   [0] Cancel' -ForegroundColor DarkGray
@@ -401,12 +419,12 @@ if ($useMenu) {
         4 { $Version = Read-ValidatedVersion }
         5 {
             Write-Host ''
-            Write-Host '  ── Preview ─────────────────────────────────────────' -ForegroundColor DarkGray
+            Write-Host '  -- Preview -----------------------------------------' -ForegroundColor DarkGray
             foreach ($t in 'major', 'minor', 'patch') {
                 $next = Format-Semver -Semver (Bump-Semver -Semver $current -Type $t)
-                Write-Host ("  {0,-6} {1}  →  {2}" -f $t, $currentRaw, $next) -ForegroundColor Gray
+                Write-Host ("  {0,-6} {1}  ->  {2}" -f $t, $currentRaw, $next) -ForegroundColor Gray
             }
-            Write-Host '  ────────────────────────────────────────────────────' -ForegroundColor DarkGray
+            Write-Host '  ----------------------------------------------------' -ForegroundColor DarkGray
             Write-Host ''
             $postChoice = Read-Choice -Prompt '  Now pick a bump type (1-3), 4=custom, 0=cancel' -Valid @(0, 1, 2, 3, 4)
             switch ($postChoice) {
@@ -420,9 +438,9 @@ if ($useMenu) {
     }
 }
 
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 # Final validation
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 if (-not $Type -and -not $Version) {
     Write-Error "Specify either -Type (major|minor|patch) or -Version <semver>." -ErrorAction Stop
 }
@@ -430,9 +448,9 @@ if ($Type -and $Version) {
     Write-Error "-Type and -Version are mutually exclusive." -ErrorAction Stop
 }
 
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 # Resolve target version
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 if ($Version) {
     $target = Split-Semver -Raw $Version
 } else {
@@ -441,9 +459,9 @@ if ($Version) {
 
 $targetRaw = Format-Semver -Semver $target
 
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 # Build the change plan
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 $lockVersions = Read-PackageLockVersions
 $changes = @()
 if (-not $SkipRoot) {
@@ -462,33 +480,33 @@ $changes += @{ File = $TauriConf; Current = (Read-JsonVersion -Path $TauriConf);
 $changes += @{ File = $CargoToml; Current = (Select-String -LiteralPath $CargoToml -Pattern '^version\s*=\s*".*"' | Select-Object -First 1).Line -replace '^version\s*=\s*"?', '' -replace '"$', ''; Next = $targetRaw }
 $changes += @{ File = $CargoLock; Current = (Read-CargoLockVersion); Next = $targetRaw }
 
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 # Report
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 Write-Host ''
-Write-Host '──────────────────────────────────────────────────────────────' -ForegroundColor DarkGray
+Write-Host '--------------------------------------------------------------' -ForegroundColor DarkGray
 Write-Host "  HysCode version bump" -ForegroundColor Cyan
-Write-Host '──────────────────────────────────────────────────────────────' -ForegroundColor DarkGray
+Write-Host '--------------------------------------------------------------' -ForegroundColor DarkGray
 Write-Host ("  Current base : {0}" -f $currentRaw)
-Write-Host ("  Bump         : {0}" -f $(if ($Version) { "explicit → $Version" } else { $Type }))
+Write-Host ("  Bump         : {0}" -f $(if ($Version) { "explicit -> $Version" } else { $Type }))
 Write-Host ("  Next base    : {0}" -f $targetRaw)
-Write-Host '──────────────────────────────────────────────────────────────' -ForegroundColor DarkGray
+Write-Host '--------------------------------------------------------------' -ForegroundColor DarkGray
 Write-Host '  Files that will be updated:'
 foreach ($c in $changes) {
     $rel = $c.File.Substring($RepoRoot.Length).TrimStart('\', '/')
-    Write-Host ("    {0,-55} {1}  →  {2}" -f $rel, $c.Current, $c.Next)
+    Write-Host ("    {0,-55} {1}  ->  {2}" -f $rel, $c.Current, $c.Next)
 }
-Write-Host '──────────────────────────────────────────────────────────────' -ForegroundColor DarkGray
+Write-Host '--------------------------------------------------------------' -ForegroundColor DarkGray
 Write-Host ''
 
 if ($DryRun) {
-    Write-Host "Dry run — no files modified." -ForegroundColor Yellow
+    Write-Host "Dry run - no files modified." -ForegroundColor Yellow
     return
 }
 
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 # Confirm
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 if (-not $Force) {
     $answer = Read-Host "Proceed? [y/N]"
     if ($answer -notin @('y', 'Y', 'yes', 'Yes', 'YES')) {
@@ -497,10 +515,10 @@ if (-not $Force) {
     }
 }
 
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 # Apply changes
-# ─────────────────────────────────────────────────────────────────────────────
-# 1) Root package.json — only manual releases update the clean build base.
+# -----------------------------------------------------------------------------
+# 1) Root package.json - only manual releases update the clean build base.
 if (-not $SkipRoot) {
     $rootJson = [System.IO.File]::ReadAllText($RootPkg) | ConvertFrom-Json
     $rootJson.version = $targetRaw
@@ -514,7 +532,7 @@ $deskJson.version = $targetRaw
 $deskOut = (($deskJson | ConvertTo-Json -Depth 100) -replace "`r?`n", "`n") + "`n"
 [System.IO.File]::WriteAllText($DesktopPkg, $deskOut)
 
-# 2b) VORTEX TUI packages — always track the app version, like the desktop
+# 2b) VORTEX TUI packages - always track the app version, like the desktop
 # package (never skipped with -SkipRoot: the release workflow injects the same
 # build version into the VORTEX executable via build-vortex --version).
 $tuiJson = [System.IO.File]::ReadAllText($TuiPkg) | ConvertFrom-Json
@@ -533,18 +551,18 @@ $tauriJson.version = $targetRaw
 $tauriOut = (($tauriJson | ConvertTo-Json -Depth 100) -replace "`r?`n", "`n") + "`n"
 [System.IO.File]::WriteAllText($TauriConf, $tauriOut)
 
-# 4) apps/desktop/src-tauri/Cargo.toml — only the first [package] block.
+# 4) apps/desktop/src-tauri/Cargo.toml - only the first [package] block.
 # Read raw text and do a targeted string replace to preserve the file's
 # original line endings (LF vs CRLF) and any other byte-level quirks.
 $cargoText = [System.IO.File]::ReadAllText($CargoToml)
 $cargoRegex = [regex]'(?ms)(^\[package\][^\[]*?^version\s*=\s*)"[^"]*"'
 if (-not $cargoRegex.IsMatch($cargoText)) {
-    throw "Failed to update 'version' line in $CargoToml — no [package] block found."
+    throw "Failed to update 'version' line in $CargoToml - no [package] block found."
 }
 $cargoNew = $cargoRegex.Replace($cargoText, ('$1"' + $targetRaw + '"'), 1)
 [System.IO.File]::WriteAllText($CargoToml, $cargoNew)
 
-# 5) Lockfiles — update only the exact package metadata that carries the
+# 5) Lockfiles - update only the exact package metadata that carries the
 # application version, preserving the rest of each generated lockfile.
 Update-PackageLock -TargetVersion $targetRaw
 Update-CargoLock -TargetVersion $targetRaw
@@ -558,11 +576,11 @@ Update-FallbackVersion -Path $BuildVortex -Regex $BuildVortexRegex -TargetVersio
 # before that commit if any runtime version is inconsistent.
 Assert-SynchronizedVersions -TargetVersion $targetRaw -ExpectedRootVersion $currentRaw
 
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 # Done
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 Write-Host ''
-Write-Host "✓ Bumped to $targetRaw" -ForegroundColor Green
+Write-Host "Bumped to $targetRaw" -ForegroundColor Green
 Write-Host ''
 Write-Host 'Next steps:' -ForegroundColor Cyan
 Write-Host "  git add package.json package-lock.json apps/desktop/package.json apps/desktop/src-tauri/tauri.conf.json apps/desktop/src-tauri/Cargo.toml apps/desktop/src-tauri/Cargo.lock tools/hyscode-tui/package.json packages/tui-runtime/package.json tools/hyscode-tui/src/main.ts tools/hyscode-tui/src/commands.ts scripts/build-vortex.mjs"
