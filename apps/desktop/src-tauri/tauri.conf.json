@@ -1,100 +1,96 @@
 {
-    "$schema":  "https://raw.githubusercontent.com/nicklasbekkevold/tauri-settings/refs/heads/main/schema.json",
-    "productName":  "HysCode",
-    "version":  "0.15.0",
-    "identifier":  "com.hyscode.app",
-    "build":  {
-                  "beforeDevCommand":  "npm run build:sidecars \u0026\u0026 npm run copy:conpty \u0026\u0026 npm run frontend:dev",
-                  "devUrl":  "http://localhost:1420",
-                  "beforeBuildCommand":  "npm run build:sidecars \u0026\u0026 npm run stage:conpty \u0026\u0026 npm run build",
-                  "frontendDist":  "../dist"
-              },
-    "app":  {
-                "windows":  [
-                                {
-                                    "title":  "HysCode",
-                                    "width":  1400,
-                                    "height":  900,
-                                    "minWidth":  900,
-                                    "minHeight":  600,
-                                    "decorations":  false,
-                                    "resizable":  true,
-                                    "minimizable":  true,
-                                    "maximizable":  true,
-                                    "closable":  true,
-                                    "center":  true,
-                                    "dragDropEnabled":  false
-                                }
-                            ],
-                "security":  {
-                                 "csp":  "default-src \u0027self\u0027; script-src \u0027self\u0027 blob:; style-src \u0027self\u0027 \u0027unsafe-inline\u0027; img-src \u0027self\u0027 data: blob: asset: https://avatars.githubusercontent.com; frame-src \u0027self\u0027 data: blob:; connect-src \u0027self\u0027 https://*.anthropic.com https://*.openai.com https://*.googleapis.com https://openrouter.ai https://api.githubcopilot.com https://api.github.com http://localhost:*"
-                             }
-            },
-    "bundle":  {
-                   "active":  true,
-                   "targets":  "all",
-                   "externalBin":  [
-                                       "binaries/codex-sidecar",
-                                       "binaries/claude-agent"
-                                   ],
-                   "icon":  [
-                                "icons/32x32.png",
-                                "icons/128x128.png",
-                                "icons/128x128@2x.png",
-                                "icons/icon.icns",
-                                "icons/icon.ico"
-                            ],
-                   "publisher":  "HysCode",
-                   "copyright":  "Copyright © 2024-2026 HysCode",
-                   "category":  "DeveloperTool",
-                   "shortDescription":  "An agentic code IDE",
-                   "longDescription":  "HysCode is a modern agentic code IDE with built-in AI assistance, extension support, and an intelligent coding experience.",
-                   "fileAssociations":  [
-
-                                        ],
-                   "windows":  {
-                                   "certificateThumbprint":  null,
-                                   "digestAlgorithm":  "sha256",
-                                   "timestampUrl":  "",
-                                   "webviewInstallMode":  {
-                                                              "type":  "downloadBootstrapper"
-                                                          },
-                                   "allowDowngrades":  true,
-                                   "nsis":  {
-                                                "displayLanguageSelector":  true,
-                                                "installerIcon":  "icons/icon.ico",
-                                                "headerImage":  "icons/nsis-header.bmp",
-                                                "sidebarImage":  "icons/nsis-sidebar.bmp",
-                                                "languages":  [
-                                                                  "English",
-                                                                  "PortugueseBR"
-                                                              ],
-                                                "installMode":  "both"
-                                            }
-                               },
-                   "linux":  {
-                                 "deb":  {
-                                             "depends":  [
-                                                             "libwebkit2gtk-4.1-0",
-                                                             "libgtk-3-0",
-                                                             "libayatana-appindicator3-1",
-                                                             "libssl3"
-                                                         ],
-                                             "section":  "devel",
-                                             "priority":  "optional"
-                                         },
-                                 "appimage":  {
-                                                  "bundleMediaFramework":  true
-                                              }
-                             },
-                   "macOS":  {
-                                 "frameworks":  [
-
-                                                ],
-                                 "minimumSystemVersion":  "10.15",
-                                 "signingIdentity":  null,
-                                 "providerShortName":  null,
-                                 "entitlements":  null
-                             }
-               }
+  "$schema": "https://raw.githubusercontent.com/nicklasbekkevold/tauri-settings/refs/heads/main/schema.json",
+  "productName": "HysCode",
+  "version": "0.15.0-build.114",
+  "identifier": "com.hyscode.app",
+  "build": {
+    "beforeDevCommand": "npm run build:sidecars && npm run copy:conpty && npm run frontend:dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "npm run build:sidecars && npm run stage:conpty && npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "HysCode",
+        "width": 1400,
+        "height": 900,
+        "minWidth": 900,
+        "minHeight": 600,
+        "decorations": false,
+        "resizable": true,
+        "minimizable": true,
+        "maximizable": true,
+        "closable": true,
+        "center": true,
+        "dragDropEnabled": false
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; script-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: asset: https://avatars.githubusercontent.com; frame-src 'self' data: blob:; connect-src 'self' https://*.anthropic.com https://*.openai.com https://*.googleapis.com https://openrouter.ai https://api.githubcopilot.com https://api.github.com http://localhost:*"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "externalBin": [
+      "binaries/codex-sidecar",
+      "binaries/claude-agent"
+    ],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "publisher": "HysCode",
+    "copyright": "Copyright © 2024-2026 HysCode",
+    "category": "DeveloperTool",
+    "shortDescription": "An agentic code IDE",
+    "longDescription": "HysCode is a modern agentic code IDE with built-in AI assistance, extension support, and an intelligent coding experience.",
+    "fileAssociations": [],
+    "windows": {
+      "certificateThumbprint": null,
+      "digestAlgorithm": "sha256",
+      "timestampUrl": "",
+      "webviewInstallMode": {
+        "type": "downloadBootstrapper"
+      },
+      "allowDowngrades": true,
+      "nsis": {
+        "displayLanguageSelector": true,
+        "installerIcon": "icons/icon.ico",
+        "headerImage": "icons/nsis-header.bmp",
+        "sidebarImage": "icons/nsis-sidebar.bmp",
+        "languages": [
+          "English",
+          "PortugueseBR"
+        ],
+        "installMode": "both"
+      }
+    },
+    "linux": {
+      "deb": {
+        "depends": [
+          "libwebkit2gtk-4.1-0",
+          "libgtk-3-0",
+          "libayatana-appindicator3-1",
+          "libssl3"
+        ],
+        "section": "devel",
+        "priority": "optional"
+      },
+      "appimage": {
+        "bundleMediaFramework": true
+      }
+    },
+    "macOS": {
+      "frameworks": [],
+      "minimumSystemVersion": "10.15",
+      "signingIdentity": null,
+      "providerShortName": null,
+      "entitlements": null
+    }
+  }
 }

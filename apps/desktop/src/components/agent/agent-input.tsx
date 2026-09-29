@@ -595,6 +595,24 @@ export function AgentInput({ goalModeEnabled = false, onGoalModeChange }: AgentI
         </div>
       )}
 
+      {goalModeNotice && (
+        <div
+          role="status"
+          className="mb-2 flex items-start gap-1.5 rounded-md border border-warning/30 bg-warning/5 px-2.5 py-2 text-[10px] text-warning"
+        >
+          <Target className="mt-0.5 h-3 w-3 shrink-0" />
+          <span className="min-w-0 flex-1">{goalModeNotice}</span>
+          <button
+            type="button"
+            aria-label="Dismiss goal mode notice"
+            className="shrink-0 text-warning/70 transition-colors hover:text-warning"
+            onClick={() => setGoalModeNotice(null)}
+          >
+            <X className="h-3 w-3" />
+          </button>
+        </div>
+      )}
+
       {/* ── Minimal input frame ── */}
       <div
         className={cn(
