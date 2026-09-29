@@ -60,7 +60,7 @@ describe('ToolRouter', () => {
     expect(handler.execute).not.toHaveBeenCalled();
   });
 
-  it('waits for an uncancellable native operation and reports partial cancellation', async () => {
+  it('cancels promptly when abort fires before the native operation settles', async () => {
     const router = new ToolRouter();
     let settle: ((result: { success: boolean; output: string }) => void) | undefined;
     router.register({
@@ -82,7 +82,7 @@ describe('ToolRouter', () => {
     await expect(execution).resolves.toMatchObject({
       output: {
         success: false,
-        metadata: { cancellationPartial: true, operationCompleted: true },
+        error: expect.stringMatching(/cancel/i),
       },
     });
   });

@@ -102,9 +102,20 @@ export class LspManager {
     }
 
     const config = this.configs.get(languageId);
-    if (!config || !this.monaco || !this.rootUri) return;
+    if (!config || !this.monaco || !this.rootUri) {
+      const missing = [
+        !config && 'server config',
+        !this.monaco && 'monaco instance',
+        !this.rootUri && 'root URI',
+      ].filter(Boolean).join(', ');
+      console.warn(`[LspManager] Cannot start server for "${languageId}": missing ${missing}.`);
+      for (const listener of this.statusListeners) {
+        listener(languageId, 'error');
+      }
+      return;
+    }
 
-    const serverId = `lsp-${serverKey}-${Date.now()}`;
+    const serverId = `lsp-${serverKey}-${crypto.randomUUID()}`;
     const rootPath = fileUriToPath(this.rootUri);
     console.log('[LspManager] lsp_start serverKey=', serverKey, 'rootUri=', this.rootUri, 'rootPath=', rootPath, 'filePath=', filePath);
 

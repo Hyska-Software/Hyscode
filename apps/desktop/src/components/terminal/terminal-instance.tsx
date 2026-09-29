@@ -44,8 +44,13 @@ function TerminalInstanceComponent({ sessionId, isActive }: TerminalInstanceProp
   const setLastCommand = useTerminalStore((s) => s.setLastCommand);
   const appendCommandHistory = useTerminalStore((s) => s.appendCommandHistory);
   const rootPath = useProjectStore((s) => s.rootPath);
-  const session = useTerminalStore.getState().sessions.find((s) => s.id === sessionId);
-  const sessionCwd = session?.cwd ?? rootPath;
+  // Reactive subscription (not a one-shot getState snapshot) so cwd / agent
+  // ownership stay current for the spawn effect below.
+  const sessionCwd =
+    useTerminalStore((s) => s.sessions.find((item) => item.id === sessionId)?.cwd) ?? rootPath;
+  const sessionIsAgent =
+    useTerminalStore((s) => s.sessions.find((item) => item.id === sessionId)?.isAgentSession) ??
+    false;
   const themeId = useSettingsStore((s) => s.themeId);
   const terminalFontSize = useSettingsStore((s) => s.terminalFontSize);
   const terminalFontFamily = useSettingsStore((s) => s.terminalFontFamily);
@@ -151,7 +156,8 @@ function TerminalInstanceComponent({ sessionId, isActive }: TerminalInstanceProp
     term.options.scrollback = terminalScrollback;
     term.options.cursorStyle = terminalCursorStyle;
     term.options.letterSpacing = 0;
-    requestAnimationFrame(handleResize);
+    const raf = requestAnimationFrame(handleResize);
+    return () => cancelAnimationFrame(raf);
   }, [handleResize, terminalCursorStyle, terminalFontFamily, terminalFontSize, terminalScrollback]);
 
   // Initialize xterm + PTY. Uses a `cancelled` flag to handle React StrictMode's
@@ -185,8 +191,7 @@ function TerminalInstanceComponent({ sessionId, isActive }: TerminalInstanceProp
     term.open(container);
 
     // Forward user keystrokes to the PTY and track commands
-    const session = useTerminalStore.getState().sessions.find((s) => s.id === sessionId);
-    const isAgentSession = session?.isAgentSession ?? false;
+    const isAgentSession = sessionIsAgent;
     const onDataDisposable = term.onData((data) => {
       if (ptyIdRef.current) {
         const liveSession = useTerminalStore
@@ -324,16 +329,18 @@ function TerminalInstanceComponent({ sessionId, isActive }: TerminalInstanceProp
       xtermRef.current = null;
       fitAddonRef.current = null;
     };
-  }, [sessionId]);
+  }, [sessionId, sessionCwd, sessionIsAgent]);
 
   // When switching to this tab, refit and focus
   useEffect(() => {
     if (isActive) {
-      requestAnimationFrame(() => {
+      const raf = requestAnimationFrame(() => {
         handleResize();
         xtermRef.current?.focus();
       });
+      return () => cancelAnimationFrame(raf);
     }
+    return undefined;
   }, [isActive, handleResize]);
 
   return (

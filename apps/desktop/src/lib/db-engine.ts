@@ -84,9 +84,9 @@ export async function connectSQLite(filePath: string): Promise<DbConnection> {
   try {
     const test = await db.select<Array<{ name: string }>>("SELECT name FROM sqlite_master WHERE type='table' LIMIT 1");
     console.log('[db-engine] Connection validated, sample table:', test[0]?.name ?? 'none');
-  } catch (e: any) {
+  } catch (e: unknown) {
     console.error('[db-engine] Connection validation failed:', e);
-    throw new Error(`Connected but validation query failed: ${e.message}`);
+    throw new Error(`Connected but validation query failed: ${e instanceof Error ? e.message : String(e)}`);
   }
 
   const id = generateConnectionId();

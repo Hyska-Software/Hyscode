@@ -8,48 +8,73 @@ use tauri::State;
 
 pub struct DbState(pub Mutex<Connection>);
 
-pub fn open_database(app_dir: &std::path::Path) -> Connection {
-    std::fs::create_dir_all(app_dir).ok();
+/// Open (or create) the file-backed application database, running every
+/// migration. Returns `Err` with an actionable message instead of panicking
+/// so the app can start with a fallback and the frontend can show the error.
+pub fn open_database(app_dir: &std::path::Path) -> Result<Connection, String> {
+    std::fs::create_dir_all(app_dir).map_err(|e| {
+        format!(
+            "DB init failed: cannot create app dir '{}': {e}",
+            app_dir.display()
+        )
+    })?;
     let db_path = app_dir.join("hyscode.db");
-    let conn = Connection::open(&db_path).expect("failed to open database");
+    let conn = Connection::open(&db_path)
+        .map_err(|e| format!("DB open failed '{}': {e}", db_path.display()))?;
+    apply_base_migrations(&conn)?;
+    Ok(conn)
+}
+
+/// Open an ephemeral in-memory database with the full schema. Used as a
+/// fallback when the file database cannot be opened: the app stays usable
+/// and db commands surface actionable errors instead of the process dying
+/// at startup.
+pub fn open_memory_database() -> Result<Connection, String> {
+    let conn = Connection::open_in_memory().map_err(|e| format!("DB open failed: {e}"))?;
+    apply_base_migrations(&conn)?;
+    Ok(conn)
+}
+
+fn apply_base_migrations(conn: &Connection) -> Result<(), String> {
     conn.execute_batch("PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;")
-        .expect("failed to set pragmas");
-    conn.execute_batch(include_str!("../../migrations/001_initial.sql"))
-        .expect("failed to run migration 001");
-    conn.execute_batch(include_str!("../../migrations/002_extensions.sql"))
-        .expect("failed to run migration 002");
-    conn.execute_batch(include_str!("../../migrations/003_fix_mode_constraint.sql"))
-        .expect("failed to run migration 003");
-    conn.execute_batch(include_str!("../../migrations/004_traces_and_policies.sql"))
-        .expect("failed to run migration 004");
-    conn.execute_batch(include_str!("../../migrations/005_open_tabs.sql"))
-        .expect("failed to run migration 005");
-    conn.execute_batch(include_str!("../../migrations/006_file_history.sql"))
-        .expect("failed to run migration 006");
-    conn.execute_batch(include_str!("../../migrations/007_diagrams.sql"))
-        .expect("failed to run migration 007");
-    conn.execute_batch(include_str!("../../migrations/008_memories.sql"))
-        .expect("failed to run migration 008");
-    conn.execute_batch(include_str!("../../migrations/009_agent_sdd.sql"))
-        .expect("failed to run migration 009");
-    conn.execute_batch(include_str!("../../migrations/016_kanban.sql"))
-        .expect("failed to run migration 016");
-    conn.execute_batch(include_str!("../../migrations/017_goals.sql"))
-        .expect("failed to run migration 017");
-    apply_migration_010(&conn);
-    apply_migration_011(&conn);
-    apply_migration_012(&conn);
-    apply_migration_013(&conn);
-    apply_migration_014(&conn);
-    apply_migration_015(&conn);
-    conn
+        .map_err(|e| format!("DB pragma failed: {e}"))?;
+    const FILE_MIGRATIONS: &[(&str, &str)] = &[
+        ("001", include_str!("../../migrations/001_initial.sql")),
+        ("002", include_str!("../../migrations/002_extensions.sql")),
+        (
+            "003",
+            include_str!("../../migrations/003_fix_mode_constraint.sql"),
+        ),
+        (
+            "004",
+            include_str!("../../migrations/004_traces_and_policies.sql"),
+        ),
+        ("005", include_str!("../../migrations/005_open_tabs.sql")),
+        ("006", include_str!("../../migrations/006_file_history.sql")),
+        ("007", include_str!("../../migrations/007_diagrams.sql")),
+        ("008", include_str!("../../migrations/008_memories.sql")),
+        ("009", include_str!("../../migrations/009_agent_sdd.sql")),
+        ("016", include_str!("../../migrations/016_kanban.sql")),
+        ("017", include_str!("../../migrations/017_goals.sql")),
+    ];
+    for (name, sql) in FILE_MIGRATIONS {
+        conn.execute_batch(sql)
+            .map_err(|e| format!("DB migration {name} failed: {e}"))?;
+    }
+    apply_migration_010(conn)?;
+    apply_migration_011(conn)?;
+    apply_migration_012(conn)?;
+    apply_migration_013(conn)?;
+    apply_migration_014(conn)?;
+    apply_migration_015(conn)?;
+    Ok(())
 }
 
 /// Migration 010: token usage + cache columns. Idempotent — checks
 /// `pragma_table_info` for each column before adding it. Safe to run on
 /// fresh DBs, on DBs already partially migrated, and on DBs that have the
 /// full schema.
-fn apply_migration_010(conn: &Connection) {
+fn apply_migration_010(conn: &Connection) -> Result<(), String> {
     let additions: &[(&str, &str, &str)] = &[
         (
             "turn_records",
@@ -92,13 +117,14 @@ fn apply_migration_010(conn: &Connection) {
             .unwrap_or(false);
         if !exists {
             conn.execute_batch(ddl)
-                .unwrap_or_else(|e| panic!("failed to add column {table}.{column}: {e}"));
+                .map_err(|e| format!("DB migration failed to add column {table}.{column}: {e}"))?;
         }
     }
+    Ok(())
 }
 
 /// Migration 011: preserve provider-native transcript blocks for exact replay.
-fn apply_migration_011(conn: &Connection) {
+fn apply_migration_011(conn: &Connection) -> Result<(), String> {
     let exists: bool = conn
         .query_row(
             "SELECT COUNT(*) > 0 FROM pragma_table_info('messages') WHERE name = 'blocks'",
@@ -108,11 +134,12 @@ fn apply_migration_011(conn: &Connection) {
         .unwrap_or(false);
     if !exists {
         conn.execute_batch("ALTER TABLE messages ADD COLUMN blocks TEXT")
-            .unwrap_or_else(|error| panic!("failed to add messages.blocks: {error}"));
+            .map_err(|e| format!("DB migration failed to add messages.blocks: {e}"))?;
     }
+    Ok(())
 }
 
-fn apply_migration_012(conn: &Connection) {
+fn apply_migration_012(conn: &Connection) -> Result<(), String> {
     let exists: bool = conn
         .query_row(
             "SELECT COUNT(*) > 0 FROM pragma_table_info('messages') WHERE name = 'turn_summary'",
@@ -122,12 +149,13 @@ fn apply_migration_012(conn: &Connection) {
         .unwrap_or(false);
     if !exists {
         conn.execute_batch("ALTER TABLE messages ADD COLUMN turn_summary TEXT")
-            .unwrap_or_else(|error| panic!("failed to add messages.turn_summary: {error}"));
+            .map_err(|e| format!("DB migration failed to add messages.turn_summary: {e}"))?;
     }
+    Ok(())
 }
 
 /// Migration 013: link delegated turn records and traces to their parent turn.
-fn apply_migration_013(conn: &Connection) {
+fn apply_migration_013(conn: &Connection) -> Result<(), String> {
     let additions: &[(&str, &str, &str)] = &[
         (
             "turn_records",
@@ -150,19 +178,20 @@ fn apply_migration_013(conn: &Connection) {
             .unwrap_or(false);
         if !exists {
             conn.execute_batch(ddl)
-                .unwrap_or_else(|e| panic!("failed to add column {table}.{column}: {e}"));
+                .map_err(|e| format!("DB migration failed to add column {table}.{column}: {e}"))?;
         }
     }
     conn.execute_batch(
         "CREATE INDEX IF NOT EXISTS idx_turn_records_parent ON turn_records(parent_turn_id);
          CREATE INDEX IF NOT EXISTS idx_traces_parent ON traces(parent_turn_id);",
     )
-    .expect("failed to index delegated turn records");
+    .map_err(|e| format!("DB migration failed to index delegated turn records: {e}"))?;
+    Ok(())
 }
 
 /// Migration 014: persist prompt-cache eligibility and observed hit counters.
 /// Rates remain nullable so historical rows are not misclassified as misses.
-fn apply_migration_014(conn: &Connection) {
+fn apply_migration_014(conn: &Connection) -> Result<(), String> {
     let additions: &[(&str, &str, &str)] = &[
         (
             "turn_records",
@@ -245,14 +274,15 @@ fn apply_migration_014(conn: &Connection) {
             .unwrap_or(false);
         if !exists {
             conn.execute_batch(ddl)
-                .unwrap_or_else(|e| panic!("failed to add column {table}.{column}: {e}"));
+                .map_err(|e| format!("DB migration failed to add column {table}.{column}: {e}"))?;
         }
     }
+    Ok(())
 }
 
 /// Migration 015: persist the native Codex thread associated with a HysCode
 /// conversation. The fingerprint fences reuse when the stable prompt changes.
-fn apply_migration_015(conn: &Connection) {
+fn apply_migration_015(conn: &Connection) -> Result<(), String> {
     let additions: &[(&str, &str, &str)] = &[
         (
             "conversations",
@@ -275,9 +305,10 @@ fn apply_migration_015(conn: &Connection) {
             .unwrap_or(false);
         if !exists {
             conn.execute_batch(ddl)
-                .unwrap_or_else(|e| panic!("failed to add column {table}.{column}: {e}"));
+                .map_err(|e| format!("DB migration failed to add column {table}.{column}: {e}"))?;
         }
     }
+    Ok(())
 }
 
 pub fn load_codex_thread(
@@ -400,7 +431,7 @@ const UPSERT_CONVERSATION_SQL: &str = "INSERT INTO conversations
         provider_id = excluded.provider_id,
         updated_at = datetime('now')";
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub fn db_list_conversations(
     state: State<'_, DbState>,
     project_id: String,
@@ -435,7 +466,7 @@ pub fn db_list_conversations(
     Ok(rows)
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub fn db_list_vortex_project_sessions(
     state: State<'_, DbState>,
 ) -> Result<VortexProjectSessionIndexRow, String> {
@@ -551,7 +582,7 @@ fn list_vortex_project_sessions(conn: &Connection) -> Result<VortexProjectSessio
     })
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub fn db_get_conversation(
     state: State<'_, DbState>,
     conversation_id: String,
@@ -580,7 +611,7 @@ pub fn db_get_conversation(
     Ok(row)
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub fn db_ensure_project(
     state: State<'_, DbState>,
     id: String,
@@ -607,7 +638,7 @@ pub fn db_ensure_project(
     Ok(())
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub fn db_create_conversation(
     state: State<'_, DbState>,
     id: String,
@@ -626,7 +657,7 @@ pub fn db_create_conversation(
     Ok(())
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub fn db_update_conversation(
     state: State<'_, DbState>,
     conversation_id: String,
@@ -643,7 +674,7 @@ pub fn db_update_conversation(
     Ok(())
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub fn db_delete_conversation(
     state: State<'_, DbState>,
     conversation_id: String,
@@ -659,7 +690,7 @@ pub fn db_delete_conversation(
 
 // ─── Message commands ───────────────────────────────────────────────────────
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub fn db_list_messages(
     state: State<'_, DbState>,
     conversation_id: String,
@@ -693,7 +724,7 @@ pub fn db_list_messages(
     Ok(rows)
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub fn db_create_message(
     state: State<'_, DbState>,
     id: String,
@@ -731,7 +762,7 @@ pub fn db_create_message(
 
 // ─── Turn Record commands ────────────────────────────────────────────────────
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub fn db_create_turn_record(
     state: State<'_, DbState>,
     id: String,
@@ -830,7 +861,7 @@ pub struct TurnCommitRecord {
 }
 
 /// Atomically commits the conversation transcript and its turn record.
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 #[allow(clippy::too_many_arguments)]
 pub fn db_commit_agent_turn(
     state: State<'_, DbState>,
@@ -957,7 +988,7 @@ pub struct TokenUsageRow {
 
 /// Sum token usage across all turn records in a conversation.
 /// Returns zeros when the conversation has no turn records yet.
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub fn db_get_conversation_token_usage(
     state: State<'_, DbState>,
     conversation_id: String,
@@ -1148,7 +1179,7 @@ struct GoalStatePayload {
     events: Vec<GoalEventPayload>,
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub fn db_goal_load_state(
     state: State<'_, DbState>,
     conversation_id: String,
@@ -1337,7 +1368,7 @@ pub fn db_goal_load_state(
     .map_err(|e| e.to_string())
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 #[allow(clippy::too_many_arguments)]
 pub fn db_goal_save_state(
     state: State<'_, DbState>,
@@ -1543,7 +1574,7 @@ pub fn db_goal_save_state(
     serde_json::to_string(&payload).map_err(|e| e.to_string())
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub fn db_goal_clear_state(
     state: State<'_, DbState>,
     conversation_id: String,
@@ -1590,7 +1621,7 @@ pub struct TraceRow {
     pub parent_turn_id: Option<String>,
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub fn db_create_trace(
     state: State<'_, DbState>,
     id: String,
@@ -1665,7 +1696,7 @@ pub fn db_create_trace(
     Ok(())
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub fn db_list_traces(
     state: State<'_, DbState>,
     conversation_id: String,
@@ -1739,7 +1770,7 @@ pub struct ModePolicyRow {
     pub skill_triggers: Option<String>,
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub fn db_list_mode_policies(state: State<'_, DbState>) -> Result<Vec<ModePolicyRow>, String> {
     let conn = state.0.lock().map_err(|e| e.to_string())?;
     let mut stmt = conn
@@ -1771,7 +1802,7 @@ pub fn db_list_mode_policies(state: State<'_, DbState>) -> Result<Vec<ModePolicy
     Ok(rows)
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub fn db_update_mode_policy(
     state: State<'_, DbState>,
     mode: String,
@@ -1853,7 +1884,7 @@ pub struct OpenTabRow {
     pub last_focused_at: String,
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub fn db_get_open_tabs(
     state: State<'_, DbState>,
     project_id: String,
@@ -1885,7 +1916,7 @@ pub fn db_get_open_tabs(
     Ok(rows)
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub fn db_upsert_open_tab(
     state: State<'_, DbState>,
     id: String,
@@ -1911,7 +1942,7 @@ pub fn db_upsert_open_tab(
     Ok(())
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub fn db_remove_open_tab(state: State<'_, DbState>, id: String) -> Result<(), String> {
     let conn = state.0.lock().map_err(|e| e.to_string())?;
     conn.execute("DELETE FROM open_tabs WHERE id = ?1", params![id])
@@ -1938,7 +1969,7 @@ pub struct FileHistorySnapshot {
     pub created_at: String,
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub fn file_history_save(
     state: State<'_, DbState>,
     file_path: String,
@@ -1977,7 +2008,7 @@ pub fn file_history_save(
     Ok(id)
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub fn file_history_list(
     state: State<'_, DbState>,
     file_path: String,
@@ -2005,7 +2036,7 @@ pub fn file_history_list(
     Ok(rows)
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub fn file_history_get(
     state: State<'_, DbState>,
     id: String,
@@ -2028,7 +2059,7 @@ pub fn file_history_get(
     Ok(row)
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub fn file_history_clear(state: State<'_, DbState>, file_path: String) -> Result<(), String> {
     let conn = state.0.lock().map_err(|e| e.to_string())?;
     conn.execute(
@@ -2052,7 +2083,7 @@ pub struct DiagramRow {
     pub updated_at: String,
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub fn db_list_diagrams(
     state: State<'_, DbState>,
     project_id: String,
@@ -2082,7 +2113,7 @@ pub fn db_list_diagrams(
     Ok(rows)
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub fn db_get_diagram(state: State<'_, DbState>, id: String) -> Result<DiagramRow, String> {
     let conn = state.0.lock().map_err(|e| e.to_string())?;
     conn.query_row(
@@ -2104,7 +2135,7 @@ pub fn db_get_diagram(state: State<'_, DbState>, id: String) -> Result<DiagramRo
     .map_err(|e| e.to_string())
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub fn db_save_diagram(
     state: State<'_, DbState>,
     id: String,
@@ -2128,7 +2159,7 @@ pub fn db_save_diagram(
     Ok(())
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub fn db_delete_diagram(state: State<'_, DbState>, id: String) -> Result<(), String> {
     let conn = state.0.lock().map_err(|e| e.to_string())?;
     conn.execute("DELETE FROM diagrams WHERE id = ?1", params![id])
@@ -2157,7 +2188,7 @@ pub struct MemoryRow {
     pub updated_at: String,
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub fn db_create_memory(
     state: State<'_, DbState>,
     id: String,
@@ -2231,7 +2262,7 @@ pub fn db_create_memory(
     Ok(row)
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub fn db_list_memories(
     state: State<'_, DbState>,
     project_id: Option<String>,
@@ -2312,7 +2343,7 @@ pub fn db_list_memories(
     Ok(rows)
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub fn db_search_memories(
     state: State<'_, DbState>,
     project_id: Option<String>,
@@ -2404,7 +2435,7 @@ pub fn db_search_memories(
     Ok(rows)
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub fn db_update_memory(
     state: State<'_, DbState>,
     id: String,
@@ -2454,7 +2485,7 @@ pub fn db_update_memory(
     Ok(())
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub fn db_delete_memory(state: State<'_, DbState>, id: String) -> Result<(), String> {
     let conn = state.0.lock().map_err(|e| e.to_string())?;
     conn.execute("DELETE FROM memories WHERE id = ?1", params![id])
@@ -2462,7 +2493,7 @@ pub fn db_delete_memory(state: State<'_, DbState>, id: String) -> Result<(), Str
     Ok(())
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub fn db_track_memory_access(state: State<'_, DbState>, id: String) -> Result<(), String> {
     let conn = state.0.lock().map_err(|e| e.to_string())?;
     conn.execute(
@@ -2472,7 +2503,7 @@ pub fn db_track_memory_access(state: State<'_, DbState>, id: String) -> Result<(
     Ok(())
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub fn db_decay_memories(
     state: State<'_, DbState>,
     project_id: Option<String>,
@@ -2542,7 +2573,7 @@ pub struct MemoryStats {
     pub archived: i64,
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub fn db_get_memory_stats(
     state: State<'_, DbState>,
     project_id: Option<String>,
@@ -2636,7 +2667,7 @@ pub struct ExtractedTable {
     pub foreign_keys: Vec<ExtractedForeignKey>,
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub fn db_extract_schema(db_path: String) -> Result<Vec<ExtractedTable>, String> {
     let conn = Connection::open(&db_path).map_err(|e| e.to_string())?;
 
@@ -2733,7 +2764,7 @@ pub struct AgentSddTaskRow {
     pub updated_at: String,
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub fn db_sdd_upsert_session(
     state: State<'_, DbState>,
     session_json: String,
@@ -2769,7 +2800,7 @@ fn read_sdd_session(row: &rusqlite::Row<'_>) -> rusqlite::Result<AgentSddSession
     })
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub fn db_sdd_get_session(state: State<'_, DbState>, id: String) -> Result<Option<String>, String> {
     let conn = state.0.lock().map_err(|e| e.to_string())?;
     let row = conn.query_row(
@@ -2781,7 +2812,7 @@ pub fn db_sdd_get_session(state: State<'_, DbState>, id: String) -> Result<Optio
         .transpose()
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub fn db_sdd_list_sessions(
     state: State<'_, DbState>,
     project_id: String,
@@ -2802,7 +2833,7 @@ pub fn db_sdd_list_sessions(
         .collect()
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub fn db_sdd_upsert_task(state: State<'_, DbState>, task_json: String) -> Result<(), String> {
     let task: AgentSddTaskRow = serde_json::from_str(&task_json).map_err(|e| e.to_string())?;
     let files = serde_json::to_string(&task.files).map_err(|e| e.to_string())?;
@@ -2823,7 +2854,7 @@ pub fn db_sdd_upsert_task(state: State<'_, DbState>, task_json: String) -> Resul
     Ok(())
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub fn db_sdd_get_tasks(
     state: State<'_, DbState>,
     session_id: String,
@@ -2900,7 +2931,7 @@ mod database_tests {
     fn migrates_legacy_sdd_rows() -> Result<(), Box<dyn Error>> {
         let suffix = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
         let directory = std::env::temp_dir().join(format!("hyscode-sdd-migration-{suffix}"));
-        let connection = open_database(&directory);
+        let connection = open_database(&directory).expect("test database should open");
         connection.execute_batch(
             "INSERT INTO projects (id,name,path) VALUES ('project','Project','/project');
              INSERT INTO conversations (id,project_id,title,mode) VALUES ('conversation','project','Test','chat');
@@ -2933,7 +2964,7 @@ mod database_tests {
     fn lists_projects_with_sessions_and_global_recent_order() -> Result<(), Box<dyn Error>> {
         let suffix = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
         let directory = std::env::temp_dir().join(format!("hyscode-vortex-index-{suffix}"));
-        let connection = open_database(&directory);
+        let connection = open_database(&directory).expect("test database should open");
         connection.execute_batch(
             "INSERT INTO projects (id,name,path,updated_at) VALUES
                ('project-a','Project A','C:/project-a','2026-08-04 10:00:00'),
@@ -2965,7 +2996,7 @@ mod database_tests {
     {
         let suffix = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
         let directory = std::env::temp_dir().join(format!("hyscode-codex-thread-{suffix}"));
-        let connection = open_database(&directory);
+        let connection = open_database(&directory).expect("test database should open");
         connection.execute_batch(
             "INSERT INTO projects (id,name,path) VALUES ('project','Project','C:/project');
              INSERT INTO conversations (id,project_id,title,mode) VALUES
@@ -2997,7 +3028,7 @@ mod database_tests {
     ) -> Result<(), Box<dyn Error>> {
         let suffix = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
         let directory = std::env::temp_dir().join(format!("hyscode-vortex-title-repair-{suffix}"));
-        let connection = open_database(&directory);
+        let connection = open_database(&directory).expect("test database should open");
         connection.execute_batch(
             "INSERT INTO projects (id,name,path) VALUES ('project','Project','C:/project');
              INSERT INTO conversations (id,project_id,title,mode,updated_at) VALUES
@@ -3061,7 +3092,7 @@ mod database_tests {
     fn includes_empty_projects_in_the_vortex_index() -> Result<(), Box<dyn Error>> {
         let suffix = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
         let directory = std::env::temp_dir().join(format!("hyscode-vortex-empty-{suffix}"));
-        let connection = open_database(&directory);
+        let connection = open_database(&directory).expect("test database should open");
         connection.execute(
             "INSERT INTO projects (id,name,path) VALUES (?1,?2,?3)",
             ("empty", "Empty Project", "C:/empty-project"),
@@ -3083,7 +3114,7 @@ mod database_tests {
         let suffix = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
         let directory =
             std::env::temp_dir().join(format!("hyscode-vortex-session-upsert-{suffix}"));
-        let connection = open_database(&directory);
+        let connection = open_database(&directory).expect("test database should open");
         connection.execute_batch(
             "INSERT INTO projects (id,name,path) VALUES
                ('project-old','Old Project','C:/old-project'),

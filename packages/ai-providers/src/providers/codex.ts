@@ -203,11 +203,21 @@ export class CodexProvider implements AIProvider {
     return this.apiKey.length > 0 || this.authDetected;
   }
 
+  /** Zero the in-memory API key (secret hygiene on reinit/dispose). */
+  clear(): void {
+    this.apiKey = '';
+  }
+
+  dispose(): void {
+    this.clear();
+  }
+
   async listModels(): Promise<AIModel[]> {
     return this.models;
   }
 
   async *chat(params: ChatParams): AsyncIterable<StreamChunk> {
+    if (!params.messages.length) throw new Error('model required: messages must not be empty');
     if (!this.invoke) {
       yield { type: 'error', error: 'Codex sidecar not available (no invoke function)' };
       return;
@@ -219,14 +229,26 @@ export class CodexProvider implements AIProvider {
     const model = params.model || CODEX_MODELS[0].id;
 
     // Flatten messages to a single prompt; Codex runs its own agentic loop.
+    // Role prefixes are escaped so message content starting with "User:" or
+    // "Assistant:" can't forge message boundaries. Tool results and thinking
+    // are preserved as bracketed text so replay history doesn't lose them.
+    const escapeRolePrefix = (text: string): string =>
+      text.replace(/^(Assistant|User):/gm, '\\$1:');
     const prompt = params.messages
       .map((m) => {
         const role = m.role === 'user' ? 'User' : 'Assistant';
         const content = m.content
-          .map((c) => (c.type === 'text' ? c.text : ''))
+          .map((c) => {
+            if (c.type === 'text') return c.text;
+            if (c.type === 'thinking') return `[thinking]${c.thinking}`;
+            if (c.type === 'tool_result') return `[tool result ${c.toolCallId}]${c.output}`;
+            if (c.type === 'tool_call') return `[tool call ${c.name} ${JSON.stringify(c.input)}]`;
+            if (c.type === 'image') return '[image]';
+            return '';
+          })
           .filter(Boolean)
           .join('\n');
-        return `${role}:\n${content}`;
+        return `${role}:\n${escapeRolePrefix(content)}`;
       })
       .join('\n\n');
 
@@ -243,7 +265,7 @@ export class CodexProvider implements AIProvider {
       systemPrompt: params.systemPrompt,
       prompt,
       reasoningEffort: resolveReasoningEffort(params.thinking),
-      sandboxMode: AGENT_MODE_TO_SANDBOX[params.agentMode ?? ''] ?? 'danger-full-access',
+      sandboxMode: AGENT_MODE_TO_SANDBOX[params.agentMode ?? ''] ?? 'read-only',
       sessionId: params.sessionId,
       sessionFingerprint: params.sessionFingerprint,
       continuationPrompt: latestUserMessage || undefined,

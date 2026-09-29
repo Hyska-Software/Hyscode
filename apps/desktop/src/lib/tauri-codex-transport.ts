@@ -12,21 +12,21 @@ import type { CodexInvoke } from '@hyscode/ai-providers';
 import { useFileStore } from '@/stores/file-store';
 
 interface CodexChunk {
-  request_id: string;
+  requestId: string;
   type: string;
   content?: string | null;
-  tool_name?: string | null;
-  tool_input?: string | null;
-  call_id?: string | null;
-  stop_reason?: string | null;
+  toolName?: string | null;
+  toolInput?: string | null;
+  callId?: string | null;
+  stopReason?: string | null;
   error?: string | null;
   done: boolean;
-  input_tokens?: number | null;
-  output_tokens?: number | null;
-  cache_read_tokens?: number | null;
-  cache_write_tokens?: number | null;
-  reasoning_tokens?: number | null;
-  thread_id?: string | null;
+  inputTokens?: number | null;
+  outputTokens?: number | null;
+  cacheReadTokens?: number | null;
+  cacheWriteTokens?: number | null;
+  reasoningTokens?: number | null;
+  threadId?: string | null;
 }
 
 let _counter = 0;
@@ -69,11 +69,11 @@ export function createCodexInvoke(): CodexInvoke {
         function mapChunk(chunk: CodexChunk): void {
           switch (chunk.type) {
             case 'thread_started':
-              if (chunk.thread_id && params.sessionId) {
+              if (chunk.threadId && params.sessionId) {
                 invoke<void>('codex_store_thread', {
                   sessionId: params.sessionId,
                   fingerprint: params.sessionFingerprint,
-                  threadId: chunk.thread_id,
+                  threadId: chunk.threadId,
                 }).catch(() => {
                   // Runtime continuity is already held in Rust; persistence is best effort.
                 });
@@ -93,12 +93,12 @@ export function createCodexInvoke(): CodexInvoke {
               break;
 
             case 'tool_use':
-              if (chunk.call_id && chunk.tool_name) {
-                enqueue({ type: 'tool_call_start', id: chunk.call_id, name: chunk.tool_name });
-                if (chunk.tool_input) {
-                  enqueue({ type: 'tool_call_delta', id: chunk.call_id, input: chunk.tool_input });
+              if (chunk.callId && chunk.toolName) {
+                enqueue({ type: 'tool_call_start', id: chunk.callId, name: chunk.toolName });
+                if (chunk.toolInput) {
+                  enqueue({ type: 'tool_call_delta', id: chunk.callId, input: chunk.toolInput });
                 }
-                enqueue({ type: 'tool_call_end', id: chunk.call_id });
+                enqueue({ type: 'tool_call_end', id: chunk.callId });
               }
               break;
 
@@ -108,18 +108,18 @@ export function createCodexInvoke(): CodexInvoke {
 
             case 'usage':
               if (
-                typeof chunk.input_tokens === 'number' ||
-                typeof chunk.output_tokens === 'number'
+                typeof chunk.inputTokens === 'number' ||
+                typeof chunk.outputTokens === 'number'
               ) {
                 enqueue({
                   type: 'usage',
                   usage: {
-                    inputTokens: chunk.input_tokens ?? 0,
-                    outputTokens: chunk.output_tokens ?? 0,
-                    totalTokens: (chunk.input_tokens ?? 0) + (chunk.output_tokens ?? 0),
-                    cacheReadTokens: chunk.cache_read_tokens ?? undefined,
-                    cacheWriteTokens: chunk.cache_write_tokens ?? undefined,
-                    reasoningTokens: chunk.reasoning_tokens ?? undefined,
+                    inputTokens: chunk.inputTokens ?? 0,
+                    outputTokens: chunk.outputTokens ?? 0,
+                    totalTokens: (chunk.inputTokens ?? 0) + (chunk.outputTokens ?? 0),
+                    cacheReadTokens: chunk.cacheReadTokens ?? undefined,
+                    cacheWriteTokens: chunk.cacheWriteTokens ?? undefined,
+                    reasoningTokens: chunk.reasoningTokens ?? undefined,
                   },
                 });
               }
@@ -128,7 +128,7 @@ export function createCodexInvoke(): CodexInvoke {
             case 'done':
               enqueue({
                 type: 'done',
-                stopReason: (chunk.stop_reason as 'end_turn') ?? 'end_turn',
+                stopReason: (chunk.stopReason as 'end_turn') ?? 'end_turn',
               });
               enqueue(null); // signal end
               break;
@@ -146,7 +146,7 @@ export function createCodexInvoke(): CodexInvoke {
 
           // Listen for codex:chunk events
           unlisten = (await listen<CodexChunk>('codex:chunk', (event) => {
-            if (event.payload.request_id === requestId) {
+            if (event.payload.requestId === requestId) {
               mapChunk(event.payload);
             }
           })) as unknown as () => void;
@@ -173,17 +173,17 @@ export function createCodexInvoke(): CodexInvoke {
           try {
             await invoke<void>('codex_run', {
               request: {
-                request_id: requestId,
+                requestId,
                 model: params.model,
-                system_prompt: params.systemPrompt,
+                systemPrompt: params.systemPrompt,
                 prompt: params.prompt,
-                api_key: params.apiKey,
+                apiKey: params.apiKey,
                 cwd,
-                reasoning_effort: params.reasoningEffort,
-                sandbox_mode: params.sandboxMode,
-                session_id: params.sessionId,
-                session_fingerprint: params.sessionFingerprint,
-                continuation_prompt: params.continuationPrompt,
+                reasoningEffort: params.reasoningEffort,
+                sandboxMode: params.sandboxMode,
+                sessionId: params.sessionId,
+                sessionFingerprint: params.sessionFingerprint,
+                continuationPrompt: params.continuationPrompt,
               },
             });
           } catch (err) {

@@ -280,7 +280,7 @@ pub async fn migrate_legacy_accounts(
 // ── Commands ─────────────────────────────────────────────────────────────────
 
 /// List all connected GitHub accounts (running the legacy migration first).
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub async fn github_accounts_list(
     keychain: State<'_, KeychainState>,
 ) -> Result<GitHubAccountsState, String> {
@@ -293,7 +293,7 @@ pub async fn github_accounts_list(
 }
 
 /// Step 1 of adding an OAuth account: start the device flow.
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub async fn github_account_oauth_start() -> Result<super::github_oauth::DeviceFlowResponse, String>
 {
     super::github_oauth::start_account_device_flow().await
@@ -301,7 +301,7 @@ pub async fn github_account_oauth_start() -> Result<super::github_oauth::DeviceF
 
 /// Step 2 of adding an OAuth account: poll until GitHub authorizes, then store
 /// the account metadata and token.
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub async fn github_account_oauth_poll(
     keychain: State<'_, KeychainState>,
     device_code: String,
@@ -345,7 +345,7 @@ pub async fn github_account_oauth_poll(
 }
 
 /// Add a manually provided personal access token as a named account.
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub async fn github_account_add_token(
     keychain: State<'_, KeychainState>,
     label: String,
@@ -397,7 +397,7 @@ pub async fn github_account_add_token(
 
 /// Re-read the account identity from the GitHub API (updates login/avatar and
 /// token scopes). Fails when the token is invalid or revoked.
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub async fn github_account_refresh(
     keychain: State<'_, KeychainState>,
     account_id: String,
@@ -438,7 +438,7 @@ pub async fn github_account_refresh(
 }
 
 /// Select the account used by default for API and git operations.
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub async fn github_account_switch(
     keychain: State<'_, KeychainState>,
     account_id: String,
@@ -451,7 +451,7 @@ pub async fn github_account_switch(
 
 /// Disconnect one account (token + metadata). When the active account is
 /// removed, the first remaining account becomes active.
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub async fn github_account_remove(
     keychain: State<'_, KeychainState>,
     account_id: String,
@@ -463,7 +463,7 @@ pub async fn github_account_remove(
 }
 
 /// Return the scopes granted to an account, if known.
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub async fn github_account_scopes(
     keychain: State<'_, KeychainState>,
     account_id: Option<String>,

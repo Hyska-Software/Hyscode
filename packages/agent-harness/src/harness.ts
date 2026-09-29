@@ -379,6 +379,7 @@ export class Harness {
         ...options.config,
       },
       ruleLoader: this.ruleLoader?.fork(),
+      skillLoader: this.skillLoader?.clone() ?? undefined,
       onEvent: options.onEvent,
       onApprovalRequest: options.onApprovalRequest ?? this.environment.onApprovalRequest,
       delegationLevel: this.delegationLevel + 1,
@@ -391,7 +392,7 @@ export class Harness {
 
     child.setAgentType(options.agentType);
     child.setConversationId(this.conversationId);
-    child.setActiveSkills(this.activeSkills);
+    child.setActiveSkills([...this.activeSkills]);
     child.setActiveRules(this.activeRules.map((rule) => ({ ...rule })));
     child.ruleTargetPaths = [...this.ruleTargetPaths];
     child.setDelegationChain(this.delegationChain);
@@ -549,8 +550,9 @@ export class Harness {
 
     try {
       this.onRulesResolved?.(rules, this.ruleLoader.getDiagnostics());
-    } catch {
+    } catch (e) {
       // A projection failure must never prevent the agent from executing.
+      console.warn('[harness] onRulesResolved failed', e);
     }
 
     return rules;
@@ -564,7 +566,8 @@ export class Harness {
   /**
    * Compute the effective policy for the current mode + model.
    * Merges the base mode policy with model-specific adjustments.
-   * Respects user-configured maxIterations from the HarnessConfig.
+   * Precedence: AgentDefinition > ModePolicy > HarnessConfig.
+   * Iteration count is always bounded (default 50, hard fuse 200).
    */
   getEffectivePolicy(): Omit<ModePolicy, 'maxIterations'> & { maxIterations: number | null } {
     if (!this._effectivePolicy || this._effectivePolicy.mode !== this.agentType) {
@@ -572,25 +575,25 @@ export class Harness {
       const providerAdjusted = this.config.modelId
         ? adjustPolicyForModel(base, this.config.modelId, this.config.providerId)
         : { ...base };
+      const agentDef = getAgentDefinition(this.agentType);
       const costCap = getPerRequestIterationCap(
         this.agentType,
         this.config.modelId,
         this.config.providerId,
       );
-      const requestedLimit = this.config.maxIterations;
-      const maxIterations =
-        costCap === null
-          ? requestedLimit
-          : requestedLimit === null
-            ? costCap
-            : Math.min(requestedLimit, costCap);
-      // Mode policies retain token/timeout ceilings. Iterations are unlimited
-      // unless the user opts in or a per-request provider has a cost cap.
+      // Precedence: explicit HarnessConfig > AgentDefinition > ModePolicy > built-in default.
+      const requestedLimit = this.config.maxIterations
+        ?? agentDef.maxIterations
+        ?? providerAdjusted.maxIterations
+        ?? 50;
+      const clamped = Math.min(requestedLimit ?? 50, 200);
+      const maxIterations = costCap === null ? clamped : Math.min(clamped, costCap);
+      const agentMaxOutput = agentDef.maxOutputTokens ?? providerAdjusted.maxOutputTokens;
       this._effectivePolicy = {
         ...providerAdjusted,
         maxIterations,
         maxInputTokens: Math.min(providerAdjusted.maxInputTokens, this.config.maxInputTokens),
-        maxOutputTokens: Math.min(providerAdjusted.maxOutputTokens, this.config.maxOutputTokens),
+        maxOutputTokens: Math.min(agentMaxOutput, this.config.maxOutputTokens),
         turnTimeoutMs: Math.min(providerAdjusted.turnTimeoutMs, this.config.turnTimeoutMs),
       };
     }
@@ -770,8 +773,9 @@ export class Harness {
             expiresAfterTurn: this.contextManager.getTurnNumber(),
           });
         } else this.contextManager.removeSource('memory-context');
-      } catch {
+      } catch (e) {
         // Memory injection is non-critical — never block the turn
+        console.warn('[harness] memory context injection failed', e);
       }
     }
 
@@ -816,6 +820,13 @@ export class Harness {
       : policy.maxOutputTokens;
 
     while ((maxIter === null || iteration < maxIter) && !this.cancelled) {
+      // Hard fuse: never allow an unbounded or misconfigured loop to run forever.
+      if (iteration >= 200) {
+        terminalStatus = 'max_iterations';
+        finalResponse = finalResponse.trim()
+          || 'The agent reached the 200-iteration safety fuse before producing a final response. Review the completed tool calls before continuing.';
+        break;
+      }
       this.turnController.transition('streaming');
       iteration++;
       this.traceRecorder.startIteration(iteration);
@@ -840,9 +851,16 @@ export class Harness {
 
       // Build context snapshot (use policy-based limits)
       const goalToolsEnabled = this.agentType === 'build' && this.goalToolsEnabled?.() !== false;
+      const mergedOverrides = {
+        allow: [...(agentDef.toolOverrides?.allow ?? []), ...(policy.toolOverrides?.allow ?? [])],
+        deny: [...(agentDef.toolOverrides?.deny ?? []), ...(policy.toolOverrides?.deny ?? [])],
+      };
+      const effectiveOverrides = mergedOverrides.allow.length > 0 || mergedOverrides.deny.length > 0
+        ? mergedOverrides
+        : undefined;
       const availableTools = this.toolRouter.getToolDefinitionsFiltered(
         policy.allowedToolCategories,
-        agentDef.toolOverrides,
+        effectiveOverrides,
       ).filter((tool) => goalToolsEnabled || !this.goalToolNames.has(tool.name));
       if (
         !selectedTools
@@ -1032,7 +1050,8 @@ export class Harness {
                   if (tc && tc._rawInput) {
                     try {
                       tc.input = parseToolCallInput(tc._rawInput);
-                    } catch {
+                    } catch (e) {
+                      console.warn('[harness] failed to parse tool-call input', e);
                       invalidToolCall = tc.name;
                     }
                   }
@@ -1255,8 +1274,12 @@ export class Harness {
             input: tc.input,
             output: {
               success: true,
-              output: '',
-              metadata: { note: 'Executed by the agent internally' },
+              output: '[internal execution — no direct output]',
+              metadata: {
+                internal: true,
+                note: 'Executed by the agent internally',
+                tokenUsage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
+              },
             },
             durationMs: 0,
             approved: true,
@@ -1710,14 +1733,15 @@ export class Harness {
           this.projectId,
           this.conversationId,
         )
-        .then((count) => {
-          if (count > 0) {
-            const extractedMems: Array<{ title: string; type: import('./types').MemoryType }> = [];
-            this.emit({ type: 'memories_extracted', count, memories: extractedMems });
+        .then((saved) => {
+          if (saved.length > 0) {
+            const extractedMems = saved.slice(0, 5).map((m) => ({ title: m.title, type: m.type }));
+            this.emit({ type: 'memories_extracted', count: saved.length, memories: extractedMems });
           }
         })
-        .catch(() => {
+        .catch((e) => {
           // Non-critical — never surface memory failures
+          console.warn('[harness] memory extraction failed', e);
         });
     }
 

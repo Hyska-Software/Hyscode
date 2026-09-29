@@ -28,8 +28,8 @@ export function PdfViewer({ filePath }: PdfViewerProps) {
         }
         const base64 = btoa(binary);
         setDataUrl(`data:application/pdf;base64,${base64}`);
-      } catch (err: any) {
-        if (!cancelled) setError(err.message ?? String(err));
+      } catch (err: unknown) {
+        if (!cancelled) setError(err instanceof Error ? err.message : String(err));
       } finally {
         if (!cancelled) setLoading(false);
       }

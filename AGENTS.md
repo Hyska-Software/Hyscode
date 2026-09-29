@@ -4,7 +4,7 @@
 
 HysCode is a desktop IDE powered by AI agents. Agents write, edit, and execute code using real developer tools (Monaco Editor, terminal, git, filesystem). Built with Tauri v2 (Rust) + React 19 (TypeScript).
 
-não use o Prettier
+Use Prettier com .prettierrc (printWidth 100, singleQuote).
 
 ## Issue → Branch → PR Loop (FAÇA APENAS SE O USUARIO PEDIR EXPLICITAMENTE)
 
@@ -256,7 +256,10 @@ Em caso de dúvida: `docs/WORKFLOW.md` é a fonte de verdade.
 
 ## Build/Release
 
-- **Versioning**: Tags follow `v{major}.{minor}.{build}` (e.g., `v0.3.1-build.40`)
+- **Versioning**: Tags follow `v{major}.{minor}.{patch}-build.{N}` (e.g., `v0.15.0-build.42`).
+  The base semver lives in root `package.json`; `release.yml:111-113` appends
+  `-build.<run_number>` on push to main (`VERSION="${BASE}-build.${{ github.run_number }}"`),
+  and the tag is `v$VERSION`.
 - **CI**: GitHub Actions (`.github/workflows/release.yml`)
 - **Release**: `RELEASE.md` for process
 - **Changelog**: `scripts/CHANGELOG.md`

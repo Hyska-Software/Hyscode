@@ -284,7 +284,12 @@ export class ToolRouter {
     try {
       result = context.signal.aborted
         ? { success: false, output: '', error: 'Tool call cancelled.' }
-        : await executeWithAbort(handler.execute(input, executionContext), context.signal);
+        : await executeWithAbort(
+            handler.execute(input, executionContext),
+            context.signal,
+            toolName,
+            handler.category,
+          );
     } catch (err) {
       result = {
         success: false,
@@ -423,7 +428,16 @@ export class ToolRouter {
           resolve(decision);
         }
       };
-      const onAbort = () => settle({ approved: false });
+      let pendingRef: PendingToolCall | null = null;
+      const onAbort = () => {
+        settle({ approved: false });
+        // Propagate cancellation to the UI callback so dialogs clean up.
+        try {
+          pendingRef?.onAbort?.();
+        } catch (e) {
+          console.warn('[tool-router] pending onAbort failed', e);
+        }
+      };
       if (signal.aborted) return settle(false);
       signal.addEventListener('abort', onAbort, { once: true });
 
@@ -436,6 +450,7 @@ export class ToolRouter {
         ...(externalAccess ? { externalAccess } : {}),
         resolve: settle,
       };
+      pendingRef = pending;
 
       // Emit event so UI can display and interact with the pending call
       this.eventHandler?.({
@@ -843,19 +858,61 @@ function escapeRawControlsInStrings(json: string): string {
   return out;
 }
 
+const TOOL_TIMEOUT_MS: Record<string, number> = {
+  default: 60_000,
+  terminal: 30_000,
+  mcp: 30_000,
+  fs: 15_000,
+};
+
+function timeoutForTool(toolName: string, category?: string): number {
+  const name = toolName.toLowerCase();
+  if (name.startsWith('mcp__') || category === 'mcp') return TOOL_TIMEOUT_MS.mcp;
+  if (name.includes('terminal') || name === 'run_code' || category === 'terminal') {
+    return TOOL_TIMEOUT_MS.terminal;
+  }
+  if (category === 'filesystem') return TOOL_TIMEOUT_MS.fs;
+  return TOOL_TIMEOUT_MS.default;
+}
+
 async function executeWithAbort(
   execution: Promise<ToolResult>,
   signal: AbortSignal,
+  toolName = '',
+  category?: string,
 ): Promise<ToolResult> {
   if (signal.aborted) return { success: false, output: '', error: 'Tool call cancelled.' };
-  // Do not race an uncancellable native mutation. Returning early would tell the
-  // UI that cancellation completed while the operation could still mutate disk.
-  const result = await execution;
-  if (!signal.aborted || result.error?.toLowerCase().includes('cancel')) return result;
-  return {
-    success: false,
-    output: result.output,
-    error: 'Cancellation was requested, but the native operation completed before it could stop.',
-    metadata: { ...result.metadata, cancellationPartial: true, operationCompleted: true },
-  };
+  const timeoutMs = timeoutForTool(toolName, category);
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`Tool "${toolName || 'unknown'}" timed out after ${timeoutMs}ms.`)), timeoutMs);
+  });
+  const abortPromise = new Promise<never>((_, reject) => {
+    if (signal.aborted) reject(new Error('Tool call cancelled.'));
+    else signal.addEventListener('abort', () => reject(new Error('Tool call cancelled.')), { once: true });
+  });
+  try {
+    // Race the native execution against abort + per-tool timeout. The native
+    // promise is not cancelled — we only stop waiting for it — so a late
+    // disk mutation still resolves in the background without hanging the turn.
+    const result = await Promise.race([execution, abortPromise, timeoutPromise]);
+    if (!signal.aborted || result.error?.toLowerCase().includes('cancel')) return result;
+    return {
+      success: false,
+      output: result.output,
+      error: 'Cancellation was requested, but the native operation completed before it could stop.',
+      metadata: { ...result.metadata, cancellationPartial: true, operationCompleted: true },
+    };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (/timed out/i.test(message)) {
+      return { success: false, output: '', error: message, metadata: { timeoutMs, toolName } };
+    }
+    if (/cancel/i.test(message)) {
+      return { success: false, output: '', error: 'Tool call cancelled.' };
+    }
+    throw err;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }

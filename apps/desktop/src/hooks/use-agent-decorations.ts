@@ -8,14 +8,17 @@ type IEditor = monacoEditor.editor.IStandaloneCodeEditor;
 type IMonaco = typeof monacoEditor;
 type IDecorationsCollection = monacoEditor.editor.IEditorDecorationsCollection;
 
-// ── One-time CSS injection ────────────────────────────────────────────────────
+// ── One-time CSS injection (ref-counted) ─────────────────────────────────────
 
-let cssInjected = false;
+const AGENT_STYLE_ID = 'hyscode-agent-decorations-css';
 
-function ensureAgentCss() {
-  if (cssInjected) return;
-  cssInjected = true;
+let agentCssRefCount = 0;
+
+function ensureAgentCss(): void {
+  agentCssRefCount += 1;
+  if (document.getElementById(AGENT_STYLE_ID)) return;
   const el = document.createElement('style');
+  el.id = AGENT_STYLE_ID;
   el.textContent = `
     /* Agent edit gutter bars */
     .monaco-editor .agent-gutter-added {
@@ -72,6 +75,13 @@ function ensureAgentCss() {
   document.head.appendChild(el);
 }
 
+function releaseAgentCss(): void {
+  agentCssRefCount = Math.max(0, agentCssRefCount - 1);
+  if (agentCssRefCount === 0) {
+    document.getElementById(AGENT_STYLE_ID)?.remove();
+  }
+}
+
 // ── Hook ─────────────────────────────────────────────────────────────────────
 
 /**
@@ -100,6 +110,9 @@ export function useAgentDecorations(
 
   useEffect(() => {
     ensureAgentCss();
+    return () => {
+      releaseAgentCss();
+    };
   }, []);
 
   // Toggle reduced-motion class on body

@@ -105,6 +105,7 @@ export type ClaudeAgentInvoke = (params: {
   messages: Array<{ role: 'user' | 'assistant'; content: string }>;
   maxTurns?: number;
   cwd?: string;
+  signal?: AbortSignal;
 }) => AsyncIterable<StreamChunk>;
 
 export class ClaudeAgentProvider implements AIProvider {
@@ -132,6 +133,15 @@ export class ClaudeAgentProvider implements AIProvider {
     return this.apiKey.length > 0;
   }
 
+  /** Zero the in-memory API key (secret hygiene on reinit/dispose). */
+  clear(): void {
+    this.apiKey = '';
+  }
+
+  dispose(): void {
+    this.clear();
+  }
+
   async listModels(): Promise<AIModel[]> {
     return this.models;
   }
@@ -141,12 +151,23 @@ export class ClaudeAgentProvider implements AIProvider {
       yield { type: 'error', error: 'Claude Agent sidecar not available (no invoke function)' };
       return;
     }
+    if (!params.model) throw new Error('model required');
+    if (!params.messages.length) throw new Error('model required: messages must not be empty');
+    if (params.maxTurns !== undefined && (params.maxTurns < 1 || params.maxTurns > 50)) {
+      throw new Error('maxTurns must be between 1 and 50');
+    }
 
-    // Flatten messages to simple role/content pairs for the sidecar
+    // Flatten messages to simple role/content pairs for the sidecar.
+    // Thinking and tool results are preserved as bracketed text for replay.
     const messages = params.messages.map((m) => ({
       role: m.role === 'user' ? ('user' as const) : ('assistant' as const),
       content: m.content
-        .map((c) => (c.type === 'text' ? c.text : ''))
+        .map((c) => {
+          if (c.type === 'text') return c.text;
+          if (c.type === 'thinking') return `[thinking]${c.thinking}`;
+          if (c.type === 'tool_result') return `[tool result]${c.output}`;
+          return '';
+        })
         .filter(Boolean)
         .join('\n'),
     }));
@@ -157,6 +178,7 @@ export class ClaudeAgentProvider implements AIProvider {
       systemPrompt: params.systemPrompt,
       messages,
       maxTurns: params.maxTurns,
+      signal: params.signal,
     });
   }
 }

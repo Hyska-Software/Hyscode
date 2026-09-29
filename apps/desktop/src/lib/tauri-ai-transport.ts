@@ -18,14 +18,14 @@ import {
 // ─── Types matching the Rust AiStreamChunk struct ─────────────────────────
 
 interface AiStreamChunk {
-  request_id: string;
+  requestId: string;
   data: string;
   done: boolean;
   error?: string | null;
-  status_code?: number | null;
-  retry_after_ms?: number | null;
-  error_kind?: ProviderErrorKind | null;
-  error_phase?: ProviderErrorPhase | null;
+  statusCode?: number | null;
+  retryAfterMs?: number | null;
+  errorKind?: ProviderErrorKind | null;
+  errorPhase?: ProviderErrorPhase | null;
 }
 
 // ─── Provider detection ───────────────────────────────────────────────────
@@ -157,13 +157,13 @@ export function createTauriFetch(resilience: Partial<ResilienceConfig> = {}): Fe
       resetIdleTimer();
       if (!statusResolved) {
         statusResolved = true;
-        retryAfterMs = chunk.retry_after_ms ?? null;
-        transportErrorKind = chunk.error_kind ?? null;
-        transportErrorPhase = chunk.error_phase ?? null;
-        const code = chunk.status_code ?? 200;
+        retryAfterMs = chunk.retryAfterMs ?? null;
+        transportErrorKind = chunk.errorKind ?? null;
+        transportErrorPhase = chunk.errorPhase ?? null;
+        const code = chunk.statusCode ?? 200;
 
         if (chunk.error && chunk.done) {
-          if (chunk.status_code == null) {
+          if (chunk.statusCode == null) {
             rejectStatus(new Error(chunk.error));
             dispose();
             return;
@@ -197,7 +197,7 @@ export function createTauriFetch(resilience: Partial<ResilienceConfig> = {}): Fe
 
     // Register the event listener before invoking so no chunks are missed.
     const unlisten = await listen<AiStreamChunk>('ai:chunk', (event) => {
-      if (event.payload.request_id === requestId) {
+      if (event.payload.requestId === requestId) {
         onChunk(event.payload);
       }
     });
@@ -214,12 +214,12 @@ export function createTauriFetch(resilience: Partial<ResilienceConfig> = {}): Fe
     try {
       await invoke<void>('ai_stream_request', {
         request: {
-          request_id: requestId,
+          requestId,
           provider,
           url,
           headers,
           body,
-          timeout_ms: config.requestTimeoutMs,
+          timeoutMs: config.requestTimeoutMs,
         },
       });
     } catch (err) {

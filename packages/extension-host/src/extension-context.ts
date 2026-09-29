@@ -24,16 +24,21 @@ class InMemoryMemento implements ExtensionMemento {
 export function createExtensionContext(
   extensionName: string,
   extensionPath: string,
-  api: HyscodeAPI,
+  _api: HyscodeAPI,
 ): ExtensionContext {
+  // NOTE: the full host `api` is intentionally NOT exposed on the context
+  // object (`_api` escape hatch removed) — extensions receive only the
+  // scoped `api` argument passed to `activate(context, api)`. `_api` is kept
+  // as an unused parameter for signature compatibility; it lives only in
+  // this closure and is never attached to the returned object.
+  void _api;
   return {
     extensionName,
     extensionPath,
     subscriptions: [],
     globalState: new InMemoryMemento(),
     workspaceState: new InMemoryMemento(),
-    _api: api,
-  } as ExtensionContext & { _api: HyscodeAPI };
+  };
 }
 
 export function disposeContext(context: ExtensionContext) {

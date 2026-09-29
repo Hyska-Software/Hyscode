@@ -40,7 +40,7 @@ interface FileState {
   openFolder: (path: string) => Promise<void>;
   expandDirectory: (path: string) => Promise<void>;
   refreshExpandedDirs: () => Promise<void>;
-  closeFolder: () => void;
+  closeFolder: () => Promise<void>;
   toggleShowHidden: () => Promise<void>;
   startWatching: () => Promise<void>;
   stopWatching: () => Promise<void>;
@@ -205,9 +205,13 @@ export const useFileStore = create<FileState>()(
       }
     },
 
-    closeFolder: () => {
+    closeFolder: async () => {
       folderLoadGeneration += 1;
-      get().stopWatching();
+      const stopPromise = get()
+        .stopWatching()
+        .catch(() => {
+          // Watcher teardown is best-effort during close.
+        });
       useDiagnosticsStore.getState().clearAll();
       set((state) => {
         state.rootPath = null;
@@ -217,6 +221,7 @@ export const useFileStore = create<FileState>()(
         state._pathIndex.clear();
         state._parentMap.clear();
       });
+      await stopPromise;
     },
 
     expandDirectory: async (path) => {
@@ -372,7 +377,9 @@ export const useFileStore = create<FileState>()(
             console.warn('[FileStore] Refresh failed:', err);
           });
         }, 120);
-        (get() as any)._refreshTimer = timer;
+        set((state) => {
+          state._refreshTimer = timer;
+        });
 
         if (event.payload.kind === 'modify') {
           void Promise.all([import('./editor-store'), import('./agent-store')]).then(async ([editorModule, agentModule]) => {
@@ -433,7 +440,7 @@ export const useFileStore = create<FileState>()(
       }
 
       set((state) => {
-        state._watchUnlisten = unlisten as any;
+        state._watchUnlisten = unlisten;
       });
     },
 

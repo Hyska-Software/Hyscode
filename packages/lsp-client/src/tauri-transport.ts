@@ -33,11 +33,16 @@ export class TauriLspTransport implements MessageTransport {
     this.unlisten = unlisten;
   }
 
-  send(message: LspRequest | LspNotification): void {
+  async send(message: LspRequest | LspNotification): Promise<void> {
     const json = JSON.stringify(message);
-    this.invoke('lsp_send', { id: this.serverId, content: json }).catch((err) => {
+    try {
+      await this.invoke('lsp_send', { id: this.serverId, content: json });
+    } catch (err) {
+      // Log AND propagate: swallowing here would leave the caller hanging
+      // until the 30s request timeout. LspConnection fails fast on rejection.
       console.error(`[TauriLspTransport] Failed to send message:`, err);
-    });
+      throw err;
+    }
   }
 
   onMessage(handler: (message: LspResponse | LspNotification) => void): void {

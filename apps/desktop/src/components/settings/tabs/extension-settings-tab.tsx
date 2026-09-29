@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { ChevronDown, ChevronRight, Blocks, Eye, EyeOff } from 'lucide-react';
 import { useExtensionStore } from '../../../stores/extension-store';
 import { useSettingsStore } from '../../../stores';
@@ -52,6 +52,74 @@ function ConfigSection({ entry }: { entry: ExtConfigEntry }) {
   );
 }
 
+function ObjectSettingInput({
+  value,
+  fallbackDefault,
+  onChange,
+}: {
+  value: unknown;
+  fallbackDefault?: unknown;
+  onChange: (value: Record<string, unknown>) => void;
+}) {
+  const toText = (v: unknown): string =>
+    v !== undefined ? JSON.stringify(v, null, 2) : JSON.stringify(fallbackDefault ?? {}, null, 2);
+  const [draft, setDraft] = useState<string>(() => toText(value));
+  const [error, setError] = useState<string | null>(null);
+
+  // Resync only when the stored value diverges from what the draft parses
+  // to — avoids reformatting (and yanking the cursor) while typing.
+  useEffect(() => {
+    try {
+      if (JSON.stringify(JSON.parse(draft)) === JSON.stringify(value ?? null)) return;
+    } catch {
+      // Draft is mid-edit / invalid: leave it alone.
+      return;
+    }
+    setDraft(toText(value));
+    setError(null);
+     
+  }, [value]);
+
+  const handleDraftChange = (text: string) => {
+    setDraft(text);
+    if (text.trim() === '') {
+      setError('JSON object required (empty is not valid).');
+      return;
+    }
+    try {
+      const parsed: unknown = JSON.parse(text);
+      if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        setError('Value must be a JSON object (`{...}`), not an array or primitive.');
+        return;
+      }
+      setError(null);
+      onChange(parsed as Record<string, unknown>);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Invalid JSON.');
+    }
+  };
+
+  return (
+    <div className="flex w-64 flex-col gap-1">
+      <textarea
+        value={draft}
+        onChange={(e) => handleDraftChange(e.target.value)}
+        spellCheck={false}
+        rows={4}
+        aria-label="JSON object value"
+        className="w-full resize-y rounded-md border border-border bg-muted/30 p-2 font-mono text-[10px] leading-relaxed text-foreground outline-none focus:border-primary/50"
+      />
+      {error ? (
+        <span role="alert" className="text-[10px] text-destructive">
+          {error}
+        </span>
+      ) : (
+        <span className="text-[9px] text-muted-foreground/50">Valid JSON object</span>
+      )}
+    </div>
+  );
+}
+
 function ConfigProperty({
   propKey,
   prop,
@@ -67,31 +135,32 @@ function ConfigProperty({
     maximum?: number;
   };
 }) {
-  const settingsStore = useSettingsStore();
+  // Extension setting keys are dotted paths (`extId.section.name`). Reject
+  // anything outside the safe alphabet plus `__proto__`/`constructor`/
+  // `prototype` segments so a malicious manifest cannot pollute the store.
+  const isValidKey =
+    /^[a-zA-Z0-9_.-]+$/.test(propKey) &&
+    !/(^|\.)(__proto__|constructor|prototype)(\.|$)/.test(propKey);
+  // Selective subscription: re-render only when this key changes. The store
+  // is typed, so read through a Record<string, unknown> view instead of `any`.
+  const storedValue = useSettingsStore(
+    (s) => (s as unknown as Record<string, unknown>)[propKey],
+  );
+  const setSetting = useSettingsStore((s) => s.set);
   // Extension settings are stored using a generic `set` method
   // Read from store or use default
-  const storedValue = (settingsStore as any)[propKey];
   const currentValue = storedValue !== undefined ? storedValue : prop.default;
 
   const handleChange = (value: unknown) => {
-    // Store extension settings using the settings store's generic setter
-    try {
-      (settingsStore as any).set(propKey, value);
-    } catch {
-      // Extension settings may not be in the typed store; use extensionSettings
-      const extSettings = (globalThis as any).__hyscode_extension_settings ?? {};
-      extSettings[propKey] = value;
-      (globalThis as any).__hyscode_extension_settings = extSettings;
-
-      // Notify extension API
-      const api = (globalThis as any).hyscode;
-      if (api?.settings?.onDidChange) {
-        api.settings.onDidChange(propKey, value);
-      }
-    }
+    if (!isValidKey) return;
+    // The typed `set` only accepts known SettingsState keys; extension keys
+    // are dynamic, so call it through a (key: string, value: unknown) view.
+    (setSetting as (key: string, value: unknown) => void)(propKey, value);
   };
 
   const shortKey = propKey.split('.').pop() || propKey;
+
+  if (!isValidKey) return null;
 
   return (
     <div className="flex flex-col gap-1 rounded-lg bg-surface-raised px-3 py-2">
@@ -138,7 +207,11 @@ function ConfigProperty({
               className="h-7 w-44"
             />
           ) : prop.type === 'object' ? (
-            <span className="text-[10px] text-muted-foreground/60 italic">JSON object</span>
+            <ObjectSettingInput
+              value={currentValue}
+              fallbackDefault={prop.default}
+              onChange={handleChange}
+            />
           ) : (
             <SettingInput
               type="text"

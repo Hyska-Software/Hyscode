@@ -113,6 +113,11 @@ export class LspConnection {
     } catch {
       // Process may have already died
     }
+    // Fail fast: pending requests would otherwise hang until the 30s timer.
+    for (const [, pending] of this.pendingRequests) {
+      pending.reject(new Error('shutdown'));
+    }
+    this.pendingRequests.clear();
     this.setStatus('stopped');
     this.transport.close();
   }
@@ -272,6 +277,15 @@ export class LspConnection {
 
   onNotification(method: string, handler: NotificationHandler) {
     this.notificationHandlers.set(method, handler);
+    return () => {
+      if (this.notificationHandlers.get(method) === handler) {
+        this.notificationHandlers.delete(method);
+      }
+    };
+  }
+
+  removeNotificationHandler(method: string): void {
+    this.notificationHandlers.delete(method);
   }
 
   onStatusChange(listener: (status: LspConnectionStatus) => void) {
@@ -284,18 +298,41 @@ export class LspConnection {
   private sendRequest<T = unknown>(method: string, params: unknown): Promise<T> {
     return new Promise((resolve, reject) => {
       const id = this.nextId++;
-      this.pendingRequests.set(id, { resolve: resolve as (v: unknown) => void, reject });
-
-      const msg: LspRequest = { jsonrpc: '2.0', id, method, params };
-      this.transport.send(msg);
-
-      // Timeout after 30s
-      setTimeout(() => {
+      // Timeout after 30s — created first so a sync/async transport failure
+      // can clear it immediately instead of leaking the timer.
+      const handle = setTimeout(() => {
         if (this.pendingRequests.has(id)) {
           this.pendingRequests.delete(id);
           reject(new Error(`LSP request "${method}" timed out (30s).`));
         }
       }, 30_000);
+      const wrappedResolve = (v: unknown) => {
+        clearTimeout(handle);
+        (resolve as (val: unknown) => void)(v);
+      };
+      const wrappedReject = (e: Error) => {
+        clearTimeout(handle);
+        reject(e);
+      };
+      this.pendingRequests.set(id, { resolve: wrappedResolve, reject: wrappedReject });
+
+      const msg: LspRequest = { jsonrpc: '2.0', id, method, params };
+      try {
+        const result = this.transport.send(msg) as unknown;
+        // Async transports (Tauri IPC) surface failures as rejections —
+        // fail the request now instead of waiting out the 30s timer.
+        if (result instanceof Promise) {
+          result.catch((err: unknown) => {
+            if (this.pendingRequests.has(id)) {
+              this.pendingRequests.delete(id);
+              wrappedReject(err instanceof Error ? err : new Error(String(err)));
+            }
+          });
+        }
+      } catch (err) {
+        this.pendingRequests.delete(id);
+        wrappedReject(err instanceof Error ? err : new Error(String(err)));
+      }
     });
   }
 

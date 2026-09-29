@@ -59,14 +59,11 @@ export function AiTab() {
 
   const handleToggleModel = (provider: ProviderInfo, modelId: string) => {
     const all = getProviderModels(provider, store.customModels);
-    const explicit = store.enabledModels[provider.id];
-    if (!explicit) {
-      // First toggle: materialize the full list minus this model
-      const allIds = all.map((m) => m.id).filter((id) => id !== modelId);
-      store.setEnabledModels(provider.id, allIds);
-    } else {
-      store.toggleModel(provider.id, modelId);
-    }
+    store.toggleModel(
+      provider.id,
+      modelId,
+      all.map((m) => m.id),
+    );
   };
 
   const handleAddCustomModel = (providerId: string) => {
@@ -80,8 +77,8 @@ export function AiTab() {
   return (
     <div className="flex flex-col gap-6">
       {/* ─── Claude Agent notice ─────────────────────────────────────── */}
-      <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2.5">
-        <p className="text-[11px] leading-relaxed text-amber-300">
+      <div className="rounded-lg border border-warning/30 bg-warning/10 px-3 py-2.5">
+        <p className="text-[11px] leading-relaxed text-warning">
           <span className="font-semibold">Claude Agent</span> is in development and
           temporarily unavailable. It will return in a future release.
         </p>
@@ -280,7 +277,7 @@ export function AiTab() {
           <div className="flex items-center gap-2">
             <Key className="h-3.5 w-3.5 text-muted-foreground" />
             <span className="text-[12px] text-foreground">Claude Agent</span>
-            <span className="rounded bg-amber-500/15 px-1.5 py-0.5 text-[9px] font-medium text-amber-300">
+            <span className="rounded bg-warning/15 px-1.5 py-0.5 text-[9px] font-medium text-warning">
               In development
             </span>
           </div>
@@ -921,15 +918,24 @@ function ApiKeyRow({ providerId, providerName }: { providerId: string; providerN
 
   // Load existing key on mount
   useEffect(() => {
+    let cancelled = false;
     tauriInvoke('keychain_get', {
       service: 'hyscode',
       account: `${providerId}_api_key`,
-    }).then((existing) => {
-      if (existing) {
-        setValue(existing ?? '');
-        setHasExisting(true);
-      }
-    });
+    })
+      .then((existing) => {
+        if (cancelled) return;
+        if (existing) {
+          setValue(existing ?? '');
+          setHasExisting(true);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setHasExisting(false);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [providerId]);
 
   const handleSave = async () => {

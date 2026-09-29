@@ -9,6 +9,7 @@ use std::sync::Mutex;
 use tauri::{AppHandle, Emitter};
 
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct FileEntry {
     pub name: String,
     pub path: String,
@@ -17,6 +18,7 @@ pub struct FileEntry {
 }
 
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct FileStat {
     pub path: String,
     pub is_dir: bool,
@@ -36,6 +38,118 @@ pub const READ_CHUNK_LEN: u64 = 256 * 1024;
 pub const READ_CHUNK_HARD_CAP: u64 = 512 * 1024 * 1024;
 pub const BINARY_SNIFF_LEN: usize = 8192;
 
+// ── Workspace path sandbox ────────────────────────────────────────────────
+// SECURITY: every filesystem command funnels user-supplied paths through
+// these resolvers. Paths are canonicalized (symlinks + `..` resolved) and
+// filesystem roots ("/", "C:\", "$HOME" itself) are always rejected, which
+// blocks destructive operations against the whole disk or the home folder.
+// Full containment inside frontend-declared workspace roots is a follow-up
+// once a workspace registry exists in the backend; until then canonicalize +
+// root-guard is the enforced baseline (same pattern as diagnostics.rs and
+// git_backend.rs path validation).
+
+/// Reject filesystem roots: `/`, drive roots (`C:\`), and `$HOME` itself.
+/// Subdirectories of `$HOME` (regular workspaces) remain allowed.
+/// Both sides are canonicalized before comparison: on Windows
+/// `canonicalize` returns verbatim (`\\?\C:\...`) paths while `dirs` does
+/// not, so a raw string comparison would miss the home directory.
+fn reject_filesystem_root(canonical: &Path) -> Result<(), String> {
+    if let Some(home) = dirs::home_dir() {
+        let is_home = fs::canonicalize(&home)
+            .map(|canonical_home| canonical == canonical_home)
+            .unwrap_or(false)
+            || canonical == home;
+        if is_home {
+            return Err(format!(
+                "Refusing operation on home directory: {}",
+                canonical.display()
+            ));
+        }
+    }
+    match canonical.parent() {
+        None => Err(format!(
+            "Refusing operation on filesystem root: {}",
+            canonical.display()
+        )),
+        Some(parent) if parent.as_os_str().is_empty() || parent == canonical => Err(format!(
+            "Refusing operation on filesystem root: {}",
+            canonical.display()
+        )),
+        _ => Ok(()),
+    }
+}
+
+/// Resolve a path that must already exist: canonicalize + root-guard.
+/// Returned path is the canonical (symlink-resolved) location.
+pub fn resolve_workspace_path(path: &str) -> Result<PathBuf, String> {
+    if path.trim().is_empty() {
+        return Err("Path cannot be empty".to_string());
+    }
+    if path.contains('\0') {
+        return Err("Path contains invalid characters".to_string());
+    }
+    let canonical = fs::canonicalize(path)
+        .map_err(|e| format!("Cannot access path '{}': {e}", Path::new(path).display()))?;
+    reject_filesystem_root(&canonical)?;
+    Ok(canonical)
+}
+
+/// Resolve a path for writing (it may not exist yet): canonicalize the
+/// nearest existing ancestor, root-guard it, validate the file name, and
+/// re-attach. Parent directories are therefore never created above (or as)
+/// a filesystem root — `write_file` cannot `create_dir_all("/")`.
+fn resolve_workspace_write_path(path: &str) -> Result<PathBuf, String> {
+    if path.trim().is_empty() {
+        return Err("Path cannot be empty".to_string());
+    }
+    if path.contains('\0') {
+        return Err("Path contains invalid characters".to_string());
+    }
+    let candidate = PathBuf::from(path);
+    if let Ok(canonical) = fs::canonicalize(&candidate) {
+        reject_filesystem_root(&canonical)?;
+        return Ok(canonical);
+    }
+    // Walk up to the nearest existing ancestor and canonicalize it.
+    let mut ancestor = candidate.as_path();
+    let mut pending: Vec<std::ffi::OsString> = Vec::new();
+    loop {
+        match ancestor.parent() {
+            Some(parent) if !parent.as_os_str().is_empty() => {
+                if let Some(name) = ancestor.file_name() {
+                    pending.push(name.to_os_string());
+                }
+                ancestor = parent;
+                if ancestor.exists() {
+                    break;
+                }
+            }
+            _ => {
+                if let Some(name) = ancestor.file_name() {
+                    pending.push(name.to_os_string());
+                }
+                break;
+            }
+        }
+    }
+    let canonical_base = fs::canonicalize(ancestor)
+        .map_err(|e| format!("Cannot access path '{}': {e}", candidate.display()))?;
+    reject_filesystem_root(&canonical_base)?;
+    let mut resolved = canonical_base;
+    for component in pending.into_iter().rev() {
+        let text = component.to_string_lossy();
+        if text == "." || text == ".." {
+            return Err(format!(
+                "Path escapes the workspace: '{}'",
+                candidate.display()
+            ));
+        }
+        resolved.push(component);
+    }
+    reject_filesystem_root(&resolved)?;
+    Ok(resolved)
+}
+
 #[derive(Serialize)]
 pub struct FileChunk {
     pub data: String,
@@ -44,21 +158,15 @@ pub struct FileChunk {
     pub finished: bool,
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub fn read_file(path: String) -> Result<String, String> {
-    let path = PathBuf::from(&path);
-    if !path.exists() {
-        return Err(format!("File not found: {}", path.display()));
-    }
+    let path = resolve_workspace_path(&path)?;
     fs::read_to_string(&path).map_err(|e| format!("Failed to read file: {}", e))
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub fn read_file_chunk(path: String, offset: u64, length: u64) -> Result<FileChunk, String> {
-    let path = PathBuf::from(&path);
-    if !path.exists() {
-        return Err(format!("File not found: {}", path.display()));
-    }
+    let path = resolve_workspace_path(&path)?;
     let metadata = fs::metadata(&path).map_err(|e| format!("Failed to read metadata: {}", e))?;
     let total_size = metadata.len();
     if offset >= total_size {
@@ -69,7 +177,8 @@ pub fn read_file_chunk(path: String, offset: u64, length: u64) -> Result<FileChu
             finished: true,
         });
     }
-    if length == 0 || length > READ_CHUNK_LEN || offset.saturating_add(length) > READ_CHUNK_HARD_CAP {
+    if length == 0 || length > READ_CHUNK_LEN || offset.saturating_add(length) > READ_CHUNK_HARD_CAP
+    {
         return Err("Chunk out of range".to_string());
     }
     let remaining = total_size.saturating_sub(offset);
@@ -117,18 +226,19 @@ pub fn read_file_chunk(path: String, offset: u64, length: u64) -> Result<FileChu
     }
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub fn write_file(path: String, content: String) -> Result<(), String> {
-    let path = PathBuf::from(&path);
+    let path = resolve_workspace_write_path(&path)?;
     if let Some(parent) = path.parent() {
+        // Parent was root-guarded by the resolver; only create below it.
         fs::create_dir_all(parent).map_err(|e| format!("Failed to create directories: {}", e))?;
     }
     fs::write(&path, content).map_err(|e| format!("Failed to write file: {}", e))
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub fn create_file(path: String, content: Option<String>) -> Result<(), String> {
-    let path = PathBuf::from(&path);
+    let path = resolve_workspace_write_path(&path)?;
     if path.exists() {
         return Err(format!("File already exists: {}", path.display()));
     }
@@ -151,15 +261,19 @@ fn ensure_path_exists(path: &Path) -> Result<(), String> {
 
 /// Permanently delete a file or directory on the blocking filesystem pool.
 ///
+/// SECURITY: the frontend must confirm destructive deletes with the user
+/// before invoking; the backend additionally refuses filesystem roots
+/// (`/`, `C:\`, `$HOME`) via `resolve_workspace_path`.
+///
 /// Recursive deletion can take a long time for large workspaces. Keeping it
 /// off the Tauri async runtime prevents filesystem work from delaying commands
 /// that need to keep the application responsive.
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub async fn delete_path(path: String) -> Result<(), String> {
+    let resolved = resolve_workspace_path(&path)?;
     tauri::async_runtime::spawn_blocking(move || {
-        let path = PathBuf::from(path);
-        ensure_path_exists(&path)?;
-        remove_all_hardened(&path)
+        ensure_path_exists(&resolved)?;
+        remove_all_hardened(&resolved)
     })
     .await
     .map_err(|error| format!("Delete task failed: {}", error))?
@@ -167,15 +281,17 @@ pub async fn delete_path(path: String) -> Result<(), String> {
 
 /// Move a file or directory to the OS Trash / Recycle Bin.
 ///
+/// SECURITY: same root-guard as `delete_path`.
+///
 /// Returns `Err("TRASH_UNAVAILABLE: ...")` when the platform trash cannot be
 /// used (e.g. Linux without a Freedesktop trash backend). Callers should offer
 /// a permanent delete as an explicit user-confirmed fallback in that case.
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub async fn trash_path(path: String) -> Result<(), String> {
+    let resolved = resolve_workspace_path(&path)?;
     tauri::async_runtime::spawn_blocking(move || {
-        let path = PathBuf::from(path);
-        ensure_path_exists(&path)?;
-        trash::delete(&path).map_err(|e| format!("TRASH_UNAVAILABLE: {}", e))
+        ensure_path_exists(&resolved)?;
+        trash::delete(&resolved).map_err(|e| format!("TRASH_UNAVAILABLE: {}", e))
     })
     .await
     .map_err(|error| format!("Trash task failed: {}", error))?
@@ -268,10 +384,10 @@ fn remove_all_hardened(path: &Path) -> Result<(), String> {
     })
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub fn list_dir(path: String, show_hidden: Option<bool>) -> Result<Vec<FileEntry>, String> {
     let show_hidden = show_hidden.unwrap_or(false);
-    let path = PathBuf::from(&path);
+    let path = resolve_workspace_path(&path)?;
     if !path.is_dir() {
         return Err(format!("Not a directory: {}", path.display()));
     }
@@ -310,12 +426,9 @@ pub fn list_dir(path: String, show_hidden: Option<bool>) -> Result<Vec<FileEntry
     Ok(entries)
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub fn stat_path(path: String) -> Result<FileStat, String> {
-    let path = PathBuf::from(&path);
-    if !path.exists() {
-        return Err(format!("Path not found: {}", path.display()));
-    }
+    let path = resolve_workspace_path(&path)?;
 
     let metadata = fs::metadata(&path).map_err(|e| format!("Failed to read metadata: {}", e))?;
     let modified = metadata
@@ -358,7 +471,7 @@ fn is_binary_file(name: &str) -> bool {
     }
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub fn search_files(
     root: String,
     query: String,
@@ -366,7 +479,7 @@ pub fn search_files(
     max_results: Option<usize>,
     show_hidden: Option<bool>,
 ) -> Result<Vec<SearchResult>, String> {
-    let root_path = PathBuf::from(&root);
+    let root_path = resolve_workspace_path(&root)?;
     if !root_path.is_dir() {
         return Err(format!("Not a directory: {}", root));
     }
@@ -453,10 +566,10 @@ pub fn search_files(
     Ok(results)
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub fn rename_path(from: String, to: String) -> Result<(), String> {
-    let from_path = PathBuf::from(&from);
-    let to_path = PathBuf::from(&to);
+    let from_path = resolve_workspace_path(&from)?;
+    let to_path = resolve_workspace_write_path(&to)?;
 
     if !from_path.exists() && fs::symlink_metadata(&from_path).is_err() {
         return Err(format!("Source path not found: {}", from));
@@ -512,10 +625,10 @@ fn is_cross_device_error(e: &std::io::Error) -> bool {
 /// Same-device moves use an atomic `rename`. Cross-device moves
 /// (`C:` -> `D:`, `/` -> `/mnt`, ...) fall back to copy + permanent delete.
 /// The destination must not exist; callers are expected to auto-rename first.
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub fn move_path(from: String, to: String) -> Result<(), String> {
-    let from_path = PathBuf::from(&from);
-    let to_path = PathBuf::from(&to);
+    let from_path = resolve_workspace_path(&from)?;
+    let to_path = resolve_workspace_write_path(&to)?;
 
     if !from_path.exists() && fs::symlink_metadata(&from_path).is_err() {
         return Err(format!("Source path not found: {}", from));
@@ -543,9 +656,16 @@ pub fn move_path(from: String, to: String) -> Result<(), String> {
 
 /// Join a parent directory and a child name using the OS separator.
 /// Validates the child name and avoids any frontend separator guessing.
-#[tauri::command]
+/// NOTE: the parent is intentionally NOT canonicalized so the returned string
+/// keeps the caller's path form (canonicalization would rewrite it to a
+/// verbatim `\\?\` path on Windows); `validate_file_name` already rules out
+/// separators and traversal in `name`.
+#[tauri::command(rename_all = "camelCase")]
 pub fn join_path(parent: String, name: String) -> Result<String, String> {
     validate_file_name(&name)?;
+    if parent.trim().is_empty() {
+        return Err("Path cannot be empty".to_string());
+    }
     Ok(PathBuf::from(&parent)
         .join(&name)
         .to_string_lossy()
@@ -554,7 +674,7 @@ pub fn join_path(parent: String, name: String) -> Result<String, String> {
 
 /// Validate a single file/folder name for the running OS.
 /// Returns `Ok(())` when valid, `Err(message)` describing the problem.
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub fn validate_name(name: String) -> Result<(), String> {
     validate_file_name(&name)
 }
@@ -600,14 +720,14 @@ fn validate_file_name(name: &str) -> Result<(), String> {
 
 /// Recursively search for files matching a glob-like pattern.
 /// Supports: `*` (any chars except `/`), `**` (any path segments), `?` (single char).
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub fn find_files(
     base_path: String,
     pattern: String,
     max_results: Option<usize>,
     show_hidden: Option<bool>,
 ) -> Result<Vec<String>, String> {
-    let root = PathBuf::from(&base_path);
+    let root = resolve_workspace_path(&base_path)?;
     if !root.is_dir() {
         return Err(format!("Not a directory: {}", base_path));
     }
@@ -716,9 +836,9 @@ fn glob_to_regex(pattern: &str) -> String {
     format!("^{}$", regex)
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub fn create_directory(path: String) -> Result<(), String> {
-    let dir_path = PathBuf::from(&path);
+    let dir_path = resolve_workspace_write_path(&path)?;
     if dir_path.exists() {
         return Err(format!("Directory already exists: {}", path));
     }
@@ -737,9 +857,9 @@ pub fn get_home_dir() -> Result<String, String> {
 
 /// Like list_dir but includes hidden entries (files/dirs starting with '.')
 /// Used by the skills loader to scan ~/.agents/skills/ etc.
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub fn list_dir_all(path: String) -> Result<Vec<FileEntry>, String> {
-    let path = PathBuf::from(&path);
+    let path = resolve_workspace_path(&path)?;
     if !path.is_dir() {
         return Err(format!("Not a directory: {}", path.display()));
     }
@@ -785,12 +905,16 @@ fn event_kind_to_string(kind: &EventKind) -> Option<&'static str> {
     }
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub fn fs_watch(
     path: String,
     app: AppHandle,
     state: tauri::State<'_, FsWatcherState>,
 ) -> Result<(), String> {
+    let canonical = resolve_workspace_path(&path)?;
+    // Use the canonical path as the watcher key so `..`/symlink aliases for
+    // the same directory cannot register duplicate watchers.
+    let path = canonical.to_string_lossy().to_string();
     let mut watchers = state.0.lock().map_err(|e| e.to_string())?;
 
     // If already watching this path, do nothing
@@ -799,9 +923,6 @@ pub fn fs_watch(
     }
 
     let watch_path = PathBuf::from(&path);
-    if !watch_path.exists() {
-        return Err(format!("Path not found: {}", path));
-    }
 
     let app_handle = app.clone();
     let mut watcher = RecommendedWatcher::new(
@@ -835,20 +956,26 @@ pub fn fs_watch(
     Ok(())
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub fn fs_unwatch(path: String, state: tauri::State<'_, FsWatcherState>) -> Result<(), String> {
+    // Keys are canonical paths (see fs_watch); canonicalize best-effort so a
+    // non-canonical alias still releases the watcher. If the path is gone,
+    // fall back to the raw key.
+    let key = resolve_workspace_path(&path)
+        .map(|canonical| canonical.to_string_lossy().to_string())
+        .unwrap_or(path);
     let mut watchers = state.0.lock().map_err(|e| e.to_string())?;
-    if let Some(mut watcher) = watchers.remove(&path) {
-        let watch_path = PathBuf::from(&path);
+    if let Some(mut watcher) = watchers.remove(&key) {
+        let watch_path = PathBuf::from(&key);
         let _ = watcher.unwatch(&watch_path);
     }
     Ok(())
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub fn copy_path(from: String, to: String) -> Result<(), String> {
-    let from_path = PathBuf::from(&from);
-    let to_path = PathBuf::from(&to);
+    let from_path = resolve_workspace_path(&from)?;
+    let to_path = resolve_workspace_write_path(&to)?;
     if !from_path.exists() && fs::symlink_metadata(&from_path).is_err() {
         return Err(format!("Source not found: {}", from));
     }
@@ -1039,12 +1166,9 @@ fn reveal_in_file_manager(path: &Path) -> Result<(), String> {
 
 /// Open the OS file manager and highlight/select the given path.
 /// Async so the (blocking) shell reveal call never runs on the UI thread.
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub async fn reveal_path(path: String) -> Result<(), String> {
-    let p = PathBuf::from(&path);
-    if !p.exists() {
-        return Err(format!("Path not found: {}", path));
-    }
+    let p = resolve_workspace_path(&path)?;
 
     #[cfg(target_os = "windows")]
     {
@@ -1076,10 +1200,13 @@ pub async fn reveal_path(path: String) -> Result<(), String> {
 
 /// Open a file or folder with the OS default application
 /// ("Open With > Default Application" in the explorer).
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub fn open_path(path: String) -> Result<(), String> {
-    let p = PathBuf::from(&path);
-    if !p.exists() && fs::symlink_metadata(&p).is_err() {
+    let resolved = resolve_workspace_path(&path)?;
+    let p = resolved;
+    // `resolve_workspace_path` guarantees existence, but keep a symlink-aware
+    // check so dangling links still produce a clear error.
+    if fs::symlink_metadata(&p).is_err() {
         return Err(format!("Path not found: {}", path));
     }
 
@@ -1114,6 +1241,46 @@ pub fn open_path(path: String) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn workspace_resolver_rejects_roots_and_missing_paths() {
+        assert!(resolve_workspace_path("").is_err());
+        assert!(resolve_workspace_path("/nonexistent-hyscode-path-xyz").is_err());
+        assert!(resolve_workspace_write_path("").is_err());
+        #[cfg(target_os = "windows")]
+        {
+            assert!(resolve_workspace_path("C:\\").is_err());
+            if let Some(home) = dirs::home_dir() {
+                assert!(resolve_workspace_path(home.to_str().unwrap()).is_err());
+            }
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            assert!(resolve_workspace_path("/").is_err());
+        }
+        // Temp dir itself is usable (existing workspace-style root).
+        let tmp = std::env::temp_dir().to_string_lossy().to_string();
+        assert!(resolve_workspace_path(&tmp).is_ok());
+    }
+
+    #[test]
+    fn workspace_write_path_never_resolves_to_root() {
+        #[cfg(target_os = "windows")]
+        assert!(resolve_workspace_write_path("C:\\new-file.txt").is_err());
+        #[cfg(not(target_os = "windows"))]
+        assert!(resolve_workspace_write_path("/new-file.txt").is_err());
+        // Nested temp file resolves below temp (compare canonical forms:
+        // Windows canonicalize yields verbatim `\\?\` paths).
+        let canonical_tmp = std::env::temp_dir()
+            .canonicalize()
+            .expect("temp dir should canonicalize");
+        let target = std::env::temp_dir()
+            .join("hyscode-fs-test-resolve")
+            .join("nested")
+            .join("file.txt");
+        let resolved = resolve_workspace_write_path(&target.to_string_lossy()).unwrap();
+        assert!(resolved.starts_with(&canonical_tmp));
+    }
 
     #[test]
     fn rejects_empty_and_blank_names() {
@@ -1246,7 +1413,8 @@ mod tests {
 
     #[test]
     fn move_and_copy_refuse_existing_destination() {
-        let base = std::env::temp_dir().join(format!("hyscode-fs-test-{}-move", std::process::id()));
+        let base =
+            std::env::temp_dir().join(format!("hyscode-fs-test-{}-move", std::process::id()));
         let _ = fs::remove_dir_all(&base);
         fs::create_dir_all(base.join("src")).unwrap();
         fs::write(base.join("src").join("a.txt"), b"hi").unwrap();
@@ -1294,7 +1462,8 @@ mod tests {
     }
     #[test]
     fn read_file_chunk_returns_head_and_tail() {
-        let base = std::env::temp_dir().join(format!("hyscode-fs-test-{}-chunk", std::process::id()));
+        let base =
+            std::env::temp_dir().join(format!("hyscode-fs-test-{}-chunk", std::process::id()));
         let _ = fs::remove_dir_all(&base);
         fs::create_dir_all(&base).unwrap();
         let file = base.join("big.txt");
@@ -1322,14 +1491,14 @@ mod tests {
 
     #[test]
     fn read_file_chunk_flags_null_bytes_binary() {
-        let base = std::env::temp_dir().join(format!("hyscode-fs-test-{}-binary", std::process::id()));
+        let base =
+            std::env::temp_dir().join(format!("hyscode-fs-test-{}-binary", std::process::id()));
         let _ = fs::remove_dir_all(&base);
         fs::create_dir_all(&base).unwrap();
         let file = base.join("blob.bin");
         fs::write(&file, [0x00, 0xFF, b'a']).unwrap();
 
-        let chunk =
-            read_file_chunk(file.to_string_lossy().to_string(), 0, READ_CHUNK_LEN).unwrap();
+        let chunk = read_file_chunk(file.to_string_lossy().to_string(), 0, READ_CHUNK_LEN).unwrap();
         assert!(chunk.is_binary);
         assert!(chunk.data.is_empty());
         assert!(chunk.finished);
@@ -1339,7 +1508,8 @@ mod tests {
 
     #[test]
     fn read_file_chunk_offset_past_end_returns_finished_empty() {
-        let base = std::env::temp_dir().join(format!("hyscode-fs-test-{}-past-end", std::process::id()));
+        let base =
+            std::env::temp_dir().join(format!("hyscode-fs-test-{}-past-end", std::process::id()));
         let _ = fs::remove_dir_all(&base);
         fs::create_dir_all(&base).unwrap();
         let file = base.join("small.txt");

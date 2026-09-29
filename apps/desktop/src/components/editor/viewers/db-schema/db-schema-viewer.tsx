@@ -225,7 +225,7 @@ function DbSchemaViewerInner({ sourceFile }: DbSchemaViewerProps) {
       .then((graph) => useSchemaDiagramStore.getState().loadGraph(graph, sourceFile))
       .catch(() => useSchemaDiagramStore.getState().loadGraph({ tables: [], relations: [] }, sourceFile))
       .finally(() => { setLoading(false); setInitialized(true); });
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+   
   }, [sourceFile]);
 
   // ── Sync store → React Flow nodes/edges ───────────────────────────────
@@ -247,7 +247,7 @@ function DbSchemaViewerInner({ sourceFile }: DbSchemaViewerProps) {
       setNodes(fn);
       setEdges(fe);
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+   
   }, [tables, relations]);
 
   // ── Read-only guard (SQLite binaries cannot be overwritten with DDL) ──
@@ -276,7 +276,7 @@ function DbSchemaViewerInner({ sourceFile }: DbSchemaViewerProps) {
       unlisten?.();
       tauriInvoke('fs_unwatch', { path: sourceFile }).catch(() => {});
     };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+   
   }, [sourceFile]);
 
   // ── Keyboard shortcuts ─────────────────────────────────────────────────

@@ -12,7 +12,7 @@ Development is organized into 8 milestones (M0–M7) spanning approximately 17 w
 Set up the monorepo, Tauri desktop shell, React frontend scaffold, database, and CI pipeline.
 
 ### Deliverables
-- [x] Turborepo monorepo with pnpm workspaces
+- [x] Turborepo monorepo with npm workspaces
 - [x] Tauri v2 app (`apps/desktop/`) with React + Vite
 - [x] shadcn/ui configured with Zinc dark theme + Geist fonts
 - [x] Tailwind CSS v4 with CSS-first config
@@ -23,7 +23,7 @@ Set up the monorepo, Tauri desktop shell, React frontend scaffold, database, and
 - [x] Base layout shell (sidebar, editor panel placeholder, agent panel placeholder, status bar)
 
 ### Definition of Done
-`pnpm dev` opens a Tauri window with the base IDE layout. All panels are visible (with placeholder content). CI passes on push.
+`npm run dev` opens a Tauri window with the base IDE layout. All panels are visible (with placeholder content). CI passes on push.
 
 ### Dependencies
 None (first milestone).

@@ -1,9 +1,13 @@
 node_modules/
 dist/
+apps/desktop/dist/
 .turbo/
 *.tsbuildinfo
 target/
 *.log
+pref.log
+probe-*.log
+ps-error.log
 .DS_Store
 Thumbs.db
 

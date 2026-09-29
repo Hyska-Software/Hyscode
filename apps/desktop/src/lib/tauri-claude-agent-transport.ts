@@ -9,13 +9,13 @@ import type { StreamChunk } from '@hyscode/ai-providers';
 import type { ClaudeAgentInvoke } from '@hyscode/ai-providers';
 
 interface ClaudeAgentChunk {
-  request_id: string;
+  requestId: string;
   type: string;
   content?: string | null;
-  tool_name?: string | null;
-  tool_input?: string | null;
-  call_id?: string | null;
-  stop_reason?: string | null;
+  toolName?: string | null;
+  toolInput?: string | null;
+  callId?: string | null;
+  stopReason?: string | null;
   error?: string | null;
   done: boolean;
 }
@@ -64,19 +64,19 @@ export function createClaudeAgentInvoke(): ClaudeAgentInvoke {
               break;
 
             case 'tool_use':
-              if (chunk.call_id && chunk.tool_name) {
-                enqueue({ type: 'tool_call_start', id: chunk.call_id, name: chunk.tool_name });
-                if (chunk.tool_input) {
-                  enqueue({ type: 'tool_call_delta', id: chunk.call_id, input: chunk.tool_input });
+              if (chunk.callId && chunk.toolName) {
+                enqueue({ type: 'tool_call_start', id: chunk.callId, name: chunk.toolName });
+                if (chunk.toolInput) {
+                  enqueue({ type: 'tool_call_delta', id: chunk.callId, input: chunk.toolInput });
                 }
-                enqueue({ type: 'tool_call_end', id: chunk.call_id });
+                enqueue({ type: 'tool_call_end', id: chunk.callId });
               }
               break;
 
             case 'done':
               enqueue({
                 type: 'done',
-                stopReason: (chunk.stop_reason as 'end_turn') ?? 'end_turn',
+                stopReason: (chunk.stopReason as 'end_turn') ?? 'end_turn',
               });
               enqueue(null); // signal end
               break;
@@ -94,7 +94,7 @@ export function createClaudeAgentInvoke(): ClaudeAgentInvoke {
 
           // Listen for agent:chunk events
           unlisten = (await listen<ClaudeAgentChunk>('agent:chunk', (event) => {
-            if (event.payload.request_id === requestId) {
+            if (event.payload.requestId === requestId) {
               mapChunk(event.payload);
             }
           })) as unknown as () => void;
@@ -103,11 +103,11 @@ export function createClaudeAgentInvoke(): ClaudeAgentInvoke {
           try {
             await invoke<void>('claude_agent_run', {
               request: {
-                request_id: requestId,
+                requestId,
                 model: params.model,
-                system_prompt: params.systemPrompt,
+                systemPrompt: params.systemPrompt,
                 messages: params.messages,
-                max_turns: params.maxTurns,
+                maxTurns: params.maxTurns,
                 cwd: params.cwd,
               },
             });

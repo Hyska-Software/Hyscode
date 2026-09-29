@@ -5,6 +5,8 @@ const DEFAULT_RETRY_CONFIG: RetryConfig = {
   baseDelayMs: 1000,
   maxDelayMs: 30_000,
   retryableStatuses: [429, 500, 502, 503, 529],
+  requestTimeoutMs: 120_000,
+  streamIdleTimeoutMs: 90_000,
 };
 
 function jitter(delayMs: number): number {
@@ -25,7 +27,7 @@ export async function withRetry<T>(
 
   for (let attempt = 0; attempt <= cfg.maxRetries; attempt++) {
     try {
-      return await fn();
+      return await withRequestTimeout(fn, cfg.requestTimeoutMs, cfg.signal);
     } catch (err) {
       lastError = err;
 
@@ -72,6 +74,103 @@ export async function withRetry<T>(
   }
 
   throw lastError;
+}
+
+/**
+ * Race a single attempt against `requestTimeoutMs`. Uses a `setTimeout` that
+ * rejects with a timeout ProviderError so slow connects don't hang forever.
+ * When the caller passes its own `signal`, an abort still wins immediately.
+ */
+function withRequestTimeout<T>(
+  fn: () => Promise<T>,
+  requestTimeoutMs: number | undefined,
+  signal?: AbortSignal,
+): Promise<T> {
+  if (!requestTimeoutMs || requestTimeoutMs <= 0) return fn();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      reject(
+        new ProviderError(
+          `Request timed out after ${requestTimeoutMs}ms`,
+          'unknown',
+          undefined,
+          true,
+          undefined,
+          'timeout',
+          'connecting',
+        ),
+      );
+    }, requestTimeoutMs);
+    signal?.addEventListener('abort', () => {
+      if (timer) clearTimeout(timer);
+      reject(signal.reason ?? new DOMException('Request aborted', 'AbortError'));
+    }, { once: true });
+  });
+  return Promise.race([fn(), timeoutPromise]).finally(() => {
+    if (timer) clearTimeout(timer);
+  });
+}
+
+/**
+ * Wrap an async iterable so a stalled stream (no chunks for
+ * `streamIdleTimeoutMs`) aborts via the returned controller. Callers forward
+ * `controller.signal` into the fetch and break the loop on abort.
+ */
+export function withStreamIdleTimeout<T>(
+  stream: AsyncIterable<T>,
+  streamIdleTimeoutMs: number | undefined,
+  signal?: AbortSignal,
+): { stream: AsyncIterable<T>; controller: AbortController } {
+  const controller = new AbortController();
+  if (signal?.aborted) controller.abort(signal.reason);
+  else signal?.addEventListener('abort', () => controller.abort(signal.reason), { once: true });
+  if (!streamIdleTimeoutMs || streamIdleTimeoutMs <= 0) return { stream, controller };
+  const wrapped: AsyncIterable<T> = {
+    [Symbol.asyncIterator]() {
+      const iter = stream[Symbol.asyncIterator]();
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const reset = () => {
+        if (timer) clearTimeout(timer);
+        timer = setTimeout(() => controller.abort(
+          new ProviderError(
+            `Stream idle for ${streamIdleTimeoutMs}ms`,
+            'unknown',
+            undefined,
+            true,
+            undefined,
+            'timeout',
+            'streaming',
+          ),
+        ), streamIdleTimeoutMs);
+      };
+      reset();
+      return {
+        next: async (...args: []) => {
+          try {
+            const result = await iter.next(...args);
+            if (!result.done) reset();
+            else if (timer) clearTimeout(timer);
+            return result;
+          } catch (err) {
+            if (timer) clearTimeout(timer);
+            throw err;
+          }
+        },
+        return: async (value?: unknown) => {
+          if (timer) clearTimeout(timer);
+          return iter.return?.(value as never) ?? ({ done: true, value } as IteratorResult<T>);
+        },
+        throw: async (e?: unknown) => {
+          if (timer) clearTimeout(timer);
+          if (iter.throw) return iter.throw(e);
+          throw e;
+        },
+        [Symbol.asyncIterator]() { return this; },
+      };
+    },
+  };
+  return { stream: wrapped, controller };
 }
 
 function abortableDelay(delayMs: number, signal?: AbortSignal): Promise<void> {

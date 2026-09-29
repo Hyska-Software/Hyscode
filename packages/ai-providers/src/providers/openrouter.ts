@@ -775,32 +775,46 @@ export class OpenRouterProvider extends OpenAIProvider {
 
       if (data.data?.length) {
         const now = Date.now();
+        // Merge live data with the curated catalog so curated-only fields
+        // (thinkingVariants, hand-verified pricing) survive refreshes.
+        const curatedById = new Map(this.models.map((m) => [m.id, m]));
         this.models = data.data
           .filter((m) => {
             if (!m.id || !m.name) return false;
             if (!m.expiration_date) return true;
             return Date.parse(m.expiration_date) > now;
           })
-          .map((m) => ({
-            id: m.id,
-            name: m.name,
-            provider: 'openrouter',
-            contextWindow: m.context_length ?? 1_000_000,
-            maxOutputTokens: m.top_provider?.max_completion_tokens ?? 8_192,
-            supportsTools: m.supported_parameters?.includes('tools') ?? false,
-            supportsStreaming: true,
-            supportsVision: m.architecture?.input_modalities?.includes('image') ?? false,
-            inputPricePerMToken: m.pricing?.prompt
-              ? parseFloat(m.pricing.prompt) * 1_000_000
-              : undefined,
-            outputPricePerMToken: m.pricing?.completion
-              ? parseFloat(m.pricing.completion) * 1_000_000
-              : undefined,
-          }));
+          .map((m) => {
+            const curated = curatedById.get(m.id);
+            return {
+              id: m.id,
+              name: curated?.name ?? m.name,
+              provider: 'openrouter',
+              contextWindow: m.context_length ?? curated?.contextWindow ?? 1_000_000,
+              maxOutputTokens:
+                m.top_provider?.max_completion_tokens ?? curated?.maxOutputTokens ?? 8_192,
+              supportsTools:
+                m.supported_parameters?.includes('tools') ?? curated?.supportsTools ?? false,
+              supportsStreaming: true,
+              supportsVision:
+                m.architecture?.input_modalities?.includes('image') ??
+                curated?.supportsVision ??
+                false,
+              inputPricePerMToken: m.pricing?.prompt
+                ? parseFloat(m.pricing.prompt) * 1_000_000
+                : curated?.inputPricePerMToken,
+              outputPricePerMToken: m.pricing?.completion
+                ? parseFloat(m.pricing.completion) * 1_000_000
+                : curated?.outputPricePerMToken,
+              cachedInputPricePerMToken: curated?.cachedInputPricePerMToken,
+              thinkingVariants: curated?.thinkingVariants,
+            };
+          });
       }
 
       return this.models;
-    } catch {
+    } catch (err) {
+      console.warn('[OpenRouterProvider] live listModels failed, using curated catalog:', err);
       return this.models;
     }
   }

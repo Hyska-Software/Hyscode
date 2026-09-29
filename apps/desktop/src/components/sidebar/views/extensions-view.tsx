@@ -671,7 +671,7 @@ function StoreView() {
     if (age > 30_000) {
       void fetchStoreItems();
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+   
   }, []);
 
   const filtered = storeSearch.trim()
@@ -841,7 +841,7 @@ export function ExtensionsView() {
     // Fetch store items on mount so update badges work on the installed tab
     // even before the user has opened the store tab.
     void fetchStoreItems();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+   
   }, []);
 
   const handleInstallFolder = useCallback(async () => {

@@ -30,7 +30,7 @@ export interface LspError {
 // ── Transport Interface ──────────────────────────────────────────────────────
 
 export interface MessageTransport {
-  send(message: LspRequest | LspNotification): void;
+  send(message: LspRequest | LspNotification): void | Promise<void>;
   onMessage(handler: (message: LspResponse | LspNotification) => void): void;
   close(): void;
 }

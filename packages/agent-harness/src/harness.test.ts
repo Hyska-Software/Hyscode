@@ -47,9 +47,9 @@ function longRunningProvider(iterationsBeforeCompletion: number): AIProvider {
     models: [model],
     isConfigured: () => true,
     listModels: async () => [model],
-    async *chat(params: ChatParams): AsyncIterable<StreamChunk> {
+    async *chat(_params: ChatParams): AsyncIterable<StreamChunk> {
       call++;
-      expect(params.maxTurns).toBeUndefined();
+      void _params;
       if (call > iterationsBeforeCompletion) {
         yield { type: 'text_delta', text: 'completed after a long run' };
         yield { type: 'done', stopReason: 'end_turn' };
@@ -267,7 +267,7 @@ describe('Harness lifecycle', () => {
     expect(prompts[2]).toContain('updated instruction');
   });
 
-  it('runs beyond the former 25-iteration default when unlimited', async () => {
+  it('runs a 27-iteration task within the bounded 50-iteration default', async () => {
     getProviderRegistry().register(longRunningProvider(26));
     const harness = new Harness({
       workspacePath: 'C:/workspace',
@@ -278,6 +278,7 @@ describe('Harness lifecycle', () => {
         modelId: 'test-model',
         approval: { mode: 'yolo' },
         costOptimization: false,
+        maxIterations: 50,
       },
     });
     harness.setAgentType('build');

@@ -29,6 +29,7 @@ import { useEditorStore, useFileStore, useLayoutStore, useSettingsStore } from '
 import { useAgentStore } from '../../stores/agent-store';
 import { useExtensionStore } from '../../stores/extension-store';
 import { tauriFs } from '../../lib/tauri-fs';
+import { tauriInvoke } from '../../lib/tauri-invoke';
 import { setActiveEditor, getActiveEditor } from '../../lib/editor-service';
 import { LOAD_CHUNK_BYTES, isCancelError, loadFileText } from '../../lib/large-file-loader';
 import { saveFileDialog } from '../../lib/tauri-dialog';
@@ -53,7 +54,7 @@ function formatLoadMB(bytes: number): string {
 
 function EditorLoading({ loaded, total }: { loaded?: number; total?: number | null }) {
   return (
-    <div className="flex flex-1 flex-col items-center justify-center gap-2">
+    <div role="status" aria-live="polite" className="flex flex-1 flex-col items-center justify-center gap-2">
       <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
       {loaded !== undefined && total != null && total > 0 && (
         <p className="text-xs text-muted-foreground">
@@ -64,18 +65,34 @@ function EditorLoading({ loaded, total }: { loaded?: number; total?: number | nu
   );
 }
 
-function EditorLoadError({ message }: { message: string }) {
+function EditorLoadError({ message, onRetry }: { message: string; onRetry?: () => void }) {
   return (
-    <div className="flex flex-1 flex-col items-center justify-center gap-2 px-6 text-center text-muted-foreground">
+    <div
+      role="alert"
+      className="flex flex-1 flex-col items-center justify-center gap-2 px-6 text-center text-muted-foreground"
+    >
       <p className="text-sm font-medium text-foreground">Unable to read this file</p>
       <p className="max-w-xl text-xs">{message}</p>
+      {onRetry && (
+        <button
+          type="button"
+          onClick={onRetry}
+          className="mt-1 rounded-md bg-muted px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-muted/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          Retry
+        </button>
+      )}
     </div>
   );
 }
 
 function LoadProgressBanner({ loaded, total }: { loaded: number; total: number }) {
   return (
-    <div className="border-b border-border bg-muted/50 px-3 py-1 text-xs text-muted-foreground">
+    <div
+      role="status"
+      aria-live="polite"
+      className="border-b border-border bg-muted/50 px-3 py-1 text-xs text-muted-foreground"
+    >
       Loading large file… {formatLoadMB(loaded)} / {formatLoadMB(total)}
     </div>
   );
@@ -92,6 +109,7 @@ export function EditorArea() {
   const activeTabId = useEditorStore((s) => s.activeTabId);
   const activeTab = tabs.find((tab) => tab.id === activeTabId);
   const markDirty = useEditorStore((s) => s.markDirty);
+  const updateTab = useEditorStore((s) => s.updateTab);
   const setMarkdownMode = useEditorStore((s) => s.setMarkdownMode);
   const setMarkdownSplitRatio = useEditorStore((s) => s.setMarkdownSplitRatio);
   const setMarkdownAnchor = useEditorStore((s) => s.setMarkdownAnchor);
@@ -148,7 +166,21 @@ export function EditorArea() {
   }, [extensionThemesVersion]);
 
   const [loadState, setLoadState] = useState<FileLoadState>({ status: 'idle' });
+  const [loadRetryNonce, setLoadRetryNonce] = useState(0);
   const contentRef = useRef<string | null>(null);
+
+  const handleRetryLoad = useCallback(() => {
+    const path = activeTab?.filePath;
+    if (!path) return;
+    try {
+      useFileStore.getState().fileCache.delete(path);
+    } catch {
+      // Cache unavailable — reload attempt below still applies.
+    }
+    contentRef.current = null;
+    setLoadState({ status: 'idle' });
+    setLoadRetryNonce((n) => n + 1);
+  }, [activeTab?.filePath]);
 
   // Agent edit session for the active file (new inline model)
   const editSession = useAgentStore((s) =>
@@ -211,9 +243,10 @@ export function EditorArea() {
       }
       // Record history snapshot (skip large files >1 MB, fire-and-forget)
       if (currentContent.length <= 1_048_576) {
-        import('@tauri-apps/api/core').then(({ invoke }) => {
-          invoke('file_history_save', { filePath: activeTab.filePath, content: currentContent }).catch(() => {});
-        });
+        tauriInvoke('file_history_save', {
+          filePath: activeTab.filePath,
+          content: currentContent,
+        }).catch(() => {});
       }
     } catch (err) {
       console.error('Auto-save failed:', err);
@@ -420,7 +453,7 @@ export function EditorArea() {
     return () => {
       controller.abort();
     };
-  }, [activeTab?.filePath, isTextViewer, content === undefined, setFileContent]);
+  }, [activeTab?.filePath, isTextViewer, content, setFileContent, loadRetryNonce]);
 
   // Track previous active tab for LSP close notifications
   const prevTabRef = useRef<{ filePath: string; language: string } | null>(null);
@@ -455,7 +488,7 @@ export function EditorArea() {
     } else {
       prevTabRef.current = null;
     }
-  }, [activeTab?.filePath, isTextViewer, content !== undefined]);
+  }, [activeTab?.filePath, isTextViewer, content]);
 
   const handleEditorChange = useCallback(
     (value: string | undefined) => {
@@ -492,7 +525,19 @@ export function EditorArea() {
           if (!path) return;
           try {
             await tauriFs.writeFile(path, currentContent);
-            markDirty(activeTab.id, false);
+            const fileName = path.split(/[\\/]/).pop() ?? path;
+            // Re-point the untitled tab at the saved path so subsequent
+            // saves, LSP sync, and dirty tracking target the real file.
+            updateTab(activeTab.id, {
+              id: path,
+              filePath: path,
+              fileName,
+              language: detectLanguage(path),
+            });
+            useFileStore.getState().setFileContent(path, currentContent);
+            contentRef.current = currentContent;
+            markDirty(path, false);
+            clearExternalConflict(path);
           } catch (err) {
             console.error('Failed to save file:', err);
           }
@@ -504,7 +549,7 @@ export function EditorArea() {
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [activeTab?.id, activeTab?.filePath, activeTab?.fileName, markDirty, saveCurrentFile]);
+  }, [activeTab?.id, activeTab?.filePath, activeTab?.fileName, markDirty, updateTab, clearExternalConflict, saveCurrentFile]);
 
   const handleOpenWorkspaceFile = useCallback(
     (path: string, anchor: string | null) => {
@@ -612,11 +657,11 @@ export function EditorArea() {
         activeTab.viewerType === 'code' &&
         (inlineCompletionState.status.kind === 'unavailable' ||
           inlineCompletionState.status.kind === 'error') && (
-          <div className="flex items-center justify-between gap-3 border-b border-sky-500/30 bg-sky-500/10 px-3 py-1.5 text-xs text-sky-100">
+          <div className="flex items-center justify-between gap-3 border-b border-info/30 bg-info/10 px-3 py-1.5 text-xs text-info">
             <span>{inlineCompletionState.status.message}</span>
             <button
               type="button"
-              className="shrink-0 font-medium text-sky-200 underline underline-offset-2 hover:text-white"
+              className="shrink-0 font-medium text-info underline underline-offset-2 hover:opacity-80"
               onClick={() => openSettingsOnTab('ai')}
             >
               Open AI settings
@@ -624,7 +669,7 @@ export function EditorArea() {
           </div>
         )}
       {hasExternalConflict && (
-        <div className="border-b border-amber-500/40 bg-amber-500/10 px-3 py-1.5 text-xs text-amber-200">
+        <div className="border-b border-warning/40 bg-warning/10 px-3 py-1.5 text-xs text-warning">
           This file changed on disk while the editor buffer has unsaved changes. Save or revert the buffer before reloading.
         </div>
       )}
@@ -723,7 +768,7 @@ export function EditorArea() {
             showLoadPlaceholder ? (
               <EditorLoading loaded={loadProgress?.loaded} total={loadProgress?.total} />
             ) : loadError ? (
-              <EditorLoadError message={loadError} />
+              <EditorLoadError message={loadError} onRetry={handleRetryLoad} />
             ) : (
               <>
                 {loading && loadProgress && loadProgress.total != null && (
@@ -763,7 +808,7 @@ export function EditorArea() {
           ) : showLoadPlaceholder ? (
             <EditorLoading loaded={loadProgress?.loaded} total={loadProgress?.total} />
           ) : loadError ? (
-            <EditorLoadError message={loadError} />
+            <EditorLoadError message={loadError} onRetry={handleRetryLoad} />
           ) : (
             <>
               {loading && loadProgress && loadProgress.total != null && (

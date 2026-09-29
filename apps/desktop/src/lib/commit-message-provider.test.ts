@@ -9,7 +9,7 @@ import {
 
 const gateway: CommitMessageProviderGateway = {
   listConfiguredProviders: async () => [
-    { id: 'anthropic', modelIds: ['claude-sonnet-4-6'] },
+    { id: 'anthropic', modelIds: ['claude-sonnet-5'] },
     { id: 'openrouter', modelIds: ['anthropic/claude-sonnet-5'] },
   ],
   async *stream() {
@@ -40,7 +40,7 @@ describe('commit-message provider targets', () => {
   it('keeps only configured, enabled runtime models plus explicit custom models', async () => {
     const targets = await listCommitMessageTargets(
       {
-        anthropic: ['claude-sonnet-4-6', 'claude-opus-5'],
+        anthropic: ['claude-sonnet-5', 'claude-opus-5'],
         openai: ['gpt-5.6-sol'],
         openrouter: ['anthropic/claude-sonnet-5', 'vendor/custom'],
       },
@@ -49,7 +49,7 @@ describe('commit-message provider targets', () => {
     );
 
     expect(targets.map((target) => `${target.providerId}::${target.modelId}`)).toEqual([
-      'anthropic::claude-sonnet-4-6',
+      'anthropic::claude-sonnet-5',
       'openrouter::anthropic/claude-sonnet-5',
       'openrouter::vendor/custom',
     ]);

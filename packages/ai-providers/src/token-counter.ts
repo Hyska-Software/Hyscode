@@ -2,13 +2,48 @@ import type { Message, ToolDefinition } from './types';
 
 /**
  * Approximate token counter using character-based estimation.
- * Ratio: ~4 characters per token (reasonable average across models).
- * This avoids heavy WASM tokenizer dependencies.
+ *
+ * LIMITATIONS (documented):
+ * - This is a heuristic (~4 chars/token for Latin scripts), NOT a real
+ *   tokenizer. Real tokenizers (tiktoken, SentencePiece) split CJK text
+ *   into far more tokens per character, and multimodal image cost depends
+ *   on resolution/tiling. Use provider-native `countTokens` when the
+ *   provider exposes it (see `estimateTokensMaybeNative`); otherwise treat
+ *   these numbers as rough budgets for truncation warnings, never billing.
+ * - Image cost is a flat 1500 tokens (upper bound for large images after
+ *   tiling). Kept at 1500 rather than 800 so we over-estimate and truncate
+ *   early instead of overflowing context.
  */
 const CHARS_PER_TOKEN = 4;
+/** CJK Unified Ideographs range — denser tokenization (~2.5 chars/token). */
+const CJK_RE = /[\u4e00-\u9fff]/;
+const CJK_CHARS_PER_TOKEN = 2.5;
+/** Flat image estimate (see LIMITATIONS above). */
+const IMAGE_TOKENS = 1500;
 
 export function estimateTokens(text: string): number {
-  return Math.ceil(text.length / CHARS_PER_TOKEN);
+  if (!text) return 0;
+  const charsPerToken = CJK_RE.test(text) ? CJK_CHARS_PER_TOKEN : CHARS_PER_TOKEN;
+  return Math.ceil(text.length / charsPerToken);
+}
+
+/**
+ * Prefer provider-native counting when the provider opts in via
+ * `capabilities.nativeTokenCounting` and exposes `countTokens(text)`.
+ * Falls back to the character heuristic otherwise.
+ */
+export async function estimateTokensMaybeNative(
+  text: string,
+  provider?: { capabilities?: { nativeTokenCounting?: boolean }; countTokens?: (t: string) => number | Promise<number> },
+): Promise<number> {
+  if (provider?.capabilities?.nativeTokenCounting && typeof provider.countTokens === 'function') {
+    try {
+      return await provider.countTokens(text);
+    } catch (err) {
+      console.warn('[token-counter] native countTokens failed, using heuristic fallback:', err);
+    }
+  }
+  return estimateTokens(text);
 }
 
 export function estimateMessageTokens(messages: Message[]): number {
@@ -31,8 +66,8 @@ export function estimateMessageTokens(messages: Message[]): number {
           total += 5; // overhead
           break;
         case 'image':
-          // Images typically cost ~1000-2000 tokens depending on size
-          total += 1500;
+          // Flat upper-bound estimate; real cost varies by resolution/tiling.
+          total += IMAGE_TOKENS;
           break;
         case 'thinking':
           total += estimateTokens(content.thinking);

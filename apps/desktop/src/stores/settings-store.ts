@@ -281,7 +281,7 @@ interface SettingsState {
   addMcpServer: (server: McpServerConfig) => void;
   removeMcpServer: (id: string) => void;
   updateMcpServer: (id: string, patch: Partial<McpServerConfig>) => void;
-  toggleModel: (providerId: string, modelId: string) => void;
+  toggleModel: (providerId: string, modelId: string, allModelIds?: string[]) => void;
   setEnabledModels: (providerId: string, modelIds: string[]) => void;
   addCustomModel: (model: CustomModel) => void;
   removeCustomModel: (providerId: string, modelId: string) => void;
@@ -486,17 +486,18 @@ export const useSettingsStore = create<SettingsState>()(
           if (server) Object.assign(server, patch);
         }),
 
-      toggleModel: (providerId, modelId) =>
+      toggleModel: (providerId, modelId, allModelIds) =>
         set((state) => {
           const current = state.enabledModels[providerId];
           if (!current) {
-            // First toggle for this provider — no entry means "all enabled"
-            // We need to know all model ids to create the list minus this one.
-            // Store an empty array convention: absent key = all on, present key = explicit list.
-            // Toggle OFF: store all-except-this. But we don't know "all" here.
-            // Instead: absent key = use default; present array = explicit enabled.
-            // On first toggle-off, the UI will call setEnabledModels first.
-            state.enabledModels[providerId] = [modelId];
+            // Absent key means "all on". Toggling one model off must materialize
+            // the full list minus that model. When the caller knows the catalog,
+            // prefer it; otherwise fall back to an explicit single-entry list.
+            if (allModelIds && allModelIds.length > 0) {
+              state.enabledModels[providerId] = allModelIds.filter((m) => m !== modelId);
+            } else {
+              state.enabledModels[providerId] = [modelId];
+            }
           } else if (current.includes(modelId)) {
             state.enabledModels[providerId] = current.filter((m) => m !== modelId);
           } else {

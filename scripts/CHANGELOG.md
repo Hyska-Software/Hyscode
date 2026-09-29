@@ -27,6 +27,22 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/lang/pt-BR/).
   real (history/diff/untitled) são ignorados e `textDocument/inlayHint` passa o
   `range` visível exigido pelos servidores.
 
+## [0.15.0] - 2026-09-28
+
+### Estado atual
+
+- **Monaco funcional**: editor lazy-loaded com tema escuro, LSP via URIs `file:`
+  canônicas e inlay hints com range visível.
+- **Terminal funcional**: xterm.js + PTY Tauri com múltiplas sessões; build Vite
+  fixado em ES2021 contra o bug de lowering `||=` do esbuild.
+- **MCP implementado**: `@hyscode/mcp-client` com transportes stdio/SSE/WS e
+  registro dinâmico de ferramentas.
+- **Provedores de IA + harness**: streaming multi-provider, tool router,
+  approval workflow e SDD engine ativos no painel do agente.
+- **VORTEX CLI**: TUI standalone com bundle de produção e update manifest próprios.
+- **Infra**: monorepo npm workspaces + Turborepo; CI em PR/push main; LSP Windows
+  via `rustup which`.
+
 ## [0.1.0] - 2026-04-16
 
 ### Adicionado
@@ -45,7 +61,7 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/lang/pt-BR/).
 - **React 19** + TypeScript + Vite para frontend
 - **Tauri v2** para desktop (Windows, macOS, Linux)
 - **Turbo monorepo** para gerenciamento de pacotes
-- **pnpm workspaces** para dependências eficientes
+- **npm workspaces** para dependências
 
 ### Corrigido
 
@@ -84,4 +100,5 @@ Este é o primeiro lançamento do HysCode em versão pública. Ainda é uma vers
 
 ---
 
+[0.15.0]: https://github.com/Hyska-Software/Hyscode/releases/tag/v0.15.0
 [0.1.0]: https://github.com/Hyska-Software/Hyscode/releases/tag/v0.1.0

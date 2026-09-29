@@ -192,6 +192,10 @@ interface TauriCommands {
     ret: DiagnosticContract[];
   };
   read_file: { args: { path: string }; ret: string };
+  read_file_chunk: {
+    args: { path: string; offset: number; length: number };
+    ret: { data: string; total_size: number; is_binary: boolean; finished: boolean };
+  };
   write_file: { args: { path: string; content: string }; ret: void };
   create_file: { args: { path: string; content?: string }; ret: void };
   delete_path: { args: { path: string }; ret: void };
@@ -205,6 +209,12 @@ interface TauriCommands {
   };
   reveal_path: { args: { path: string }; ret: void };
   rename_path: { args: { from: string; to: string }; ret: void };
+  copy_path: { args: { from: string; to: string }; ret: void };
+  move_path: { args: { from: string; to: string }; ret: void };
+  trash_path: { args: { path: string }; ret: void };
+  open_path: { args: { path: string }; ret: void };
+  join_path: { args: { parent: string; name: string }; ret: string };
+  validate_name: { args: { name: string }; ret: void };
   create_directory: { args: { path: string }; ret: void };
   search_files: {
     args: { root: string; query: string; maxResults?: number };
@@ -451,15 +461,21 @@ interface TauriCommands {
   keychain_delete: { args: { service: string; account: string }; ret: void };
   keychain_has: { args: { service: string; account: string }; ret: boolean };
 
-  // AI Streaming
+  // AI Streaming — nested `request` with snake_case fields, matching the Rust
+  // `AiStreamRequest` struct (no rename_all) and the raw invoke call sites in
+  // `tauri-ai-transport.ts`, `tauri-codex-transport.ts` and
+  // `tauri-claude-agent-transport.ts`. Tauri auto-converts camelCase JS arg
+  // keys, but nested struct *fields* are deserialized as-is (snake_case).
   ai_stream_request: {
     args: {
-      requestId: string;
-      provider: string;
-      url: string;
-      headers: Record<string, string>;
-      body: string;
-      timeoutMs?: number;
+      request: {
+        request_id: string;
+        provider: string;
+        url: string;
+        headers: Record<string, string>;
+        body: string;
+        timeout_ms?: number;
+      };
     };
     ret: void;
   };
@@ -469,11 +485,11 @@ interface TauriCommands {
   claude_agent_run: {
     args: {
       request: {
-        request_id: string;
+        requestId: string;
         model: string;
-        system_prompt?: string;
+        systemPrompt?: string;
         messages: Array<{ role: string; content: string }>;
-        max_turns?: number;
+        maxTurns?: number;
         cwd?: string;
       };
     };
@@ -485,17 +501,17 @@ interface TauriCommands {
   codex_run: {
     args: {
       request: {
-        request_id: string;
+        requestId: string;
         model: string;
-        system_prompt?: string;
+        systemPrompt?: string;
         prompt: string;
-        api_key?: string;
+        apiKey?: string;
         cwd?: string;
-        reasoning_effort?: string;
-        sandbox_mode?: 'read-only' | 'workspace-write' | 'danger-full-access';
-        session_id?: string;
-        session_fingerprint?: string;
-        continuation_prompt?: string;
+        reasoningEffort?: string;
+        sandboxMode?: 'read-only' | 'workspace-write' | 'danger-full-access';
+        sessionId?: string;
+        sessionFingerprint?: string;
+        continuationPrompt?: string;
       };
     };
     ret: void;
@@ -856,6 +872,9 @@ interface TauriCommands {
     ret: KanbanTaskActivityContract[];
   };
 
+  // Database: Agent file history
+  file_history_save: { args: { filePath: string; content: string }; ret: string };
+
   // Database: Agent SDD
   db_sdd_upsert_session: { args: { sessionJson: string }; ret: void };
   db_sdd_get_session: { args: { id: string }; ret: string | null };
@@ -1008,7 +1027,7 @@ interface TauriCommands {
       currentVersion: string;
     } | null;
   };
-  updater_download: { args: { assetUrl: string; assetName: string }; ret: string };
+  updater_download: { args: { assetUrl: string; assetName: string; expectedSha256?: string | null }; ret: string };
   updater_install: { args: { installerPath: string }; ret: void };
 
   // Open tabs

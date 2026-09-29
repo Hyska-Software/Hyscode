@@ -208,6 +208,7 @@ pub struct PtyStopResult {
 }
 
 #[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct PtySnapshot {
     data: String,
     from_sequence: u64,
@@ -425,17 +426,20 @@ fn record_session_operation_failure(
     record_operation_failure(session, pty_id, operation, message)
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub async fn pty_spawn(
     shell: Option<String>,
     cwd: Option<String>,
     env: Option<HashMap<String, String>>,
     cols: Option<u16>,
     rows: Option<u16>,
-    _interactive: Option<bool>,
+    interactive: Option<bool>,
     app: AppHandle,
     state: State<'_, PtyState>,
 ) -> Result<String, String> {
+    // `interactive` is accepted for frontend API compatibility; PTY sessions
+    // are always interactive shells.
+    let _ = interactive;
     let cols = normalize_dimension(cols, DEFAULT_PTY_COLS);
     let rows = normalize_dimension(rows, DEFAULT_PTY_ROWS);
     let pair = native_pty_system()
@@ -848,7 +852,7 @@ pub(crate) fn register_pty_session(
     Ok(pty_id)
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub async fn pty_write(
     pty_id: String,
     data: String,
@@ -879,7 +883,7 @@ fn enqueue_write(
         .map_err(|_| format!("PTY session is not running: {pty_id}"))
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub async fn pty_resize(
     pty_id: String,
     cols: u16,
@@ -942,7 +946,7 @@ fn normalize_dimension(value: Option<u16>, fallback: u16) -> u16 {
     value.unwrap_or(fallback).clamp(1, MAX_PTY_DIMENSION)
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub async fn pty_exists(pty_id: String, state: State<'_, PtyState>) -> Result<bool, String> {
     let sessions = state
         .0
@@ -999,7 +1003,7 @@ fn snapshot_for_session(session: &PtySession, after_sequence: Option<u64>) -> Pt
     }
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub async fn pty_snapshot(
     pty_id: String,
     after_sequence: Option<u64>,
@@ -1019,18 +1023,19 @@ fn snapshot_is_truncated(requested: u64, first_available: u64) -> bool {
     first_available.saturating_sub(requested) > 1
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub async fn pty_interrupt(pty_id: String, state: State<'_, PtyState>) -> Result<(), String> {
     enqueue_write(&state.0, &pty_id, b"\x03")
 }
 
 #[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct PtyDiagnostics {
     conpty_source: String,
     conpty_path: Option<String>,
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub async fn pty_diagnostics() -> Result<PtyDiagnostics, String> {
     Ok(collect_pty_diagnostics())
 }
@@ -1168,7 +1173,7 @@ fn commit_stop(
     )
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub async fn pty_kill(
     pty_id: String,
     app: AppHandle,

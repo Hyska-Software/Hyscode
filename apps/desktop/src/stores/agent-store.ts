@@ -13,6 +13,22 @@ import type {
 } from '@hyscode/agent-harness';
 import type { MessageContent, TokenUsage } from '@hyscode/ai-providers';
 import type { ProviderErrorDetails } from '@hyscode/ai-providers';
+import { useExtensionUiStore } from './extension-ui-store';
+
+/** Result of a tab switch/close attempt. Blocked attempts carry a reason. */
+export type AgentTabActionResult =
+  | { ok: true }
+  | { ok: false; reason: 'streaming' | 'single-tab' | 'not-found' | 'already-active' };
+
+function notifyTabBlocked(reason: AgentTabActionResult & { ok: false }): void {
+  const message =
+    reason.reason === 'streaming'
+      ? 'Aguarde o streaming terminar para trocar ou fechar conversas.'
+      : reason.reason === 'single-tab'
+        ? 'Não é possível fechar a última conversa.'
+        : 'Conversa não encontrada.';
+  useExtensionUiStore.getState().showNotification('warning', message, 'Agent');
+}
 
 export type { TokenUsage };
 
@@ -365,10 +381,10 @@ export interface AgentState {
   tabStates: Record<string, PerTabState>;
   /** Open a new empty tab; returns the new tab id. */
   openNewTab: (mode?: AgentMode) => string;
-  /** Switch active tab (blocked while isStreaming). */
-  switchTab: (id: string) => void;
-  /** Close tab by id. Activates the nearest remaining tab. */
-  closeTab: (id: string) => void;
+  /** Switch active tab (blocked while isStreaming). Returns ok:false when blocked. */
+  switchTab: (id: string) => AgentTabActionResult;
+  /** Close tab by id. Activates the nearest remaining tab. Returns ok:false when blocked. */
+  closeTab: (id: string) => AgentTabActionResult;
   /** Update a tab's display title. */
   updateTabTitle: (id: string, title: string) => void;
   /** Load previously saved tabs into the store (called on app init). */
@@ -709,6 +725,15 @@ export const createAgentStore = () =>
 
     clearConversation: () =>
       set((state) => {
+        for (const img of state.attachedImages) {
+          if (img.previewUrl) {
+            try {
+              URL.revokeObjectURL(img.previewUrl);
+            } catch {
+              // Already revoked or invalid URL — ignore.
+            }
+          }
+        }
         state.messages = [];
         state.conversationId = null;
         state.pendingToolCalls = [];
@@ -1118,11 +1143,15 @@ export const createAgentStore = () =>
       return tabId;
     },
 
-    switchTab: (id) =>
+    switchTab: (id) => {
+      const { activeTabId, isStreaming } = useAgentStore.getState();
+      if (activeTabId === id) return { ok: false, reason: 'already-active' } as const;
+      // Block switch during streaming
+      if (isStreaming) {
+        notifyTabBlocked({ ok: false, reason: 'streaming' });
+        return { ok: false, reason: 'streaming' } as const;
+      }
       set((state) => {
-        if (state.activeTabId === id) return;
-        // Block switch during streaming
-        if (state.isStreaming) return;
         // Save current flat state to cache
         state.tabStates[state.activeTabId] = _extractTab(state);
         // Load target tab's cached state (or default)
@@ -1131,14 +1160,26 @@ export const createAgentStore = () =>
         state.activeTabId = id;
         // Clean up the new active tab from the cache (it's now in flat fields)
         delete state.tabStates[id];
-      }),
+      });
+      return { ok: true } as const;
+    },
 
-    closeTab: (id) =>
+    closeTab: (id) => {
+      const { openTabs, activeTabId, isStreaming } = useAgentStore.getState();
+      // Can't close last tab
+      if (openTabs.length <= 1) {
+        notifyTabBlocked({ ok: false, reason: 'single-tab' });
+        return { ok: false, reason: 'single-tab' } as const;
+      }
+      // The active turn owns the flat state until its terminal event arrives.
+      if (activeTabId === id && isStreaming) {
+        notifyTabBlocked({ ok: false, reason: 'streaming' });
+        return { ok: false, reason: 'streaming' } as const;
+      }
+      if (!openTabs.some((t) => t.id === id)) {
+        return { ok: false, reason: 'not-found' } as const;
+      }
       set((state) => {
-        // Can't close last tab
-        if (state.openTabs.length <= 1) return;
-        // The active turn owns the flat state until its terminal event arrives.
-        if (state.activeTabId === id && state.isStreaming) return;
         const idx = state.openTabs.findIndex((t) => t.id === id);
         if (idx === -1) return;
         state.openTabs.splice(idx, 1);
@@ -1151,7 +1192,9 @@ export const createAgentStore = () =>
           state.activeTabId = nextTab.id;
           delete state.tabStates[nextTab.id];
         }
-      }),
+      });
+      return { ok: true } as const;
+    },
 
     updateTabTitle: (id, title) =>
       set((state) => {

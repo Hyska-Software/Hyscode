@@ -36,7 +36,8 @@ function rowToMemory(row: MemoryRow): Memory {
   let tags: string[] = [];
   try {
     tags = JSON.parse(row.tags);
-  } catch {
+  } catch (e) {
+    console.warn('[memory-manager] failed to parse memory tags', e);
     tags = [];
   }
   return {
@@ -97,14 +98,48 @@ export class MemoryManager {
   }
 
   async list(query: MemoryQuery): Promise<Memory[]> {
+    const wantsMultiType = (query.types?.length ?? 0) > 1;
+    const needsPostFilter = wantsMultiType
+      || query.minRelevance !== undefined
+      || (query.tags?.length ?? 0) > 0
+      || (query.query?.trim()?.length ?? 0) > 0;
+    // db_list_memories only supports a single memory_type — over-fetch when we
+    // must filter in memory so the final page still honours limit/offset.
+    const fetchLimit = needsPostFilter
+      ? Math.min(Math.max((query.limit ?? 50) * 3, query.limit ?? 50), 200)
+      : (query.limit ?? 50);
     const rows = await this.invoke<MemoryRow[]>('db_list_memories', {
       projectId: query.projectId ?? null,
       memoryType: query.types && query.types.length === 1 ? query.types[0] : null,
       status: query.status ?? 'active',
-      limit: query.limit ?? 50,
-      offset: query.offset ?? 0,
+      limit: fetchLimit,
+      offset: needsPostFilter ? 0 : (query.offset ?? 0),
     });
-    return rows.map(rowToMemory);
+    let memories = rows.map(rowToMemory);
+    if (needsPostFilter) {
+      const typeSet = query.types?.length ? new Set(query.types) : null;
+      const tagSet = query.tags?.length ? new Set(query.tags.map((t) => t.toLowerCase())) : null;
+      const needle = query.query?.trim().toLowerCase() ?? '';
+      memories = memories.filter((m) => {
+        if (typeSet && !typeSet.has(m.type)) return false;
+        if (query.minRelevance !== undefined && (m.relevanceScore ?? 0) < query.minRelevance) {
+          return false;
+        }
+        if (tagSet) {
+          const mine = new Set(m.tags.map((t) => t.toLowerCase()));
+          if (![...tagSet].some((t) => mine.has(t))) return false;
+        }
+        if (needle) {
+          const hay = `${m.title} ${m.content} ${m.summary}`.toLowerCase();
+          if (!hay.includes(needle)) return false;
+        }
+        return true;
+      });
+      const offset = query.offset ?? 0;
+      const limit = query.limit ?? 50;
+      memories = memories.slice(offset, offset + limit);
+    }
+    return memories;
   }
 
   async search(query: MemoryQuery): Promise<Memory[]> {
@@ -190,12 +225,15 @@ export class MemoryManager {
         if (ftsMems.length >= 3) {
           // Track access for returned memories
           for (const m of ftsMems.slice(0, limit)) {
-            this.trackAccess(m.id).catch(() => {});
+            this.trackAccess(m.id).catch((e) => {
+              console.warn('[memory-manager] trackAccess failed', m.id, e);
+            });
           }
           return ftsMems.slice(0, limit);
         }
-      } catch {
+      } catch (e) {
         // FTS5 query might fail on bad syntax, fall through
+        console.warn('[memory-manager] FTS search failed, falling back to list', e);
       }
     }
 
@@ -207,7 +245,9 @@ export class MemoryManager {
       status: 'active',
     });
     for (const m of allMems) {
-      this.trackAccess(m.id).catch(() => {});
+      this.trackAccess(m.id).catch((e) => {
+        console.warn('[memory-manager] trackAccess failed', m.id, e);
+      });
     }
     return allMems;
   }
@@ -221,7 +261,8 @@ export class MemoryManager {
     let byType: Record<string, number> = {};
     try {
       byType = JSON.parse(stats.by_type);
-    } catch {
+    } catch (e) {
+      console.warn('[memory-manager] failed to parse memory stats', e);
       byType = {};
     }
     return { total: stats.total, byType, archived: stats.archived };

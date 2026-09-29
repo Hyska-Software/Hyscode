@@ -29,7 +29,7 @@ import { useUpdateStore } from './stores/update-store';
 import { useOnboardingStore } from './stores/onboarding-store';
 import { CloneRepositoryDialog } from './components/git/clone-repository-dialog';
 import { PublishRepositoryDialog } from './components/git/publish-repository-dialog';
-import { useEffect, useRef, useCallback } from 'react';
+import { useEffect, useRef, useCallback, useState } from 'react';
 import { pickFolder, pickFile } from './lib/tauri-dialog';
 import { initProviders } from './lib/init-providers';
 import { HarnessBridge } from './lib/harness-bridge';
@@ -193,7 +193,9 @@ function IDE() {
   useEffect(() => {
     const persistedProjectPath = useProjectStore.getState().rootPath;
     if (persistedProjectPath && !useFileStore.getState().rootPath) {
-      hydrateProjectWorkspace(persistedProjectPath).catch(console.error);
+      hydrateProjectWorkspace(persistedProjectPath).catch((err: unknown) => {
+        console.error('[App] Workspace hydration failed:', err);
+      });
     }
   }, []);
 
@@ -328,10 +330,18 @@ export function App() {
     await closeProjectWorkspace();
   }, []);
 
+  const [bootError, setBootError] = useState<string | null>(null);
+
+  const reportBootError = useCallback((scope: string, err: unknown) => {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error(`[App] ${scope} failed:`, err);
+    setBootError((prev) => prev ?? `${scope} failed: ${message}`);
+  }, []);
+
   // Initialize AI providers on app startup (once)
   useEffect(() => {
-    initProviders().catch(console.error);
-  }, []);
+    initProviders().catch((err: unknown) => reportBootError('Provider initialization', err));
+  }, [reportBootError]);
 
   // Keep the provider, agent, approval, MCP, skills, and retry settings in a
   // shared JSON contract consumed by the standalone TypeScript TUI runtime.
@@ -348,8 +358,11 @@ export function App() {
   // Load extensions on startup (once) so contributions + activation run
   // regardless of whether the user ever opens the Extensions panel
   useEffect(() => {
-    useExtensionStore.getState().loadExtensions().catch(console.error);
-  }, []);
+    useExtensionStore
+      .getState()
+      .loadExtensions()
+      .catch((err: unknown) => reportBootError('Extension loading', err));
+  }, [reportBootError]);
 
   // ── Register built-in IDE commands ───────────────────────────────────────
   useEffect(() => {
@@ -1000,12 +1013,22 @@ export function App() {
   useEffect(() => {
     let waitingForSecond: string | null = null;
     let timer: ReturnType<typeof setTimeout> | null = null;
+    let hintTimer: ReturnType<typeof setTimeout> | null = null;
 
     const clearChord = () => {
       waitingForSecond = null;
+      try {
+        if (document.body.title === 'Ctrl+K, depois K/O/T/R') document.body.removeAttribute('title');
+      } catch {
+        // DOM unavailable (tests) — ignore.
+      }
       if (timer) {
         clearTimeout(timer);
         timer = null;
+      }
+      if (hintTimer) {
+        clearTimeout(hintTimer);
+        hintTimer = null;
       }
     };
 
@@ -1017,6 +1040,20 @@ export function App() {
         e.preventDefault();
         waitingForSecond = 'k';
         timer = setTimeout(clearChord, 1000);
+        // Hint the pending chord: title tooltip on body + status notification.
+        try {
+          document.body.title = 'Ctrl+K, depois K/O/T/R';
+          const { useExtensionUiStore } = await import('./stores/extension-ui-store');
+          hintTimer = setTimeout(() => {
+            if (waitingForSecond === 'k') {
+              useExtensionUiStore
+                .getState()
+                .showNotification('info', 'Ctrl+K — then press K/O/T/R', 'Keyboard');
+            }
+          }, 400);
+        } catch {
+          // Hint is best-effort only.
+        }
         return;
       }
 
@@ -1060,12 +1097,31 @@ export function App() {
     };
 
     window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
+    return () => {
+      clearChord();
+      window.removeEventListener('keydown', handler);
+    };
   }, []);
 
   return (
     <TooltipProvider>
       {!hasCompletedOnboarding && <OnboardingWizard />}
+      {bootError && (
+        <div
+          role="alert"
+          className="mx-2 mt-2 flex items-start gap-2 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-[11px] text-destructive"
+        >
+          <span className="min-w-0 flex-1">Startup issue: {bootError}</span>
+          <button
+            type="button"
+            aria-label="Dismiss startup error"
+            className="shrink-0 underline underline-offset-2 hover:opacity-80"
+            onClick={() => setBootError(null)}
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
       {!rootPath ? <WelcomePage /> : <IDE />}
       <StartupNotification />
       <CloneRepositoryDialog open={cloneDialogOpen} onClose={closeCloneDialog} />

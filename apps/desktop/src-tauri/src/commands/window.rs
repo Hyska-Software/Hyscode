@@ -31,6 +31,12 @@ pub fn start_resize(window: tauri::Window, edge: String) -> Result<(), String> {
 /// the command itself performs no gating.
 #[tauri::command]
 pub fn open_devtools(app: tauri::AppHandle) -> Result<(), String> {
+    // SECURITY: the `devtools` Tauri feature is compiled in, so enforce the
+    // debug-only gate here — release builds always refuse, even if the
+    // frontend setting or an extension invokes this command.
+    if !cfg!(debug_assertions) {
+        return Err("DevTools are only available in debug builds".to_string());
+    }
     let window = app
         .get_webview_window("main")
         .ok_or_else(|| "main window not found".to_string())?;

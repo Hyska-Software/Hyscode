@@ -74,17 +74,17 @@ describe('agent interaction limit settings', () => {
         },
       },
       3,
-    ) as Record<string, any>;
+    ) as Record<string, unknown>;
 
     expect(migrated.activeProviderId).toBeNull();
     expect(migrated.activeModelId).toBeNull();
     expect(migrated.inlineCompletionProviderId).toBeNull();
     expect(migrated.inlineCompletionModelId).toBeNull();
-    expect(migrated.enabledModels['claude-agent']).toBeUndefined();
-    expect(migrated.enabledModels.openai).toEqual(['gpt-5.5']);
+    expect((migrated.enabledModels as Record<string, unknown>)['claude-agent']).toBeUndefined();
+    expect((migrated.enabledModels as Record<string, unknown>).openai).toEqual(['gpt-5.5']);
     expect(migrated.customModels).toEqual([]);
-    expect(migrated.thinkingSettings['claude-agent::claude-sonnet-5']).toBeUndefined();
-    expect(migrated.thinkingSettings['openai::gpt-5.5']).toEqual({ enabled: false });
+    expect((migrated.thinkingSettings as Record<string, unknown>)['claude-agent::claude-sonnet-5']).toBeUndefined();
+    expect((migrated.thinkingSettings as Record<string, unknown>)['openai::gpt-5.5']).toEqual({ enabled: false });
   });
 
   it('keeps other active providers when migrating', () => {

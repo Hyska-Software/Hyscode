@@ -41,7 +41,7 @@ describe('RuleLoader', () => {
     ]);
   });
 
-  it('merges workspace rules over global rules by name', async () => {
+  it('keeps global and workspace rules with the same name as separate scopes', async () => {
     const config = loaderConfig({
       pathExists: vi.fn(async () => true),
       readDir: vi.fn(async (path) =>
@@ -54,10 +54,12 @@ describe('RuleLoader', () => {
     const loader = new RuleLoader(config);
     const rules = await loader.loadAll();
 
-    expect(rules).toHaveLength(2);
-    const style = rules.find((r) => r.name === 'style');
-    expect(style?.scope).toBe('workspace');
-    expect(style?.filePath).toBe('C:/workspace/.hyscode/rules/style.md');
+    expect(rules).toHaveLength(3);
+    const scopes = rules.filter((r) => r.name === 'style').map((r) => r.scope).sort();
+    expect(scopes).toEqual(['global', 'workspace']);
+    expect(rules.find((r) => r.name === 'style' && r.scope === 'workspace')?.filePath).toBe(
+      'C:/workspace/.hyscode/rules/style.md',
+    );
   });
 
   it('skips missing directories and unreadable files', async () => {

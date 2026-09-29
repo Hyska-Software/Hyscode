@@ -204,7 +204,7 @@ export class TerminalCommandRunner {
     };
     let watch: CommandWatch | null = null;
     let abortHandler: (() => void) | null = null;
-    let commandNotified = false;
+    let _commandNotified = false;
     let operation: TerminalFailureOperation = 'acquire';
 
     const startStop = (): Promise<TerminalStopResult> => {
@@ -670,7 +670,7 @@ export class TerminalCommandRunner {
     cleanup.runtimeFailure = cleanup.runtimeFailure || (watch?.commandFailure ?? null) !== null;
     await cleanupRun(adapter, cleanup, state, ctx, background, abortHandler);
     if (cleanup.binding && state.result) {
-      commandNotified = finalizeRunOutcome(
+      _commandNotified = finalizeRunOutcome(
         ctx,
         cleanup.binding,
         command,
@@ -679,7 +679,7 @@ export class TerminalCommandRunner {
         watch,
         cleanup,
         state,
-        commandNotified,
+        _commandNotified,
       );
     }
     return state.result ?? {

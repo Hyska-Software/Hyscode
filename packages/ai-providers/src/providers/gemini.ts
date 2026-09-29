@@ -66,6 +66,7 @@ interface GeminiFunctionDeclaration {
 }
 
 function toGeminiContents(messages: Message[]): GeminiContent[] {
+  if (!messages.length) throw new Error('model required: messages must not be empty');
   const result: GeminiContent[] = [];
 
   // Build a map from tool call ID → function name so that functionResponse
@@ -91,7 +92,14 @@ function toGeminiContents(messages: Message[]): GeminiContent[] {
         case 'text':
           parts.push({ text: c.text });
           break;
+        case 'thinking':
+          // Preserve thinking as text so replay history doesn't lose it.
+          parts.push({ text: `[thinking]${c.thinking}` });
+          break;
         case 'image':
+          if (c.base64.length > 20 * 1024 * 1024) {
+            throw new Error('image too large: base64 payload exceeds 20MB');
+          }
           parts.push({ inlineData: { mimeType: c.mediaType, data: c.base64 } });
           break;
         case 'tool_call':
@@ -186,7 +194,7 @@ function* parseGeminiResponse(data: string): Iterable<StreamChunk> {
       }
       if (part.functionCall) {
         hasFunctionCalls = true;
-        const callId = `gemini_${part.functionCall.name}_${Date.now()}`;
+        const callId = `gemini_${part.functionCall.name}_${crypto.randomUUID()}`;
         yield { type: 'tool_call_start', id: callId, name: part.functionCall.name };
         yield {
           type: 'tool_call_delta',
@@ -336,11 +344,22 @@ export class GeminiProvider implements AIProvider {
     return this.apiKey.length > 0;
   }
 
+  /** Zero the in-memory API key (secret hygiene on reinit/dispose). */
+  clear(): void {
+    this.apiKey = '';
+  }
+
+  dispose(): void {
+    this.clear();
+  }
+
   async listModels(): Promise<AIModel[]> {
     return this.models;
   }
 
   async *chat(params: ChatParams): AsyncIterable<StreamChunk> {
+    if (!params.model) throw new Error('model required');
+    if (!params.messages.length) throw new Error('model required: messages must not be empty');
     const contents = toGeminiContents(params.messages);
 
     const body: Record<string, unknown> = { contents };
@@ -391,7 +410,7 @@ export class GeminiProvider implements AIProvider {
         `Gemini API error: ${response.status} ${errorBody}`,
         'gemini',
         response.status,
-        [429, 500, 502, 503].includes(response.status),
+        [429, 500, 502, 503, 529].includes(response.status),
         retryAfterMs,
       );
     }
@@ -405,7 +424,10 @@ export class GeminiProvider implements AIProvider {
 
     try {
       while (true) {
-        if (params.signal?.aborted) break;
+        if (params.signal?.aborted) {
+          await reader.cancel().catch(() => undefined);
+          break;
+        }
         const { done, value } = await reader.read();
         if (done) break;
 
@@ -426,7 +448,11 @@ export class GeminiProvider implements AIProvider {
         }
       }
     } finally {
-      reader.releaseLock();
+      try {
+        await reader.cancel().catch(() => undefined);
+      } finally {
+        reader.releaseLock();
+      }
     }
   }
 }

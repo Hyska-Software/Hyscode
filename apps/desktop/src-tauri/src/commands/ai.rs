@@ -6,6 +6,7 @@ use super::github_oauth::ensure_copilot_token;
 use super::keychain::KeychainState;
 
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct AiStreamRequest {
     /// Unique request ID for correlating events
     pub request_id: String,
@@ -22,6 +23,7 @@ pub struct AiStreamRequest {
 }
 
 #[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct AiStreamChunk {
     pub request_id: String,
     pub data: String,
@@ -100,7 +102,7 @@ fn get_auth_header(provider: &str, api_key: &str, url: &str) -> (String, String)
     }
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub async fn ai_stream_request(
     window: Window,
     keychain: State<'_, KeychainState>,
@@ -362,7 +364,7 @@ pub async fn ai_stream_request(
 
 /// Cancel an in-progress streaming request.
 /// Currently this just signals — actual cancellation depends on the reqwest client.
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub async fn ai_stream_cancel(
     window: Window,
     active_requests: State<'_, AiRequestState>,

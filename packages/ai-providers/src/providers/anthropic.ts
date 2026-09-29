@@ -34,6 +34,7 @@ interface AnthropicTool {
 
 function toAnthropicMessages(messages: Message[]): AnthropicMessage[] {
   const result: AnthropicMessage[] = [];
+  if (!messages.length) throw new Error('model required: messages must not be empty');
 
   for (const msg of messages) {
     if (msg.role === 'system') continue; // system prompt handled separately
@@ -46,7 +47,14 @@ function toAnthropicMessages(messages: Message[]): AnthropicMessage[] {
         case 'text':
           content.push({ type: 'text', text: c.text });
           break;
+        case 'thinking':
+          // Preserve thinking as text so replay/multi-turn history doesn't lose it.
+          content.push({ type: 'text', text: `[thinking]${c.thinking}` });
+          break;
         case 'image':
+          if (c.base64.length > 20 * 1024 * 1024) {
+            throw new Error('image too large: base64 payload exceeds 20MB');
+          }
           content.push({
             type: 'image',
             source: { type: 'base64', media_type: c.mediaType, data: c.base64 },
@@ -376,11 +384,22 @@ export class AnthropicProvider implements AIProvider {
     return this.apiKey.length > 0;
   }
 
+  /** Zero the in-memory API key (secret hygiene on reinit/dispose). */
+  clear(): void {
+    this.apiKey = '';
+  }
+
+  dispose(): void {
+    this.clear();
+  }
+
   async listModels(): Promise<AIModel[]> {
     return this.models;
   }
 
   async *chat(params: ChatParams): AsyncIterable<StreamChunk> {
+    if (!params.model) throw new Error('model required');
+    if (!params.messages.length) throw new Error('model required: messages must not be empty');
     const messages = toAnthropicMessages(params.messages);
 
     const body: Record<string, unknown> = {
@@ -453,7 +472,6 @@ export class AnthropicProvider implements AIProvider {
         {
           'Content-Type': 'application/json',
           'x-api-key': this.apiKey,
-          Authorization: `Bearer ${this.apiKey}`,
           'anthropic-version': '2023-06-01',
           'anthropic-beta': 'prompt-caching-2024-07-31',
         },

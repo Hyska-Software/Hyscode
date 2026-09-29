@@ -35,7 +35,12 @@ export function opencodeUserAgent(): string {
 }
 
 export function isOpencodeUrl(url: string): boolean {
-  return url.includes('opencode.ai');
+  try {
+    const hostname = new URL(url).hostname.toLowerCase();
+    return hostname === 'opencode.ai' || hostname.endsWith('.opencode.ai');
+  } catch {
+    return false;
+  }
 }
 
 /**

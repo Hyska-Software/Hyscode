@@ -321,7 +321,7 @@ export function getAllLanguageIds(): string[] {
  * We register additional languages with Monarch tokenizers.
  */
 export function disableNativeTypeScriptValidation(monaco: MonacoInstance) {
-  const tsLang = (monaco.languages as any).typescript;
+  const tsLang = (monaco.languages as unknown as Record<string, { typescriptDefaults?: { setDiagnosticsOptions(o: Record<string, unknown>): void; getDiagnosticsOptions(): Record<string, unknown> }; javascriptDefaults?: { setDiagnosticsOptions(o: Record<string, unknown>): void; getDiagnosticsOptions(): Record<string, unknown> } }>).typescript;
   if (!tsLang) return;
   tsLang.typescriptDefaults?.setDiagnosticsOptions({
     ...tsLang.typescriptDefaults.getDiagnosticsOptions(),
@@ -345,7 +345,7 @@ export function disableNativeTypeScriptValidation(monaco: MonacoInstance) {
 }
 
 export function enableNativeTypeScriptValidation(monaco: MonacoInstance) {
-  const tsLang = (monaco.languages as any).typescript;
+  const tsLang = (monaco.languages as unknown as Record<string, { typescriptDefaults?: { setDiagnosticsOptions(o: Record<string, unknown>): void; getDiagnosticsOptions(): Record<string, unknown> }; javascriptDefaults?: { setDiagnosticsOptions(o: Record<string, unknown>): void; getDiagnosticsOptions(): Record<string, unknown> } }>).typescript;
   if (!tsLang) return;
   tsLang.typescriptDefaults?.setDiagnosticsOptions({
     ...tsLang.typescriptDefaults.getDiagnosticsOptions(),

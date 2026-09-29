@@ -315,6 +315,10 @@ export interface RetryConfig {
   baseDelayMs: number;
   maxDelayMs: number;
   retryableStatuses: number[];
+  /** Overall timeout for a single attempt (default 120s). */
+  requestTimeoutMs?: number;
+  /** Max idle time while streaming before aborting (default 90s). */
+  streamIdleTimeoutMs?: number;
   onRetry?: (attempt: number, error: unknown, delayMs: number) => void;
   onRetryStart?: (attempt: number) => void;
   signal?: AbortSignal;

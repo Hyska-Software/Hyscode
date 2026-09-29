@@ -74,9 +74,13 @@ export class OpenCodeGoProvider extends OpenAIProvider {
     return this.models;
   }
 
+  override dispose(): void {
+    super.dispose();
+    this.anthropicDelegate.dispose();
+  }
+
   override async *chat(params: ChatParams): AsyncIterable<StreamChunk> {
-    switch (this.wireFormats.get(params.model) ?? 'chat-completions') {
-      case 'responses':
+    switch (this.wireFormats.get(params.model) ?? 'chat-completions') {      case 'responses':
         // Route GPT/Grok/Muse Spark models through the OpenAI Responses API
         yield* chatResponsesAPI(params, {
           providerId: this.id,

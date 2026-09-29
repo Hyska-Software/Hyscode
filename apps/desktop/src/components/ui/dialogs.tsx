@@ -162,7 +162,16 @@ export function InputDialog() {
   return createPortal(
     <div className="fixed inset-0 z-[9999] flex items-start justify-center pt-[20vh]">
       {/* Backdrop */}
-      <div className="absolute inset-0 bg-black/50" onClick={handleCancel} />
+      <div
+        className="absolute inset-0 bg-black/50"
+        role="button"
+        tabIndex={0}
+        aria-label="Close dialog"
+        onClick={handleCancel}
+        onKeyDown={(e) => {
+          if (e.key === 'Escape' || e.key === 'Enter') handleCancel();
+        }}
+      />
 
       {/* Dialog */}
       <div className="relative z-10 w-full max-w-sm rounded-xl border border-border bg-card p-4 shadow-lg">
@@ -239,7 +248,16 @@ export function ConfirmDialog() {
       onKeyDown={handleKeyDown}
     >
       {/* Backdrop */}
-      <div className="absolute inset-0 bg-black/50" onClick={handleCancel} />
+      <div
+        className="absolute inset-0 bg-black/50"
+        role="button"
+        tabIndex={0}
+        aria-label="Close confirm dialog"
+        onClick={handleCancel}
+        onKeyDown={(e) => {
+          if (e.key === 'Escape' || e.key === 'Enter') handleCancel();
+        }}
+      />
 
       {/* Dialog */}
       <div className="relative z-10 w-full max-w-sm rounded-xl border border-border bg-card p-4 shadow-lg">
@@ -323,7 +341,16 @@ export function DeleteDialog() {
       onKeyDown={handleKeyDown}
     >
       {/* Backdrop */}
-      <div className="absolute inset-0 bg-black/50" onClick={handleCancel} />
+      <div
+        className="absolute inset-0 bg-black/50"
+        role="button"
+        tabIndex={0}
+        aria-label="Close delete dialog"
+        onClick={handleCancel}
+        onKeyDown={(e) => {
+          if (e.key === 'Escape' || e.key === 'Enter') handleCancel();
+        }}
+      />
 
       {/* Dialog */}
       <div className="relative z-10 w-full max-w-sm rounded-xl border border-border bg-card p-4 shadow-lg">

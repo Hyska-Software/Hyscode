@@ -497,7 +497,7 @@ describe('shared harness bridge protocol', () => {
         method: 'set_config',
         params: {
           providerId: 'openai',
-          modelId: 'gpt-5.4-mini',
+          modelId: 'gpt-5.6-sol',
           thinking: { enabled: true, level: 'high' },
         },
       }));
@@ -506,7 +506,7 @@ describe('shared harness bridge protocol', () => {
       expect(
         (JSON.parse(await readFile(path.join(directory, 'settings.json'), 'utf8')) as {
           thinkingSettings: Record<string, unknown>;
-        }).thinkingSettings['openai::gpt-5.4-mini'],
+        }).thinkingSettings['openai::gpt-5.6-sol'],
       ).toEqual({ enabled: true, level: 'high' });
 
       const rejected = await bridge.handle({
@@ -514,7 +514,7 @@ describe('shared harness bridge protocol', () => {
         method: 'set_config',
         params: {
           providerId: 'openai',
-          modelId: 'gpt-5.4-mini',
+          modelId: 'gpt-5.6-sol',
           thinking: { enabled: true, level: 'adaptive' },
         },
       });
@@ -525,7 +525,7 @@ describe('shared harness bridge protocol', () => {
         method: 'set_config',
         params: {
           providerId: 'openai',
-          modelId: 'gpt-5.4-mini',
+          modelId: 'gpt-5.6-sol',
           thinking: { enabled: false, level: 'high' },
         },
       }));
@@ -533,7 +533,7 @@ describe('shared harness bridge protocol', () => {
       expect(
         (JSON.parse(await readFile(path.join(directory, 'settings.json'), 'utf8')) as {
           thinkingSettings: Record<string, unknown>;
-        }).thinkingSettings['openai::gpt-5.4-mini'],
+        }).thinkingSettings['openai::gpt-5.6-sol'],
       ).toEqual({ enabled: false, level: 'high' });
 
       const turnPromise = bridge.handle({
@@ -561,9 +561,15 @@ describe('shared harness bridge protocol', () => {
       expect(await readFile(path.join(directory, 'fixture-output.txt'), 'utf8')).toBe('updated by fixture');
       expect(fixture.requests.length).toBeGreaterThanOrEqual(2);
       const firstRequestMessages = Array.isArray(fixture.requests[0]?.messages)
-        ? fixture.requests[0].messages as Array<{ role?: string; content?: string }>
+        ? fixture.requests[0].messages as Array<{ role?: string; content?: string | Array<{ type?: string; text?: string }> }>
         : [];
-      expect(firstRequestMessages.find((message) => message.role === 'system')?.content).toContain(
+      const systemContent = firstRequestMessages.find((message) => message.role === 'system')?.content;
+      const systemText = typeof systemContent === 'string'
+        ? systemContent
+        : Array.isArray(systemContent)
+          ? systemContent.map((part) => part.text ?? '').join('')
+          : '';
+      expect(systemText).toContain(
         'Always verify the fixture output.',
       );
       const toolResultRequest = fixture.requests.find((request) => (
@@ -612,7 +618,7 @@ describe('shared harness bridge protocol', () => {
       await bridge.handle({
         id: 'configure-cache',
         method: 'set_config',
-        params: { providerId: 'openai', modelId: 'gpt-5.4-mini', approvalMode: 'yolo' },
+        params: { providerId: 'openai', modelId: 'gpt-5.6-sol', approvalMode: 'yolo' },
       });
 
       const outcomes: TurnOutcome[] = [];
@@ -681,7 +687,7 @@ describe('shared harness bridge protocol', () => {
       await bridge.handle({
         id: 'config',
         method: 'set_config',
-        params: { providerId: 'openai', modelId: 'gpt-5.4-mini', approvalMode: 'yolo' },
+        params: { providerId: 'openai', modelId: 'gpt-5.6-sol', approvalMode: 'yolo' },
       });
 
       const turnPromise = bridge.handle({
@@ -793,7 +799,7 @@ describe('shared harness bridge protocol', () => {
       await bridge.handle({
         id: 'config',
         method: 'set_config',
-        params: { providerId: 'openai', modelId: 'gpt-5.4-mini', approvalMode: 'yolo' },
+        params: { providerId: 'openai', modelId: 'gpt-5.6-sol', approvalMode: 'yolo' },
       });
 
       const turnPromise = bridge.handle({
@@ -904,7 +910,7 @@ describe('shared harness bridge protocol', () => {
       await bridge.handle({
         id: 'config',
         method: 'set_config',
-        params: { providerId: 'openai', modelId: 'gpt-5.4-mini', approvalMode: 'yolo' },
+        params: { providerId: 'openai', modelId: 'gpt-5.6-sol', approvalMode: 'yolo' },
       });
 
       const turn = successfulResult<{ status: string; response: string }>(await bridge.handle({
@@ -968,7 +974,7 @@ describe('shared harness bridge protocol', () => {
       await bridge.handle({
         id: 'config',
         method: 'set_config',
-        params: { providerId: 'openai', modelId: 'gpt-5.4-mini' },
+        params: { providerId: 'openai', modelId: 'gpt-5.6-sol' },
       });
 
       const turnPromise = bridge.handle({

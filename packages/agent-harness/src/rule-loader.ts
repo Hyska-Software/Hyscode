@@ -155,23 +155,27 @@ export class RuleLoader {
             content,
             enabled: true,
           });
-        } catch {
+        } catch (e) {
           // Managed rule files remain best-effort for backward compatibility.
+          console.warn('[rule-loader] skipping unreadable rule file', entry.name, e);
         }
       }
 
       return rules;
-    } catch {
+    } catch (e) {
+      console.warn('[rule-loader] loadFromDir failed', dirPath, e);
       return [];
     }
   }
 
   private mergeRules(global: Rule[], workspace: Rule[]): Rule[] {
-    const byName = new Map<string, Rule>();
+    // Key by scope:name so a workspace rule never clobbers a global rule
+    // that happens to share the same file name (and vice versa).
+    const byScopeAndName = new Map<string, Rule>();
 
-    for (const rule of global) byName.set(rule.name, rule);
-    for (const rule of workspace) byName.set(rule.name, rule);
+    for (const rule of global) byScopeAndName.set(`${rule.scope}:${rule.name}`, rule);
+    for (const rule of workspace) byScopeAndName.set(`${rule.scope}:${rule.name}`, rule);
 
-    return Array.from(byName.values());
+    return Array.from(byScopeAndName.values());
   }
 }

@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import { Search, X, FileText, Loader2 } from 'lucide-react';
 import { tauriFs, type SearchResult } from '../../../lib/tauri-fs';
 import { useFileStore, useEditorStore } from '../../../stores';
@@ -10,26 +10,43 @@ export function SearchView() {
   const [results, setResults] = useState<SearchResult[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const [hasSearched, setHasSearched] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const generationRef = useRef(0);
+
+  useEffect(() => {
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+      // Invalidate any in-flight search so a late resolve cannot clobber new state.
+      generationRef.current += 1;
+    };
+  }, []);
 
   const performSearch = useCallback(
     async (searchQuery: string) => {
+      const gen = ++generationRef.current;
       if (!rootPath || !searchQuery.trim()) {
         setResults([]);
         setHasSearched(false);
+        setError(null);
+        setIsSearching(false);
         return;
       }
 
       setIsSearching(true);
       setHasSearched(true);
+      setError(null);
 
       try {
         const res = await tauriFs.searchFiles(rootPath, searchQuery.trim(), 100);
+        if (gen !== generationRef.current) return;
         setResults(res);
       } catch {
+        if (gen !== generationRef.current) return;
         setResults([]);
+        setError('Busca falhou');
       } finally {
-        setIsSearching(false);
+        if (gen === generationRef.current) setIsSearching(false);
       }
     },
     [rootPath],
@@ -45,6 +62,8 @@ export function SearchView() {
     setQuery('');
     setResults([]);
     setHasSearched(false);
+    setError(null);
+    generationRef.current += 1;
   };
 
   const handleResultClick = (result: SearchResult) => {
@@ -94,7 +113,11 @@ export function SearchView() {
           autoFocus
         />
         {query && (
-          <button onClick={handleClear} className="text-muted-foreground hover:text-foreground">
+          <button
+            onClick={handleClear}
+            aria-label="Limpar busca"
+            className="text-muted-foreground hover:text-foreground"
+          >
             <X className="h-3 w-3" />
           </button>
         )}
@@ -102,6 +125,9 @@ export function SearchView() {
 
       {/* Results */}
       <div className="flex-1 overflow-auto">
+        <div aria-live="polite" className="sr-only">
+          {isSearching ? 'Searching...' : error ?? (hasSearched ? `${results.length} results` : '')}
+        </div>
         {isSearching && (
           <div className="flex items-center gap-2 px-3 py-4 text-muted-foreground">
             <Loader2 className="h-3 w-3 animate-spin" />
@@ -109,13 +135,20 @@ export function SearchView() {
           </div>
         )}
 
-        {!isSearching && hasSearched && results.length === 0 && (
+        {error && !isSearching && (
+          <div role="alert" className="px-3 py-4 text-center text-[11px] text-destructive">
+            {error}
+          </div>
+        )}
+
+        {!isSearching && !error && hasSearched && results.length === 0 && (
           <div className="px-3 py-4 text-center text-[11px] text-muted-foreground">
             No results found
           </div>
         )}
 
         {!isSearching &&
+          !error &&
           Object.entries(grouped).map(([filePath, fileResults]) => {
             const fileName = filePath.split(/[\\/]/).pop() ?? filePath;
             const relativePath = rootPath

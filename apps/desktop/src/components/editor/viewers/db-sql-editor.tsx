@@ -50,8 +50,8 @@ export function DbSqlEditor() {
       }
 
       addToQueryHistory(trimmed);
-    } catch (err: any) {
-      setError(err.message ?? 'Query failed');
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Query failed');
       setQueryResult(null);
       setQueryExecuteResult(null);
     } finally {

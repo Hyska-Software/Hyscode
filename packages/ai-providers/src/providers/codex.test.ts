@@ -105,8 +105,9 @@ describe('CodexProvider chat', () => {
       ['plan', 'workspace-write'],
       ['build', 'danger-full-access'],
       ['debug', 'danger-full-access'],
-      [undefined, 'danger-full-access'],
-      ['unknown-mode', 'danger-full-access'],
+      // Unknown/unset modes default to the least privilege (read-only).
+      [undefined, 'read-only'],
+      ['unknown-mode', 'read-only'],
     ];
 
     for (const [mode, expected] of cases) {

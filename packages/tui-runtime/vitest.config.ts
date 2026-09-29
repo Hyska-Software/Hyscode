@@ -18,4 +18,7 @@ export default defineConfig({
       '@hyscode/skills': sibling('skills'),
     },
   },
+  test: {
+    exclude: ['**/.kilo/**', '**/.hyscode/**', '**/node_modules/**', '**/dist/**'],
+  },
 });

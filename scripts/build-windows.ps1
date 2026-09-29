@@ -1,7 +1,11 @@
 #!/usr/bin/env pwsh
 # ============================================================================
-# HysCode Production Build Script — Windows
+# HysCode Production Build Script — Windows (local full-bundle path)
 # Generates: NSIS installer (.exe) + Inno Setup installer + MSI
+# NOTE: CI (release.yml JOB 2) is Inno-only: it builds the Tauri binary with
+# --no-bundle and then runs Inno Setup. NSIS + MSI bundles are produced only
+# by this local script (full `tauri build`, no --no-bundle).
+# Uses npm ci / npm run (npm workspaces, no pnpm).
 # ============================================================================
 
 param(
@@ -44,10 +48,10 @@ if (-not (Test-Command "rustc")) {
 }
 Write-Host "  ✓ Rust $(rustc --version)" -ForegroundColor Green
 
-if (-not (Test-Command "pnpm")) {
-    Write-Error "pnpm is not installed. Install with: npm install -g pnpm"
+if (-not (Test-Command "npm")) {
+    Write-Error "npm is not installed. Install Node.js 18+ from https://nodejs.org"
 }
-Write-Host "  ✓ pnpm $(pnpm --version)" -ForegroundColor Green
+Write-Host "  ✓ npm $(npm --version)" -ForegroundColor Green
 
 if (-not (Test-Command "bun")) {
     Write-Host "  ⚠ bun not found in PATH. Sidecar binaries (claude-agent, codex) will NOT be built." -ForegroundColor Yellow
@@ -61,10 +65,10 @@ if (-not (Test-Command "cargo")) {
 }
 Write-Host "  ✓ Cargo $(cargo --version)" -ForegroundColor Green
 
-$tauriCli = pnpm tauri --version 2>$null
+$tauriCli = npm run tauri -- --version 2>$null
 if ($LASTEXITCODE -ne 0) {
     Write-Host "  ⚠ Installing @tauri-apps/cli..." -ForegroundColor Yellow
-    pnpm add -Dw @tauri-apps/cli
+    npm install -D @tauri-apps/cli
 }
 Write-Host "  ✓ Tauri CLI ready" -ForegroundColor Green
 
@@ -72,9 +76,9 @@ Write-Host "  ✓ Tauri CLI ready" -ForegroundColor Green
 Write-Host ""
 Write-Host "[2/5] Installing dependencies..." -ForegroundColor Yellow
 Push-Location $ROOT
-pnpm install --frozen-lockfile
+npm ci
 if ($LASTEXITCODE -ne 0) {
-    pnpm install
+    npm install
 }
 Pop-Location
 Write-Host "  ✓ Dependencies installed" -ForegroundColor Green
@@ -83,7 +87,7 @@ Write-Host "  ✓ Dependencies installed" -ForegroundColor Green
 Write-Host ""
 Write-Host "[3/5] Building frontend..." -ForegroundColor Yellow
 Push-Location $ROOT
-pnpm build
+npm run build
 Pop-Location
 Write-Host "  ✓ Frontend built" -ForegroundColor Green
 
@@ -110,9 +114,9 @@ if (-not $InnoOnly) {
     $env:TAURI_SIGNING_PRIVATE_KEY = ""
     
     if ($Debug) {
-        pnpm tauri build --target $Target -- --verbose
+        npm run tauri -- build --target $Target -- --verbose
     } else {
-        pnpm tauri build --target $Target
+        npm run tauri -- build --target $Target
     }
     
     if ($LASTEXITCODE -ne 0) {

@@ -53,11 +53,10 @@ export function DbDataGrid() {
           setTableData(data.rows, data.total);
           clearPendingChanges();
         }
-      } catch (err: any) {
+      } catch (err: unknown) {
         console.error('[DbDataGrid] Failed to load data:', err);
         if (!cancelled) {
-          const msg = err?.message || err?.toString?.() || 'Failed to load data';
-          setError(msg);
+          setError(err instanceof Error ? err.message : 'Failed to load data');
         }
       } finally {
         if (!cancelled) {
@@ -114,9 +113,9 @@ export function DbDataGrid() {
         }
 
         await updateCell(conn, selectedTable, change.column, valueToSave, clause);
-      } catch (err: any) {
+      } catch (err: unknown) {
         console.error('[DbDataGrid] Failed to save cell:', err);
-        failed.push(`${change.column}: ${err.message}`);
+        failed.push(`${change.column}: ${err instanceof Error ? err.message : String(err)}`);
       }
     }
 
@@ -142,8 +141,8 @@ export function DbDataGrid() {
       const data = await getTableData(conn, selectedTable, page, pageSize);
       setTableData(data.rows, data.total);
       clearPendingChanges();
-    } catch (err: any) {
-      setError(err.message ?? 'Failed to reload data');
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Failed to reload data');
     } finally {
       setLoading(false);
     }

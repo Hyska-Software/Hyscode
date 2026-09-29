@@ -265,8 +265,11 @@ export function GitView() {
     try {
       await fn();
       setOpStatus({ type: 'success', msg: `${label} completed` });
-    } catch (err: any) {
-      setOpStatus({ type: 'error', msg: `${label} failed: ${err.message ?? err}` });
+    } catch (err: unknown) {
+      setOpStatus({
+        type: 'error',
+        msg: `${label} failed: ${err instanceof Error ? err.message : String(err)}`,
+      });
     }
   }, []);
 
@@ -419,8 +422,8 @@ export function GitView() {
                     : 'Committed and published successfully'
                   : 'Committed and synchronized successfully',
         });
-      } catch (err: any) {
-        const message = err.message ?? String(err);
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
         setCommitError(
           committedLocally && action !== 'commit'
             ? `Committed locally, but the remote operation failed: ${message}`

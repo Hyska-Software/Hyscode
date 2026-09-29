@@ -1,5 +1,6 @@
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use tauri::{AppHandle, Emitter};
 
 // ── GitHub API response types ────────────────────────────────────────────────
@@ -66,6 +67,11 @@ pub struct ReleaseInfo {
     pub asset_name: String,
     pub asset_size: u64,
     pub current_version: String,
+    /// Optional SHA-256 of the installer (hex). `None` until releases publish
+    /// a checksums asset or the updater migrates to signature verification —
+    /// the download path is currently authenticated by origin (release URL
+    /// prefix) rather than by content hash.
+    pub sha256: Option<String>,
     pub commits: Vec<CommitInfo>,
 }
 
@@ -117,10 +123,31 @@ fn parse_version(s: &str) -> Result<semver::Version, String> {
     semver::Version::parse(cleaned).map_err(|e| format!("Invalid version '{}': {}", s, e))
 }
 
-/// Validate that a download URL comes from GitHub.
+/// Validate that a download URL is a HysCode release artifact URL.
+/// Only `https://github.com/Hyska-Software/Hyscode/releases/download/...`
+/// is accepted — the generic github.com/objects.githubusercontent.com check
+/// was too broad (any repo's release could pass).
 fn is_safe_download_url(url: &str) -> bool {
-    url.starts_with("https://github.com/")
-        || url.starts_with("https://objects.githubusercontent.com/")
+    url.starts_with("https://github.com/Hyska-Software/Hyscode/releases/download/")
+}
+
+/// Validate an installer asset file name: bare file name of
+/// `[A-Za-z0-9._-]` (1–128 chars). Rejects `..`, `/`, `\` and anything that
+/// could escape the temp directory when joined.
+fn validate_asset_name(name: &str) -> Result<(), String> {
+    if name.is_empty() || name.len() > 128 {
+        return Err("Validation: invalid asset name".to_string());
+    }
+    if !name
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '_' || c == '-')
+    {
+        return Err(format!("Validation: invalid asset name: '{name}'"));
+    }
+    if name.contains("..") {
+        return Err(format!("Validation: invalid asset name: '{name}'"));
+    }
+    Ok(())
 }
 
 /// Validate that an installer path is in the system temp directory and has an expected extension.
@@ -195,7 +222,7 @@ async fn fetch_commits_between(
 /// `channel`: "stable" uses /releases/latest; "pre-release" scans recent releases for the
 /// highest semver (stable or pre-release).
 /// Returns `None` if up to date or no releases found.
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub async fn updater_check(
     app: AppHandle,
     channel: Option<String>,
@@ -299,21 +326,42 @@ pub async fn updater_check(
         asset_name: asset.name.clone(),
         asset_size: asset.size,
         current_version: current_version.to_string(),
+        // No checksum published by the release API today; see field docs.
+        sha256: None,
         commits,
     }))
 }
 
 /// Download the update installer, streaming progress events to the frontend.
 /// Returns the path to the downloaded installer file.
-#[tauri::command]
+///
+/// SECURITY: `expected_sha256` (64 hex chars) is verified against the
+/// downloaded bytes before returning when provided. Callers should pass the
+/// hash published alongside the release; downloads without a hash emit a
+/// warning and rely on TLS + trusted-host pinning only.
+#[tauri::command(rename_all = "camelCase")]
 pub async fn updater_download(
     app: AppHandle,
     asset_url: String,
     asset_name: String,
+    expected_sha256: Option<String>,
 ) -> Result<String, String> {
-    // Security: only allow downloads from GitHub domains
+    // Security: only HysCode release artifact URLs, and a sanitized bare
+    // file name so the temp-dir join cannot escape.
     if !is_safe_download_url(&asset_url) {
         return Err("Download URL is not from a trusted domain".to_string());
+    }
+    validate_asset_name(&asset_name)?;
+    if let Some(expected) = expected_sha256
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        if expected.len() != 64 || !expected.chars().all(|c| c.is_ascii_hexdigit()) {
+            return Err("Validation: expected_sha256 must be 64 hex characters".to_string());
+        }
+    } else {
+        eprintln!("[updater] downloading without expected_sha256 (release hash not published yet)");
     }
 
     let client = reqwest::Client::new();
@@ -382,11 +430,26 @@ pub async fn updater_download(
         },
     );
 
+    drop(file);
+    if let Some(expected) = expected_sha256
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        let bytes = std::fs::read(&dest)
+            .map_err(|e| format!("Failed to re-read download for hashing: {}", e))?;
+        let actual = format!("{:x}", Sha256::digest(&bytes));
+        if actual != expected.trim().to_lowercase() {
+            let _ = std::fs::remove_file(&dest);
+            return Err("Download hash mismatch: expected_sha256 does not match".to_string());
+        }
+    }
+
     Ok(dest.to_string_lossy().to_string())
 }
 
 /// Launch the downloaded installer and exit the application.
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub async fn updater_install(app: AppHandle, installer_path: String) -> Result<(), String> {
     let path = std::path::PathBuf::from(&installer_path);
 
@@ -446,7 +509,7 @@ pub async fn updater_install(app: AppHandle, installer_path: String) -> Result<(
 
 #[cfg(test)]
 mod tests {
-    use super::is_vortex_cli_only_asset;
+    use super::{is_safe_download_url, is_vortex_cli_only_asset, validate_asset_name};
 
     #[test]
     fn ignores_standalone_vortex_assets_for_desktop_updates() {
@@ -456,5 +519,36 @@ mod tests {
         assert!(!is_vortex_cli_only_asset(
             "HysCode-Setup-0.8.2-linux-x64-with-vortex-cli.deb"
         ));
+    }
+
+    #[test]
+    fn download_url_must_be_a_hyscode_release_artifact() {
+        assert!(is_safe_download_url(
+            "https://github.com/Hyska-Software/Hyscode/releases/download/v0.15.0/HysCode-Setup.exe"
+        ));
+        for bad in [
+            "https://github.com/other/repo/releases/download/v1/a.exe",
+            "https://objects.githubusercontent.com/abc",
+            "http://github.com/Hyska-Software/Hyscode/releases/download/v1/a.exe",
+            "https://github.com/Hyska-Software/Hyscode/releases",
+            "",
+        ] {
+            assert!(!is_safe_download_url(bad), "{bad}");
+        }
+    }
+
+    #[test]
+    fn asset_names_reject_traversal_and_separators() {
+        assert!(validate_asset_name("HysCode-Setup-0.15.0_x64.exe").is_ok());
+        for bad in [
+            "",
+            "../evil.exe",
+            "a/b.exe",
+            "a\\b.exe",
+            "a b.exe",
+            "evil;rm.exe",
+        ] {
+            assert!(validate_asset_name(bad).is_err(), "{bad}");
+        }
     }
 }

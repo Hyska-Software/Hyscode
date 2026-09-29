@@ -40,6 +40,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { cn } from '@/lib/utils';
 import { useAgentStore } from '@/stores/agent-store';
+import { useExtensionUiStore } from '@/stores/extension-ui-store';
 import { useSettingsStore } from '@/stores/settings-store';
 import {
   cancelActiveAgentRun,
@@ -96,13 +97,33 @@ function useActiveModelInfo(): ModelInfo | null {
   return provider.models.find((m) => m.id === modelId) ?? null;
 }
 
+export type ImageRejectReason = 'unsupported-type' | 'too-large' | 'read-failed';
+
+export const IMAGE_ERROR_MESSAGES: Record<ImageRejectReason, string> = {
+  'unsupported-type': 'Tipo não suportado (png/jpg/webp/gif)',
+  'too-large': 'Imagem >20MB',
+  'read-failed': 'Falha ao ler imagem',
+};
+
+function notifyImageError(reason: ImageRejectReason): void {
+  const message = IMAGE_ERROR_MESSAGES[reason];
+  console.warn(`[AgentInput] ${message}`);
+  try {
+    useExtensionUiStore.getState().showNotification('error', message, 'Agent');
+  } catch {
+    // Store unavailable (tests, teardown) — console output above suffices.
+  }
+}
+
 function processImageFile(file: File): Promise<AttachedImage | null> {
   return new Promise((resolve) => {
     if (!ACCEPTED_IMAGE_TYPES.includes(file.type)) {
+      notifyImageError('unsupported-type');
       resolve(null);
       return;
     }
     if (file.size > MAX_IMAGE_SIZE) {
+      notifyImageError('too-large');
       resolve(null);
       return;
     }
@@ -111,6 +132,7 @@ function processImageFile(file: File): Promise<AttachedImage | null> {
       const dataUrl = reader.result as string;
       const commaIdx = dataUrl.indexOf(',');
       if (commaIdx < 0) {
+        notifyImageError('read-failed');
         resolve(null);
         return;
       }
@@ -124,7 +146,10 @@ function processImageFile(file: File): Promise<AttachedImage | null> {
         previewUrl,
       });
     };
-    reader.onerror = () => resolve(null);
+    reader.onerror = () => {
+      notifyImageError('read-failed');
+      resolve(null);
+    };
     reader.readAsDataURL(file);
   });
 }
@@ -266,6 +291,7 @@ export function AgentInput({ goalModeEnabled = false, onGoalModeChange }: AgentI
   const [mentionPickerOpen, setMentionPickerOpen] = useState(false);
   const [isDragOver, setIsDragOver] = useState(false);
   const [goalModeNotice, setGoalModeNotice] = useState<string | null>(null);
+  const [imageError, setImageError] = useState<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const inputWrapperRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -275,6 +301,7 @@ export function AgentInput({ goalModeEnabled = false, onGoalModeChange }: AgentI
   const isStreaming = useAgentStore((s) => s.isStreaming);
   const delegationChain = useAgentStore((s) => s.delegationChain);
   const attachedImages = useAgentStore((s) => s.attachedImages);
+  const attachedTerminal = useAgentStore((s) => s.attachedTerminal);
   const activeModelId = useSettingsStore((s) => s.activeModelId);
   const activeProviderId = useSettingsStore((s) => s.activeProviderId);
   const enabledModels = useSettingsStore((s) => s.enabledModels);
@@ -438,9 +465,24 @@ export function AgentInput({ goalModeEnabled = false, onGoalModeChange }: AgentI
   // ─── Image attachment handlers ─────────────────────────────────────
 
   const addImagesFromFiles = useCallback(async (files: FileList | File[]) => {
-    for (const file of Array.from(files)) {
+    const list = Array.from(files);
+    let failures = 0;
+    for (const file of list) {
       const img = await processImageFile(file);
-      if (img) useAgentStore.getState().addAttachedImage(img);
+      if (img) {
+        useAgentStore.getState().addAttachedImage(img);
+      } else {
+        failures += 1;
+      }
+    }
+    if (failures > 0) {
+      setImageError(
+        failures === list.length
+          ? IMAGE_ERROR_MESSAGES['read-failed'] + ' — verifique tipo (png/jpg/webp/gif) e tamanho ≤20MB'
+          : `${failures} imagem(ns) ignorada(s) — verifique tipo e tamanho ≤20MB`,
+      );
+    } else {
+      setImageError(null);
     }
   }, []);
 
@@ -514,6 +556,24 @@ export function AgentInput({ goalModeEnabled = false, onGoalModeChange }: AgentI
         <div className="mb-2 flex items-center gap-1.5 text-[10px] text-warning">
           <AlertTriangle className="h-3 w-3 shrink-0" />
           <span>{activeModel.name} does not support vision. Images will be ignored.</span>
+        </div>
+      )}
+
+      {imageError && (
+        <div
+          role="alert"
+          className="mb-2 flex items-start gap-1.5 rounded-md border border-destructive/30 bg-destructive/5 px-2.5 py-2 text-[10px] text-destructive"
+        >
+          <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
+          <span className="min-w-0 flex-1">{imageError}</span>
+          <button
+            type="button"
+            aria-label="Dismiss image error"
+            className="shrink-0 text-destructive/70 transition-colors hover:text-destructive"
+            onClick={() => setImageError(null)}
+          >
+            <X className="h-3 w-3" />
+          </button>
         </div>
       )}
 
@@ -994,7 +1054,7 @@ export function AgentInput({ goalModeEnabled = false, onGoalModeChange }: AgentI
                     <Button
                       variant="default"
                       size="icon-sm"
-                      disabled={!input.trim() && attachedImages.length === 0}
+                      disabled={!input.trim() && attachedImages.length === 0 && !attachedTerminal}
                       onClick={handleSend}
                       className="shadow-none disabled:opacity-30"
                     />

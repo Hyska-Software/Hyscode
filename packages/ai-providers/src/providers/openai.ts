@@ -46,6 +46,7 @@ export function toOpenAIMessages(
   alwaysReasoningContent = false,
   explicitCacheBreakpoint = false,
 ): OpenAIMessage[] {
+  if (!messages.length) throw new Error('model required: messages must not be empty');
   const result: OpenAIMessage[] = [];
 
   if (systemPrompt) {
@@ -119,7 +120,14 @@ export function toOpenAIMessages(
     const contentParts: OpenAIContentPart[] = [];
     for (const c of msg.content) {
       if (c.type === 'text') contentParts.push({ type: 'text', text: c.text });
+      if (c.type === 'thinking') {
+        // Preserve thinking as text so replay history doesn't lose it.
+        contentParts.push({ type: 'text', text: `[thinking]${c.thinking}` });
+      }
       if (c.type === 'image') {
+        if (c.base64.length > 20 * 1024 * 1024) {
+          throw new Error('image too large: base64 payload exceeds 20MB');
+        }
         contentParts.push({
           type: 'image_url',
           image_url: { url: `data:${c.mediaType};base64,${c.base64}` },
@@ -385,11 +393,22 @@ export class OpenAIProvider implements AIProvider {
     return this.apiKey.length > 0;
   }
 
+  /** Zero the in-memory API key (secret hygiene on reinit/dispose). */
+  clear(): void {
+    this.apiKey = '';
+  }
+
+  dispose(): void {
+    this.clear();
+  }
+
   async listModels(): Promise<AIModel[]> {
     return this.models;
   }
 
   async *chat(params: ChatParams): AsyncIterable<StreamChunk> {
+    if (!params.model) throw new Error('model required');
+    if (!params.messages.length) throw new Error('model required: messages must not be empty');
     const explicitCache =
       (params.cachePrompt === true || params.promptCacheOptions?.mode === 'explicit') &&
       this.capabilities.promptCacheModeForModel?.(params.model) === 'explicit-breakpoints';
@@ -475,7 +494,7 @@ export class OpenAIProvider implements AIProvider {
         `${this.name} API error: ${response.status} ${errorBody}`,
         this.id,
         response.status,
-        [429, 500, 502, 503].includes(response.status),
+        [429, 500, 502, 503, 529].includes(response.status),
         retryAfterMs,
       );
     }
@@ -483,27 +502,61 @@ export class OpenAIProvider implements AIProvider {
     // Track tool call IDs across delta chunks.
     // OpenAI never sends tool_call_end — we must synthesize it when a new
     // tool starts or the stream finishes with stopReason 'tool_use'.
+    // Some proxies emit a `name` chunk with an empty id before the real id
+    // arrives: buffer the name + args until a non-empty id shows up so we
+    // never yield tool_call_* chunks with an empty id.
     let currentToolCallId = '';
+    let pendingName: string | null = null;
+    let pendingArgs = '';
 
     for await (const data of parseSSEStream(response, params.signal)) {
       const chunks = parseOpenAIChunk(data);
 
       for (const chunk of chunks) {
-        if (chunk.type === 'tool_call_start' && chunk.id) {
+        if (chunk.type === 'tool_call_start') {
+          if (!chunk.id) {
+            // Id not assigned yet — hold the name until the id arrives.
+            pendingName = chunk.name;
+            continue;
+          }
+          if (pendingName !== null || pendingArgs) {
+            // Flush buffered pre-id state under the now-known id.
+            if (currentToolCallId) {
+              yield { type: 'tool_call_end' as const, id: currentToolCallId };
+            }
+            currentToolCallId = chunk.id;
+            yield chunk;
+            if (pendingArgs) {
+              yield { type: 'tool_call_delta' as const, id: currentToolCallId, input: pendingArgs };
+              pendingArgs = '';
+            }
+            pendingName = null;
+            continue;
+          }
           // A new tool call starting means the previous one is done
           if (currentToolCallId) {
             yield { type: 'tool_call_end' as const, id: currentToolCallId };
           }
           currentToolCallId = chunk.id;
-        } else if (chunk.type === 'tool_call_delta' && !chunk.id) {
-          yield { ...chunk, id: currentToolCallId };
-          continue;
+        } else if (chunk.type === 'tool_call_delta') {
+          if (!chunk.id) {
+            if (!currentToolCallId) {
+              // No id yet — buffer args until the start chunk assigns one.
+              pendingArgs += chunk.input;
+              continue;
+            }
+            yield { ...chunk, id: currentToolCallId };
+            continue;
+          }
+          if (!currentToolCallId) currentToolCallId = chunk.id;
         } else if (chunk.type === 'done' && chunk.stopReason === 'tool_use') {
           // Emit tool_call_end for the last active tool before the done signal
           if (currentToolCallId) {
             yield { type: 'tool_call_end' as const, id: currentToolCallId };
             currentToolCallId = '';
           }
+          pendingName = null;
+          pendingArgs = '';
         }
 
         yield chunk;

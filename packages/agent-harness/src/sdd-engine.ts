@@ -386,8 +386,9 @@ Order tasks so dependencies come first.`;
     if (this.config.savePlanFile && session.spec) {
       try {
         await this.config.savePlanFile(sessionId, session.spec, tasks);
-      } catch {
+      } catch (e) {
         // Non-critical: continue even if file write fails
+        console.warn('[sdd-engine] savePlanFile failed', e);
       }
     }
 
@@ -400,7 +401,12 @@ Order tasks so dependencies come first.`;
 
   // ─── Phase 4: Execute ───────────────────────────────────────────────
 
-  async execute(sessionId: string): Promise<'completed' | 'paused' | 'failed' | 'cancelled'> {
+  async execute(
+    sessionId: string,
+    options: { maxIterations?: number; signal?: AbortSignal; turnTimeoutMs?: number } = {},
+  ): Promise<'completed' | 'paused' | 'failed' | 'cancelled'> {
+    const maxIterations = options.maxIterations ?? 100;
+    const turnTimeoutMs = options.turnTimeoutMs ?? 5 * 60 * 1000;
     this.emitPhaseChange('executing');
     this._paused = false;
     this._failedTask = null;
@@ -408,7 +414,13 @@ Order tasks so dependencies come first.`;
     const session = await this.planManager.getSession(sessionId);
     if (!session) throw new Error(`Session ${sessionId} not found`);
 
+    let iterations = 0;
     while (!this._paused) {
+      if (options.signal?.aborted) return 'cancelled';
+      iterations++;
+      if (iterations > maxIterations) {
+        throw new Error(`SDD execution reached max_iterations (${maxIterations}).`);
+      }
       const task = await this.planManager.getNextTask(sessionId);
       if (!task) {
         // All tasks done
@@ -455,7 +467,17 @@ Complete this task by using the available tools. Read files before modifying the
 When done, provide a brief summary of what you did.`;
 
       try {
-        const outcome = await this.config.runAgentTurn(systemAddon, taskPrompt);
+        if (options.signal?.aborted) {
+          await this.planManager.updateTaskStatus(task.id, 'pending');
+          this._paused = true;
+          return 'cancelled';
+        }
+        const outcome = await this.runTaskWithTimeout(
+          systemAddon,
+          taskPrompt,
+          turnTimeoutMs,
+          options.signal,
+        );
         if (outcome.status === 'cancelled') {
           await this.planManager.updateTaskStatus(task.id, 'pending');
           this._paused = true;
@@ -557,6 +579,28 @@ Provide a summary of the implementation and any issues found.`;
   }
 
   // ─── Helpers ────────────────────────────────────────────────────────
+
+  private async runTaskWithTimeout(
+    systemAddon: string,
+    taskPrompt: string,
+    turnTimeoutMs: number,
+    signal?: AbortSignal,
+  ): Promise<import('./types').TurnOutcome> {
+    const run = this.config.runAgentTurn(systemAddon, taskPrompt);
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const timeout = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new Error(`SDD task turn timed out after ${turnTimeoutMs}ms.`)), turnTimeoutMs);
+    });
+    const abort = new Promise<never>((_, reject) => {
+      if (signal?.aborted) reject(new Error('SDD execution cancelled.'));
+      else signal?.addEventListener('abort', () => reject(new Error('SDD execution cancelled.')), { once: true });
+    });
+    try {
+      return await Promise.race([run, timeout, abort]);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }
 
   private emitPhaseChange(phase: SddStatus): void {
     this.config.eventHandler?.({ type: 'sdd_phase_change', phase });

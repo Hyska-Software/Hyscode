@@ -350,6 +350,8 @@ export interface PendingToolCall {
   riskLevel?: ToolRiskLevel;
   externalAccess?: ExternalPathAccessRequest;
   resolve: (decision: ApprovalDecision, reason?: string) => void;
+  /** Optional cleanup hook invoked when the owning turn is cancelled. */
+  onAbort?: () => void;
 }
 
 /** Approval result. Boolean callbacks remain supported for compatibility. */
@@ -634,7 +636,7 @@ export type TurnOutcome = {
 export const DEFAULT_HARNESS_CONFIG: HarnessConfig = {
   providerId: '',
   modelId: '',
-  maxIterations: null,
+  maxIterations: 50,
   maxInputTokens: 200_000,
   maxOutputTokens: 16_000,
   turnTimeoutMs: 300_000, // 5 minutes

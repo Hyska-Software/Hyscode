@@ -40,8 +40,9 @@ function parseFrontmatter(content: string): { frontmatter: Record<string, unknow
     if (yaml && typeof yaml === 'object') {
       return { frontmatter: yaml as Record<string, unknown>, body };
     }
-  } catch {
+  } catch (e) {
     // Fall through to manual parser
+    console.warn('[skill-loader] YAML parse failed, using manual parser', e);
   }
 
   const frontmatter: Record<string, unknown> = {};
@@ -125,13 +126,17 @@ function parseYaml(yaml: string): unknown {
     if (value.startsWith('[') && value.endsWith(']')) {
       try {
         result[key] = JSON.parse(value.replace(/'/g, '"'));
-      } catch {
+      } catch (e) {
+        // Heuristic fallback: unquoted YAML flow sequences (e.g. [build]) are
+        // not valid JSON — keep the raw string for the manual parser.
+        console.debug('[skill-loader] keeping raw array value', key, e);
         result[key] = value;
       }
     } else if (value.startsWith('{') && value.endsWith('}')) {
       try {
         result[key] = JSON.parse(value.replace(/'/g, '"'));
-      } catch {
+      } catch (e) {
+        console.debug('[skill-loader] keeping raw object value', key, e);
         result[key] = value;
       }
     } else {
@@ -259,12 +264,15 @@ export class SkillLoader {
         .split(/[,\s]+/)
         .filter((k) => k.length > 2);
 
-      // Token-overlap matching: check if any keyword appears in message tokens
-      // or if the keyword is a substring of any token (handles compound words)
+      // Token-overlap matching with a minimum token length guard to avoid
+      // over-firing on short substrings (e.g. "a" in "data").
       const match = keywords.some((keyword) => {
-        return messageTokens.some((token) =>
-          token.includes(keyword) || keyword.includes(token),
-        );
+        const kw = keyword.toLowerCase();
+        return messageTokens.some((token) => {
+          const tok = token.toLowerCase();
+          if (tok.length < 4 || kw.length < 4) return tok === kw;
+          return tok === kw || tok.startsWith(kw) || kw.startsWith(tok);
+        });
       });
 
       if (match) {
@@ -313,8 +321,9 @@ export class SkillLoader {
               active: frontmatter.activation === 'always',
               status: 'ok',
             });
-          } catch {
+          } catch (e) {
             // Skip invalid skill files
+            console.warn('[skill-loader] skipping invalid skill file', entry.name, e);
           }
           continue;
         }
@@ -349,8 +358,9 @@ export class SkillLoader {
               });
               found = true;
               break;
-            } catch {
+            } catch (e) {
               // Try next candidate
+              console.warn('[skill-loader] failed to load skill candidate', candidate, e);
             }
           }
 
@@ -375,9 +385,24 @@ export class SkillLoader {
       }
 
       return skills;
-    } catch {
+    } catch (e) {
+      console.warn('[skill-loader] loadFromDir failed', dirPath, e);
       return [];
     }
+  }
+
+  /** Create an isolated loader for a child harness without sharing mutable skill state. */
+  clone(): SkillLoader {
+    const child = new SkillLoader({ ...this.config });
+    child.skills = this.skills.map((skill) => ({
+      ...skill,
+      frontmatter: {
+        ...skill.frontmatter,
+        agents: skill.frontmatter.agents ? [...skill.frontmatter.agents] : undefined,
+        globs: skill.frontmatter.globs ? [...skill.frontmatter.globs] : undefined,
+      },
+    }));
+    return child;
   }
 
   private mergeSkills(builtIn: Skill[], global: Skill[], workspace: Skill[]): Skill[] {

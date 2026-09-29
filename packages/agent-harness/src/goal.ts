@@ -232,9 +232,17 @@ export const DEFAULT_GOAL_BUDGET: GoalBudget = {
   maxConsecutiveErrors: null,
 };
 
-/** Goal execution is intentionally unbounded; cancellation is the user stop control. */
-export function createDefaultGoalBudget(_input: GoalBudgetInput = {}): GoalBudget {
-  return { ...DEFAULT_GOAL_BUDGET };
+/** Bounded by default; explicit input always wins over the defaults. */
+export function createDefaultGoalBudget(input: GoalBudgetInput = {}): GoalBudget {
+  const raw = input as GoalBudgetInput & { timeoutMs?: number };
+  return {
+    maxTokens: input.maxTokens ?? null,
+    maxTurns: input.maxTurns ?? 50,
+    maxDurationMs: input.maxDurationMs ?? raw.timeoutMs ?? 300_000,
+    maxToolCalls: input.maxToolCalls ?? 200,
+    maxCostUsd: input.maxCostUsd ?? null,
+    maxConsecutiveErrors: input.maxConsecutiveErrors ?? null,
+  };
 }
 
 function now(): string {
@@ -274,10 +282,13 @@ function normalizeTokenUsage(value: TokenUsage | undefined): TokenUsage {
 
 function normalizeState(state: GoalState): GoalState {
   const rawUsage = state.goal.usage;
+  // Never clobber a persisted budget — merge it over the defaults so stored
+  // limits survive reloads while new fields still get sane defaults.
+  const persistedBudget = state.goal.budget as GoalBudget | undefined;
   return {
     goal: {
       ...state.goal,
-      budget: createDefaultGoalBudget(state.goal.budget),
+      budget: persistedBudget ? { ...createDefaultGoalBudget(), ...persistedBudget } : createDefaultGoalBudget(),
       usage: {
         inputTokens: rawUsage?.inputTokens ?? 0,
         outputTokens: rawUsage?.outputTokens ?? 0,

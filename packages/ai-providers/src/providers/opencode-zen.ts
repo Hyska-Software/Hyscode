@@ -82,8 +82,13 @@ export class OpenCodeZenProvider extends OpenAIProvider {
     return this.models;
   }
 
-  override async *chat(params: ChatParams): AsyncIterable<StreamChunk> {
-    switch (this.wireFormats.get(params.model) ?? 'chat-completions') {
+  override dispose(): void {
+    super.dispose();
+    this.anthropicDelegate.dispose();
+    this.geminiDelegate.dispose();
+  }
+
+  override async *chat(params: ChatParams): AsyncIterable<StreamChunk> {    switch (this.wireFormats.get(params.model) ?? 'chat-completions') {
       case 'anthropic-messages':
         // Claude and Anthropic-compatible Qwen models via Anthropic message format
         yield* this.anthropicDelegate.chat(params);

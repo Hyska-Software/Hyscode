@@ -19,14 +19,17 @@ interface GitBlameHunk {
   message: string;
 }
 
-// ── One-time CSS injection ────────────────────────────────────────────────────
+// ── One-time CSS injection (ref-counted) ─────────────────────────────────────
 
-let cssInjected = false;
+const GIT_BLAME_STYLE_ID = 'hyscode-git-blame-css';
 
-function ensureGitBlameCss() {
-  if (cssInjected) return;
-  cssInjected = true;
+let gitBlameRefCount = 0;
+
+function ensureGitBlameCss(): void {
+  gitBlameRefCount += 1;
+  if (document.getElementById(GIT_BLAME_STYLE_ID)) return;
   const el = document.createElement('style');
+  el.id = GIT_BLAME_STYLE_ID;
   el.textContent = `
     .monaco-editor .git-blame-inline {
       color: #8b949e;
@@ -39,6 +42,13 @@ function ensureGitBlameCss() {
     }
   `;
   document.head.appendChild(el);
+}
+
+function releaseGitBlameCss(): void {
+  gitBlameRefCount = Math.max(0, gitBlameRefCount - 1);
+  if (gitBlameRefCount === 0) {
+    document.getElementById(GIT_BLAME_STYLE_ID)?.remove();
+  }
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -118,6 +128,9 @@ export function useGitBlameDecorations(
   // Inject CSS once on mount
   useEffect(() => {
     ensureGitBlameCss();
+    return () => {
+      releaseGitBlameCss();
+    };
   }, []);
 
   // Main effect: runs whenever prerequisites change

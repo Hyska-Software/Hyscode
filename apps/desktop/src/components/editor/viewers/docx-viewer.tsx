@@ -34,8 +34,8 @@ export function DocxViewer({ filePath }: DocxViewerProps) {
           setHtml(result.value);
           setWarnings(result.messages.map((m) => m.message));
         }
-      } catch (err: any) {
-        if (!cancelled) setError(err.message ?? String(err));
+      } catch (err: unknown) {
+        if (!cancelled) setError(err instanceof Error ? err.message : String(err));
       } finally {
         if (!cancelled) setLoading(false);
       }

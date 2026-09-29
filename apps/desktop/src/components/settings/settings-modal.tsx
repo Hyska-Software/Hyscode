@@ -121,6 +121,7 @@ export function SettingsModal() {
 
   // Auto-expand the group containing the active tab when the active tab *changes*.
   // (Not on every render — that would fight manual collapse.)
+  // Reads expanded groups via getState() so the effect never loops on its own write.
   const activeKey = activeTab.type === 'builtin' ? `b:${activeTab.id}` : `e:${activeTab.tabId}`;
   const prevActiveKeyRef = useRef<string>(activeKey);
   useEffect(() => {
@@ -131,18 +132,24 @@ export function SettingsModal() {
     if (activeTab.type !== 'builtin') return;
     const gid = findGroupForBuiltin(activeTab.id);
     if (!gid) return;
-    if (expandedIds.has(gid)) return;
-    setTreeExpandedGroups([gid, ...treeExpandedGroups.filter((g) => g !== gid)]);
-  }, [open, activeKey]);
+    const current = useSettingsStore.getState().treeExpandedGroups;
+    if (current.includes(gid)) return;
+    setTreeExpandedGroups([gid, ...current.filter((g) => g !== gid)]);
+     
+  }, [open, activeKey, activeTab]);
 
   // Navigate to requested tab when modal opens.
+  // Reads expanded groups via getState() so the effect never loops on its own write.
   useEffect(() => {
     if (open && settingsInitialTab) {
       if (settingsInitialTab in BUILTIN_TAB_CONTENT) {
         setActiveTab({ type: 'builtin', id: settingsInitialTab as BuiltinTabIdAny });
         const gid = findGroupForBuiltin(settingsInitialTab);
-        if (gid && !expandedIds.has(gid)) {
-          setTreeExpandedGroups([gid, ...treeExpandedGroups.filter((g) => g !== gid)]);
+        if (gid) {
+          const current = useSettingsStore.getState().treeExpandedGroups;
+          if (!current.includes(gid)) {
+            setTreeExpandedGroups([gid, ...current.filter((g) => g !== gid)]);
+          }
         }
       } else {
         const ext = extensionSettingsTabs.find((t) => t.id === settingsInitialTab);
@@ -158,7 +165,8 @@ export function SettingsModal() {
       }
       useSettingsStore.getState().set('settingsInitialTab', null);
     }
-  }, [open, settingsInitialTab, extensionSettingsTabs, expandedIds, treeExpandedGroups, setTreeExpandedGroups]);
+     
+  }, [open, settingsInitialTab, extensionSettingsTabs]);
 
   // Keyboard: Escape closes the modal.
   useEffect(() => {
@@ -190,12 +198,13 @@ export function SettingsModal() {
 
   const handleToggleGroup = useCallback(
     (groupId: GroupId) => {
-      const next = expandedIds.has(groupId)
-        ? treeExpandedGroups.filter((g) => g !== groupId)
-        : [...treeExpandedGroups, groupId];
+      const current = useSettingsStore.getState().treeExpandedGroups;
+      const next = current.includes(groupId)
+        ? current.filter((g) => g !== groupId)
+        : [...current, groupId];
       setTreeExpandedGroups(next);
     },
-    [expandedIds, treeExpandedGroups, setTreeExpandedGroups],
+    [setTreeExpandedGroups],
   );
 
   const handleResetTab = useCallback(() => {
@@ -225,7 +234,7 @@ export function SettingsModal() {
         if (e.target === e.currentTarget) closeSettings();
       }}
     >
-      <div className="flex h-[580px] w-[1100px] overflow-hidden rounded-xl bg-surface shadow-2xl">
+      <div className="flex h-[min(580px,calc(100vh-2rem))] max-w-full w-[min(1100px,calc(100vw-2rem))] overflow-hidden rounded-xl bg-surface shadow-2xl">
         {/* Left navigation */}
         <nav className="flex w-[240px] flex-col overflow-hidden border-r border-border bg-background">
           <div className="flex items-center justify-between px-3 pb-2 pt-3">

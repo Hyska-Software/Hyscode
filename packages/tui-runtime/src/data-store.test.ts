@@ -129,6 +129,7 @@ describe('CLI persistence adapter', () => {
     };
     const service = new GoalService(repository);
     const created = await service.createGoal(session.id, directory, 'Persist the TUI goal');
+    await service.pauseGoal(session.id);
     await service.editGoal(session.id, { objective: 'Persist and restore the TUI goal' });
 
     const reopened = new CliDataStore(store.path);

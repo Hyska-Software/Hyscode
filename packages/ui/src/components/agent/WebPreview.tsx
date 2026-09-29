@@ -1,4 +1,4 @@
-import { forwardRef, useState, type ReactNode } from "react";
+import { forwardRef, useEffect, useState, type ReactNode } from "react";
 import { ExternalLink, RotateCw } from "lucide-react";
 import { cn } from "../../lib/cn";
 import { useControllableState } from "../../lib/hooks/useControllableState";
@@ -25,6 +25,15 @@ export interface WebPreviewProps {
   className?: string;
 }
 
+/** Only http(s) previews are allowed — javascript:, data:, file: etc. are blocked. */
+function isSafePreviewUrl(value: string): boolean {
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === "http:" || parsed.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
 /** Live app preview with URL bar, refresh and device viewport switcher
  *  (Replit / Lovable / v0 / bolt.new style). */
 export const WebPreview = forwardRef<HTMLIFrameElement, WebPreviewProps>(
@@ -52,6 +61,13 @@ export const WebPreview = forwardRef<HTMLIFrameElement, WebPreviewProps>(
     const [key, setKey] = useState(0);
     const width = VIEWPORT_WIDTHS[vp];
 
+    // Keep the URL bar in sync when the parent navigates the preview.
+    useEffect(() => {
+      setDraft(url);
+    }, [url]);
+
+    const safeUrl = isSafePreviewUrl(url) ? url : undefined;
+
     const refresh = () => {
       setKey((k) => k + 1);
       onRefresh?.();
@@ -77,7 +93,10 @@ export const WebPreview = forwardRef<HTMLIFrameElement, WebPreviewProps>(
             className="flex h-7 min-w-0 flex-1 items-center rounded-md bg-muted px-2.5"
             onSubmit={(e) => {
               e.preventDefault();
-              onUrlChange?.(draft);
+              // Never navigate the preview to javascript:/data:/file: URLs.
+              if (isSafePreviewUrl(draft)) {
+                onUrlChange?.(draft);
+              }
             }}
           >
             <input
@@ -89,7 +108,7 @@ export const WebPreview = forwardRef<HTMLIFrameElement, WebPreviewProps>(
           </form>
           {showViewport && <ViewportSwitcher value={vp} onValueChange={setVp} />}
           <a
-            href={url}
+            href={safeUrl}
             target="_blank"
             rel="noreferrer"
             aria-label="Open in new tab"
@@ -111,9 +130,11 @@ export const WebPreview = forwardRef<HTMLIFrameElement, WebPreviewProps>(
               <iframe
                 ref={ref}
                 key={key}
-                src={url}
+                src={safeUrl}
                 title="Preview"
                 className="size-full "
+                sandbox="allow-scripts allow-same-origin"
+                referrerPolicy="no-referrer"
               />
             )}
           </div>

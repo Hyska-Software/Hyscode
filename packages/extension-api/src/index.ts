@@ -22,7 +22,25 @@ export interface ExtensionManifest {
   repository?: string;
   license?: string;
   readme?: string;
+  /**
+   * Declared host capabilities the extension needs. Advisory-only until the
+   * host API is redesigned around a serializable RPC bridge (true Worker
+   * isolation is incompatible with the current direct-object API): unknown
+   * entries produce a console warning at activation so reviewers can spot
+   * over-privileged extensions.
+   */
+  permissions?: ExtensionPermission[];
 }
+
+/** Known permission strings for `ExtensionManifest.permissions`. */
+export type ExtensionPermission =
+  | 'commands'
+  | 'settings'
+  | 'workspace'
+  | 'terminal'
+  | 'process'
+  | 'network'
+  | 'ui';
 
 // ── Contribution Points ──────────────────────────────────────────────────────
 
