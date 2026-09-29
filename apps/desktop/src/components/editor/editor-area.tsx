@@ -18,7 +18,6 @@ import {
   SpreadsheetViewer,
   DocxViewer,
   PptxViewer,
-
   DatabaseViewer,
 } from './viewers';
 import { DbSchemaViewer } from './viewers/db-schema';
@@ -42,7 +41,11 @@ import { defineAllMonacoThemes, getMonacoThemeName } from '../../lib/monaco-them
 import { loadMonacoEditor } from '../../lib/monaco-loader';
 import { LspBridge, detectLanguage, detectLspLanguage } from '../../lib/lsp-bridge';
 import { LspMissingBanner } from './lsp-missing-banner';
-import { registerAllLanguages, disableNativeTypeScriptValidation, pathToFileUri } from '@hyscode/lsp-client';
+import {
+  registerAllLanguages,
+  disableNativeTypeScriptValidation,
+  pathToFileUri,
+} from '@hyscode/lsp-client';
 import { getViewerType } from '../../lib/utils';
 import type * as monacoEditor from 'monaco-editor';
 
@@ -54,7 +57,11 @@ function formatLoadMB(bytes: number): string {
 
 function EditorLoading({ loaded, total }: { loaded?: number; total?: number | null }) {
   return (
-    <div role="status" aria-live="polite" className="flex flex-1 flex-col items-center justify-center gap-2">
+    <div
+      role="status"
+      aria-live="polite"
+      className="flex flex-1 flex-col items-center justify-center gap-2"
+    >
       <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
       {loaded !== undefined && total != null && total > 0 && (
         <p className="text-xs text-muted-foreground">
@@ -185,11 +192,11 @@ export function EditorArea() {
   // Agent edit session for the active file (new inline model)
   const editSession = useAgentStore((s) =>
     activeTab?.filePath
-      ? s.agentEditSessions.find(
+      ? (s.agentEditSessions.find(
           (es) =>
             es.filePath === activeTab.filePath &&
             (es.phase === 'streaming' || es.phase === 'pending_review'),
-        ) ?? null
+        ) ?? null)
       : null,
   );
 
@@ -299,13 +306,23 @@ export function EditorArea() {
     });
   }, [
     editorVersion,
-    editorFontSize, editorFontFamily, editorLineHeight,
-    editorTabSize, editorInsertSpaces,
-    editorWordWrap, editorMinimap, editorLineNumbers, editorCursorStyle,
-    editorRenderWhitespace, editorBracketPairColorization,
-    editorScrollBeyondLastLine, editorSmoothScrolling,
-    editorAutoClosingBrackets, editorAutoClosingQuotes,
-    editorFormatOnPaste, editorFormatOnType,
+    editorFontSize,
+    editorFontFamily,
+    editorLineHeight,
+    editorTabSize,
+    editorInsertSpaces,
+    editorWordWrap,
+    editorMinimap,
+    editorLineNumbers,
+    editorCursorStyle,
+    editorRenderWhitespace,
+    editorBracketPairColorization,
+    editorScrollBeyondLastLine,
+    editorSmoothScrolling,
+    editorAutoClosingBrackets,
+    editorAutoClosingQuotes,
+    editorFormatOnPaste,
+    editorFormatOnType,
   ]);
 
   // Apply git diff decorations to gutter + minimap
@@ -341,7 +358,8 @@ export function EditorArea() {
     monacoRef: monacoInstanceRef,
     filePath: activeTab?.type === 'file' ? (activeTab?.filePath ?? null) : null,
     language: activeTab?.type === 'file' ? (activeTab?.language ?? null) : null,
-    enabled: inlineCompletionEnabled && activeTab?.type === 'file' && activeTab?.viewerType === 'code',
+    enabled:
+      inlineCompletionEnabled && activeTab?.type === 'file' && activeTab?.viewerType === 'code',
     editorVersion,
     delay: inlineCompletionDelay,
     maxTokens: inlineCompletionMaxTokens,
@@ -507,7 +525,16 @@ export function EditorArea() {
         autoSaveTimerRef.current = setTimeout(saveCurrentFile, autoSaveDelay);
       }
     },
-    [activeTab?.id, activeTab?.filePath, activeTab?.language, markDirty, setFileContent, autoSave, autoSaveDelay, saveCurrentFile],
+    [
+      activeTab?.id,
+      activeTab?.filePath,
+      activeTab?.language,
+      markDirty,
+      setFileContent,
+      autoSave,
+      autoSaveDelay,
+      saveCurrentFile,
+    ],
   );
 
   // Save with Ctrl+S (only for text-editable viewers)
@@ -549,23 +576,28 @@ export function EditorArea() {
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [activeTab?.id, activeTab?.filePath, activeTab?.fileName, markDirty, updateTab, clearExternalConflict, saveCurrentFile]);
+  }, [
+    activeTab?.id,
+    activeTab?.filePath,
+    activeTab?.fileName,
+    markDirty,
+    updateTab,
+    clearExternalConflict,
+    saveCurrentFile,
+  ]);
 
-  const handleOpenWorkspaceFile = useCallback(
-    (path: string, anchor: string | null) => {
-      const fileName = path.split(/[\\/]/).pop() ?? path;
-      useEditorStore.getState().openTab({
-        id: path,
-        filePath: path,
-        fileName,
-        language: detectLanguage(path),
-        viewerType: getViewerType(fileName),
-        markdownAnchor: anchor ?? undefined,
-      });
-      useLayoutStore.getState().setWorkspaceMode('editor');
-    },
-    [],
-  );
+  const handleOpenWorkspaceFile = useCallback((path: string, anchor: string | null) => {
+    const fileName = path.split(/[\\/]/).pop() ?? path;
+    useEditorStore.getState().openTab({
+      id: path,
+      filePath: path,
+      fileName,
+      language: detectLanguage(path),
+      viewerType: getViewerType(fileName),
+      markdownAnchor: anchor ?? undefined,
+    });
+    useLayoutStore.getState().setWorkspaceMode('editor');
+  }, []);
 
   const handleTextEditorMount = useCallback(
     (
@@ -602,10 +634,7 @@ export function EditorArea() {
       };
       const handleKeyDown = (event: KeyboardEvent) => {
         // Keyboard-invoked context menu (Shift+F10 or the Menu key).
-        if (
-          (event.shiftKey && event.key === 'F10') ||
-          event.key === 'ContextMenu'
-        ) {
+        if ((event.shiftKey && event.key === 'F10') || event.key === 'ContextMenu') {
           event.preventDefault();
           event.stopPropagation();
           try {
@@ -637,8 +666,7 @@ export function EditorArea() {
   );
 
   const hasOpenTabs = tabs.length > 0;
-  const loading =
-    loadState.status === 'loading' && loadState.path === activeTab?.filePath;
+  const loading = loadState.status === 'loading' && loadState.path === activeTab?.filePath;
   const loadProgress =
     loadState.status === 'loading' && loadState.path === activeTab?.filePath
       ? { loaded: loadState.loaded, total: loadState.total }
@@ -670,12 +698,16 @@ export function EditorArea() {
         )}
       {hasExternalConflict && (
         <div className="border-b border-warning/40 bg-warning/10 px-3 py-1.5 text-xs text-warning">
-          This file changed on disk while the editor buffer has unsaved changes. Save or revert the buffer before reloading.
+          This file changed on disk while the editor buffer has unsaved changes. Save or revert the
+          buffer before reloading.
         </div>
       )}
       <div className="relative flex-1 overflow-hidden">
         {/* ── Layer 1: Normal editor content (hidden when a terminal tab is active) ── */}
-        <div className="absolute inset-0 flex flex-col" style={{ display: activeTab?.type === 'terminal' ? 'none' : 'flex' }}>
+        <div
+          className="absolute inset-0 flex flex-col"
+          style={{ display: activeTab?.type === 'terminal' ? 'none' : 'flex' }}
+        >
           {!activeTab ? (
             <EditorWelcome />
           ) : activeTab.type === 'commit' && activeTab.commitProps ? (
@@ -774,21 +806,21 @@ export function EditorArea() {
                 {loading && loadProgress && loadProgress.total != null && (
                   <LoadProgressBanner loaded={loadProgress.loaded} total={loadProgress.total} />
                 )}
-              <MarkdownViewer
-                content={content ?? ''}
-                mode={activeTab.markdownMode ?? 'preview'}
-                onModeChange={(mode) => setMarkdownMode(activeTab.id, mode)}
-                onSplitRatioChange={(ratio) => setMarkdownSplitRatio(activeTab.id, ratio)}
-                onChange={handleEditorChange}
-                onEditorMount={handleTextEditorMount}
-                onOpenWorkspaceFile={handleOpenWorkspaceFile}
-                language={activeTab.language}
-                filePath={activeTab.filePath}
-                rootPath={rootPath}
-                splitRatio={activeTab.markdownSplitRatio ?? 50}
-                requestedAnchor={activeTab.markdownAnchor}
-                onAnchorHandled={() => setMarkdownAnchor(activeTab.id, undefined)}
-              />
+                <MarkdownViewer
+                  content={content ?? ''}
+                  mode={activeTab.markdownMode ?? 'preview'}
+                  onModeChange={(mode) => setMarkdownMode(activeTab.id, mode)}
+                  onSplitRatioChange={(ratio) => setMarkdownSplitRatio(activeTab.id, ratio)}
+                  onChange={handleEditorChange}
+                  onEditorMount={handleTextEditorMount}
+                  onOpenWorkspaceFile={handleOpenWorkspaceFile}
+                  language={activeTab.language}
+                  filePath={activeTab.filePath}
+                  rootPath={rootPath}
+                  splitRatio={activeTab.markdownSplitRatio ?? 50}
+                  requestedAnchor={activeTab.markdownAnchor}
+                  onAnchorHandled={() => setMarkdownAnchor(activeTab.id, undefined)}
+                />
               </>
             )
           ) : activeTab.viewerType === 'image' ? (
@@ -864,6 +896,8 @@ export function EditorArea() {
                       autoClosingQuotes: editorAutoClosingQuotes,
                       formatOnPaste: editorFormatOnPaste,
                       formatOnType: editorFormatOnType,
+                      // VS Code parity: allow LSP semantic tokens to overlay Monarch.
+                      'semanticHighlighting.enabled': true,
                       inlineSuggest: {
                         enabled: inlineCompletionEnabled,
                         mode: 'subwordSmart',
@@ -885,9 +919,16 @@ export function EditorArea() {
 
         {/* ── Layer 2: Terminal tabs (always mounted; visibility toggled) ── */}
         {tabs
-          .filter((t): t is typeof t & { terminalSessionId: string } => t.type === 'terminal' && !!t.terminalSessionId)
+          .filter(
+            (t): t is typeof t & { terminalSessionId: string } =>
+              t.type === 'terminal' && !!t.terminalSessionId,
+          )
           .map((t) => (
-            <div key={t.terminalSessionId} className="absolute inset-0" style={{ display: t.id === activeTabId ? 'block' : 'none' }}>
+            <div
+              key={t.terminalSessionId}
+              className="absolute inset-0"
+              style={{ display: t.id === activeTabId ? 'block' : 'none' }}
+            >
               <TerminalInstance sessionId={t.terminalSessionId} isActive={t.id === activeTabId} />
             </div>
           ))}
@@ -898,7 +939,11 @@ export function EditorArea() {
         <EditorContextMenu
           x={editorCtxMenu.x}
           y={editorCtxMenu.y}
-          editorInstance={editorInstanceRef.current as unknown as Parameters<typeof EditorContextMenu>[0]['editorInstance']}
+          editorInstance={
+            editorInstanceRef.current as unknown as Parameters<
+              typeof EditorContextMenu
+            >[0]['editorInstance']
+          }
           onClose={() => setEditorCtxMenu(null)}
         />
       )}

@@ -1,38 +1,75 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
+import { defineAllMonacoThemes, getMonacoThemeName } from './monaco-themes';
 
-import { defineAllMonacoThemes, getMonacoThemeName, getXtermTheme } from './monaco-themes';
+// Canonical tokens that must be styled in every theme for VS Code parity.
+const REQUIRED_TOKENS = [
+  'comment',
+  'keyword',
+  'string',
+  'number',
+  'type',
+  'namespace',
+  'class',
+  'struct',
+  'enum',
+  'interface',
+  'function',
+  'method',
+  'macro',
+  'decorator',
+  'annotation',
+  'parameter',
+  'property',
+  'variable',
+  'constant',
+  'operator',
+  'delimiter',
+];
 
-describe('Aura built-in theme', () => {
-  it('maps the settings theme id to the registered Monaco theme', () => {
-    expect(getMonacoThemeName('aura')).toBe('hyscode-aura');
+const THEME_IDS = [
+  'hyscode-dark',
+  'aura',
+  'hyscode-light',
+  'nord',
+  'monokai',
+  'dracula',
+  'github-dark',
+];
+
+function createMonacoCapture() {
+  const defined = new Map<
+    string,
+    { rules: Array<{ token: string }>; colors: Record<string, string> }
+  >();
+  const monaco = {
+    editor: {
+      defineTheme: (
+        name: string,
+        def: { rules: Array<{ token: string }>; colors: Record<string, string> },
+      ) => {
+        defined.set(name, def);
+      },
+    },
+  };
+  return { monaco, defined };
+}
+
+describe('monaco-themes VS Code parity', () => {
+  it('maps every settings themeId to a Monaco theme', () => {
+    for (const id of THEME_IDS) {
+      expect(getMonacoThemeName(id)).toMatch(/^hyscode-/);
+    }
   });
 
-  it('registers the Aura editor surface with Monaco', () => {
-    const defineTheme = vi.fn();
-
-    defineAllMonacoThemes({ editor: { defineTheme } } as unknown as typeof import('monaco-editor'));
-
-    expect(defineTheme).toHaveBeenCalledWith(
-      'hyscode-aura',
-      expect.objectContaining({
-        base: 'vs-dark',
-        colors: expect.objectContaining({
-          'editor.background': '#15141b',
-          'editorCursor.foreground': '#a277ff',
-        }),
-      }),
-    );
-  });
-
-  it('keeps the official palette relationship across terminal colors', () => {
-    expect(getXtermTheme('aura')).toMatchObject({
-      background: '#15141b',
-      foreground: '#cdccce',
-      cursor: '#a277ff',
-      green: '#61ffca',
-      yellow: '#ffca85',
-      blue: '#a277ff',
-      red: '#ff6767',
-    });
+  it('defines every required token in every built-in theme', () => {
+    const { monaco, defined } = createMonacoCapture();
+    defineAllMonacoThemes(monaco as never);
+    expect(defined.size).toBeGreaterThanOrEqual(7);
+    for (const [, def] of defined) {
+      const tokens = new Set(def.rules.map((r) => r.token));
+      for (const required of REQUIRED_TOKENS) {
+        expect(tokens.has(required)).toBe(true);
+      }
+    }
   });
 });

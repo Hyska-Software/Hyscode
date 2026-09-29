@@ -16,6 +16,11 @@ export type {
   LspError,
   MessageTransport,
   ServerCapabilities,
+  SemanticTokensLegend,
+  SemanticTokensProviderOptions,
+  SemanticTokensFullResponse,
+  SemanticTokensDeltaResponse,
+  SemanticTokensDeltaEdit,
   InitializeResult,
   LspDiagnostic,
   LspRange,
@@ -26,3 +31,10 @@ export type {
   Location,
   LocationLink,
 } from './types';
+export {
+  SEMANTIC_TOKEN_TYPES,
+  SEMANTIC_TOKEN_MODIFIERS,
+  decodeSemanticTokens,
+  remapSemanticTokensToLegend,
+  resolveCanonicalTokenType,
+} from './semantic-tokens';

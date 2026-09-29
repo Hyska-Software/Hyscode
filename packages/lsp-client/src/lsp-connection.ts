@@ -6,7 +6,10 @@ import type {
   ServerCapabilities,
   InitializeResult,
   LspRange,
+  SemanticTokensFullResponse,
+  SemanticTokensDeltaResponse,
 } from './types';
+import { SEMANTIC_TOKEN_MODIFIERS, SEMANTIC_TOKEN_TYPES } from './semantic-tokens';
 
 type NotificationHandler = (params: unknown) => void;
 type ResponseResolver = { resolve: (result: unknown) => void; reject: (error: Error) => void };
@@ -53,7 +56,12 @@ export class LspConnection {
       ...(initializationOptions !== undefined ? { initializationOptions } : {}),
       capabilities: {
         textDocument: {
-          synchronization: { dynamicRegistration: false, willSave: false, didSave: true, willSaveWaitUntil: false },
+          synchronization: {
+            dynamicRegistration: false,
+            willSave: false,
+            didSave: true,
+            willSaveWaitUntil: false,
+          },
           completion: {
             dynamicRegistration: false,
             completionItem: {
@@ -90,7 +98,21 @@ export class LspConnection {
           documentHighlight: { dynamicRegistration: false },
           selectionRange: { dynamicRegistration: false },
           inlayHint: { dynamicRegistration: false },
-          publishDiagnostics: { relatedInformation: true, versionSupport: true, tagSupport: { valueSet: [1, 2] } },
+          semanticTokens: {
+            dynamicRegistration: false,
+            requests: { range: false, full: { delta: true } },
+            tokenTypes: SEMANTIC_TOKEN_TYPES,
+            tokenModifiers: SEMANTIC_TOKEN_MODIFIERS,
+            formats: ['relative'],
+            overlappingTokenSupport: false,
+            multilineTokenSupport: true,
+            augmentsSyntaxTokens: true,
+          },
+          publishDiagnostics: {
+            relatedInformation: true,
+            versionSupport: true,
+            tagSupport: { valueSet: [1, 2] },
+          },
         },
         workspace: {
           workspaceFolders: true,
@@ -201,7 +223,11 @@ export class LspConnection {
     });
   }
 
-  codeAction(uri: string, range: { start: { line: number; character: number }; end: { line: number; character: number } }, diagnostics: unknown[]) {
+  codeAction(
+    uri: string,
+    range: { start: { line: number; character: number }; end: { line: number; character: number } },
+    diagnostics: unknown[],
+  ) {
     return this.sendRequest('textDocument/codeAction', {
       textDocument: { uri },
       range,
@@ -267,6 +293,32 @@ export class LspConnection {
     });
   }
 
+  semanticTokensFull(uri: string) {
+    return this.sendRequest<SemanticTokensFullResponse | null>('textDocument/semanticTokens/full', {
+      textDocument: { uri },
+    });
+  }
+
+  semanticTokensFullDelta(uri: string, previousResultId: string) {
+    return this.sendRequest<SemanticTokensFullResponse | SemanticTokensDeltaResponse | null>(
+      'textDocument/semanticTokens/full/delta',
+      {
+        textDocument: { uri },
+        previousResultId,
+      },
+    );
+  }
+
+  semanticTokensRange(uri: string, range: LspRange) {
+    return this.sendRequest<SemanticTokensFullResponse | null>(
+      'textDocument/semanticTokens/range',
+      {
+        textDocument: { uri },
+        range,
+      },
+    );
+  }
+
   workspaceSymbol(query: string) {
     return this.sendRequest('workspace/symbol', {
       query,
@@ -290,7 +342,9 @@ export class LspConnection {
 
   onStatusChange(listener: (status: LspConnectionStatus) => void) {
     this.statusListeners.add(listener);
-    return () => { this.statusListeners.delete(listener); };
+    return () => {
+      this.statusListeners.delete(listener);
+    };
   }
 
   // ── Internals ─────────────────────────────────────────────────────────────
@@ -343,7 +397,10 @@ export class LspConnection {
 
   private handleMessage(msg: unknown) {
     if (typeof msg !== 'object' || msg === null) {
-      console.error(`[LspConnection ${this.languageId}] Malformed LSP message (not an object):`, msg);
+      console.error(
+        `[LspConnection ${this.languageId}] Malformed LSP message (not an object):`,
+        msg,
+      );
       return;
     }
 

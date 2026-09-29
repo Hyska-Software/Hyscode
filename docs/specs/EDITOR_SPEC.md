@@ -170,6 +170,14 @@ Additional languages (Dockerfile, HCL, Elixir, Haskell, Zig, Nim, Clojure, OCaml
 ### Native language services (LSP)
 HysCode ships a built-in LSP client (`packages/lsp-client`) that starts language servers per file language via Tauri (`lsp_start`), including: TypeScript (`typescript-language-server`), Pyright, rust-analyzer, gopls, clangd, jdtls, csharp-ls, Intelephense, Ruby LSP, Dart, HTML/CSS/JSON (`vscode-langservers-extracted`) and SpectraLang (`spectra-lsp`). Server configs live in `packages/lsp-client/src/builtin-servers.ts`; `initializationOptions` from each config are sent in the LSP `initialize` request. IntelliSense (diagnostics, completion, hover, definition, formatting, symbols) is wired to Monaco via `MonacoLspAdapter`.
 
+### Syntax highlighting (VS Code parity)
+Highlighting is two layers, enabled for all supported languages with `'semanticHighlighting.enabled': true`:
+
+1. **Semantic (LSP)** — `MonacoLspAdapter` registers `registerDocumentSemanticTokensProvider` + range provider when `semanticTokensProvider` is advertised. Client advertises `textDocument/semanticTokens` with delta support (`packages/lsp-client/src/lsp-connection.ts`); decode/remap helpers live in `packages/lsp-client/src/semantic-tokens.ts`. Large files (>1 MB) skip semantic tokens and fall back to Monarch.
+2. **Syntactic (Monarch)** — built-in Monaco grammars plus custom tokenizers in `language-registry.ts`, including a rich Rust fallback (`namespace`, `type`, `function`, `macro`, `annotation`, `lifetime`) for use when the server is missing.
+
+Both layers share one canonical token vocabulary (`namespace`, `class`, `struct`, `enum`, `function`, `method`, `macro`, `decorator`, `parameter`, `property`, …). All 7 built-in Monaco themes in `apps/desktop/src/lib/monaco-themes.ts` define colors for the full set, and `SCOPE_TO_TOKEN` maps extension `tokenColors` scopes to the same vocabulary so extension themes keep working.
+
 ---
 
 ## Agent Edit Visualization

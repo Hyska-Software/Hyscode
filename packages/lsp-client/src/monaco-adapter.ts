@@ -1,7 +1,29 @@
 import type { LspConnection } from './lsp-connection';
-import type { CompletionItem, CompletionList, Hover, Location, LocationLink, LspDiagnostic, LspRange, DocumentSymbol, InlayHint } from './types';
-import { disableNativeTypeScriptValidation, enableNativeTypeScriptValidation } from './language-registry';
+import type {
+  CompletionItem,
+  CompletionList,
+  Hover,
+  Location,
+  LocationLink,
+  LspDiagnostic,
+  LspRange,
+  DocumentSymbol,
+  InlayHint,
+  SemanticTokensDeltaResponse,
+  SemanticTokensFullResponse,
+  SemanticTokensProviderOptions,
+} from './types';
+import {
+  disableNativeTypeScriptValidation,
+  enableNativeTypeScriptValidation,
+} from './language-registry';
 import { documentUriFromModelUri } from './uri';
+import {
+  SEMANTIC_TOKEN_MODIFIERS,
+  SEMANTIC_TOKEN_TYPES,
+  remapSemanticTokensToLegend,
+  toMonacoSemanticEdits,
+} from './semantic-tokens';
 
 type MonacoEditor = typeof import('monaco-editor');
 
@@ -23,10 +45,7 @@ function normalizeUri(u: string): string {
  *  external/unsafe resources. */
 const ALLOWED_URI_SCHEMES = new Set(['file', 'untitled', 'vscode-remote']);
 
-function safeParseUri(
-  monacoRef: MonacoEditor,
-  uri: string,
-): import('monaco-editor').Uri | null {
+function safeParseUri(monacoRef: MonacoEditor, uri: string): import('monaco-editor').Uri | null {
   const match = /^([a-zA-Z][a-zA-Z0-9+.-]*):/.exec(uri);
   const scheme = match?.[1]?.toLowerCase() ?? '';
   if (!ALLOWED_URI_SCHEMES.has(scheme)) return null;
@@ -149,6 +168,9 @@ export class MonacoLspAdapter {
     if (caps.documentRangeFormattingProvider) {
       this.registerRangeFormattingProvider(languageId);
     }
+    if (caps.semanticTokensProvider) {
+      this.registerSemanticTokensProvider(languageId, caps.semanticTokensProvider);
+    }
 
     this.registerDiagnostics();
   }
@@ -217,16 +239,25 @@ export class MonacoLspAdapter {
               label: item.label,
               kind: this.mapCompletionKind(item.kind),
               detail: item.detail,
-              documentation: typeof item.documentation === 'string'
-                ? item.documentation
-                : item.documentation?.value,
+              documentation:
+                typeof item.documentation === 'string'
+                  ? item.documentation
+                  : item.documentation?.value,
               insertText: item.insertText ?? item.label,
-              insertTextRules: item.insertTextFormat === 2
-                ? monacoRef.languages.CompletionItemInsertTextRule.InsertAsSnippet
-                : undefined,
+              insertTextRules:
+                item.insertTextFormat === 2
+                  ? monacoRef.languages.CompletionItemInsertTextRule.InsertAsSnippet
+                  : undefined,
               sortText: item.sortText,
               filterText: item.filterText,
-              range: range ?? new monacoRef.Range(position.lineNumber, position.column, position.lineNumber, position.column),
+              range:
+                range ??
+                new monacoRef.Range(
+                  position.lineNumber,
+                  position.column,
+                  position.lineNumber,
+                  position.column,
+                ),
             };
             if (additionalTextEdits) suggestion.additionalTextEdits = additionalTextEdits;
             return suggestion;
@@ -243,20 +274,19 @@ export class MonacoLspAdapter {
       provideHover: async (model, position) => {
         const uri = documentUriFromModelUri(model.uri);
         if (!uri) return null;
-        const result = await this.safeRequest('hover', null as Hover | null, () =>
-          conn.hover(uri, position.lineNumber - 1, position.column - 1) as Promise<Hover | null>,
+        const result = await this.safeRequest(
+          'hover',
+          null as Hover | null,
+          () =>
+            conn.hover(uri, position.lineNumber - 1, position.column - 1) as Promise<Hover | null>,
         );
         if (!result) return null;
 
-        const contents = Array.isArray(result.contents)
-          ? result.contents
-          : [result.contents];
+        const contents = Array.isArray(result.contents) ? result.contents : [result.contents];
 
         return {
           contents: contents.map((c) =>
-            typeof c === 'string'
-              ? { value: c }
-              : { value: c.value },
+            typeof c === 'string' ? { value: c } : { value: c.value },
           ),
           range: result.range
             ? new this.monaco.Range(
@@ -370,19 +400,24 @@ export class MonacoLspAdapter {
       provideSignatureHelp: async (model, position) => {
         const uri = documentUriFromModelUri(model.uri);
         if (!uri) return null;
-        type SigHelp =
-          | {
-              signatures: Array<{
-                label: string;
-                documentation?: string | { kind: string; value: string };
-                parameters?: Array<{ label: string | [number, number]; documentation?: string }>;
-              }>;
-              activeSignature?: number;
-              activeParameter?: number;
-            }
-          | null;
-        const result = await this.safeRequest('signatureHelp', null as SigHelp, () =>
-          conn.signatureHelp(uri, position.lineNumber - 1, position.column - 1) as Promise<SigHelp>,
+        type SigHelp = {
+          signatures: Array<{
+            label: string;
+            documentation?: string | { kind: string; value: string };
+            parameters?: Array<{ label: string | [number, number]; documentation?: string }>;
+          }>;
+          activeSignature?: number;
+          activeParameter?: number;
+        } | null;
+        const result = await this.safeRequest(
+          'signatureHelp',
+          null as SigHelp,
+          () =>
+            conn.signatureHelp(
+              uri,
+              position.lineNumber - 1,
+              position.column - 1,
+            ) as Promise<SigHelp>,
         );
 
         if (!result) return null;
@@ -391,9 +426,10 @@ export class MonacoLspAdapter {
           value: {
             signatures: result.signatures.map((sig) => ({
               label: sig.label,
-              documentation: typeof sig.documentation === 'string'
-                ? sig.documentation
-                : sig.documentation?.value,
+              documentation:
+                typeof sig.documentation === 'string'
+                  ? sig.documentation
+                  : sig.documentation?.value,
               parameters: (sig.parameters ?? []).map((p) => ({
                 label: p.label,
                 documentation: p.documentation,
@@ -416,11 +452,17 @@ export class MonacoLspAdapter {
       provideDocumentFormattingEdits: async (model, options) => {
         const uri = documentUriFromModelUri(model.uri);
         if (!uri) return [];
-        type FmtEdits =
-          | Array<{ range: { start: { line: number; character: number }; end: { line: number; character: number } }; newText: string }>
-          | null;
-        const result = await this.safeRequest('formatting', null as FmtEdits, () =>
-          conn.formatting(uri, options.tabSize, options.insertSpaces) as Promise<FmtEdits>,
+        type FmtEdits = Array<{
+          range: {
+            start: { line: number; character: number };
+            end: { line: number; character: number };
+          };
+          newText: string;
+        }> | null;
+        const result = await this.safeRequest(
+          'formatting',
+          null as FmtEdits,
+          () => conn.formatting(uri, options.tabSize, options.insertSpaces) as Promise<FmtEdits>,
         );
 
         if (!result) return [];
@@ -455,9 +497,9 @@ export class MonacoLspAdapter {
           'codeAction',
           null as Array<import('./types').CodeAction> | null,
           () =>
-            conn.codeAction(uri, lspRange, context.markers) as Promise<
-              Array<import('./types').CodeAction> | null
-            >,
+            conn.codeAction(uri, lspRange, context.markers) as Promise<Array<
+              import('./types').CodeAction
+            > | null>,
         );
 
         if (!result) return { actions: [], dispose: () => {} };
@@ -533,8 +575,10 @@ export class MonacoLspAdapter {
           | DocumentSymbol[]
           | Array<{ name: string; kind: number; location: Location; containerName?: string }>
           | null;
-        const result = await this.safeRequest('documentSymbol', null as DocSyms, () =>
-          conn.documentSymbol(uri) as Promise<DocSyms>,
+        const result = await this.safeRequest(
+          'documentSymbol',
+          null as DocSyms,
+          () => conn.documentSymbol(uri) as Promise<DocSyms>,
         );
 
         if (!result) return [];
@@ -545,27 +589,32 @@ export class MonacoLspAdapter {
         }
 
         // Flat SymbolInformation[]
-        return (result as Array<{ name: string; kind: number; location: Location; containerName?: string }>).map(
-          (s): import('monaco-editor').languages.DocumentSymbol => ({
-            name: s.name,
-            detail: '',
-            kind: this.mapSymbolKind(s.kind),
-            containerName: s.containerName,
-            tags: [],
-            range: new monacoRef.Range(
-              s.location.range.start.line + 1,
-              s.location.range.start.character + 1,
-              s.location.range.end.line + 1,
-              s.location.range.end.character + 1,
-            ),
-            selectionRange: new monacoRef.Range(
-              s.location.range.start.line + 1,
-              s.location.range.start.character + 1,
-              s.location.range.end.line + 1,
-              s.location.range.end.character + 1,
-            ),
-          }),
-        ) as unknown as import('monaco-editor').languages.DocumentSymbol[];
+        return (
+          result as Array<{
+            name: string;
+            kind: number;
+            location: Location;
+            containerName?: string;
+          }>
+        ).map((s): import('monaco-editor').languages.DocumentSymbol => ({
+          name: s.name,
+          detail: '',
+          kind: this.mapSymbolKind(s.kind),
+          containerName: s.containerName,
+          tags: [],
+          range: new monacoRef.Range(
+            s.location.range.start.line + 1,
+            s.location.range.start.character + 1,
+            s.location.range.end.line + 1,
+            s.location.range.end.character + 1,
+          ),
+          selectionRange: new monacoRef.Range(
+            s.location.range.start.line + 1,
+            s.location.range.start.character + 1,
+            s.location.range.end.line + 1,
+            s.location.range.end.character + 1,
+          ),
+        })) as unknown as import('monaco-editor').languages.DocumentSymbol[];
       },
     });
     this.disposables.push(d);
@@ -603,13 +652,16 @@ export class MonacoLspAdapter {
       provideReferences: async (model, position, context) => {
         const uri = documentUriFromModelUri(model.uri);
         if (!uri) return [];
-        const result = await this.safeRequest('references', null as Location[] | null, () =>
-          conn.references(
-            uri,
-            position.lineNumber - 1,
-            position.column - 1,
-            context.includeDeclaration,
-          ) as Promise<Location[] | null>,
+        const result = await this.safeRequest(
+          'references',
+          null as Location[] | null,
+          () =>
+            conn.references(
+              uri,
+              position.lineNumber - 1,
+              position.column - 1,
+              context.includeDeclaration,
+            ) as Promise<Location[] | null>,
         );
 
         if (!result) return [];
@@ -641,18 +693,28 @@ export class MonacoLspAdapter {
       provideRenameEdits: async (model, position, newName) => {
         const uri = documentUriFromModelUri(model.uri);
         if (!uri) return null;
-        type RenameResult =
-          | {
-              changes?: Record<string, Array<{ range: { start: { line: number; character: number }; end: { line: number; character: number } }; newText: string }>>;
-            }
-          | null;
-        const result = await this.safeRequest('rename', null as RenameResult, () =>
-          conn.rename(
-            uri,
-            position.lineNumber - 1,
-            position.column - 1,
-            newName,
-          ) as Promise<RenameResult>,
+        type RenameResult = {
+          changes?: Record<
+            string,
+            Array<{
+              range: {
+                start: { line: number; character: number };
+                end: { line: number; character: number };
+              };
+              newText: string;
+            }>
+          >;
+        } | null;
+        const result = await this.safeRequest(
+          'rename',
+          null as RenameResult,
+          () =>
+            conn.rename(
+              uri,
+              position.lineNumber - 1,
+              position.column - 1,
+              newName,
+            ) as Promise<RenameResult>,
         );
 
         if (!result) return null;
@@ -692,15 +754,21 @@ export class MonacoLspAdapter {
         const uri = documentUriFromModelUri(model.uri);
         if (!uri) return [];
         type Hl = Array<{
-          range: { start: { line: number; character: number }; end: { line: number; character: number } };
+          range: {
+            start: { line: number; character: number };
+            end: { line: number; character: number };
+          };
           kind?: number;
         }> | null;
-        const result = await this.safeRequest('documentHighlight', null as Hl, () =>
-          conn.documentHighlight(
-            uri,
-            position.lineNumber - 1,
-            position.column - 1,
-          ) as Promise<Hl>,
+        const result = await this.safeRequest(
+          'documentHighlight',
+          null as Hl,
+          () =>
+            conn.documentHighlight(
+              uri,
+              position.lineNumber - 1,
+              position.column - 1,
+            ) as Promise<Hl>,
         );
 
         if (!result) return [];
@@ -736,38 +804,50 @@ export class MonacoLspAdapter {
           character: p.column - 1,
         }));
         type SelRanges = Array<{
-          range: { start: { line: number; character: number }; end: { line: number; character: number } };
-          parent?: { range: { start: { line: number; character: number }; end: { line: number; character: number } } };
+          range: {
+            start: { line: number; character: number };
+            end: { line: number; character: number };
+          };
+          parent?: {
+            range: {
+              start: { line: number; character: number };
+              end: { line: number; character: number };
+            };
+          };
         }> | null;
-        const result = await this.safeRequest('selectionRanges', null as SelRanges, () =>
-          conn.selectionRanges(uri, lspPositions) as Promise<SelRanges>,
+        const result = await this.safeRequest(
+          'selectionRanges',
+          null as SelRanges,
+          () => conn.selectionRanges(uri, lspPositions) as Promise<SelRanges>,
         );
 
         if (!result) return [];
 
-        const selectionRanges: import('monaco-editor').languages.SelectionRange[][] = result.map((r) => {
-          const ranges: import('monaco-editor').Range[] = [
-            new monacoRef.Range(
-              r.range.start.line + 1,
-              r.range.start.character + 1,
-              r.range.end.line + 1,
-              r.range.end.character + 1,
-            ),
-          ];
-          let parent = r.parent;
-          while (parent) {
-            ranges.push(
+        const selectionRanges: import('monaco-editor').languages.SelectionRange[][] = result.map(
+          (r) => {
+            const ranges: import('monaco-editor').Range[] = [
               new monacoRef.Range(
-                parent.range.start.line + 1,
-                parent.range.start.character + 1,
-                parent.range.end.line + 1,
-                parent.range.end.character + 1,
+                r.range.start.line + 1,
+                r.range.start.character + 1,
+                r.range.end.line + 1,
+                r.range.end.character + 1,
               ),
-            );
-            parent = (parent as { parent?: typeof parent }).parent;
-          }
-          return ranges.map((range) => ({ range }));
-        });
+            ];
+            let parent = r.parent;
+            while (parent) {
+              ranges.push(
+                new monacoRef.Range(
+                  parent.range.start.line + 1,
+                  parent.range.start.character + 1,
+                  parent.range.end.line + 1,
+                  parent.range.end.character + 1,
+                ),
+              );
+              parent = (parent as { parent?: typeof parent }).parent;
+            }
+            return ranges.map((range) => ({ range }));
+          },
+        );
 
         return selectionRanges;
       },
@@ -786,19 +866,21 @@ export class MonacoLspAdapter {
           start: { line: range.startLineNumber - 1, character: range.startColumn - 1 },
           end: { line: range.endLineNumber - 1, character: range.endColumn - 1 },
         };
-        const result = await this.safeRequest('inlayHints', null as InlayHint[] | null, () =>
-          conn.inlayHints(uri, lspRange) as Promise<InlayHint[] | null>,
+        const result = await this.safeRequest(
+          'inlayHints',
+          null as InlayHint[] | null,
+          () => conn.inlayHints(uri, lspRange) as Promise<InlayHint[] | null>,
         );
 
         if (!result) return { hints: [], dispose: () => {} };
 
         const hints = result.map((h) => ({
           position: new monacoRef.Position(h.position.line + 1, h.position.character + 1),
-          label:
-            typeof h.label === 'string'
-              ? h.label
-              : h.label.map((l) => l.value).join(''),
-          kind: h.kind === 2 ? monacoRef.languages.InlayHintKind.Parameter : monacoRef.languages.InlayHintKind.Type,
+          label: typeof h.label === 'string' ? h.label : h.label.map((l) => l.value).join(''),
+          kind:
+            h.kind === 2
+              ? monacoRef.languages.InlayHintKind.Parameter
+              : monacoRef.languages.InlayHintKind.Type,
           paddingLeft: h.paddingLeft,
           paddingRight: h.paddingRight,
         }));
@@ -820,11 +902,23 @@ export class MonacoLspAdapter {
           start: { line: range.startLineNumber - 1, character: range.startColumn - 1 },
           end: { line: range.endLineNumber - 1, character: range.endColumn - 1 },
         };
-        type RangeEdits =
-          | Array<{ range: { start: { line: number; character: number }; end: { line: number; character: number } }; newText: string }>
-          | null;
-        const result = await this.safeRequest('rangeFormatting', null as RangeEdits, () =>
-          conn.rangeFormatting(uri, lspRange, options.tabSize, options.insertSpaces) as Promise<RangeEdits>,
+        type RangeEdits = Array<{
+          range: {
+            start: { line: number; character: number };
+            end: { line: number; character: number };
+          };
+          newText: string;
+        }> | null;
+        const result = await this.safeRequest(
+          'rangeFormatting',
+          null as RangeEdits,
+          () =>
+            conn.rangeFormatting(
+              uri,
+              lspRange,
+              options.tabSize,
+              options.insertSpaces,
+            ) as Promise<RangeEdits>,
         );
 
         if (!result) return [];
@@ -843,27 +937,162 @@ export class MonacoLspAdapter {
     this.disposables.push(d);
   }
 
+  private registerSemanticTokensProvider(
+    languageId: string,
+    options: SemanticTokensProviderOptions,
+  ) {
+    const conn = this.connection;
+    const serverTypes =
+      options.legend.tokenTypes.length > 0 ? options.legend.tokenTypes : SEMANTIC_TOKEN_TYPES;
+    const serverModifiers =
+      options.legend.tokenModifiers.length > 0
+        ? options.legend.tokenModifiers
+        : SEMANTIC_TOKEN_MODIFIERS;
+    const supportsDelta =
+      typeof options.full === 'object' ? options.full.delta === true : options.full === true;
+    const supportsRange = Boolean(options.range);
+
+    const legend = { tokenTypes: SEMANTIC_TOKEN_TYPES, tokenModifiers: SEMANTIC_TOKEN_MODIFIERS };
+
+    const toMonacoData = (data: number[] | undefined): Uint32Array | null => {
+      if (!data || data.length === 0) return new Uint32Array(0);
+      // Guard against truncated payloads (must be a multiple of 5).
+      if (data.length % 5 !== 0) return null;
+      try {
+        return remapSemanticTokensToLegend(data, serverTypes, serverModifiers);
+      } catch {
+        return null;
+      }
+    };
+
+    const fullProvider: import('monaco-editor').languages.DocumentSemanticTokensProvider = {
+      getLegend: () => legend,
+      provideDocumentSemanticTokens: async (model, lastResultId) => {
+        const uri = documentUriFromModelUri(model.uri);
+        if (!uri) return null;
+        // Skip huge files — semantic tokens on multi-MB buffers stall the UI.
+        if (model.getValueLength() > 1_000_000) return null;
+
+        if (lastResultId && supportsDelta) {
+          const delta = await this.safeRequest(
+            'semanticTokensDelta',
+            null as unknown as SemanticTokensFullResponse | SemanticTokensDeltaResponse | null,
+            () =>
+              conn.semanticTokensFullDelta(uri, lastResultId) as Promise<
+                SemanticTokensFullResponse | SemanticTokensDeltaResponse | null
+              >,
+          );
+          if (!delta) return null;
+          if ('edits' in delta && Array.isArray((delta as SemanticTokensDeltaResponse).edits)) {
+            const d = delta as SemanticTokensDeltaResponse;
+            return {
+              resultId: d.resultId,
+              edits: toMonacoSemanticEdits(d.edits, serverTypes, serverModifiers),
+            };
+          }
+          const full = delta as SemanticTokensFullResponse;
+          const data = toMonacoData(full.data);
+          if (!data) return null;
+          return { resultId: full.resultId, data };
+        }
+
+        const result = await this.safeRequest(
+          'semanticTokens',
+          null as SemanticTokensFullResponse | null,
+          () => conn.semanticTokensFull(uri) as Promise<SemanticTokensFullResponse | null>,
+        );
+        if (!result) return null;
+        const data = toMonacoData(result.data);
+        if (!data) return null;
+        return { resultId: result.resultId, data };
+      },
+      releaseDocumentSemanticTokens: () => {},
+    };
+
+    try {
+      const langs = this.monaco.languages as unknown as {
+        registerDocumentSemanticTokensProvider?: (
+          selector: string,
+          provider: unknown,
+        ) => { dispose(): void };
+        registerDocumentRangeSemanticTokensProvider?: (
+          selector: string,
+          provider: unknown,
+        ) => { dispose(): void };
+      };
+      if (typeof langs.registerDocumentSemanticTokensProvider === 'function') {
+        this.disposables.push(
+          langs.registerDocumentSemanticTokensProvider(languageId, fullProvider),
+        );
+      }
+      if (
+        supportsRange &&
+        typeof langs.registerDocumentRangeSemanticTokensProvider === 'function'
+      ) {
+        const rangeProvider: import('monaco-editor').languages.DocumentRangeSemanticTokensProvider =
+          {
+            getLegend: () => legend,
+            provideDocumentRangeSemanticTokens: async (model, range) => {
+              const uri = documentUriFromModelUri(model.uri);
+              if (!uri) return null;
+              if (model.getValueLength() > 1_000_000) return null;
+              const lspRange = {
+                start: { line: range.startLineNumber - 1, character: range.startColumn - 1 },
+                end: { line: range.endLineNumber - 1, character: range.endColumn - 1 },
+              };
+              const result = await this.safeRequest(
+                'semanticTokensRange',
+                null as SemanticTokensFullResponse | null,
+                () =>
+                  conn.semanticTokensRange(
+                    uri,
+                    lspRange,
+                  ) as Promise<SemanticTokensFullResponse | null>,
+              );
+              if (!result) return null;
+              const data = toMonacoData(result.data);
+              if (!data) return null;
+              return { resultId: result.resultId, data };
+            },
+          };
+        this.disposables.push(
+          langs.registerDocumentRangeSemanticTokensProvider(languageId, rangeProvider),
+        );
+      }
+    } catch (err) {
+      console.warn(
+        `[MonacoLspAdapter:${this.connection.languageId}] semanticTokens registration failed:`,
+        err,
+      );
+    }
+  }
+
   private registerDiagnostics() {
     if (this.diagnosticsDisposer) return;
-    this.diagnosticsDisposer = this.connection.onNotification('textDocument/publishDiagnostics', (params) => {
-      const { uri, diagnostics } = params as { uri: string; diagnostics: LspDiagnostic[] };
-      const targetUri = normalizeUri(uri);
-      const model = this.monaco.editor.getModels().find((m) => normalizeUri(m.uri.toString()) === targetUri);
-      if (!model) return;
+    this.diagnosticsDisposer = this.connection.onNotification(
+      'textDocument/publishDiagnostics',
+      (params) => {
+        const { uri, diagnostics } = params as { uri: string; diagnostics: LspDiagnostic[] };
+        const targetUri = normalizeUri(uri);
+        const model = this.monaco.editor
+          .getModels()
+          .find((m) => normalizeUri(m.uri.toString()) === targetUri);
+        if (!model) return;
 
-      const markers = diagnostics.map((d) => ({
-        severity: this.mapSeverity(d.severity),
-        startLineNumber: d.range.start.line + 1,
-        startColumn: d.range.start.character + 1,
-        endLineNumber: d.range.end.line + 1,
-        endColumn: d.range.end.character + 1,
-        message: d.message,
-        source: d.source,
-        code: d.code !== undefined ? String(d.code) : undefined,
-      }));
+        const markers = diagnostics.map((d) => ({
+          severity: this.mapSeverity(d.severity),
+          startLineNumber: d.range.start.line + 1,
+          startColumn: d.range.start.character + 1,
+          endLineNumber: d.range.end.line + 1,
+          endColumn: d.range.end.character + 1,
+          message: d.message,
+          source: d.source,
+          code: d.code !== undefined ? String(d.code) : undefined,
+        }));
 
-      this.monaco.editor.setModelMarkers(model, `lsp-${this.connection.languageId}`, markers);
-    });
+        this.monaco.editor.setModelMarkers(model, `lsp-${this.connection.languageId}`, markers);
+      },
+    );
   }
 
   dispose() {
@@ -914,11 +1143,16 @@ export class MonacoLspAdapter {
 
   private mapSeverity(severity?: number): import('monaco-editor').MarkerSeverity {
     switch (severity) {
-      case 1: return this.monaco.MarkerSeverity.Error;
-      case 2: return this.monaco.MarkerSeverity.Warning;
-      case 3: return this.monaco.MarkerSeverity.Info;
-      case 4: return this.monaco.MarkerSeverity.Hint;
-      default: return this.monaco.MarkerSeverity.Error;
+      case 1:
+        return this.monaco.MarkerSeverity.Error;
+      case 2:
+        return this.monaco.MarkerSeverity.Warning;
+      case 3:
+        return this.monaco.MarkerSeverity.Info;
+      case 4:
+        return this.monaco.MarkerSeverity.Hint;
+      default:
+        return this.monaco.MarkerSeverity.Error;
     }
   }
 
