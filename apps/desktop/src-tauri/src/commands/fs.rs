@@ -9,7 +9,6 @@ use std::sync::Mutex;
 use tauri::{AppHandle, Emitter};
 
 #[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
 pub struct FileEntry {
     pub name: String,
     pub path: String,
@@ -18,7 +17,6 @@ pub struct FileEntry {
 }
 
 #[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
 pub struct FileStat {
     pub path: String,
     pub is_dir: bool,
@@ -1241,6 +1239,45 @@ pub fn open_path(path: String) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn file_entry_and_stat_serialize_with_snake_case_keys() {
+        // Regression: the frontend `tauriFs` contract expects `is_dir` /
+        // `is_file` (snake_case). A `#[serde(rename_all = "camelCase")]` on
+        // these structs silently flattens the explorer (every node becomes
+        // a file: no chevrons, no folders-first sort, no nesting).
+        let entry = FileEntry {
+            name: "apps".to_string(),
+            path: "/root/apps".to_string(),
+            is_dir: true,
+            size: 0,
+        };
+        let entry_value = serde_json::to_value(&entry).expect("entry serializes");
+        assert_eq!(
+            entry_value.get("is_dir").and_then(|v| v.as_bool()),
+            Some(true)
+        );
+        assert!(entry_value.get("isDir").is_none());
+
+        let stat = FileStat {
+            path: "/root/apps".to_string(),
+            is_dir: true,
+            is_file: false,
+            size: 0,
+            modified: None,
+        };
+        let stat_value = serde_json::to_value(&stat).expect("stat serializes");
+        assert_eq!(
+            stat_value.get("is_dir").and_then(|v| v.as_bool()),
+            Some(true)
+        );
+        assert_eq!(
+            stat_value.get("is_file").and_then(|v| v.as_bool()),
+            Some(false)
+        );
+        assert!(stat_value.get("isDir").is_none());
+        assert!(stat_value.get("isFile").is_none());
+    }
 
     #[test]
     fn workspace_resolver_rejects_roots_and_missing_paths() {

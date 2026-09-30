@@ -18,7 +18,6 @@ use std::process::Command;
 // ── Serializable types ──────────────────────────────────────────────────────
 
 #[derive(Serialize, Clone)]
-#[serde(rename_all = "camelCase")]
 pub struct GitFile {
     pub path: String,
     pub absolute_path: String,
@@ -27,7 +26,6 @@ pub struct GitFile {
 }
 
 #[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
 pub struct GitStatusResult {
     pub staged: Vec<GitFile>,
     pub unstaged: Vec<GitFile>,
@@ -86,7 +84,17 @@ pub fn validate_repo_relative_path(path: &str) -> Result<PathBuf, String> {
 
 fn normalize_separators(path: &str) -> String {
     if cfg!(windows) {
-        path.replace('/', "\\")
+        let normalized = path.replace('/', "\\");
+        if normalized
+            .get(..8)
+            .is_some_and(|prefix| prefix.eq_ignore_ascii_case("\\\\?\\UNC\\"))
+        {
+            format!("\\\\{}", &normalized[8..])
+        } else if let Some(path) = normalized.strip_prefix("\\\\?\\") {
+            path.to_string()
+        } else {
+            normalized
+        }
     } else {
         path.to_string()
     }
@@ -110,14 +118,15 @@ pub fn normalize_repo_relative_path(repo: &Repository, path: &str) -> Result<Str
     if path.trim().is_empty() {
         return Err("Invalid repository-relative path: ''".to_string());
     }
-    if !Path::new(path).is_absolute() {
+    let normalized_path = normalize_separators(path);
+    if !Path::new(path).is_absolute() && !Path::new(&normalized_path).is_absolute() {
         validate_repo_relative_path(path)?;
         return Ok(path.to_string());
     }
 
     let worktree = normalize_separators(&worktree_root(repo)?.to_string_lossy());
     let worktree = worktree.trim_end_matches(['\\', '/']);
-    let candidate = normalize_separators(path);
+    let candidate = normalized_path;
     let candidate = candidate.trim_end_matches(['\\', '/']);
     let prefix = format!("{worktree}\\");
     let inside = candidate
@@ -559,6 +568,41 @@ pub fn run_git_cli_with_github_auth(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn git_file_serializes_with_snake_case_path_keys() {
+        let file = GitFile {
+            path: "new-name.txt".to_string(),
+            absolute_path: "C:/repo/new-name.txt".to_string(),
+            status: "R".to_string(),
+            old_path: Some("old-name.txt".to_string()),
+        };
+        let value = serde_json::to_value(file).expect("git file serializes");
+
+        assert_eq!(
+            value.get("absolute_path").and_then(|v| v.as_str()),
+            Some("C:/repo/new-name.txt")
+        );
+        assert_eq!(
+            value.get("old_path").and_then(|v| v.as_str()),
+            Some("old-name.txt")
+        );
+        assert!(value.get("absolutePath").is_none());
+        assert!(value.get("oldPath").is_none());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn strips_windows_extended_prefixes_without_changing_unc_paths() {
+        assert_eq!(
+            normalize_separators(r"\\?\D:\Hyscode\src\main.rs"),
+            r"D:\Hyscode\src\main.rs"
+        );
+        assert_eq!(
+            normalize_separators(r"\\?\UNC\server\share\src\main.rs"),
+            r"\\server\share\src\main.rs"
+        );
+    }
 
     #[test]
     fn git_ref_validation_accepts_normal_names() {

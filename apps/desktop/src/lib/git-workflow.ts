@@ -23,11 +23,64 @@ export function shouldApplyGitResult(
 }
 
 export function isPathWithinGitRoot(path: string, root: string): boolean {
-  const normalize = (value: string): string =>
-    value.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
-  const normalizedPath = normalize(path);
-  const normalizedRoot = normalize(root);
-  return normalizedPath === normalizedRoot || normalizedPath.startsWith(`${normalizedRoot}/`);
+  return isAbsolutePath(normalizeGitPath(path)) && getGitRelativePath(path, root) !== null;
+}
+
+function normalizeGitPath(path: string): string {
+  let normalized = path.replace(/\\/g, '/');
+  if (/^\/\/\?\/UNC\//i.test(normalized)) {
+    normalized = `//${normalized.slice(8)}`;
+  } else if (normalized.startsWith('//?/')) {
+    normalized = normalized.slice(4);
+  }
+  const trimmed = normalized.replace(/\/+$/, '');
+  if (trimmed) return trimmed;
+  if (normalized.startsWith('/')) return '/';
+  if (/^[A-Za-z]:\/+$/i.test(normalized)) return `${normalized.slice(0, 2)}/`;
+  return '';
+}
+
+function isAbsolutePath(path: string): boolean {
+  return path.startsWith('/') || /^[A-Za-z]:\//.test(path);
+}
+
+function pathsEqual(left: string, right: string): boolean {
+  const windowsPath =
+    /^[A-Za-z]:\//.test(left) || /^[A-Za-z]:\//.test(right) || left.startsWith('//');
+  return windowsPath ? left.toLowerCase() === right.toLowerCase() : left === right;
+}
+
+function normalizeRelativeGitPath(path: string): string | null {
+  const segments: string[] = [];
+  for (const segment of path.split('/')) {
+    if (!segment || segment === '.') continue;
+    if (segment === '..') {
+      if (segments.length === 0) return null;
+      segments.pop();
+    } else {
+      segments.push(segment);
+    }
+  }
+  return segments.join('/');
+}
+
+/** Convert an absolute editor path inside the workspace to a Git-relative path. */
+export function getGitRelativePath(filePath: string, rootPath: string): string | null {
+  const normalizedPath = normalizeGitPath(filePath);
+  const normalizedRoot = normalizeGitPath(rootPath);
+  if (!normalizedPath || !normalizedRoot) return null;
+
+  if (!isAbsolutePath(normalizedPath)) {
+    return normalizeRelativeGitPath(normalizedPath);
+  }
+
+  if (pathsEqual(normalizedPath, normalizedRoot)) return '';
+  const prefix = normalizedRoot === '/' ? '/' : `${normalizedRoot}/`;
+  const windowsPath = /^[A-Za-z]:\//.test(normalizedPath) || normalizedPath.startsWith('//');
+  const matchesPrefix = windowsPath
+    ? normalizedPath.toLowerCase().startsWith(prefix.toLowerCase())
+    : normalizedPath.startsWith(prefix);
+  return matchesPrefix ? normalizeRelativeGitPath(normalizedPath.slice(prefix.length)) : null;
 }
 
 export function shouldConfirmGitDiscard(
@@ -102,7 +155,11 @@ export function getGitStatusBarPresentation(options: {
     case 'checking':
       return { label: 'Checking Git…', title: 'Checking repository state', interactive: false };
     case 'not-repository':
-      return { label: 'No repository', title: 'The open folder is not a Git repository', interactive: false };
+      return {
+        label: 'No repository',
+        title: 'The open folder is not a Git repository',
+        interactive: false,
+      };
     case 'error':
       return {
         label: 'Git error',

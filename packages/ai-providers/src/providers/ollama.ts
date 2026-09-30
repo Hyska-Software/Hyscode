@@ -94,6 +94,13 @@ function toOllamaTools(tools: ToolDefinition[]): OllamaTool[] {
   }));
 }
 
+function isConnectionUnavailable(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return /error sending request|connection refused|actively refused|failed to fetch|fetch failed|timed out/i.test(
+    message,
+  );
+}
+
 // ─── Provider Implementation ────────────────────────────────────────────────
 
 export class OllamaProvider implements AIProvider {
@@ -122,9 +129,14 @@ export class OllamaProvider implements AIProvider {
   async listModels(): Promise<AIModel[]> {
     try {
       const response = await this.fetchImpl(`${this.baseUrl}/api/tags`);
-      if (!response.ok) return [];
+      if (!response.ok) {
+        this.models = [];
+        return [];
+      }
 
-      const data = (await response.json()) as { models?: Array<{ name: string; details?: { parameter_size?: string }; size?: number }> };
+      const data = (await response.json()) as {
+        models?: Array<{ name: string; details?: { parameter_size?: string }; size?: number }>;
+      };
       this.models = (data.models ?? []).map((m) => ({
         id: m.name,
         name: m.name,
@@ -138,7 +150,14 @@ export class OllamaProvider implements AIProvider {
 
       return this.models;
     } catch (err) {
-      console.warn('[OllamaProvider] listModels failed (is Ollama running?):', err);
+      this.models = [];
+      if (isConnectionUnavailable(err)) {
+        console.info(
+          `[OllamaProvider] Local service unavailable at ${this.baseUrl}; start Ollama to discover local models.`,
+        );
+        return [];
+      }
+      console.warn('[OllamaProvider] Model discovery failed:', err);
       return [];
     }
   }

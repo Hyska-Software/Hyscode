@@ -14,7 +14,6 @@ use tauri::State;
 // ── Serializable Types ──────────────────────────────────────────────────────
 
 #[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
 pub struct GitCommitInfo {
     pub hash: String,
     pub short_hash: String,
@@ -2114,6 +2113,25 @@ mod tests {
     use std::process::Command;
     use std::time::{SystemTime, UNIX_EPOCH};
 
+    #[test]
+    fn git_commit_info_serializes_with_snake_case_keys() {
+        let commit = GitCommitInfo {
+            hash: "full-hash".to_string(),
+            short_hash: "short".to_string(),
+            message: "message".to_string(),
+            author: "author".to_string(),
+            email: "author@example.invalid".to_string(),
+            timestamp: 0,
+        };
+        let value = serde_json::to_value(commit).expect("commit info serializes");
+
+        assert_eq!(
+            value.get("short_hash").and_then(|v| v.as_str()),
+            Some("short")
+        );
+        assert!(value.get("shortHash").is_none());
+    }
+
     struct TestRepository {
         path: PathBuf,
     }
@@ -2440,6 +2458,21 @@ mod tests {
             normalize_repo_relative_path(&opened, &absolute_inside).unwrap(),
             "file.txt"
         );
+
+        #[cfg(windows)]
+        {
+            let extended_path = format!(r"\\?\{}", absolute_inside);
+            assert_eq!(
+                normalize_repo_relative_path(&opened, &extended_path).unwrap(),
+                "file.txt"
+            );
+
+            let forward_slash_extended = format!("//?/{}", absolute_inside.replace('\\', "/"));
+            assert_eq!(
+                normalize_repo_relative_path(&opened, &forward_slash_extended).unwrap(),
+                "file.txt"
+            );
+        }
 
         let absolute_outside = std::env::temp_dir()
             .join("hyscode-outside-worktree.txt")

@@ -29,7 +29,12 @@ function encodePathSegment(segment: string): string {
  * lowercased with an encoded colon (`file:///d%3A/...`).
  */
 export function pathToFileUri(filePath: string): string {
-  const slashNormalized = filePath.replace(/\\/g, '/');
+  let slashNormalized = filePath.replace(/\\/g, '/');
+  if (/^\/\/\?\/UNC\//i.test(slashNormalized)) {
+    slashNormalized = `//${slashNormalized.slice(8)}`;
+  } else if (slashNormalized.startsWith('//?/')) {
+    slashNormalized = slashNormalized.slice(4);
+  }
   if (/^file:/i.test(slashNormalized)) return slashNormalized;
   const encoded = slashNormalized
     .split('/')

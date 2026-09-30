@@ -1,7 +1,7 @@
 use super::utils::cmd;
 use serde::Serialize;
 use std::collections::HashMap;
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::process::{Child, Command, Stdio};
 use std::sync::{Mutex, OnceLock};
 use tauri::{Emitter, Manager};
@@ -116,6 +116,30 @@ pub async fn lsp_start(
         .ok_or("Failed to capture stdout from LSP process")?;
 
     let stdin = child.stdin.take();
+    if let Some(stderr) = child.stderr.take() {
+        let stderr_id = id.clone();
+        std::thread::spawn(move || {
+            let mut reader = BufReader::new(stderr);
+            let mut buffer = [0; 4096];
+            loop {
+                match reader.read(&mut buffer) {
+                    Ok(0) => break,
+                    Ok(size) => {
+                        let text = String::from_utf8_lossy(&buffer[..size]);
+                        if text.trim().is_empty() {
+                            continue;
+                        }
+                        let diagnostic: String = text.chars().take(2048).collect();
+                        eprintln!("[lsp stderr] id={stderr_id} {diagnostic}");
+                    }
+                    Err(error) => {
+                        eprintln!("[lsp stderr] id={stderr_id} read failed: {error}");
+                        break;
+                    }
+                }
+            }
+        });
+    }
 
     let server_id = id.clone();
 

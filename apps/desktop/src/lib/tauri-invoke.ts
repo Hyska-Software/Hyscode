@@ -461,20 +461,18 @@ interface TauriCommands {
   keychain_delete: { args: { service: string; account: string }; ret: void };
   keychain_has: { args: { service: string; account: string }; ret: boolean };
 
-  // AI Streaming — nested `request` with snake_case fields, matching the Rust
-  // `AiStreamRequest` struct (no rename_all) and the raw invoke call sites in
-  // `tauri-ai-transport.ts`, `tauri-codex-transport.ts` and
-  // `tauri-claude-agent-transport.ts`. Tauri auto-converts camelCase JS arg
-  // keys, but nested struct *fields* are deserialized as-is (snake_case).
+  // AI Streaming — nested request fields are serialized in camelCase by the
+  // Rust `AiStreamRequest` serde rename rule, matching the raw invoke call in
+  // `tauri-ai-transport.ts`.
   ai_stream_request: {
     args: {
       request: {
-        request_id: string;
+        requestId: string;
         provider: string;
         url: string;
         headers: Record<string, string>;
         body: string;
-        timeout_ms?: number;
+        timeoutMs?: number;
       };
     };
     ret: void;

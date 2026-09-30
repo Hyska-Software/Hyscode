@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react';
 import { useGitStore } from '../stores/git-store';
 import { useFileStore } from '../stores/file-store';
 import { useSettingsStore } from '../stores/settings-store';
+import { getGitRelativePath } from '../lib/git-workflow';
 import type * as monacoEditor from 'monaco-editor';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -53,15 +54,8 @@ function releaseGitBlameCss(): void {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-function normalizeRelPath(filePath: string, rootPath: string): string {
-  const norm = filePath.replace(/\\/g, '/');
-  let root = rootPath.replace(/\\/g, '/');
-  if (!root.endsWith('/')) root += '/';
-  return norm.startsWith(root) ? norm.slice(root.length) : norm;
-}
-
 function formatTimeAgo(timestamp: number): string {
-  const seconds = Math.floor((Date.now() / 1000) - timestamp);
+  const seconds = Math.floor(Date.now() / 1000 - timestamp);
   const intervals: [number, string][] = [
     [31536000, 'year'],
     [2592000, 'month'],
@@ -163,7 +157,8 @@ export function useGitBlameDecorations(
     const model = editor.getModel();
     if (!model) return;
 
-    const relPath = normalizeRelPath(filePath, rootPath);
+    const relPath = getGitRelativePath(filePath, rootPath);
+    if (relPath === null || relPath.length === 0) return;
     let cancelled = false;
 
     // Apply blame for a specific line using current editor/monaco/hunks state
@@ -206,7 +201,9 @@ export function useGitBlameDecorations(
     };
 
     // Fetch blame for this file
-    useGitStore.getState().getBlame(relPath)
+    useGitStore
+      .getState()
+      .getBlame(relPath)
       .then((hunks) => {
         if (cancelled) return;
         hunksRef.current = hunks;
@@ -234,9 +231,11 @@ export function useGitBlameDecorations(
       timer = setTimeout(() => {
         const ed = editorRef.current;
         if (!ed) return;
-        const rel = rootPath ? normalizeRelPath(filePath, rootPath) : null;
+        const rel = rootPath ? getGitRelativePath(filePath, rootPath) : null;
         if (!rel) return;
-        useGitStore.getState().getBlame(rel)
+        useGitStore
+          .getState()
+          .getBlame(rel)
           .then((hunks) => {
             hunksRef.current = hunks;
             const e2 = editorRef.current;
