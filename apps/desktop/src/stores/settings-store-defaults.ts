@@ -52,6 +52,7 @@ export const SETTINGS_DEFAULTS = {
   gitAutoFetch: false,
   gitAutoFetchInterval: 5,
   gitConfirmDiscard: true,
+  gitChangesView: 'tree',
   commitAiProviderId: null,
   commitAiModelId: null,
 

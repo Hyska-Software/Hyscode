@@ -120,6 +120,39 @@ describe('inline completion settings', () => {
   });
 });
 
+describe('Git changes view preference', () => {
+  beforeEach(() => {
+    useSettingsStore.setState({ gitChangesView: SETTINGS_DEFAULTS.gitChangesView });
+  });
+
+  it('defaults to tree view for new and migrated installations', () => {
+    expect(SETTINGS_DEFAULTS.gitChangesView).toBe('tree');
+    expect(migrateSettingsState({ gitConfirmDiscard: false }, 4)).toMatchObject({
+      gitConfirmDiscard: false,
+      gitChangesView: 'tree',
+    });
+  });
+
+  it('preserves a valid view preference and resets an invalid persisted value', () => {
+    expect(migrateSettingsState({ gitChangesView: 'list' }, 5)).toMatchObject({
+      gitChangesView: 'list',
+    });
+    expect(migrateSettingsState({ gitChangesView: 'grid' }, 5)).toMatchObject({
+      gitChangesView: 'tree',
+    });
+  });
+
+  it('updates the persisted setting through the settings store', () => {
+    useSettingsStore.getState().set('gitChangesView', 'list');
+
+    expect(useSettingsStore.getState().gitChangesView).toBe('list');
+    expect(JSON.parse(localStorage.getItem('hyscode-settings') ?? '{}')).toMatchObject({
+      version: 5,
+      state: { gitChangesView: 'list' },
+    });
+  });
+});
+
 describe('activity bar settings', () => {
   beforeEach(() => {
     useSettingsStore.setState({

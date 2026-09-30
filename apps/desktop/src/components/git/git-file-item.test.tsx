@@ -33,3 +33,14 @@ describe('GitFileItem preview action', () => {
     expect(screen.queryByRole('button', { name: 'Open in Preview' })).toBeNull();
   });
 });
+
+describe('GitFileItem tree presentation', () => {
+  it('supports indentation and hides the directory suffix when rendered in a tree', () => {
+    render(<GitFileItem file={file} mode="unstaged" depth={2} showDirectoryPath={false} />);
+
+    const row = screen.getByTitle('Modified: src/components/app.tsx');
+    expect(row.getAttribute('style')).toContain('padding-left: 32px');
+    expect(screen.queryByText('src/components')).toBeNull();
+    expect(screen.getByText('app.tsx')).toBeTruthy();
+  });
+});

@@ -47,6 +47,8 @@ import { useSettingsStore } from '../../../stores/settings-store';
 import { getViewerType } from '../../../lib/utils';
 import { detectLanguage } from '../../../lib/lsp-bridge';
 import { GitFileItem } from '../../git/git-file-item';
+import { GitFileLayout } from '../../git/git-file-tree';
+import { GitViewModeMenu } from '../../git/git-view-mode-menu';
 import { GitLogView } from '../../git/git-log-view';
 import { GitGraphView } from '../../git/git-graph-view';
 import { PullRequestDialog } from '../../git/pull-request-dialog';
@@ -122,6 +124,7 @@ export function GitView() {
   const getCommitContext = useGitStore((s) => s.getCommitContext);
   const getStagedFingerprint = useGitStore((s) => s.getStagedFingerprint);
   const confirmDiscard = useSettingsStore((s) => s.gitConfirmDiscard);
+  const gitChangesView = useSettingsStore((s) => s.gitChangesView);
 
   const commitAiProviderId = useSettingsStore((s) => s.commitAiProviderId);
   const commitAiModelId = useSettingsStore((s) => s.commitAiModelId);
@@ -985,21 +988,26 @@ export function GitView() {
 
         {conflicts.length > 0 && (
           <FileSection title="Merge Conflicts" count={conflicts.length} defaultOpen>
-            {conflicts.map((f) => (
-              <GitFileItem
-                key={`conflict:${f.path}`}
-                file={f}
-                mode="conflict"
-                onStage={() => void runOp('Mark Conflict Resolved', () => stageFiles([f.path]))}
-                onOpenDiff={() => openDiffTab(f, 'conflict')}
-                onOpenFile={f.status === 'D' ? undefined : () => openFileTab(f)}
-                onOpenPreview={
-                  canOpenGitFileInPreview(workspaceMode, f.status)
-                    ? () => openPreviewFile(f)
-                    : undefined
-                }
-              />
-            ))}
+            <GitFileLayout
+              files={conflicts}
+              mode={gitChangesView}
+              renderFile={(f, depth) => (
+                <GitFileItem
+                  file={f}
+                  mode="conflict"
+                  depth={depth}
+                  showDirectoryPath={gitChangesView === 'list'}
+                  onStage={() => void runOp('Mark Conflict Resolved', () => stageFiles([f.path]))}
+                  onOpenDiff={() => openDiffTab(f, 'conflict')}
+                  onOpenFile={f.status === 'D' ? undefined : () => openFileTab(f)}
+                  onOpenPreview={
+                    canOpenGitFileInPreview(workspaceMode, f.status)
+                      ? () => openPreviewFile(f)
+                      : undefined
+                  }
+                />
+              )}
+            />
           </FileSection>
         )}
 
@@ -1020,21 +1028,26 @@ export function GitView() {
               </button>
             }
           >
-            {staged.map((f) => (
-              <GitFileItem
-                key={`staged:${f.path}`}
-                file={f}
-                mode="staged"
-                onUnstage={() => void runOp('Unstage', () => unstageFiles([f.path]))}
-                onOpenDiff={() => openDiffTab(f, 'staged')}
-                onOpenFile={f.status === 'D' ? undefined : () => openFileTab(f)}
-                onOpenPreview={
-                  canOpenGitFileInPreview(workspaceMode, f.status)
-                    ? () => openPreviewFile(f)
-                    : undefined
-                }
-              />
-            ))}
+            <GitFileLayout
+              files={staged}
+              mode={gitChangesView}
+              renderFile={(f, depth) => (
+                <GitFileItem
+                  file={f}
+                  mode="staged"
+                  depth={depth}
+                  showDirectoryPath={gitChangesView === 'list'}
+                  onUnstage={() => void runOp('Unstage', () => unstageFiles([f.path]))}
+                  onOpenDiff={() => openDiffTab(f, 'staged')}
+                  onOpenFile={f.status === 'D' ? undefined : () => openFileTab(f)}
+                  onOpenPreview={
+                    canOpenGitFileInPreview(workspaceMode, f.status)
+                      ? () => openPreviewFile(f)
+                      : undefined
+                  }
+                />
+              )}
+            />
           </FileSection>
         )}
 
@@ -1055,22 +1068,27 @@ export function GitView() {
               </button>
             }
           >
-            {changes.map((f) => (
-              <GitFileItem
-                key={`change:${f.path}`}
-                file={f}
-                mode={f.status === '?' ? 'untracked' : 'unstaged'}
-                onStage={() => void runOp('Stage', () => stageFiles([f.path]))}
-                onDiscard={() => void handleDiscardFiles([f])}
-                onOpenDiff={f.status !== '?' ? () => openDiffTab(f, 'unstaged') : undefined}
-                onOpenFile={f.status === 'D' ? undefined : () => openFileTab(f)}
-                onOpenPreview={
-                  canOpenGitFileInPreview(workspaceMode, f.status)
-                    ? () => openPreviewFile(f)
-                    : undefined
-                }
-              />
-            ))}
+            <GitFileLayout
+              files={changes}
+              mode={gitChangesView}
+              renderFile={(f, depth) => (
+                <GitFileItem
+                  file={f}
+                  mode={f.status === '?' ? 'untracked' : 'unstaged'}
+                  depth={depth}
+                  showDirectoryPath={gitChangesView === 'list'}
+                  onStage={() => void runOp('Stage', () => stageFiles([f.path]))}
+                  onDiscard={() => void handleDiscardFiles([f])}
+                  onOpenDiff={f.status !== '?' ? () => openDiffTab(f, 'unstaged') : undefined}
+                  onOpenFile={f.status === 'D' ? undefined : () => openFileTab(f)}
+                  onOpenPreview={
+                    canOpenGitFileInPreview(workspaceMode, f.status)
+                      ? () => openPreviewFile(f)
+                      : undefined
+                  }
+                />
+              )}
+            />
           </FileSection>
         )}
       </div>
@@ -1088,6 +1106,15 @@ export function GitView() {
                 : { top: 0, left: 0, visibility: 'hidden' }
             }
           >
+            <GitViewModeMenu
+              value={gitChangesView}
+              onChange={(view) => {
+                setSettings('gitChangesView', view);
+                setShowMenu(false);
+              }}
+            />
+            <MenuDivider />
+
             {/* Remote */}
             <MenuSection label="Remote">
               <MenuBtn

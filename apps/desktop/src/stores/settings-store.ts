@@ -25,6 +25,7 @@ export type AutoSave = 'off' | 'afterDelay' | 'onFocusChange';
 export type AutoClosingBrackets = 'always' | 'languageDefined' | 'beforeWhitespace' | 'never';
 export type AutoClosingQuotes = 'always' | 'languageDefined' | 'beforeWhitespace' | 'never';
 export type TerminalCursorStyle = 'block' | 'underline' | 'bar';
+export type GitChangesView = 'tree' | 'list';
 
 export type ThemeId =
   | 'hyscode-dark'
@@ -143,6 +144,7 @@ interface SettingsState {
   gitAutoFetch: boolean;
   gitAutoFetchInterval: number;
   gitConfirmDiscard: boolean;
+  gitChangesView: GitChangesView;
   /** Provider used for AI commit message generation (null = use active provider) */
   commitAiProviderId: string | null;
   /** Model used for AI commit message generation (null = use active model) */
@@ -344,6 +346,9 @@ export function migrateSettingsState(persistedState: unknown, version: number): 
         if (key.startsWith('claude-agent::')) delete thinkingSettings[key];
       }
     }
+  }
+  if (version < 5 || (state.gitChangesView !== 'tree' && state.gitChangesView !== 'list')) {
+    state.gitChangesView = 'tree';
   }
   return state;
 }
@@ -593,7 +598,7 @@ export const useSettingsStore = create<SettingsState>()(
     {
       name: 'hyscode-settings',
       storage: createJSONStorage(() => localStorage),
-      version: 4,
+      version: 5,
       migrate: migrateSettingsState,
       partialize: (state) => {
         // Exclude transient UI state and action functions from persistence
