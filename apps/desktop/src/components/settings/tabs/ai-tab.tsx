@@ -32,7 +32,7 @@ import {
   getAllEnabledModelsGrouped,
 } from '@/lib/provider-catalog';
 import type { ProviderInfo, ModelInfo } from '@/lib/provider-catalog';
-import type { ToolCategory } from '@hyscode/agent-harness';
+import { MAX_ITERATIONS_FUSE, type ToolCategory } from '@hyscode/agent-harness';
 import { SettingRow, SettingSection, SettingSelect, SettingSlider, SettingToggle } from '../controls';
 
 function getActiveModelInfo(providerId: string | null, modelId: string | null): ModelInfo | null {
@@ -370,7 +370,7 @@ export function AiTab() {
               value={store.maxIterations}
               onChange={(v) => store.set('maxIterations', v)}
               min={1}
-              max={500}
+              max={MAX_ITERATIONS_FUSE}
             />
           </SettingRow>
         )}

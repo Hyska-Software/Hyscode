@@ -16,10 +16,24 @@ You are running as an autonomous sub-agent. Rules:
 1. You CANNOT use ask_user — if information is missing, make reasonable assumptions and proceed.
 2. Do NOT spawn additional sub-agents.
 3. Complete your task fully and return a comprehensive, detailed result as your final text response.
+4. Keep the final response dense and bounded (aim for at most ~300 lines, conclusions first, no raw file dumps): only a truncated excerpt of it reaches the parent agent.
 
 Your task:
 
 `;
+
+/** Upper bound for a sub-agent's final output. Mega-analyses (millions of
+ *  tokens) make the parent loop: it can neither hold nor re-fetch them. */
+export const SUB_AGENT_MAX_OUTPUT_CHARS = 12_000;
+
+/**
+ * Truncate a sub-agent's final response with an explicit cut marker.
+ * Pure — unit-tested.
+ */
+export function truncateSubAgentOutput(output: string): string {
+  if (output.length <= SUB_AGENT_MAX_OUTPUT_CHARS) return output;
+  return `${output.slice(0, SUB_AGENT_MAX_OUTPUT_CHARS)}\n\n... [sub-agent output truncated to ${SUB_AGENT_MAX_OUTPUT_CHARS} chars; the remainder was discarded] ...`;
+}
 
 export type DelegatedRunnerOptions = {
   parentHarness: Harness;

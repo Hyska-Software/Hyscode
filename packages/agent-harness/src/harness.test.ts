@@ -7,7 +7,8 @@ import {
 } from '@hyscode/ai-providers';
 import { Harness } from './harness';
 import { RuleLoader } from './rule-loader';
-import type { HarnessEvent, TerminalRuntimeAdapter, ToolResult } from './types';
+import { MAX_ITERATIONS_FUSE } from './mode-policies';
+import type { HarnessConfig, HarnessEvent, TerminalRuntimeAdapter, ToolResult } from './types';
 
 const model = {
   id: 'test-model',
@@ -818,5 +819,55 @@ describe('Harness lifecycle', () => {
       }),
     );
     expect(events.filter((event) => event.type === 'assistant_segment_end')).toHaveLength(1);
+  });
+});
+
+describe('effective iteration limits (Settings → Limit Interactions)', () => {
+  function policyHarness(config: Partial<HarnessConfig> = {}): Harness {
+    return new Harness({
+      workspacePath: 'C:/workspace',
+      projectId: 'project',
+      invoke: async () => undefined as never,
+      config: {
+        providerId: 'harness-test',
+        modelId: 'test-model',
+        approval: { mode: 'yolo' },
+        ...config,
+      },
+    });
+  }
+
+  it('treats an explicit null as unlimited instead of falling back to the agent default', () => {
+    // Regression: "Limit Interactions off" sends maxIterations=null; the old
+    // `??` chain silently re-imposed the plan agent default (20).
+    const harness = policyHarness({ maxIterations: null });
+    harness.setAgentType('plan');
+    expect(harness.getEffectivePolicy().maxIterations).toBeNull();
+  });
+
+  it('honors a user limit of 500 instead of a lower internal fuse', () => {
+    const harness = policyHarness({ maxIterations: 500 });
+    harness.setAgentType('plan');
+    expect(harness.getEffectivePolicy().maxIterations).toBe(500);
+  });
+
+  it('bounds values above the fuse at MAX_ITERATIONS_FUSE', () => {
+    const harness = policyHarness({ maxIterations: 999 });
+    harness.setAgentType('build');
+    expect(harness.getEffectivePolicy().maxIterations).toBe(MAX_ITERATIONS_FUSE);
+  });
+
+  it('keeps the built-in default when nothing was configured', () => {
+    expect(policyHarness().getEffectivePolicy().maxIterations).toBe(50);
+  });
+
+  it('still applies the per-request provider cost cap to unlimited runs', () => {
+    const harness = policyHarness({
+      providerId: 'github-copilot',
+      modelId: 'gpt-5.5',
+      maxIterations: null,
+    });
+    harness.setAgentType('plan');
+    expect(harness.getEffectivePolicy().maxIterations).toBe(5);
   });
 });

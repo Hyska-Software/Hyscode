@@ -59,6 +59,7 @@ import {
   getModePolicy,
   adjustPolicyForModel,
   getPerRequestIterationCap,
+  MAX_ITERATIONS_FUSE,
 } from './mode-policies';
 import type { MemoryManager } from './memory-manager';
 import { MemoryExtractor } from './memory-extractor';
@@ -571,8 +572,11 @@ export class Harness {
   /**
    * Compute the effective policy for the current mode + model.
    * Merges the base mode policy with model-specific adjustments.
-   * Precedence: AgentDefinition > ModePolicy > HarnessConfig.
-   * Iteration count is always bounded (default 50, hard fuse 200).
+   * Precedence: HarnessConfig > AgentDefinition > ModePolicy > built-in default.
+   * Iteration count: an explicit `null` in HarnessConfig means the host
+   * disabled the limit ("Infinite" in Settings) — it stays unlimited and only
+   * the per-request provider cost cap applies. Numeric limits are bounded by
+   * the fuse (default 50, hard fuse MAX_ITERATIONS_FUSE = Settings slider max).
    */
   getEffectivePolicy(): Omit<ModePolicy, 'maxIterations'> & { maxIterations: number | null } {
     if (!this._effectivePolicy || this._effectivePolicy.mode !== this.agentType) {
@@ -587,12 +591,20 @@ export class Harness {
         this.config.providerId,
       );
       // Precedence: explicit HarnessConfig > AgentDefinition > ModePolicy > built-in default.
-      const requestedLimit = this.config.maxIterations
-        ?? agentDef.maxIterations
-        ?? providerAdjusted.maxIterations
-        ?? 50;
-      const clamped = Math.min(requestedLimit ?? 50, 200);
-      const maxIterations = costCap === null ? clamped : Math.min(clamped, costCap);
+      // `null` is an explicit "no limit" (Settings → Limit Interactions off)
+      // and must NOT fall through the `??` chain into the agent definition
+      // default — that silently re-imposed plan=20/build=25 on unlimited runs.
+      const requestedLimit =
+        this.config.maxIterations === null
+          ? null
+          : (this.config.maxIterations ??
+            agentDef.maxIterations ??
+            providerAdjusted.maxIterations ??
+            50);
+      const bounded =
+        requestedLimit === null ? null : Math.min(requestedLimit, MAX_ITERATIONS_FUSE);
+      const maxIterations =
+        bounded === null ? costCap : costCap === null ? bounded : Math.min(bounded, costCap);
       const agentMaxOutput = agentDef.maxOutputTokens ?? providerAdjusted.maxOutputTokens;
       this._effectivePolicy = {
         ...providerAdjusted,

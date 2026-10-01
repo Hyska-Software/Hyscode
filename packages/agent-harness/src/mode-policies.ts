@@ -494,6 +494,13 @@ export function getPerRequestIterationCap(
 }
 
 /**
+ * Hard upper bound for a user-configured iteration limit. Kept in sync with
+ * the Settings slider max (Settings → Max Interactions) so a configured 500
+ * is never silently truncated by a lower internal fuse.
+ */
+export const MAX_ITERATIONS_FUSE = 500;
+
+/**
  * Get the model profile matching the given model ID.
  * Returns null if no profile matches.
  */

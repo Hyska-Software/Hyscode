@@ -2634,7 +2634,7 @@ Investigate the error, fix the underlying issue in the affected files, and verif
       definition: {
         name: 'spawn_subagent',
         description:
-          'Delegate a focused subtask to a specialized sub-agent. The parent waits for the sub-agent to finish and then receives its result. Call it directly with {task, mode}; never wrap it in invoke_external_tool and never call both for the same subtask. Multiple spawn_subagent calls in one response run concurrently (review runs in parallel; build/debug/plan wait for an exclusive workspace slot). Use this to apply a specialist agent (for example review or debug) to a self-contained subtask. Not available in chat mode.',
+          'Delegate a focused subtask to a specialized sub-agent. The parent waits for the sub-agent to finish and then receives its result. Call it directly with {task, mode}; never wrap it in invoke_external_tool and never call both for the same subtask. After receiving a sub-agent result, work with it — do not delegate the same analysis again (results may be truncated and cannot be re-fetched). Multiple spawn_subagent calls in one response run concurrently (review runs in parallel; build/debug/plan wait for an exclusive workspace slot). Use this to apply a specialist agent (for example review or debug) to a self-contained subtask. Not available in chat mode.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -3037,7 +3037,10 @@ Investigate the error, fix the underlying issue in the affected files, and verif
           store.addSubAgent({
             id: event.toolCallId,
             task: typeof input.task === 'string' ? input.task : 'Sub-agent task',
-            mode: mode === 'build' || mode === 'review' || mode === 'debug' || mode === 'plan' ? mode : 'build',
+            mode:
+              mode === 'build' || mode === 'review' || mode === 'debug' || mode === 'plan'
+                ? mode
+                : 'build',
             conversationId: store.conversationId ?? undefined,
             status: 'running',
             output: '',
@@ -3429,7 +3432,9 @@ Investigate the error, fix the underlying issue in the affected files, and verif
     const state = this.agentStore.getState();
     return (
       state.pendingToolCalls.find((toolCall) => toolCall.id === id) ??
-      state.messages.flatMap((message) => message.toolCalls ?? []).find((toolCall) => toolCall.id === id)
+      state.messages
+        .flatMap((message) => message.toolCalls ?? [])
+        .find((toolCall) => toolCall.id === id)
     );
   }
 
@@ -3440,11 +3445,7 @@ Investigate the error, fix the underlying issue in the affected files, and verif
    * terminal entry when none exists (e.g. transcript restored after reload)
    * so the card renders the outcome instead of "Sub-agent state not found."
    */
-  private mirrorSubAgentToolResult(
-    toolCallId: string,
-    toolName: string,
-    result: ToolResult,
-  ): void {
+  private mirrorSubAgentToolResult(toolCallId: string, toolName: string, result: ToolResult): void {
     const target = resolveSubAgentMirrorTarget(
       toolCallId,
       toolName,

@@ -169,6 +169,34 @@ Do NOT skip verification. Run at least one of the above before finishing.
 
 const LOOP_THRESHOLD = 4; // Warn after N edits to the same file
 
+/** Two spawn tasks at or above this token-set similarity count as "the same analysis". */
+const SPAWN_TASK_SIMILARITY_THRESHOLD = 0.7;
+
+function spawnTaskTokens(task: string): Set<string> {
+  return new Set(
+    task
+      .toLowerCase()
+      .replace(/[^a-z0-9\s]/g, ' ')
+      .split(/\s+/)
+      .filter((token) => token.length > 2),
+  );
+}
+
+/**
+ * Jaccard similarity of two spawn-task token sets. Pure — unit-tested.
+ * Empty tasks score 0 so missing input never triggers a false warning.
+ */
+export function spawnTaskSimilarity(a: string, b: string): number {
+  const tokensA = spawnTaskTokens(a);
+  const tokensB = spawnTaskTokens(b);
+  if (tokensA.size === 0 || tokensB.size === 0) return 0;
+  let intersection = 0;
+  for (const token of tokensA) {
+    if (tokensB.has(token)) intersection++;
+  }
+  return intersection / (tokensA.size + tokensB.size - intersection);
+}
+
 export class LoopDetectionMiddleware implements PostToolHook {
   name = 'loop_detection';
 
@@ -178,12 +206,19 @@ export class LoopDetectionMiddleware implements PostToolHook {
   /** Flag tracking whether we've already warned about this file */
   private warned = new Set<string>();
 
+  /** Spawn delegation history for respawn detection (reset per turn) */
+  private spawnTasks: Array<{ mode: string; task: string }> = [];
+  private spawnWarnings = 0;
+
   resetCounts(): void {
     this.fileEditCounts.clear();
     this.warned.clear();
+    this.spawnTasks = [];
+    this.spawnWarnings = 0;
   }
 
   afterTool(toolName: string, record: ToolCallRecord, _ctx: MiddlewareContext): string | null {
+    if (toolName === 'spawn_subagent') return this.checkSpawnLoop(record);
     // Only track file-editing tools
     if (!FILE_MUTATION_TOOLS.has(toolName)) return null;
 
@@ -214,6 +249,31 @@ Consider:
 
     return null;
   }
+
+  /**
+   * Warn when the agent delegates a sub-agent task closely resembling one it
+   * already delegated this turn. Repeated near-identical analyses (each
+   * costing minutes and potentially millions of tokens) indicate the agent
+   * is not using the results it already has — usually because the previous
+   * output was truncated. Different modes/tasks never warn.
+   */
+  private checkSpawnLoop(record: ToolCallRecord): string | null {
+    const input = (record.input ?? {}) as Record<string, unknown>;
+    const task = typeof input.task === 'string' ? input.task : '';
+    const mode = typeof input.mode === 'string' ? input.mode : '';
+    let best = 0;
+    for (const prev of this.spawnTasks) {
+      if (prev.mode !== mode) continue;
+      best = Math.max(best, spawnTaskSimilarity(task, prev.task));
+    }
+    this.spawnTasks.push({ mode, task });
+    if (best < SPAWN_TASK_SIMILARITY_THRESHOLD) return null;
+    this.spawnWarnings++;
+    if (this.spawnWarnings === 1) {
+      return `<spawn_warning>You have already delegated a '${mode}' sub-agent with a very similar task in this turn. The previous result is in the conversation above — use it instead of spawning again. Only spawn when the new subtask is genuinely different.</spawn_warning>`;
+    }
+    return `<spawn_warning>This is similar delegation #${this.spawnWarnings + 1} for '${mode}' analysis in this turn. Do NOT spawn another sub-agent for this analysis; synthesize your final answer from the results you already have.</spawn_warning>`;
+  }
 }
 
 // ─── Tool Output Compaction ─────────────────────────────────────────────────
@@ -226,6 +286,13 @@ const COMPACTION_HEAD = 1200;
 const COMPACTION_TAIL = 1200;
 const DIAGNOSTIC_LINE_LIMIT = 80;
 
+// Sub-agent results are terminal analysis, not re-readable files: truncating
+// them with a "re-read for full output" note makes the parent respawn the
+// same analysis in a loop. They get a much larger budget and an honest note.
+const SPAWN_COMPACTION_THRESHOLD = 24_000;
+const SPAWN_COMPACTION_HEAD = 12_000;
+const SPAWN_COMPACTION_TAIL = 12_000;
+
 /**
  * Compact a tool output string if it exceeds the threshold.
  * Keeps the first and last N characters with a note in between.
@@ -233,6 +300,9 @@ const DIAGNOSTIC_LINE_LIMIT = 80;
 export function compactToolOutput(output: string, toolName: string): string {
   if (output.length <= COMPACTION_THRESHOLD) return output;
 
+  if (toolName === 'spawn_subagent' || toolName === 'invoke_external_tool') {
+    return compactSpawnOutput(output, toolName);
+  }
   if (toolName === 'read_file') return compactFileOutput(output, toolName);
   if (['search_code', 'find_files', 'get_diagnostics'].includes(toolName)) {
     return compactMatchingLines(output, toolName, () => true);
@@ -254,6 +324,23 @@ export function compactToolOutput(output: string, toolName: string): string {
   const omittedLines = output.slice(COMPACTION_HEAD, -COMPACTION_TAIL).split('\n').length;
 
   return `${head}\n\n... [${omittedLines} lines / ${omittedChars} chars omitted from ${toolName} output — re-read the file or re-run the command for full output] ...\n\n${tail}`;
+}
+
+/**
+ * Compaction for delegated sub-agent results. Unlike files or commands, a
+ * sub-agent result cannot be re-read — telling the parent to "re-run for
+ * full output" makes it spawn the same analysis again in a loop. Keep a
+ * larger window and state plainly that the remainder was discarded.
+ */
+export function compactSpawnOutput(output: string, toolName: string): string {
+  if (output.length <= SPAWN_COMPACTION_THRESHOLD) return output;
+  const head = output.slice(0, SPAWN_COMPACTION_HEAD);
+  const tail = output.slice(-SPAWN_COMPACTION_TAIL);
+  const omittedChars = output.length - SPAWN_COMPACTION_HEAD - SPAWN_COMPACTION_TAIL;
+  const omittedLines = output
+    .slice(SPAWN_COMPACTION_HEAD, -SPAWN_COMPACTION_TAIL)
+    .split('\n').length;
+  return `${head}\n\n... [${omittedLines} lines / ${omittedChars} chars omitted from ${toolName} output — the remainder was discarded and cannot be re-fetched; proceed with the analysis above instead of delegating the same task again] ...\n\n${tail}`;
 }
 
 function compactFileOutput(output: string, toolName: string): string {
@@ -307,12 +394,13 @@ export class AutoGatherMiddleware implements PostToolHook {
     if (!this.gatheredContext) return null;
 
     const rawFilePath = String(record.input.path ?? record.input.filePath ?? '');
-    const filePath = rawFilePath && ctx.workspacePath
-      // The router has already classified and authorized external paths before
-      // this post-tool hook runs. This hook only stores the canonical path in
-      // working memory; it never grants or performs filesystem access.
-      ? resolveWorkspacePath(rawFilePath, ctx.workspacePath, { allowExternalAbsolute: true })
-      : rawFilePath;
+    const filePath =
+      rawFilePath && ctx.workspacePath
+        ? // The router has already classified and authorized external paths before
+          // this post-tool hook runs. This hook only stores the canonical path in
+          // working memory; it never grants or performs filesystem access.
+          resolveWorkspacePath(rawFilePath, ctx.workspacePath, { allowExternalAbsolute: true })
+        : rawFilePath;
     if (
       ['write_file', 'edit_file', 'replace_lines', 'insert_lines', 'delete_file'].includes(toolName)
     ) {
@@ -335,7 +423,12 @@ export class AutoGatherMiddleware implements PostToolHook {
     const relevance = HIGH_VALUE_EXTENSIONS.has(ext) ? 0.5 : 0.35;
 
     if (this.gatheredContext.has(filePath)) {
-      this.gatheredContext.append(filePath, content, relevance, 'auto-gathered range from read_file');
+      this.gatheredContext.append(
+        filePath,
+        content,
+        relevance,
+        'auto-gathered range from read_file',
+      );
     } else {
       this.gatheredContext.add(filePath, content, relevance, 'auto-gathered from read_file');
     }
