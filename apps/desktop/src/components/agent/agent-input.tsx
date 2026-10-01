@@ -1,7 +1,6 @@
 import {
   Send,
   Square,
-  ChevronDown,
   MessageSquare,
   Hammer,
   Search,
@@ -22,8 +21,9 @@ import {
   AlertTriangle,
   Target,
 } from 'lucide-react';
-import { memo, useState, useRef, useMemo, useCallback, useEffect } from 'react';
+import { memo, useState, useRef, useCallback, useEffect } from 'react';
 import { ContextMentionPicker } from './context-mention-picker';
+import { ModelSelector } from './model-selector';
 import { GoalModeToggle } from './goal-mode-toggle';
 import { desktopTerminalRuntime } from '@/lib/terminal-runtime';
 import { Textarea } from '@/components/ui/textarea';
@@ -33,8 +33,6 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuGroup,
-  DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
@@ -55,11 +53,7 @@ import {
 } from '@/lib/active-agent-bridge';
 import type { AgentMode, AttachedImage } from '@/stores/agent-store';
 import type { ApprovalMode } from '@/stores/settings-store';
-import {
-  PROVIDERS,
-  getEnabledModelsForProvider,
-  getAllEnabledModelsGrouped,
-} from '@/lib/provider-catalog';
+import { PROVIDERS } from '@/lib/provider-catalog';
 import type { ModelInfo } from '@/lib/provider-catalog';
 import { getProviderRegistry } from '@hyscode/ai-providers';
 import type { AIModel } from '@hyscode/ai-providers';
@@ -304,9 +298,6 @@ export function AgentInput({ goalModeEnabled = false, onGoalModeChange }: AgentI
   const attachedTerminal = useAgentStore((s) => s.attachedTerminal);
   const activeModelId = useSettingsStore((s) => s.activeModelId);
   const activeProviderId = useSettingsStore((s) => s.activeProviderId);
-  const enabledModels = useSettingsStore((s) => s.enabledModels);
-  const customModels = useSettingsStore((s) => s.customModels);
-  const useAllProviders = useSettingsStore((s) => s.useAllProviders);
   const approvalMode = useSettingsStore((s) => s.approvalMode);
 
   const activeModel = useActiveModel();
@@ -324,39 +315,6 @@ export function AgentInput({ goalModeEnabled = false, onGoalModeChange }: AgentI
   useEffect(() => {
     if (mode !== 'build' && goalModeEnabled) onGoalModeChange?.(false);
   }, [goalModeEnabled, mode, onGoalModeChange]);
-
-  // Single-provider mode: enabled models for the active provider
-  const availableModels = useMemo(
-    () => getEnabledModelsForProvider(activeProviderId ?? '', enabledModels, customModels),
-    [activeProviderId, enabledModels, customModels],
-  );
-
-  // All-providers mode: all enabled models grouped by provider
-  const groupedModels = useMemo(
-    () => getAllEnabledModelsGrouped(enabledModels, customModels),
-    [enabledModels, customModels],
-  );
-
-  const activeModelLabel = useMemo(() => {
-    if (!activeModelId) return 'Select model';
-    const inActive = availableModels.find((m) => m.id === activeModelId);
-    if (inActive) return inActive.name;
-    for (const g of groupedModels) {
-      const found = g.models.find((m) => m.id === activeModelId);
-      if (found) return found.name;
-    }
-    return activeModelId.length > 30 ? activeModelId.slice(0, 28) + '…' : activeModelId;
-  }, [activeModelId, availableModels, groupedModels]);
-
-  const handleModelChange = (modelId: string) => {
-    useSettingsStore
-      .getState()
-      .setActiveProvider(useSettingsStore.getState().activeProviderId ?? '', modelId);
-  };
-
-  const handleModelChangeWithProvider = (providerId: string, modelId: string) => {
-    useSettingsStore.getState().setActiveProvider(providerId, modelId);
-  };
 
   const handleSend = () => {
     const hasImages = useAgentStore.getState().attachedImages.length > 0;
@@ -777,97 +735,7 @@ export function AgentInput({ goalModeEnabled = false, onGoalModeChange }: AgentI
             )}
 
             {/* Model selector */}
-            <DropdownMenu>
-              <DropdownMenuTrigger className="flex h-8 max-w-[180px] cursor-pointer items-center gap-1 rounded-lg px-2.5 text-[11px] text-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1">
-                <span className="truncate">{activeModelLabel}</span>
-                <ChevronDown className="h-3 w-3 shrink-0 opacity-50" />
-              </DropdownMenuTrigger>
-              <DropdownMenuContent side="top" className="max-h-72 min-w-[200px] overflow-auto">
-                {useAllProviders ? (
-                  /* Grouped: all providers */
-                  groupedModels.map(({ provider, models }, idx) => (
-                    <div key={provider.id}>
-                      {idx > 0 && <DropdownMenuSeparator />}
-                      <DropdownMenuGroup>
-                        <DropdownMenuLabel className="px-2 py-1 text-[9px] uppercase tracking-wider text-muted-foreground">
-                          {provider.name}
-                        </DropdownMenuLabel>
-                        {models.map((m) => (
-                          <DropdownMenuItem
-                            key={m.id}
-                            onClick={() => handleModelChangeWithProvider(provider.id, m.id)}
-                            className={cn(
-                              activeModelId === m.id &&
-                                activeProviderId === provider.id &&
-                                'bg-primary/10 text-primary',
-                            )}
-                          >
-                            <div className="flex flex-col">
-                              <span className="text-[11px]">{m.name}</span>
-                              <span className="text-[9px] text-muted-foreground">{m.id}</span>
-                            </div>
-                          </DropdownMenuItem>
-                        ))}
-                        {/* OpenRouter free-text input in its group */}
-                        {provider.id === 'openrouter' && (
-                          <div className="px-2 py-1.5">
-                            <input
-                              type="text"
-                              placeholder="Type model id…"
-                              className="h-6 w-full rounded bg-muted px-2 text-[10px] text-foreground outline-none placeholder:text-muted-foreground/50"
-                              onKeyDown={(e) => {
-                                if (e.key === 'Enter') {
-                                  const val = (e.target as HTMLInputElement).value.trim();
-                                  if (val) handleModelChangeWithProvider('openrouter', val);
-                                }
-                                e.stopPropagation();
-                              }}
-                              onClick={(e) => e.stopPropagation()}
-                            />
-                          </div>
-                        )}
-                      </DropdownMenuGroup>
-                    </div>
-                  ))
-                ) : (
-                  /* Flat: active provider only */
-                  <>
-                    {availableModels.map((m) => (
-                      <DropdownMenuItem
-                        key={m.id}
-                        onClick={() => handleModelChange(m.id)}
-                        className={cn(activeModelId === m.id && 'bg-primary/10 text-primary')}
-                      >
-                        <div className="flex flex-col">
-                          <span className="text-[11px]">{m.name}</span>
-                          <span className="text-[9px] text-muted-foreground">{m.id}</span>
-                        </div>
-                      </DropdownMenuItem>
-                    ))}
-                    {activeProviderId === 'openrouter' && (
-                      <>
-                        <div className="my-1 border-t border-border" />
-                        <div className="px-2 py-1.5">
-                          <input
-                            type="text"
-                            placeholder="Type model id…"
-                            className="h-6 w-full rounded bg-muted px-2 text-[10px] text-foreground outline-none placeholder:text-muted-foreground/50"
-                            onKeyDown={(e) => {
-                              if (e.key === 'Enter') {
-                                const val = (e.target as HTMLInputElement).value.trim();
-                                if (val) handleModelChange(val);
-                              }
-                              e.stopPropagation();
-                            }}
-                            onClick={(e) => e.stopPropagation()}
-                          />
-                        </div>
-                      </>
-                    )}
-                  </>
-                )}
-              </DropdownMenuContent>
-            </DropdownMenu>
+            <ModelSelector />
 
             {/* Thinking control (icon-only) */}
             {activeModelInfo?.supportsThinking && (
