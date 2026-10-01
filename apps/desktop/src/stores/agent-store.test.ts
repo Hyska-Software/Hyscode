@@ -269,6 +269,7 @@ describe('sub-agent state hygiene', () => {
     output: 'partial',
     toolCalls: [],
     startedAt: 0,
+    resourceMode: 'shared' as const,
   });
 
   it('clears sub-agents together with the conversation', () => {
@@ -302,5 +303,23 @@ describe('sub-agent state hygiene', () => {
     const entries = useAgentStore.getState().subAgents.filter((a) => a.id === 'sub-1');
     expect(entries).toHaveLength(1);
     expect(entries[0]).toMatchObject({ status: 'running', output: 'partial' });
+  });
+
+  it('replaces a bare start-time placeholder with the full attempt entry', () => {
+    useAgentStore.getState().addSubAgent({
+      id: 'sub-1',
+      task: 'Analyze the project',
+      mode: 'review',
+      status: 'running',
+      output: '',
+      toolCalls: [],
+      startedAt: 0,
+    });
+
+    useAgentStore.getState().addSubAgent(runningAgent('sub-1'));
+
+    const entries = useAgentStore.getState().subAgents.filter((a) => a.id === 'sub-1');
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({ status: 'running', resourceMode: 'shared' });
   });
 });

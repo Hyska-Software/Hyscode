@@ -635,6 +635,42 @@ describe('HarnessBridge Desktop turn boundaries', () => {
   });
 });
 
+describe('sub-agent card anchoring', () => {
+  function emitStart(
+    bridge: HarnessBridge,
+    toolCallId: string,
+    toolName: string,
+    input: Record<string, unknown>,
+  ): void {
+    (
+      bridge as unknown as {
+        handleEvent(event: {
+          type: 'tool_call_start';
+          toolCallId: string;
+          toolName: string;
+          input: Record<string, unknown>;
+        }): void;
+      }
+    ).handleEvent({ type: 'tool_call_start', toolCallId, toolName, input });
+  }
+
+  it('anchors the sub-agent card entry at tool start', () => {
+    const { bridge, store } = createBridge();
+    emitStart(bridge, 'sub-start-1', 'spawn_subagent', { task: 'Analyze this', mode: 'plan' });
+
+    const entry = store.getState().subAgents.find((agent) => agent.id === 'sub-start-1');
+    expect(entry).toMatchObject({ task: 'Analyze this', mode: 'plan', status: 'running' });
+  });
+
+  it('skips placeholders for nested :external dispatches and other tools', () => {
+    const { bridge, store } = createBridge();
+    emitStart(bridge, 'outer:external', 'spawn_subagent', {});
+    emitStart(bridge, 'other-1', 'read_file', {});
+
+    expect(store.getState().subAgents).toEqual([]);
+  });
+});
+
 describe('resolveSubAgentMirrorTarget', () => {
   it('resolves direct spawn_subagent calls by tool-call id', () => {
     expect(resolveSubAgentMirrorTarget('call-1', 'spawn_subagent', () => undefined)).toEqual({

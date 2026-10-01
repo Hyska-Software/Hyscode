@@ -1083,13 +1083,15 @@ export const createAgentStore = () =>
           return;
         }
         // Same toolCallId executed again (e.g. turn retry reuses the id):
-        // an in-flight entry keeps its streamed progress, while a terminal
-        // entry is superseded by the fresh attempt.
+        // a live entry keeps its streamed progress, while a terminal entry
+        // or a bare start-time placeholder (no workspace lease yet) is
+        // superseded by the fresh attempt.
         const current = state.subAgents[idx];
         if (
           current.status === 'done' ||
           current.status === 'error' ||
-          current.status === 'cancelled'
+          current.status === 'cancelled' ||
+          current.resourceMode === undefined
         ) {
           state.subAgents[idx] = agent;
         }

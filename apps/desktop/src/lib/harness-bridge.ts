@@ -2634,7 +2634,7 @@ Investigate the error, fix the underlying issue in the affected files, and verif
       definition: {
         name: 'spawn_subagent',
         description:
-          'Delegate a focused subtask to a specialized sub-agent. The parent waits for the sub-agent to finish and then receives its result. Multiple spawn_subagent calls in one response run concurrently (review runs in parallel; build/debug/plan wait for an exclusive workspace slot). Use this to apply a specialist agent (for example review or debug) to a self-contained subtask. Not available in chat mode.',
+          'Delegate a focused subtask to a specialized sub-agent. The parent waits for the sub-agent to finish and then receives its result. Call it directly with {task, mode}; never wrap it in invoke_external_tool and never call both for the same subtask. Multiple spawn_subagent calls in one response run concurrently (review runs in parallel; build/debug/plan wait for an exclusive workspace slot). Use this to apply a specialist agent (for example review or debug) to a self-contained subtask. Not available in chat mode.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -3021,6 +3021,30 @@ Investigate the error, fix the underlying issue in the affected files, and verif
           startedAt: Date.now(),
         };
         store.addToolCall(tc);
+        // Anchor the sub-agent card entry to the transcript tool-call id at
+        // start time. The execute() body adds the full entry a moment later,
+        // but policy blocks, approval stalls, coordinator queueing, or a
+        // nested dispatch must never leave the card without live state.
+        // Nested `:external` dispatches are skipped: their store entry is
+        // created under the outer (unsuffixed) id by execute().
+        if (
+          event.toolName === 'spawn_subagent' &&
+          !event.toolCallId.endsWith(':external') &&
+          !store.subAgents.some((agent) => agent.id === event.toolCallId)
+        ) {
+          const input = (event.input ?? {}) as Record<string, unknown>;
+          const mode = input.mode as AgentMode;
+          store.addSubAgent({
+            id: event.toolCallId,
+            task: typeof input.task === 'string' ? input.task : 'Sub-agent task',
+            mode: mode === 'build' || mode === 'review' || mode === 'debug' || mode === 'plan' ? mode : 'build',
+            conversationId: store.conversationId ?? undefined,
+            status: 'running',
+            output: '',
+            toolCalls: [],
+            startedAt: Date.now(),
+          });
+        }
         break;
       }
       case 'terminal_progress': {
