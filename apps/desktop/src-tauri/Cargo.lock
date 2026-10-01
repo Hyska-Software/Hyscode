@@ -2296,7 +2296,7 @@ dependencies = [
 
 [[package]]
 name = "hyscode"
-version = "0.15.0-build.114"
+version = "0.16.0"
 dependencies = [
  "base64 0.22.1",
  "chrono",
