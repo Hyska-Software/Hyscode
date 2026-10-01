@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { ToolRouter, normalizeToolInput, parseToolCallInput } from './tool-router';
+import { ToolRouter, normalizeToolInput, parseToolCallInput, timeoutForTool } from './tool-router';
 import type { ToolExecutionContext, ToolHandler } from './types';
 
 const handler: ToolHandler = {
@@ -97,7 +97,12 @@ describe('ToolRouter', () => {
       invoke: vi.fn(),
     };
 
-    const record = await router.execute('write_value', 'legacy-call', { value: 'x' }, legacyContext);
+    const record = await router.execute(
+      'write_value',
+      'legacy-call',
+      { value: 'x' },
+      legacyContext,
+    );
 
     expect(record.output.success).toBe(true);
     expect(execute).toHaveBeenCalledTimes(1);
@@ -176,7 +181,9 @@ describe('ToolRouter', () => {
 
   it('blocks direct invoke calls that escape the owning workspace', async () => {
     const router = new ToolRouter();
-    const nativeInvoke = vi.fn(async () => 'must not be called') as unknown as ToolExecutionContext['invoke'];
+    const nativeInvoke = vi.fn(
+      async () => 'must not be called',
+    ) as unknown as ToolExecutionContext['invoke'];
     router.register({
       ...handler,
       execute: async (_input, executionContext) => {
@@ -206,7 +213,9 @@ describe('ToolRouter', () => {
 
   it('normalizes in-workspace direct invoke paths before native dispatch', async () => {
     const router = new ToolRouter();
-    const nativeInvoke = vi.fn(async () => 'read result') as unknown as ToolExecutionContext['invoke'];
+    const nativeInvoke = vi.fn(
+      async () => 'read result',
+    ) as unknown as ToolExecutionContext['invoke'];
     router.register({
       ...handler,
       execute: async (_input, executionContext) => ({
@@ -458,5 +467,20 @@ describe('parseToolCallInput', () => {
 
   it('throws the original error when unrepairable', () => {
     expect(() => parseToolCallInput('{not json')).toThrow();
+  });
+});
+
+describe('timeoutForTool', () => {
+  it('gives spawn_subagent and invoke_external_tool a child-loop budget, not the 60s default', () => {
+    expect(timeoutForTool('spawn_subagent')).toBe(600_000);
+    expect(timeoutForTool('invoke_external_tool')).toBe(600_000);
+    expect(timeoutForTool('SPAWN_SUBAGENT')).toBe(600_000);
+  });
+
+  it('keeps the existing budgets for other tools', () => {
+    expect(timeoutForTool('write_file', 'filesystem')).toBe(15_000);
+    expect(timeoutForTool('run_terminal_command')).toBe(30_000);
+    expect(timeoutForTool('mcp__server__tool')).toBe(30_000);
+    expect(timeoutForTool('search_code')).toBe(60_000);
   });
 });

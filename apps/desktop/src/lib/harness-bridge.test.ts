@@ -49,6 +49,7 @@ vi.mock('@hyscode/agent-harness', () => ({
 }));
 
 import { HarnessBridge } from './harness-bridge';
+import { resolveSubAgentMirrorTarget } from './harness-bridge';
 
 type HarnessDouble = {
   workspacePath: string;
@@ -631,5 +632,41 @@ describe('HarnessBridge Desktop turn boundaries', () => {
       .find((message) => message.role === 'assistant');
     expect(assistant?.content).toBe('Assistant answer');
     expect(assistant?.isError).not.toBe(true);
+  });
+});
+
+describe('resolveSubAgentMirrorTarget', () => {
+  it('resolves direct spawn_subagent calls by tool-call id', () => {
+    expect(resolveSubAgentMirrorTarget('call-1', 'spawn_subagent', () => undefined)).toEqual({
+      spawnId: 'call-1',
+    });
+  });
+
+  it('strips the :external suffix from nested dispatches', () => {
+    expect(
+      resolveSubAgentMirrorTarget('call-1:external', 'spawn_subagent', () => undefined),
+    ).toEqual({ spawnId: 'call-1' });
+  });
+
+  it('resolves invoke_external_tool wrappers that target spawn_subagent', () => {
+    const nestedInput = { task: 'Review this', mode: 'review' };
+    const target = resolveSubAgentMirrorTarget('call-9', 'invoke_external_tool', (id) =>
+      id === 'call-9' ? { name: 'spawn_subagent', input: nestedInput } : undefined,
+    );
+    expect(target).toEqual({ spawnId: 'call-9', nestedInput });
+  });
+
+  it('ignores invoke_external_tool wrappers around other tools', () => {
+    expect(
+      resolveSubAgentMirrorTarget('call-9', 'invoke_external_tool', () => ({
+        name: 'read_file',
+        input: {},
+      })),
+    ).toBeNull();
+  });
+
+  it('ignores unrelated tools', () => {
+    expect(resolveSubAgentMirrorTarget('call-1', 'read_file', () => undefined)).toBeNull();
+    expect(resolveSubAgentMirrorTarget('', 'spawn_subagent', () => undefined)).toBeNull();
   });
 });

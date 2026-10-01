@@ -949,10 +949,19 @@ const TOOL_TIMEOUT_MS: Record<string, number> = {
   terminal: 30_000,
   mcp: 30_000,
   fs: 15_000,
+  // A spawned sub-agent runs a full child LLM loop (multiple API requests),
+  // so it must never be bound by the 60s interactive default — observed
+  // `spawn_subagent (60005ms)` timeouts were this limit firing, not real
+  // failures. invoke_external_tool can wrap any tool (including a nested
+  // spawn_subagent dispatch), so it shares the same budget.
+  subagent: 600_000,
 };
 
-function timeoutForTool(toolName: string, category?: string): number {
+/** Per-tool execution budget in ms. Exported for tests and diagnostics. */
+export function timeoutForTool(toolName: string, category?: string): number {
   const name = toolName.toLowerCase();
+  if (name === 'spawn_subagent' || name === 'invoke_external_tool')
+    return TOOL_TIMEOUT_MS.subagent;
   if (name.startsWith('mcp__') || category === 'mcp') return TOOL_TIMEOUT_MS.mcp;
   if (name.includes('terminal') || name === 'run_code' || category === 'terminal') {
     return TOOL_TIMEOUT_MS.terminal;

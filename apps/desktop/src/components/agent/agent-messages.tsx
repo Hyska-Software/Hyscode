@@ -211,11 +211,16 @@ const MessageItem = memo(function MessageItem({
                 {hasToolCalls ? (
                   /* Mid-loop message: show tool calls compactly, then agent output */
                   <>
-                    {/* Render sub-agent cards for spawn_subagent calls */}
+                      {/* Render sub-agent cards for spawn_subagent calls */}
                     {msg
                       .toolCalls!.filter((tc) => tc.name === 'spawn_subagent')
                       .map((tc) => (
-                        <SubAgentCard key={tc.id} toolCallId={tc.id} input={tc.input} />
+                        <SubAgentCard
+                          key={tc.id}
+                          toolCallId={tc.id}
+                          input={tc.input}
+                          toolCall={tc}
+                        />
                       ))}
                     {/* Render all other tool calls via the standard group */}
                     <ToolCallGroup toolCalls={msg.toolCalls!} />

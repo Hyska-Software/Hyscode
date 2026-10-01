@@ -740,6 +740,10 @@ export const createAgentStore = () =>
         state.pendingApprovals = [];
         state.pendingFileChanges = [];
         state.agentEditSessions = [];
+        // Sub-agent runs are live-run state bound to this conversation; drop
+        // them with the transcript so a new conversation never renders stale
+        // cards (restored transcripts use the tool-call fallback instead).
+        state.subAgents = [];
         state.contextFiles = [];
         state.attachedImages = [];
         state.attachedTerminal = null;
@@ -1073,7 +1077,22 @@ export const createAgentStore = () =>
 
     addSubAgent: (agent) =>
       set((state) => {
-        state.subAgents.push(agent);
+        const idx = state.subAgents.findIndex((a) => a.id === agent.id);
+        if (idx === -1) {
+          state.subAgents.push(agent);
+          return;
+        }
+        // Same toolCallId executed again (e.g. turn retry reuses the id):
+        // an in-flight entry keeps its streamed progress, while a terminal
+        // entry is superseded by the fresh attempt.
+        const current = state.subAgents[idx];
+        if (
+          current.status === 'done' ||
+          current.status === 'error' ||
+          current.status === 'cancelled'
+        ) {
+          state.subAgents[idx] = agent;
+        }
       }),
 
     updateSubAgent: (id, patch) =>

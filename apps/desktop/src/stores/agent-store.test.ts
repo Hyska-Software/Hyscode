@@ -255,3 +255,52 @@ describe('agent tab turn ownership', () => {
     expect(state.messages[1].role).toBe('tool');
   });
 });
+
+describe('sub-agent state hygiene', () => {
+  beforeEach(() => {
+    useAgentStore.setState({ subAgents: [] });
+  });
+
+  const runningAgent = (id: string) => ({
+    id,
+    task: 'Analyze the project',
+    mode: 'review' as const,
+    status: 'running' as const,
+    output: 'partial',
+    toolCalls: [],
+    startedAt: 0,
+  });
+
+  it('clears sub-agents together with the conversation', () => {
+    useAgentStore.getState().addSubAgent(runningAgent('sub-1'));
+    expect(useAgentStore.getState().subAgents).toHaveLength(1);
+
+    useAgentStore.getState().clearConversation();
+
+    expect(useAgentStore.getState().subAgents).toEqual([]);
+  });
+
+  it('ignores a duplicate add while the entry is still in flight', () => {
+    useAgentStore.getState().addSubAgent(runningAgent('sub-1'));
+    useAgentStore
+      .getState()
+      .updateSubAgent('sub-1', { output: 'streamed progress', toolCalls: [] });
+
+    useAgentStore.getState().addSubAgent({ ...runningAgent('sub-1'), output: '' });
+
+    const entry = useAgentStore.getState().subAgents.find((a) => a.id === 'sub-1');
+    expect(useAgentStore.getState().subAgents).toHaveLength(1);
+    expect(entry?.output).toBe('streamed progress');
+  });
+
+  it('replaces a terminal entry when the same id is spawned again', () => {
+    useAgentStore.getState().addSubAgent(runningAgent('sub-1'));
+    useAgentStore.getState().updateSubAgent('sub-1', { status: 'error', output: 'timed out' });
+
+    useAgentStore.getState().addSubAgent(runningAgent('sub-1'));
+
+    const entries = useAgentStore.getState().subAgents.filter((a) => a.id === 'sub-1');
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({ status: 'running', output: 'partial' });
+  });
+});

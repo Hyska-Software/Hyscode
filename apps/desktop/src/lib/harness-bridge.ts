@@ -123,6 +123,44 @@ function expectedContentAfterChange(
   return change.toolName === 'delete_file' ? null : change.newContent;
 }
 
+export interface SubAgentMirrorTarget {
+  /** Store id of the sub-agent entry (the spawn tool-call id). */
+  spawnId: string;
+  /** Inline spawn input when the outer call wraps it (invoke_external_tool). */
+  nestedInput?: Record<string, unknown>;
+}
+
+/**
+ * Resolve which sub-agent store entry a tool result belongs to.
+ * Covers direct spawn_subagent calls, nested `:external` dispatches
+ * (invoke_external_tool reuses the outer toolCallId as its context id),
+ * and invoke_external_tool wrappers (matched via `input.name`).
+ * Returns null for unrelated tools. Pure — unit-tested below.
+ */
+export function resolveSubAgentMirrorTarget(
+  toolCallId: string,
+  toolName: string,
+  findInput: (id: string) => Record<string, unknown> | undefined,
+): SubAgentMirrorTarget | null {
+  if (toolName === 'spawn_subagent') {
+    const spawnId = toolCallId.endsWith(':external')
+      ? toolCallId.slice(0, -':external'.length)
+      : toolCallId;
+    if (!spawnId) return null;
+    return { spawnId };
+  }
+  if (toolName === 'invoke_external_tool') {
+    const input = findInput(toolCallId);
+    if (input?.name !== 'spawn_subagent') return null;
+    const nested =
+      input.input !== null && typeof input.input === 'object' && !Array.isArray(input.input)
+        ? (input.input as Record<string, unknown>)
+        : undefined;
+    return { spawnId: toolCallId, ...(nested ? { nestedInput: nested } : {}) };
+  }
+  return null;
+}
+
 // ─── Error Parser ────────────────────────────────────────────────────────────
 // Converts raw technical error messages into friendly user-facing text.
 
@@ -2126,6 +2164,7 @@ Investigate the error, fix the underlying issue in the affected files, and verif
   /** Sync conversation ID when restoring a previous session */
   restoreSession(conversationId: string): void {
     const useAgentStore = this.agentStore;
+    const previousId = useAgentStore.getState().conversationId;
     this.harness.setConversationId(conversationId);
     useAgentStore.getState().setConversationId(conversationId);
     // A restored chat must be available as a Kanban current-chat target even
@@ -2147,7 +2186,53 @@ Investigate the error, fix the underlying issue in the affected files, and verif
     useAgentStore.getState().setSessionTokenUsage(null);
     void this.refreshSessionUsage();
     void this.restoreGoalForConversation(conversationId);
+    if (previousId !== conversationId) {
+      this.finalizeStaleConversationState(previousId);
+    }
     this.debug(`Session restored: ${conversationId}`);
+  }
+
+  /**
+   * Drop live-run state from the previous conversation and finalize tool
+   * calls that will never resolve (their turn died with the switch or a
+   * reload). Restored transcripts render those via the tool-call fallback
+   * instead of spinning forever.
+   */
+  private finalizeStaleConversationState(_previousId: string | null): void {
+    const state = this.agentStore.getState();
+    if (state.subAgents.length > 0) {
+      this.agentStore.setState({ subAgents: [] });
+    }
+    const interrupted =
+      'Interrupted: the turn did not complete (session switched or app reloaded).';
+    const staleIds = new Set<string>();
+    for (const toolCall of state.pendingToolCalls) {
+      if (
+        toolCall.status === 'pending' ||
+        toolCall.status === 'approved' ||
+        toolCall.status === 'running' ||
+        toolCall.status === 'cancelling'
+      ) {
+        staleIds.add(toolCall.id);
+      }
+    }
+    for (const message of state.messages) {
+      for (const toolCall of message.toolCalls ?? []) {
+        if (
+          toolCall.status === 'pending' ||
+          toolCall.status === 'approved' ||
+          toolCall.status === 'running' ||
+          toolCall.status === 'cancelling'
+        ) {
+          staleIds.add(toolCall.id);
+        }
+      }
+    }
+    for (const id of staleIds) {
+      this.agentStore
+        .getState()
+        .updateToolCall(id, { status: 'cancelled', error: interrupted, completedAt: Date.now() });
+    }
   }
 
   async getGoal(): Promise<GoalState | null> {
@@ -3101,6 +3186,10 @@ Investigate the error, fix the underlying issue in the affected files, and verif
           terminalStore.clearAgentActivityIfOwned(terminalId, event.toolCallId);
           terminalStore.setAwaitingInput(terminalId, false);
         }
+        // Mirror spawn outcomes into the sub-agent card state so the card
+        // never sticks on "Running" (timeout/cancel) and rehydrated
+        // transcripts (store entry missing) still render the outcome.
+        this.mirrorSubAgentToolResult(event.toolCallId, event.toolName, event.result);
         if (event.toolName === 'run_terminal_command') {
           const completedCall = useAgentStore
             .getState()
@@ -3309,6 +3398,79 @@ Investigate the error, fix the underlying issue in the affected files, and verif
         break;
       }
     }
+  }
+
+  /** Find a tool call by id across pending calls and transcript messages. */
+  private findToolCall(id: string): ToolCallDisplay | undefined {
+    const state = this.agentStore.getState();
+    return (
+      state.pendingToolCalls.find((toolCall) => toolCall.id === id) ??
+      state.messages.flatMap((message) => message.toolCalls ?? []).find((toolCall) => toolCall.id === id)
+    );
+  }
+
+  /**
+   * Mirror a spawn_subagent (or wrapping invoke_external_tool) result into
+   * the sub-agent store entry. Skips entries the runner already finalized so
+   * the runner's own terminal state is never clobbered; synthesizes a
+   * terminal entry when none exists (e.g. transcript restored after reload)
+   * so the card renders the outcome instead of "Sub-agent state not found."
+   */
+  private mirrorSubAgentToolResult(
+    toolCallId: string,
+    toolName: string,
+    result: ToolResult,
+  ): void {
+    const target = resolveSubAgentMirrorTarget(
+      toolCallId,
+      toolName,
+      (id) => this.findToolCall(id)?.input,
+    );
+    if (!target) return;
+    const store = this.agentStore.getState();
+    const existing = store.subAgents.find((agent) => agent.id === target.spawnId);
+    if (
+      existing &&
+      existing.status !== 'queued' &&
+      existing.status !== 'running' &&
+      existing.status !== 'cancelling'
+    ) {
+      return;
+    }
+    const cancelled = /cancel/i.test(result.error ?? '');
+    const status: SubAgentState['status'] = result.success
+      ? 'done'
+      : cancelled
+        ? 'cancelled'
+        : 'error';
+    const output = result.success ? result.output : (result.error ?? 'Sub-agent failed.');
+    const completedAt = Date.now();
+    if (existing) {
+      store.updateSubAgent(target.spawnId, { status, output, completedAt });
+      return;
+    }
+    const spawnCall = this.findToolCall(target.spawnId);
+    const rawInput = (spawnCall?.input ?? target.nestedInput ?? {}) as Record<string, unknown>;
+    const task = typeof rawInput.task === 'string' ? rawInput.task : 'Sub-agent task';
+    const mode: AgentMode =
+      rawInput.mode === 'build' ||
+      rawInput.mode === 'review' ||
+      rawInput.mode === 'debug' ||
+      rawInput.mode === 'plan' ||
+      rawInput.mode === 'chat'
+        ? rawInput.mode
+        : 'build';
+    store.addSubAgent({
+      id: target.spawnId,
+      task,
+      mode,
+      conversationId: store.conversationId ?? undefined,
+      status,
+      output,
+      toolCalls: [],
+      startedAt: spawnCall?.startedAt ?? completedAt,
+      completedAt,
+    });
   }
 
   private sweepUnfinalizedTerminalTools(): void {
