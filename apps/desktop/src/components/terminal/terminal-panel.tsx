@@ -34,11 +34,17 @@ export function TerminalPanel() {
   const setActiveSession = useTerminalStore((s) => s.setActiveSession);
   const terminalLocation = useLayoutStore((s) => s.terminalLocation);
 
-  // Auto-create first terminal session
+  // Auto-create first terminal session (StrictMode-safe: run once per mount)
+  const didInitRef = useRef(false);
   useEffect(() => {
-    if (sessions.length === 0) {
-      createSession();
+    if (didInitRef.current) return;
+    didInitRef.current = true;
+    if (useTerminalStore.getState().sessions.filter((s) => s.location === 'panel').length === 0) {
+      useTerminalStore.getState().createSession();
     }
+    // Intentionally runs once: sessions/createSession accessed via getState()
+    // to avoid re-triggering when the store updates.
+     
   }, []);
 
   const handleClose = useCallback(
@@ -137,27 +143,29 @@ export function TerminalPanel() {
                 )}
                 {session.awaitingInput && (
                   <span
-                    className="h-1.5 w-1.5 shrink-0 rounded-full bg-amber-400"
+                    className="h-1.5 w-1.5 shrink-0 rounded-full bg-warning"
                     title="Command waiting for input"
                   />
                 )}
                 {/* Explicit close owns process termination; block it only while the harness controls the PTY. */}
                 {!session.activeToolCallId && (
-                  <span
-                    role="button"
+                  <button
+                    type="button"
+                    aria-label={`Fechar terminal ${session.name}`}
                     onClick={(e) => handleClose(e, session.id, session.ptyId)}
-                    className="ml-1 flex h-4 w-4 shrink-0 items-center justify-center rounded-sm opacity-0 group-hover:opacity-100 hover:bg-muted transition-all"
+                    className="ml-1 flex h-4 w-4 shrink-0 items-center justify-center rounded-sm opacity-0 group-hover:opacity-100 hover:bg-muted transition-all focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                   >
                     <X className="h-2.5 w-2.5" />
-                  </span>
+                  </button>
                 )}
               </button>
             );
           })}
           <button
             onClick={() => createSession()}
-            className="flex h-8 w-8 items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+            aria-label="New Terminal"
             title="New Terminal"
+            className="flex h-8 w-8 items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
           >
             <Plus className="h-3 w-3" />
           </button>

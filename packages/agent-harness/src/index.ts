@@ -4,6 +4,7 @@ export type {
   ToolResult,
   ToolHandler,
   ToolExecutionContext,
+  ToolInvocationAuthorization,
   TerminalRuntimeAdapter,
   TerminalAccess,
   TerminalAcquireRequest,
@@ -119,13 +120,22 @@ export {
 export { Harness } from './harness';
 export type { HarnessOptions } from './harness';
 export type { ChildHarnessOptions, HarnessEnvironment } from './environment';
-export { DelegatedRunner, SUB_AGENT_PREAMBLE } from './delegated-runner';
+export {
+  DelegatedRunner,
+  SUB_AGENT_PREAMBLE,
+  SUB_AGENT_MAX_OUTPUT_CHARS,
+  truncateSubAgentOutput,
+} from './delegated-runner';
 export type { DelegatedRunnerOptions } from './delegated-runner';
 export { ReadLoopMiddleware } from './read-loop';
 
 export { ContextManager } from './context-manager';
 export { RequestPreparation, estimateActualCost } from './request-preparation';
-export type { PreparedChatRequest, PromptCachePlan, RequestCostBreakdown } from './request-preparation';
+export type {
+  PreparedChatRequest,
+  PromptCachePlan,
+  RequestCostBreakdown,
+} from './request-preparation';
 export { ToolRouter, normalizeToolInput, parseToolCallInput } from './tool-router';
 export { SkillLoader } from './skill-loader';
 export type { SkillLoaderConfig } from './skill-loader';
@@ -150,7 +160,13 @@ export type {
 
 // ─── Middleware ──────────────────────────────────────────────────────────────
 export type { MiddlewareContext, PreCompletionHook, PostToolHook } from './middleware';
-export { verificationMiddleware, LoopDetectionMiddleware, compactToolOutput } from './middleware';
+export {
+  verificationMiddleware,
+  LoopDetectionMiddleware,
+  compactToolOutput,
+  compactSpawnOutput,
+  spawnTaskSimilarity,
+} from './middleware';
 
 // ─── Agents ─────────────────────────────────────────────────────────────────
 export { getAgentDefinition, getAllAgentDefinitions, getAgentTypes } from './agents';
@@ -190,6 +206,7 @@ export type {
 } from './task-integration';
 export { resolveAuthorizedPath, resolveWorkspacePath } from './path-policy';
 export type { WorkspacePathOptions } from './path-policy';
+export { authorizeToolInvocationArgs } from './tool-invocation-policy';
 export { ExternalPathAccessRegistry } from './external-path-access';
 export type {
   ExternalPathAccess,
@@ -241,10 +258,7 @@ export type {
   NormalizedTerminalDataEvent,
   NormalizedTerminalExitEvent,
 } from './terminal-runtime-validation';
-export {
-  projectTerminalProgress,
-  projectTerminalRuntimeSummary,
-} from './terminal-progress';
+export { projectTerminalProgress, projectTerminalRuntimeSummary } from './terminal-progress';
 export type {
   TerminalProgressProjection,
   TerminalProgressProjectionCurrent,
@@ -276,6 +290,7 @@ export {
   getModelProfile,
   isPerRequestCostModel,
   getPerRequestIterationCap,
+  MAX_ITERATIONS_FUSE,
 } from './mode-policies';
 export type { ModePolicy, ModelProfile } from './mode-policies';
 export { resolveEffectiveAgentPolicy, effectivePolicyConfig } from './effective-policy';

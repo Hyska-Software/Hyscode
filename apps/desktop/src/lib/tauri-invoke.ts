@@ -185,29 +185,63 @@ export type KanbanChangedEventContract = {
 
 // ─── Command signatures ─────────────────────────────────────────────────────
 
+type NativeGrantArgs = { nativeGrantIds?: string[] };
+
 interface TauriCommands {
   // FS
+  workspace_confirm_diagnostics: { args: { workspacePath: string }; ret: string };
+  workspace_confirm_external_access: {
+    args: {
+      request: {
+        operation: 'read' | 'write' | 'execute';
+        paths: string[];
+        directories: string[];
+        directoryScopes: string[];
+      };
+      grantType: 'once' | 'session-directory';
+      workspacePath: string;
+    };
+    ret: string;
+  };
+  workspace_revoke_external_grants: { args: { grantIds: string[] }; ret: void };
+  workspace_pick_folder: { args: Record<string, never>; ret: string | null };
+  workspace_pick_file: {
+    args: { filters?: { name: string; extensions: string[] }[] };
+    ret: string | null;
+  };
+  workspace_save_file: { args: { defaultName?: string }; ret: string | null };
   get_diagnostics: {
-    args: { workspacePath: string; path?: string };
+    args: { workspacePath: string; path?: string } & NativeGrantArgs;
     ret: DiagnosticContract[];
   };
-  read_file: { args: { path: string }; ret: string };
-  write_file: { args: { path: string; content: string }; ret: void };
-  create_file: { args: { path: string; content?: string }; ret: void };
-  delete_path: { args: { path: string }; ret: void };
+  read_file: { args: { path: string } & NativeGrantArgs; ret: string };
+  read_file_chunk: {
+    args: { path: string; offset: number; length: number } & NativeGrantArgs;
+    ret: { data: string; total_size: number; is_binary: boolean; finished: boolean };
+  };
+  write_file: { args: { path: string; content: string } & NativeGrantArgs; ret: void };
+  create_file: { args: { path: string; content?: string } & NativeGrantArgs; ret: void };
+  delete_path: { args: { path: string } & NativeGrantArgs; ret: void };
   list_dir: {
-    args: { path: string };
+    args: { path: string } & NativeGrantArgs;
     ret: Array<{ name: string; path: string; is_dir: boolean; size: number }>;
   };
   stat_path: {
-    args: { path: string };
+    args: { path: string } & NativeGrantArgs;
     ret: { path: string; is_dir: boolean; is_file: boolean; size: number; modified: number | null };
   };
-  reveal_path: { args: { path: string }; ret: void };
-  rename_path: { args: { from: string; to: string }; ret: void };
-  create_directory: { args: { path: string }; ret: void };
+  path_exists: { args: { path: string } & NativeGrantArgs; ret: boolean };
+  reveal_path: { args: { path: string } & NativeGrantArgs; ret: void };
+  rename_path: { args: { from: string; to: string } & NativeGrantArgs; ret: void };
+  copy_path: { args: { from: string; to: string } & NativeGrantArgs; ret: void };
+  move_path: { args: { from: string; to: string } & NativeGrantArgs; ret: void };
+  trash_path: { args: { path: string } & NativeGrantArgs; ret: void };
+  open_path: { args: { path: string } & NativeGrantArgs; ret: void };
+  join_path: { args: { parent: string; name: string }; ret: string };
+  validate_name: { args: { name: string }; ret: void };
+  create_directory: { args: { path: string } & NativeGrantArgs; ret: void };
   search_files: {
-    args: { root: string; query: string; maxResults?: number };
+    args: { root: string; query: string; maxResults?: number } & NativeGrantArgs;
     ret: Array<{ path: string; line_number: number; line_content: string }>;
   };
   fs_watch: { args: { path: string }; ret: void };
@@ -416,6 +450,7 @@ interface TauriCommands {
     args: {
       shell?: string | null;
       cwd?: string | null;
+      nativeGrantIds?: string[];
       env?: Record<string, string> | null;
       cols?: number;
       rows?: number;
@@ -451,15 +486,20 @@ interface TauriCommands {
   keychain_delete: { args: { service: string; account: string }; ret: void };
   keychain_has: { args: { service: string; account: string }; ret: boolean };
 
-  // AI Streaming
+  // AI Streaming — nested request fields are serialized in camelCase by the
+  // Rust `AiStreamRequest` serde rename rule, matching the raw invoke call in
+  // `tauri-ai-transport.ts`.
   ai_stream_request: {
     args: {
-      requestId: string;
-      provider: string;
-      url: string;
-      headers: Record<string, string>;
-      body: string;
-      timeoutMs?: number;
+      request: {
+        requestId: string;
+        provider: string;
+        method: string;
+        url: string;
+        headers: Record<string, string>;
+        body: string;
+        timeoutMs?: number;
+      };
     };
     ret: void;
   };
@@ -469,11 +509,11 @@ interface TauriCommands {
   claude_agent_run: {
     args: {
       request: {
-        request_id: string;
+        requestId: string;
         model: string;
-        system_prompt?: string;
+        systemPrompt?: string;
         messages: Array<{ role: string; content: string }>;
-        max_turns?: number;
+        maxTurns?: number;
         cwd?: string;
       };
     };
@@ -485,17 +525,17 @@ interface TauriCommands {
   codex_run: {
     args: {
       request: {
-        request_id: string;
+        requestId: string;
         model: string;
-        system_prompt?: string;
+        systemPrompt?: string;
         prompt: string;
-        api_key?: string;
+        apiKey?: string;
         cwd?: string;
-        reasoning_effort?: string;
-        sandbox_mode?: 'read-only' | 'workspace-write' | 'danger-full-access';
-        session_id?: string;
-        session_fingerprint?: string;
-        continuation_prompt?: string;
+        reasoningEffort?: string;
+        sandboxMode?: 'read-only' | 'workspace-write' | 'danger-full-access';
+        sessionId?: string;
+        sessionFingerprint?: string;
+        continuationPrompt?: string;
       };
     };
     ret: void;
@@ -856,6 +896,9 @@ interface TauriCommands {
     ret: KanbanTaskActivityContract[];
   };
 
+  // Database: Agent file history
+  file_history_save: { args: { filePath: string; content: string }; ret: string };
+
   // Database: Agent SDD
   db_sdd_upsert_session: { args: { sessionJson: string }; ret: void };
   db_sdd_get_session: { args: { id: string }; ret: string | null };
@@ -1008,7 +1051,10 @@ interface TauriCommands {
       currentVersion: string;
     } | null;
   };
-  updater_download: { args: { assetUrl: string; assetName: string }; ret: string };
+  updater_download: {
+    args: { assetUrl: string; assetName: string; expectedSha256?: string | null };
+    ret: string;
+  };
   updater_install: { args: { installerPath: string }; ret: void };
 
   // Open tabs

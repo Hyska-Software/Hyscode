@@ -206,7 +206,7 @@ describe('MemoryExtractor', () => {
       persistExtractions: vi.fn(async () => [memory()]),
     } as unknown as MemoryManager;
     const extractor = new MemoryExtractor();
-    const count = await extractor.extractAndPersist(
+    const memories = await extractor.extractAndPersist(
       manager,
       'I get an error: module missing',
       'The fix is to install the dependency and rebuild the project.',
@@ -214,7 +214,7 @@ describe('MemoryExtractor', () => {
       'project-1',
       'conv-1',
     );
-    expect(count).toBe(1);
+    expect(memories).toHaveLength(1);
     expect(manager.persistExtractions).toHaveBeenCalledWith(
       expect.any(Array),
       'project-1',
@@ -223,14 +223,14 @@ describe('MemoryExtractor', () => {
     );
   });
 
-  it('returns zero when nothing is extracted', async () => {
+  it('returns empty array when nothing is extracted', async () => {
     const manager = {
       persistExtractions: vi.fn(async () => []),
     } as unknown as MemoryManager;
     const extractor = new MemoryExtractor();
     await expect(
       extractor.extractAndPersist(manager, 'hi', 'hello', [], 'p', 'c'),
-    ).resolves.toBe(0);
+    ).resolves.toEqual([]);
     expect(manager.persistExtractions).not.toHaveBeenCalled();
   });
 });

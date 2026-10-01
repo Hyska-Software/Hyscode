@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { ProviderError } from './types';
-import { normalizeProviderError, parseNDJSONStream, withRetry } from './retry';
+import { normalizeProviderError, parseNDJSONStream, parseSSEStream, withRetry } from './retry';
 
 describe('withRetry cost safety', () => {
   it('does not retry unknown errors that may follow an accepted request', async () => {
@@ -22,7 +22,11 @@ describe('withRetry cost safety', () => {
     const operation = vi
       .fn()
       .mockRejectedValueOnce(
-        normalizeProviderError(new Error('HTTP request failed: connection refused'), 'test', 'connecting'),
+        normalizeProviderError(
+          new Error('HTTP request failed: connection refused'),
+          'test',
+          'connecting',
+        ),
       )
       .mockResolvedValue('ok');
 
@@ -40,6 +44,30 @@ describe('withRetry cost safety', () => {
     expect(onRetry).toHaveBeenCalledWith(1, expect.any(ProviderError), 0);
   });
 
+  it('aborts each timed-out attempt before starting the next one', async () => {
+    const attemptSignals: AbortSignal[] = [];
+    const operation = vi.fn(
+      (signal?: AbortSignal) =>
+        new Promise<never>((_, reject) => {
+          if (!signal) throw new Error('Attempt signal was not provided');
+          attemptSignals.push(signal);
+          signal.addEventListener('abort', () => reject(signal.reason), { once: true });
+        }),
+    );
+
+    await expect(
+      withRetry(operation, {
+        maxRetries: 1,
+        baseDelayMs: 0,
+        requestTimeoutMs: 5,
+      }),
+    ).rejects.toMatchObject({ kind: 'timeout' });
+
+    expect(operation).toHaveBeenCalledTimes(2);
+    expect(new Set(attemptSignals).size).toBe(2);
+    expect(attemptSignals.map((signal) => signal.aborted)).toEqual([true, true]);
+  });
+
   it('classifies connection failures by phase', () => {
     const connecting = normalizeProviderError(new Error('connection reset'), 'test', 'connecting');
     const streaming = normalizeProviderError(new Error('connection reset'), 'test', 'streaming');
@@ -54,5 +82,42 @@ describe('withRetry cost safety', () => {
       for await (const _value of parseNDJSONStream(response)) void _value;
     };
     await expect(consume()).rejects.toMatchObject({ kind: 'invalid_response', phase: 'parsing' });
+  });
+
+  it('closes the SSE response body when its async iterator is returned early', async () => {
+    let bodyCancelled = false;
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode('data: first\n\n'));
+      },
+      cancel() {
+        bodyCancelled = true;
+      },
+    });
+    const iterator = parseSSEStream(new Response(body))[Symbol.asyncIterator]();
+
+    await expect(iterator.next()).resolves.toEqual({ value: 'first', done: false });
+    await iterator.return?.();
+
+    expect(bodyCancelled).toBe(true);
+  });
+
+  it('closes an NDJSON response body when the signal aborts during a pending read', async () => {
+    let bodyCancelled = false;
+    const body = new ReadableStream<Uint8Array>({
+      cancel() {
+        bodyCancelled = true;
+      },
+    });
+    const controller = new AbortController();
+    const iterator = parseNDJSONStream(new Response(body), controller.signal)[
+      Symbol.asyncIterator
+    ]();
+    const pendingRead = iterator.next();
+
+    controller.abort();
+
+    await expect(pendingRead).resolves.toMatchObject({ done: true });
+    expect(bodyCancelled).toBe(true);
   });
 });

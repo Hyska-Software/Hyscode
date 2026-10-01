@@ -26,7 +26,10 @@ import { useSettingsStore } from '@/stores/settings-store';
 
 type MonacoInstance = typeof import('monaco-editor');
 type TauriInvoke = (cmd: string, args?: Record<string, unknown>) => Promise<unknown>;
-type TauriListen = (event: string, handler: (payload: { payload: string }) => void) => Promise<() => void>;
+type TauriListen = (
+  event: string,
+  handler: (payload: { payload: string }) => void,
+) => Promise<() => void>;
 
 // Document version tracking for textDocument/didChange
 const documentVersions = new Map<string, number>();
@@ -51,18 +54,21 @@ class LspBridgeImpl {
   private manager: LspManager | null = null;
   private invoke: TauriInvoke | null = null;
   private rootUri: string | null = null;
+  private monaco: MonacoInstance | null = null;
   private initialized = false;
   private openDocuments = new Set<string>(); // URIs of open documents
+  private managedDocuments = new Set<string>();
+  private pendingDocuments = new Map<
+    string,
+    { filePath: string; languageId: string; content: string }
+  >();
+  private openingDocuments = new Map<string, Promise<void>>();
   private extensionConfigs: LspContribution[] = [];
 
   /**
    * Initialize the LSP bridge with Tauri IPC functions and workspace root.
    */
-  async init(
-    invoke: TauriInvoke,
-    listen: TauriListen,
-    rootPath: string,
-  ): Promise<void> {
+  async init(invoke: TauriInvoke, listen: TauriListen, rootPath: string): Promise<void> {
     if (this.initialized) return;
 
     this.invoke = invoke;
@@ -71,6 +77,9 @@ class LspBridgeImpl {
 
     this.manager = new LspManager(invoke, listen);
     this.manager.setRootUri(this.rootUri);
+    if (this.monaco) {
+      this.manager.setMonaco(this.monaco);
+    }
 
     // Register status change listener → lsp-store
     this.manager.onStatusChange((languageId, status, capabilities) => {
@@ -109,6 +118,7 @@ class LspBridgeImpl {
     }
 
     this.initialized = true;
+    this.flushPendingDocuments();
 
     // Probe servers in background
     this.probeAllServers();
@@ -118,11 +128,13 @@ class LspBridgeImpl {
    * Set the Monaco editor instance. Must be called when Monaco mounts.
    */
   setMonaco(monaco: MonacoInstance): void {
+    this.monaco = monaco;
     // Register all languages for universal syntax highlighting
     registerAllLanguages(monaco);
 
     if (this.manager) {
       this.manager.setMonaco(monaco);
+      this.flushPendingDocuments();
     }
   }
 
@@ -131,21 +143,82 @@ class LspBridgeImpl {
    * Starts the appropriate LSP server (if available) and sends didOpen.
    */
   async onFileOpened(filePath: string, languageId: string, content: string): Promise<void> {
-    if (!this.manager || !this.initialized || isNonFileDocument(filePath)) return;
+    if (isNonFileDocument(filePath)) return;
 
     const uri = this.filePathToUri(filePath);
 
     // Track open document
     this.openDocuments.add(uri);
+    this.pendingDocuments.set(uri, { filePath, languageId, content });
+
+    if (!this.manager || !this.initialized) return;
+    await this.openPendingDocument(uri);
+  }
+
+  private async openPendingDocument(uri: string): Promise<void> {
+    const existing = this.openingDocuments.get(uri);
+    if (existing) {
+      await existing;
+      return;
+    }
+
+    const opening = this.deliverPendingDocument(uri);
+    this.openingDocuments.set(uri, opening);
+    try {
+      await opening;
+    } finally {
+      if (this.openingDocuments.get(uri) === opening) {
+        this.openingDocuments.delete(uri);
+      }
+    }
+  }
+
+  private async deliverPendingDocument(uri: string): Promise<void> {
+    const initial = this.pendingDocuments.get(uri);
+    const manager = this.manager;
+    if (!initial || !manager || !this.openDocuments.has(uri)) return;
+
+    if (!manager.hasServer(initial.languageId)) {
+      this.pendingDocuments.delete(uri);
+      return;
+    }
 
     // Ensure the language server is running
-    await this.manager.onLanguageOpened(languageId, filePath);
+    await manager.onLanguageOpened(initial.languageId, initial.filePath);
+
+    // A tab can close while the server is starting. Balance the manager's
+    // document count if startup completed after that close notification.
+    if (!this.openDocuments.has(uri)) {
+      if (manager.getConnection(initial.languageId)) {
+        await manager.onLanguageClosed(initial.languageId);
+      }
+      this.pendingDocuments.delete(uri);
+      return;
+    }
 
     // Send textDocument/didOpen
-    const connection = this.manager.getConnection(languageId);
+    const current = this.pendingDocuments.get(uri);
+    if (!current) return;
+    const connection = manager.getConnection(current.languageId);
     if (connection && connection.status === 'ready') {
       const version = getNextVersion(uri);
-      connection.didOpen(uri, languageId, version, content);
+      this.managedDocuments.add(uri);
+      connection.didOpen(uri, current.languageId, version, current.content);
+      this.pendingDocuments.delete(uri);
+    }
+  }
+
+  private flushPendingDocuments(): void {
+    for (const uri of this.pendingDocuments.keys()) {
+      void (async () => {
+        const opening = this.openingDocuments.get(uri);
+        if (opening) await opening;
+        if (this.pendingDocuments.has(uri)) {
+          await this.openPendingDocument(uri);
+        }
+      })().catch((error: unknown) => {
+        console.error(`[LspBridge] Failed to resume pending document ${uri}:`, error);
+      });
     }
   }
 
@@ -194,16 +267,20 @@ class LspBridgeImpl {
    * Called when a file is closed in the editor.
    */
   async onFileClosed(filePath: string, languageId: string): Promise<void> {
-    if (!this.manager || !this.initialized || isNonFileDocument(filePath)) return;
+    if (isNonFileDocument(filePath)) return;
 
     const uri = this.filePathToUri(filePath);
 
     // Guard against duplicate close notifications (two effects can fire for the same doc)
     if (!this.openDocuments.has(uri)) return;
 
+    const managerCountTracked = this.managedDocuments.delete(uri);
+    this.pendingDocuments.delete(uri);
+
     // Send textDocument/didClose
-    const connection = this.manager.getConnection(languageId);
-    if (connection && connection.status === 'ready') {
+    const manager = this.manager;
+    const connection = manager?.getConnection(languageId);
+    if (managerCountTracked && connection && connection.status === 'ready') {
       connection.didClose(uri);
     }
 
@@ -218,7 +295,9 @@ class LspBridgeImpl {
     }
 
     // Let manager know (decrements open doc count, stops server if 0)
-    await this.manager.onLanguageClosed(languageId);
+    if (managerCountTracked && manager) {
+      await manager.onLanguageClosed(languageId);
+    }
   }
 
   /**
@@ -397,6 +476,9 @@ class LspBridgeImpl {
     changeTimers.clear();
     documentVersions.clear();
     this.openDocuments.clear();
+    this.managedDocuments.clear();
+    this.pendingDocuments.clear();
+    this.openingDocuments.clear();
 
     if (this.manager) {
       await this.manager.stopAll();

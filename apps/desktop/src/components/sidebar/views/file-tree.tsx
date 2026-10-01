@@ -609,7 +609,9 @@ export function FileTree() {
     try {
       return await fn();
     } catch (err) {
-      console.error(err);
+      // Surface to the user (extension notification toast) in addition to console,
+      // matching the git-view-new opStatus pattern — callers may re-handle.
+      notifyError(`${key} failed: ${extractInvokeMessage(err)}`);
       throw err;
     } finally {
       setPendingOps((prev) => {

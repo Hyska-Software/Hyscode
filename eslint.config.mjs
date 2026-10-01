@@ -15,8 +15,11 @@ export default tseslint.config(
     rules: {
       'no-debugger': 'error',
       'no-duplicate-imports': 'off',
-      '@typescript-eslint/no-unused-vars': 'off',
-      '@typescript-eslint/no-explicit-any': 'off',
+      '@typescript-eslint/no-unused-vars': [
+        'error',
+        { argsIgnorePattern: '^_', varsIgnorePattern: '^_' },
+      ],
+      '@typescript-eslint/no-explicit-any': 'error',
     },
   },
 );

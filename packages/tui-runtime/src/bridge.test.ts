@@ -7,7 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { OpenAIProvider, getProviderRegistry } from '@hyscode/ai-providers';
-import type { TurnOutcome } from '@hyscode/agent-harness';
+import type { HarnessEvent, TurnOutcome } from '@hyscode/agent-harness';
 import { TuiBridge } from './bridge';
 import type { BridgeEvent, BridgeResponse, GitSummary, ProjectSummary, RuntimeReadyPayload, SessionRecord } from './protocol';
 
@@ -26,17 +26,32 @@ function successfulResult<T>(response: BridgeResponse): T {
   return response.result as T;
 }
 
-type FixtureBehavior = 'tool' | 'terminal' | 'terminal-failure' | 'external-read' | 'cancel' | 'cache';
+type FixtureBehavior = 'tool' | 'terminal' | 'terminal-failure' | 'external-read' | 'cancel' | 'cache' | 'subagent-cancel';
 
 type ProviderFixture = {
   baseUrl: string;
   requests: Array<Record<string, unknown>>;
   setBehavior: (behavior: FixtureBehavior) => void;
   setExternalPath: (filePath: string) => void;
+  childStreamWasAborted: () => boolean;
   close: () => Promise<void>;
 };
 
 type JsonMessage = Record<string, unknown>;
+
+type BridgeTestInternals = {
+  terminalRuntime: {
+    acquire: (request: {
+      conversationId: string;
+      toolCallId: string;
+      cwd: string;
+      forceNew: boolean;
+      background: boolean;
+      ownerId?: string;
+    }) => Promise<{ terminalId: string }>;
+  } | null;
+  emitScopedHarnessEvent: (ownerId: string, event: HarnessEvent) => void;
+};
 
 async function readBody(request: IncomingMessage): Promise<string> {
   const chunks: Buffer[] = [];
@@ -57,7 +72,13 @@ async function startProviderFixture(): Promise<ProviderFixture> {
   const requests: Array<Record<string, unknown>> = [];
   let behavior: FixtureBehavior = 'tool';
   let externalPath = '';
+  let childStreamAborted = false;
   const server: Server = createServer((request, response) => {
+    response.on('close', () => {
+      if (behavior === 'subagent-cancel' && requests.length > 1 && !response.writableEnded) {
+        childStreamAborted = true;
+      }
+    });
     void (async () => {
       const body = JSON.parse(await readBody(request)) as Record<string, unknown>;
       requests.push(body);
@@ -70,6 +91,46 @@ async function startProviderFixture(): Promise<ProviderFixture> {
       if (behavior === 'cancel') {
         writeSse(response, {
           choices: [{ delta: { content: 'A partial response' }, finish_reason: null }],
+        });
+        return;
+      }
+
+      if (behavior === 'subagent-cancel') {
+        if (requests.length === 1) {
+          writeSse(response, {
+            choices: [{ delta: { content: 'I will delegate this task.' }, finish_reason: null }],
+          });
+          writeSse(response, {
+            choices: [{
+              delta: {
+                tool_calls: [{
+                  index: 0,
+                  id: 'fixture-subagent-call',
+                  type: 'function',
+                  function: { name: 'spawn_subagent' },
+                }],
+              },
+              finish_reason: null,
+            }],
+          });
+          writeSse(response, {
+            choices: [{
+              delta: {
+                tool_calls: [{
+                  index: 0,
+                  function: { arguments: JSON.stringify({ task: 'Inspect the cancellation fixture.', mode: 'review' }) },
+                }],
+              },
+              finish_reason: null,
+            }],
+          });
+          writeSse(response, { choices: [{ delta: {}, finish_reason: 'tool_calls' }] });
+          writeSse(response, { choices: [], usage: { prompt_tokens: 10, completion_tokens: 8, total_tokens: 18 } });
+          finishSse(response);
+          return;
+        }
+        writeSse(response, {
+          choices: [{ delta: { content: 'Child response is still streaming.' }, finish_reason: null }],
         });
         return;
       }
@@ -259,6 +320,7 @@ async function startProviderFixture(): Promise<ProviderFixture> {
     requests,
     setBehavior: (nextBehavior) => { behavior = nextBehavior; },
     setExternalPath: (filePath) => { externalPath = filePath; },
+    childStreamWasAborted: () => childStreamAborted,
     close: () => new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve())),
   };
 }
@@ -431,6 +493,101 @@ describe('shared harness bridge protocol', () => {
     expect(persistedSettings.sidebarVisible).toBe(false);
   }, 15_000);
 
+  it('restores the selected session SDD record and its task list', async () => {
+    const directory = await mkdtemp(path.join(os.tmpdir(), 'hyscode-tui-sdd-restore-'));
+    temporaryDirectories.push(directory);
+    vi.stubEnv('HYSCODE_CONFIG_PATH', path.join(directory, 'settings.json'));
+    vi.stubEnv('HYSCODE_KEYCHAIN_PATH', path.join(directory, 'keychain.json'));
+    const initialSession = {
+      id: 'session-initial',
+      projectId: 'sdd-project',
+      title: 'Initial session',
+      workspacePath: directory,
+      mode: 'chat',
+      providerId: null,
+      modelId: null,
+      createdAt: '2026-09-01T00:00:00.000Z',
+      updatedAt: '2026-09-03T00:00:00.000Z',
+      messages: [],
+    };
+    const targetSession = {
+      ...initialSession,
+      id: 'session-target',
+      title: 'SDD session',
+      mode: 'build',
+      createdAt: '2026-09-02T00:00:00.000Z',
+      updatedAt: '2026-09-02T00:00:00.000Z',
+    };
+    const sddSession = {
+      id: 'sdd-session',
+      projectId: 'sdd-project',
+      conversationId: targetSession.id,
+      description: 'Restore a persisted plan',
+      spec: 'A persisted specification.',
+      specApproved: true,
+      tasks: [],
+      status: 'planning',
+      createdAt: '2026-09-02T00:00:00.000Z',
+      updatedAt: '2026-09-02T01:00:00.000Z',
+    };
+    const sddTask = {
+      id: 'sdd-task',
+      sessionId: sddSession.id,
+      ordinal: 1,
+      title: 'Restore task data',
+      description: 'Load tasks for the selected conversation.',
+      files: [],
+      dependencies: [],
+      status: 'failed',
+      agentOutput: null,
+      toolCalls: [],
+      createdAt: sddSession.createdAt,
+      updatedAt: sddSession.updatedAt,
+    };
+    await writeFile(path.join(directory, 'tui-data.json'), JSON.stringify({
+      conversations: [initialSession, targetSession],
+      memories: [],
+      sddSessions: { [sddSession.id]: JSON.stringify(sddSession) },
+      sddTasks: { [sddSession.id]: [JSON.stringify(sddTask)] },
+      traces: [],
+      goals: {},
+    }), 'utf8');
+    vi.stubEnv('HYSCODE_TUI_DATA_PATH', path.join(directory, 'tui-data.json'));
+
+    const events: BridgeEvent[] = [];
+    const bridge = new TuiBridge((message) => { if (message.type === 'event') events.push(message); });
+    try {
+      const ready = successfulResult<RuntimeReadyPayload>(await bridge.handle({
+        id: 'initialize',
+        method: 'initialize',
+        params: { workspacePath: directory, projectId: 'sdd-project' },
+      }));
+      expect(ready.session?.id).toBe(initialSession.id);
+      expect(ready.sdd?.sessionId).toBeNull();
+
+      const loaded = successfulResult<SessionRecord | null>(await bridge.handle({
+        id: 'load-target',
+        method: 'session_load',
+        params: { id: targetSession.id },
+      }));
+      expect(loaded?.id).toBe(targetSession.id);
+      const restored = events.filter((event) => event.event === 'sdd_updated').at(-1);
+      expect(restored).toMatchObject({
+        event: 'sdd_updated',
+        payload: {
+          sessionId: sddSession.id,
+          phase: 'planning',
+          spec: sddSession.spec,
+          tasks: [expect.objectContaining({ id: sddTask.id, status: 'failed' })],
+          failedTask: expect.objectContaining({ id: sddTask.id }),
+        },
+      });
+    } finally {
+      await bridge.handle({ id: 'restore-initial', method: 'session_load', params: { id: initialSession.id } });
+      await bridge.handle({ id: 'shutdown', method: 'shutdown', params: {} });
+    }
+  }, 15_000);
+
   it('exposes context attachments and session management through the standalone protocol', async () => {
     const directory = await mkdtemp(path.join(os.tmpdir(), 'hyscode-tui-context-'));
     temporaryDirectories.push(directory);
@@ -471,6 +628,110 @@ describe('shared harness bridge protocol', () => {
     await bridge.handle({ id: 'shutdown', method: 'shutdown', params: {} });
   });
 
+  it('tracks scoped child file changes and terminal progress through shared runtime bookkeeping', async () => {
+    const directory = await mkdtemp(path.join(os.tmpdir(), 'hyscode-tui-scoped-events-'));
+    temporaryDirectories.push(directory);
+    vi.stubEnv('HYSCODE_CONFIG_PATH', path.join(directory, 'settings.json'));
+    vi.stubEnv('HYSCODE_KEYCHAIN_PATH', path.join(directory, 'keychain.json'));
+    vi.stubEnv('HYSCODE_TUI_DATA_PATH', path.join(directory, 'tui-data.json'));
+    const filePath = path.join(directory, 'child-output.txt');
+    await writeFile(filePath, 'new child content', 'utf8');
+    const events: BridgeEvent[] = [];
+    const bridge = new TuiBridge((message) => { if (message.type === 'event') events.push(message); });
+    try {
+      const ready = successfulResult<RuntimeReadyPayload>(await bridge.handle({
+        id: 'initialize-scoped',
+        method: 'initialize',
+        params: { workspacePath: directory, projectId: 'scoped-fixture', agentType: 'build' },
+      }));
+      const internals = bridge as unknown as BridgeTestInternals;
+      const terminalRuntime = internals.terminalRuntime;
+      if (!terminalRuntime || !ready.session) throw new Error('The bridge did not initialize its terminal runtime and session.');
+      const binding = await terminalRuntime.acquire({
+        conversationId: ready.session.id,
+        toolCallId: 'child-terminal-tool',
+        ownerId: 'child-owner',
+        cwd: directory,
+        forceNew: true,
+        background: false,
+      });
+
+      internals.emitScopedHarnessEvent('child-owner', {
+        type: 'file_change_pending',
+        change: {
+          toolCallId: 'child-file-tool',
+          toolName: 'write_file',
+          filePath,
+          originalContent: 'original content',
+          newContent: 'new child content',
+        },
+      });
+      internals.emitScopedHarnessEvent('child-owner', {
+        type: 'terminal_progress',
+        progress: {
+          toolCallId: 'child-terminal-tool',
+          terminalId: binding.terminalId,
+          sequence: 1,
+          chunk: 'child terminal output',
+          state: 'running',
+        },
+      });
+
+      const runningTerminals = successfulResult<Array<Record<string, unknown>>>(await bridge.handle({
+        id: 'list-running-scoped-terminal',
+        method: 'terminal_list',
+        params: {},
+      }));
+      expect(runningTerminals).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          terminalId: binding.terminalId,
+          ownerId: 'child-owner',
+          activeToolCallId: 'child-terminal-tool',
+          sequence: 1,
+        }),
+      ]));
+
+      const resolved = successfulResult<{ resolved: boolean }>(await bridge.handle({
+        id: 'reject-scoped-file-change',
+        method: 'file_change_resolve',
+        params: { toolCallId: 'child-file-tool', action: 'reject' },
+      }));
+      expect(resolved.resolved).toBe(true);
+      expect(await readFile(filePath, 'utf8')).toBe('original content');
+
+      internals.emitScopedHarnessEvent('child-owner', {
+        type: 'tool_call_result',
+        toolCallId: 'child-terminal-tool',
+        toolName: 'run_terminal_command',
+        result: {
+          success: true,
+          output: 'canonical child result',
+          metadata: { terminalId: binding.terminalId, sequence: 1, failure: null },
+        },
+        durationMs: 10,
+      });
+      const completedTerminals = successfulResult<Array<Record<string, unknown>>>(await bridge.handle({
+        id: 'list-completed-scoped-terminal',
+        method: 'terminal_list',
+        params: {},
+      }));
+      expect(completedTerminals).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          terminalId: binding.terminalId,
+          activeToolCallId: null,
+          sequence: 1,
+        }),
+      ]));
+      expect(events.some((event) => event.event === 'terminal_updated'
+        && event.payload.terminal.terminalId === binding.terminalId
+        && event.payload.terminal.activeToolCallId === null
+        && event.payload.terminal.outputPreview === 'canonical child result')).toBe(true);
+      expect(events.some((event) => event.event === 'file_change_updated' && event.payload.status === 'rejected')).toBe(true);
+    } finally {
+      await bridge.handle({ id: 'shutdown-scoped', method: 'shutdown', params: {} });
+    }
+  }, 15_000);
+
   it('streams through the real provider adapter, pauses for approval, executes a tool, and persists completion', async () => {
     const directory = await mkdtemp(path.join(os.tmpdir(), 'hyscode-tui-turn-'));
     temporaryDirectories.push(directory);
@@ -497,7 +758,7 @@ describe('shared harness bridge protocol', () => {
         method: 'set_config',
         params: {
           providerId: 'openai',
-          modelId: 'gpt-5.4-mini',
+          modelId: 'gpt-5.6-sol',
           thinking: { enabled: true, level: 'high' },
         },
       }));
@@ -506,7 +767,7 @@ describe('shared harness bridge protocol', () => {
       expect(
         (JSON.parse(await readFile(path.join(directory, 'settings.json'), 'utf8')) as {
           thinkingSettings: Record<string, unknown>;
-        }).thinkingSettings['openai::gpt-5.4-mini'],
+        }).thinkingSettings['openai::gpt-5.6-sol'],
       ).toEqual({ enabled: true, level: 'high' });
 
       const rejected = await bridge.handle({
@@ -514,7 +775,7 @@ describe('shared harness bridge protocol', () => {
         method: 'set_config',
         params: {
           providerId: 'openai',
-          modelId: 'gpt-5.4-mini',
+          modelId: 'gpt-5.6-sol',
           thinking: { enabled: true, level: 'adaptive' },
         },
       });
@@ -525,7 +786,7 @@ describe('shared harness bridge protocol', () => {
         method: 'set_config',
         params: {
           providerId: 'openai',
-          modelId: 'gpt-5.4-mini',
+          modelId: 'gpt-5.6-sol',
           thinking: { enabled: false, level: 'high' },
         },
       }));
@@ -533,7 +794,7 @@ describe('shared harness bridge protocol', () => {
       expect(
         (JSON.parse(await readFile(path.join(directory, 'settings.json'), 'utf8')) as {
           thinkingSettings: Record<string, unknown>;
-        }).thinkingSettings['openai::gpt-5.4-mini'],
+        }).thinkingSettings['openai::gpt-5.6-sol'],
       ).toEqual({ enabled: false, level: 'high' });
 
       const turnPromise = bridge.handle({
@@ -561,9 +822,15 @@ describe('shared harness bridge protocol', () => {
       expect(await readFile(path.join(directory, 'fixture-output.txt'), 'utf8')).toBe('updated by fixture');
       expect(fixture.requests.length).toBeGreaterThanOrEqual(2);
       const firstRequestMessages = Array.isArray(fixture.requests[0]?.messages)
-        ? fixture.requests[0].messages as Array<{ role?: string; content?: string }>
+        ? fixture.requests[0].messages as Array<{ role?: string; content?: string | Array<{ type?: string; text?: string }> }>
         : [];
-      expect(firstRequestMessages.find((message) => message.role === 'system')?.content).toContain(
+      const systemContent = firstRequestMessages.find((message) => message.role === 'system')?.content;
+      const systemText = typeof systemContent === 'string'
+        ? systemContent
+        : Array.isArray(systemContent)
+          ? systemContent.map((part) => part.text ?? '').join('')
+          : '';
+      expect(systemText).toContain(
         'Always verify the fixture output.',
       );
       const toolResultRequest = fixture.requests.find((request) => (
@@ -612,7 +879,7 @@ describe('shared harness bridge protocol', () => {
       await bridge.handle({
         id: 'configure-cache',
         method: 'set_config',
-        params: { providerId: 'openai', modelId: 'gpt-5.4-mini', approvalMode: 'yolo' },
+        params: { providerId: 'openai', modelId: 'gpt-5.6-sol', approvalMode: 'yolo' },
       });
 
       const outcomes: TurnOutcome[] = [];
@@ -681,7 +948,7 @@ describe('shared harness bridge protocol', () => {
       await bridge.handle({
         id: 'config',
         method: 'set_config',
-        params: { providerId: 'openai', modelId: 'gpt-5.4-mini', approvalMode: 'yolo' },
+        params: { providerId: 'openai', modelId: 'gpt-5.6-sol', approvalMode: 'yolo' },
       });
 
       const turnPromise = bridge.handle({
@@ -780,6 +1047,11 @@ describe('shared harness bridge protocol', () => {
       ]));
 
       await bridge.handle({ id: 'new-session', method: 'session_new', params: {} });
+      expect(successfulResult<Array<{ terminalId: string }>>(await bridge.handle({
+        id: 'new-session-terminals',
+        method: 'terminal_list',
+        params: {},
+      }))).not.toEqual(expect.arrayContaining([expect.objectContaining({ terminalId: userTerminal.terminalId })]));
       const deniedSnapshot = await bridge.handle({
         id: 'denied-user-snapshot',
         method: 'terminal_snapshot',
@@ -788,12 +1060,17 @@ describe('shared harness bridge protocol', () => {
       expect(deniedSnapshot.ok).toBe(false);
       expect(deniedSnapshot).toMatchObject({ error: expect.stringContaining('another conversation') });
       await bridge.handle({ id: 'restore-session', method: 'session_load', params: { id: initialized.session?.id } });
+      expect(successfulResult<Array<{ terminalId: string }>>(await bridge.handle({
+        id: 'restored-session-terminals',
+        method: 'terminal_list',
+        params: {},
+      }))).toEqual(expect.arrayContaining([expect.objectContaining({ terminalId: userTerminal.terminalId })]));
 
       registry.register(new OpenAIProvider('fixture-key', fixture.baseUrl));
       await bridge.handle({
         id: 'config',
         method: 'set_config',
-        params: { providerId: 'openai', modelId: 'gpt-5.4-mini', approvalMode: 'yolo' },
+        params: { providerId: 'openai', modelId: 'gpt-5.6-sol', approvalMode: 'yolo' },
       });
 
       const turnPromise = bridge.handle({
@@ -904,7 +1181,7 @@ describe('shared harness bridge protocol', () => {
       await bridge.handle({
         id: 'config',
         method: 'set_config',
-        params: { providerId: 'openai', modelId: 'gpt-5.4-mini', approvalMode: 'yolo' },
+        params: { providerId: 'openai', modelId: 'gpt-5.6-sol', approvalMode: 'yolo' },
       });
 
       const turn = successfulResult<{ status: string; response: string }>(await bridge.handle({
@@ -968,7 +1245,7 @@ describe('shared harness bridge protocol', () => {
       await bridge.handle({
         id: 'config',
         method: 'set_config',
-        params: { providerId: 'openai', modelId: 'gpt-5.4-mini' },
+        params: { providerId: 'openai', modelId: 'gpt-5.6-sol' },
       });
 
       const turnPromise = bridge.handle({
@@ -988,4 +1265,56 @@ describe('shared harness bridge protocol', () => {
       await fixture.close();
     }
   });
+
+  it('cancels active child Harnesses when the parent turn is cancelled', async () => {
+    const directory = await mkdtemp(path.join(os.tmpdir(), 'hyscode-tui-cancel-child-'));
+    temporaryDirectories.push(directory);
+    const fixture = await startProviderFixture();
+    fixture.setBehavior('subagent-cancel');
+    const registry = getProviderRegistry();
+    vi.stubEnv('HYSCODE_CONFIG_PATH', path.join(directory, 'settings.json'));
+    vi.stubEnv('HYSCODE_KEYCHAIN_PATH', path.join(directory, 'keychain.json'));
+    vi.stubEnv('HYSCODE_TUI_DATA_PATH', path.join(directory, 'tui-data.json'));
+    const events: BridgeEvent[] = [];
+    const bridge = new TuiBridge((message) => { if (message.type === 'event') events.push(message); });
+    try {
+      await bridge.handle({
+        id: 'initialize-child-cancel',
+        method: 'initialize',
+        params: { workspacePath: directory, projectId: 'child-cancel-fixture', agentType: 'build' },
+      });
+      registry.register(new OpenAIProvider('fixture-key', fixture.baseUrl));
+      await bridge.handle({
+        id: 'configure-child-cancel',
+        method: 'set_config',
+        params: { providerId: 'openai', modelId: 'gpt-5.6-sol', approvalMode: 'yolo' },
+      });
+
+      const turnPromise = bridge.handle({
+        id: 'child-cancel-turn',
+        method: 'send_message',
+        params: { message: 'Delegate and wait for the child report.' },
+      });
+      await waitForEvent(events, (event) => (
+        event.event === 'scoped_harness_event'
+        && event.payload.ownerId === 'fixture-subagent-call'
+        && event.payload.event.type === 'stream_chunk'
+      ));
+
+      successfulResult<{ cancelled: boolean }>(await bridge.handle({ id: 'cancel-parent', method: 'cancel', params: {} }));
+      const turn = successfulResult<{ status: string }>(await turnPromise);
+      expect(turn.status).toBe('cancelled');
+      expect(fixture.childStreamWasAborted()).toBe(true);
+      expect(events.some((event) => (
+        event.event === 'scoped_harness_event'
+        && event.payload.ownerId === 'fixture-subagent-call'
+        && event.payload.event.type === 'turn_end'
+        && (event.payload.event.reason === 'cancelled' || event.payload.event.reason === 'cancelled_partial')
+      ))).toBe(true);
+    } finally {
+      registry.unregister('openai');
+      await bridge.handle({ id: 'shutdown-child-cancel', method: 'shutdown', params: {} });
+      await fixture.close();
+    }
+  }, 30_000);
 });

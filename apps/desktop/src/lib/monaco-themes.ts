@@ -43,6 +43,35 @@ const THEMES: Record<string, ThemeDef> = {
       { token: 'constant.language', foreground: '2fb28f' },
       { token: 'constant.character.escape', foreground: '86efac' },
       { token: 'meta.interpolation', foreground: 'ececf1' },
+      // ── Semantic / VS Code parity (namespace, macro, decorator, etc.) ──
+      { token: 'namespace', foreground: '4ec9b0' },
+      { token: 'class', foreground: '60a5fa' },
+      { token: 'struct', foreground: '60a5fa' },
+      { token: 'enum', foreground: '60a5fa' },
+      { token: 'interface', foreground: '60a5fa' },
+      { token: 'typeParameter', foreground: '60a5fa' },
+      { token: 'method', foreground: '5cc6a8' },
+      { token: 'macro', foreground: 'e3b341' },
+      { token: 'decorator', foreground: 'e3b341' },
+      { token: 'annotation', foreground: 'e3b341' },
+      { token: 'attribute', foreground: 'e3b341' },
+      { token: 'parameter', foreground: '9cdcfe' },
+      { token: 'property', foreground: '9cdcfe' },
+      { token: 'enumMember', foreground: '4ec9b0' },
+      { token: 'constant', foreground: 'e3b341' },
+      { token: 'label', foreground: '8e8ea0' },
+      { token: 'lifetime', foreground: '60a5fa', fontStyle: 'italic' },
+      { token: 'string.escape', foreground: '86efac' },
+      { token: 'number.float', foreground: 'e3b341' },
+      { token: 'number.hex', foreground: 'e3b341' },
+      { token: 'number.octal', foreground: 'e3b341' },
+      { token: 'number.binary', foreground: 'e3b341' },
+      { token: 'identifier', foreground: 'ececf1' },
+      { token: 'variable.readonly', foreground: 'ececf1' },
+      { token: 'parameter.declaration', foreground: '9cdcfe' },
+      { token: 'type.static', foreground: '60a5fa' },
+      { token: 'function.declaration', foreground: '5cc6a8' },
+      { token: 'namespace.declaration', foreground: '4ec9b0' },
     ],
     colors: {
       'editor.background': '#202123',
@@ -111,6 +140,34 @@ const THEMES: Record<string, ThemeDef> = {
       { token: 'constant.language', foreground: '61ffca' },
       { token: 'constant.character.escape', foreground: '61ffca' },
       { token: 'meta.interpolation', foreground: 'edecee' },
+      // ── Semantic / VS Code parity ──
+      { token: 'namespace', foreground: '61ffca' },
+      { token: 'class', foreground: '82e2ff' },
+      { token: 'struct', foreground: '82e2ff' },
+      { token: 'enum', foreground: '82e2ff' },
+      { token: 'interface', foreground: '82e2ff' },
+      { token: 'typeParameter', foreground: '82e2ff' },
+      { token: 'method', foreground: 'ffca85' },
+      { token: 'macro', foreground: 'f694ff' },
+      { token: 'decorator', foreground: 'f694ff' },
+      { token: 'annotation', foreground: 'f694ff' },
+      { token: 'attribute', foreground: 'f694ff' },
+      { token: 'parameter', foreground: 'cdccce' },
+      { token: 'enumMember', foreground: '61ffca' },
+      { token: 'constant', foreground: 'ffca85' },
+      { token: 'label', foreground: '6d6d6d' },
+      { token: 'lifetime', foreground: '82e2ff', fontStyle: 'italic' },
+      { token: 'string.escape', foreground: '61ffca' },
+      { token: 'number.float', foreground: 'ffca85' },
+      { token: 'number.hex', foreground: 'ffca85' },
+      { token: 'number.octal', foreground: 'ffca85' },
+      { token: 'number.binary', foreground: 'ffca85' },
+      { token: 'identifier', foreground: 'edecee' },
+      { token: 'variable.readonly', foreground: 'edecee' },
+      { token: 'parameter.declaration', foreground: 'cdccce' },
+      { token: 'type.static', foreground: '82e2ff' },
+      { token: 'function.declaration', foreground: 'ffca85' },
+      { token: 'namespace.declaration', foreground: '61ffca' },
     ],
     colors: {
       'editor.background': '#15141b',
@@ -177,6 +234,35 @@ const THEMES: Record<string, ThemeDef> = {
       { token: 'constant.language', foreground: '0d8a6c' },
       { token: 'constant.character.escape', foreground: '16a34a' },
       { token: 'meta.interpolation', foreground: '0d0d0f' },
+      // ── Semantic / VS Code parity ──
+      { token: 'namespace', foreground: '267f99' },
+      { token: 'class', foreground: '1d4ed8' },
+      { token: 'struct', foreground: '1d4ed8' },
+      { token: 'enum', foreground: '1d4ed8' },
+      { token: 'interface', foreground: '1d4ed8' },
+      { token: 'typeParameter', foreground: '1d4ed8' },
+      { token: 'method', foreground: '0d8a6c' },
+      { token: 'macro', foreground: 'd97706' },
+      { token: 'decorator', foreground: 'd97706' },
+      { token: 'annotation', foreground: 'd97706' },
+      { token: 'attribute', foreground: 'd97706' },
+      { token: 'parameter', foreground: '374151' },
+      { token: 'property', foreground: '1d4ed8' },
+      { token: 'enumMember', foreground: '267f99' },
+      { token: 'constant', foreground: 'd97706' },
+      { token: 'label', foreground: '6e6e80' },
+      { token: 'lifetime', foreground: '1d4ed8', fontStyle: 'italic' },
+      { token: 'string.escape', foreground: '16a34a' },
+      { token: 'number.float', foreground: 'd97706' },
+      { token: 'number.hex', foreground: 'd97706' },
+      { token: 'number.octal', foreground: 'd97706' },
+      { token: 'number.binary', foreground: 'd97706' },
+      { token: 'identifier', foreground: '0d0d0f' },
+      { token: 'variable.readonly', foreground: '0d0d0f' },
+      { token: 'parameter.declaration', foreground: '374151' },
+      { token: 'type.static', foreground: '1d4ed8' },
+      { token: 'function.declaration', foreground: '0d8a6c' },
+      { token: 'namespace.declaration', foreground: '267f99' },
     ],
     colors: {
       'editor.background': '#ffffff',
@@ -241,6 +327,35 @@ const THEMES: Record<string, ThemeDef> = {
       { token: 'constant.language', foreground: '81a1c1' },
       { token: 'constant.character.escape', foreground: 'a3be8c' },
       { token: 'meta.interpolation', foreground: 'd8dee9' },
+      // ── Semantic / VS Code parity ──
+      { token: 'namespace', foreground: '8fbcbb' },
+      { token: 'class', foreground: '88c0d0' },
+      { token: 'struct', foreground: '88c0d0' },
+      { token: 'enum', foreground: '88c0d0' },
+      { token: 'interface', foreground: '88c0d0' },
+      { token: 'typeParameter', foreground: '88c0d0' },
+      { token: 'method', foreground: '88c0d0' },
+      { token: 'macro', foreground: 'ebcb8b' },
+      { token: 'decorator', foreground: 'ebcb8b' },
+      { token: 'annotation', foreground: 'ebcb8b' },
+      { token: 'attribute', foreground: 'ebcb8b' },
+      { token: 'parameter', foreground: 'd8dee9' },
+      { token: 'property', foreground: '8fbcbb' },
+      { token: 'enumMember', foreground: '8fbcbb' },
+      { token: 'constant', foreground: 'b48ead' },
+      { token: 'label', foreground: '636e82' },
+      { token: 'lifetime', foreground: '88c0d0', fontStyle: 'italic' },
+      { token: 'string.escape', foreground: 'a3be8c' },
+      { token: 'number.float', foreground: 'b48ead' },
+      { token: 'number.hex', foreground: 'b48ead' },
+      { token: 'number.octal', foreground: 'b48ead' },
+      { token: 'number.binary', foreground: 'b48ead' },
+      { token: 'identifier', foreground: 'd8dee9' },
+      { token: 'variable.readonly', foreground: 'd8dee9' },
+      { token: 'parameter.declaration', foreground: 'd8dee9' },
+      { token: 'type.static', foreground: '88c0d0' },
+      { token: 'function.declaration', foreground: '88c0d0' },
+      { token: 'namespace.declaration', foreground: '8fbcbb' },
     ],
     colors: {
       'editor.background': '#2e3440',
@@ -305,6 +420,35 @@ const THEMES: Record<string, ThemeDef> = {
       { token: 'constant.language', foreground: 'f92672' },
       { token: 'constant.character.escape', foreground: 'e6db74' },
       { token: 'meta.interpolation', foreground: 'f8f8f2' },
+      // ── Semantic / VS Code parity ──
+      { token: 'namespace', foreground: '66d9ef' },
+      { token: 'class', foreground: '66d9ef' },
+      { token: 'struct', foreground: '66d9ef' },
+      { token: 'enum', foreground: '66d9ef' },
+      { token: 'interface', foreground: '66d9ef' },
+      { token: 'typeParameter', foreground: '66d9ef' },
+      { token: 'method', foreground: 'a6e22e' },
+      { token: 'macro', foreground: 'fd971f' },
+      { token: 'decorator', foreground: 'fd971f' },
+      { token: 'annotation', foreground: 'fd971f' },
+      { token: 'attribute', foreground: 'fd971f' },
+      { token: 'parameter', foreground: 'f8f8f2' },
+      { token: 'property', foreground: '66d9ef' },
+      { token: 'enumMember', foreground: '66d9ef' },
+      { token: 'constant', foreground: 'ae81ff' },
+      { token: 'label', foreground: '75715e' },
+      { token: 'lifetime', foreground: '66d9ef', fontStyle: 'italic' },
+      { token: 'string.escape', foreground: 'e6db74' },
+      { token: 'number.float', foreground: 'ae81ff' },
+      { token: 'number.hex', foreground: 'ae81ff' },
+      { token: 'number.octal', foreground: 'ae81ff' },
+      { token: 'number.binary', foreground: 'ae81ff' },
+      { token: 'identifier', foreground: 'f8f8f2' },
+      { token: 'variable.readonly', foreground: 'f8f8f2' },
+      { token: 'parameter.declaration', foreground: 'f8f8f2' },
+      { token: 'type.static', foreground: '66d9ef' },
+      { token: 'function.declaration', foreground: 'a6e22e' },
+      { token: 'namespace.declaration', foreground: '66d9ef' },
     ],
     colors: {
       'editor.background': '#272822',
@@ -369,6 +513,35 @@ const THEMES: Record<string, ThemeDef> = {
       { token: 'constant.language', foreground: 'ff79c6' },
       { token: 'constant.character.escape', foreground: 'f1fa8c' },
       { token: 'meta.interpolation', foreground: 'f8f8f2' },
+      // ── Semantic / VS Code parity ──
+      { token: 'namespace', foreground: '8be9fd' },
+      { token: 'class', foreground: '8be9fd' },
+      { token: 'struct', foreground: '8be9fd' },
+      { token: 'enum', foreground: '8be9fd' },
+      { token: 'interface', foreground: '8be9fd' },
+      { token: 'typeParameter', foreground: '8be9fd' },
+      { token: 'method', foreground: '50fa7b' },
+      { token: 'macro', foreground: 'ffb86c' },
+      { token: 'decorator', foreground: 'ffb86c' },
+      { token: 'annotation', foreground: 'ffb86c' },
+      { token: 'attribute', foreground: 'ffb86c' },
+      { token: 'parameter', foreground: 'f8f8f2' },
+      { token: 'property', foreground: '8be9fd' },
+      { token: 'enumMember', foreground: '8be9fd' },
+      { token: 'constant', foreground: 'bd93f9' },
+      { token: 'label', foreground: '6272a4' },
+      { token: 'lifetime', foreground: '8be9fd', fontStyle: 'italic' },
+      { token: 'string.escape', foreground: 'f1fa8c' },
+      { token: 'number.float', foreground: 'bd93f9' },
+      { token: 'number.hex', foreground: 'bd93f9' },
+      { token: 'number.octal', foreground: 'bd93f9' },
+      { token: 'number.binary', foreground: 'bd93f9' },
+      { token: 'identifier', foreground: 'f8f8f2' },
+      { token: 'variable.readonly', foreground: 'f8f8f2' },
+      { token: 'parameter.declaration', foreground: 'f8f8f2' },
+      { token: 'type.static', foreground: '8be9fd' },
+      { token: 'function.declaration', foreground: '50fa7b' },
+      { token: 'namespace.declaration', foreground: '8be9fd' },
     ],
     colors: {
       'editor.background': '#282a36',
@@ -433,6 +606,35 @@ const THEMES: Record<string, ThemeDef> = {
       { token: 'constant.language', foreground: 'ff7b72' },
       { token: 'constant.character.escape', foreground: 'a5d6ff' },
       { token: 'meta.interpolation', foreground: 'c9d1d9' },
+      // ── Semantic / VS Code parity ──
+      { token: 'namespace', foreground: '79c0ff' },
+      { token: 'class', foreground: 'ffa657' },
+      { token: 'struct', foreground: 'ffa657' },
+      { token: 'enum', foreground: 'ffa657' },
+      { token: 'interface', foreground: 'ffa657' },
+      { token: 'typeParameter', foreground: 'ffa657' },
+      { token: 'method', foreground: 'd2a8ff' },
+      { token: 'macro', foreground: 'e3b341' },
+      { token: 'decorator', foreground: 'e3b341' },
+      { token: 'annotation', foreground: 'e3b341' },
+      { token: 'attribute', foreground: 'e3b341' },
+      { token: 'parameter', foreground: 'c9d1d9' },
+      { token: 'property', foreground: '79c0ff' },
+      { token: 'enumMember', foreground: '79c0ff' },
+      { token: 'constant', foreground: '79c0ff' },
+      { token: 'label', foreground: '8b949e' },
+      { token: 'lifetime', foreground: 'ffa657', fontStyle: 'italic' },
+      { token: 'string.escape', foreground: 'a5d6ff' },
+      { token: 'number.float', foreground: '79c0ff' },
+      { token: 'number.hex', foreground: '79c0ff' },
+      { token: 'number.octal', foreground: '79c0ff' },
+      { token: 'number.binary', foreground: '79c0ff' },
+      { token: 'identifier', foreground: 'c9d1d9' },
+      { token: 'variable.readonly', foreground: 'c9d1d9' },
+      { token: 'parameter.declaration', foreground: 'c9d1d9' },
+      { token: 'type.static', foreground: 'ffa657' },
+      { token: 'function.declaration', foreground: 'd2a8ff' },
+      { token: 'namespace.declaration', foreground: '79c0ff' },
     ],
     colors: {
       'editor.background': '#0d1117',
@@ -474,13 +676,20 @@ const THEMES: Record<string, ThemeDef> = {
 export function getMonacoThemeName(themeId: string): string {
   // Built-in themes map
   switch (themeId) {
-    case 'hyscode-dark':   return 'hyscode-dark';
-    case 'aura':           return 'hyscode-aura';
-    case 'hyscode-light':  return 'hyscode-light';
-    case 'nord':           return 'hyscode-nord';
-    case 'monokai':        return 'hyscode-monokai';
-    case 'dracula':        return 'hyscode-dracula';
-    case 'github-dark':    return 'hyscode-github-dark';
+    case 'hyscode-dark':
+      return 'hyscode-dark';
+    case 'aura':
+      return 'hyscode-aura';
+    case 'hyscode-light':
+      return 'hyscode-light';
+    case 'nord':
+      return 'hyscode-nord';
+    case 'monokai':
+      return 'hyscode-monokai';
+    case 'dracula':
+      return 'hyscode-dracula';
+    case 'github-dark':
+      return 'hyscode-github-dark';
     default: {
       // Extension-registered custom theme
       const monacoName = `ext-${themeId}`;
@@ -572,25 +781,41 @@ export function registerExtensionTheme(definition: ThemeDefinition): void {
   // ── Map colors to Monaco editor colors ──
   const monacoColors: Record<string, string> = {};
   const c = definition.colors;
-  if (c['editor.background'])              monacoColors['editor.background'] = c['editor.background'];
-  if (c['editor.foreground'])              monacoColors['editor.foreground'] = c['editor.foreground'];
-  if (c['editorLineNumber.foreground'])    monacoColors['editorLineNumber.foreground'] = c['editorLineNumber.foreground'];
-  if (c['editorLineNumber.activeForeground']) monacoColors['editorLineNumber.activeForeground'] = c['editorLineNumber.activeForeground'];
-  if (c['editor.selectionBackground'])     monacoColors['editor.selectionBackground'] = c['editor.selectionBackground'];
-  if (c['editor.lineHighlightBackground']) monacoColors['editor.lineHighlightBackground'] = c['editor.lineHighlightBackground'];
-  if (c['editorCursor.foreground'])        monacoColors['editorCursor.foreground'] = c['editorCursor.foreground'];
-  if (c['editorIndentGuide.background'])   monacoColors['editorIndentGuide.background'] = c['editorIndentGuide.background'];
-  if (c['editorBracketMatch.background'])  monacoColors['editorBracketMatch.background'] = c['editorBracketMatch.background'];
-  if (c['editorBracketMatch.border'])      monacoColors['editorBracketMatch.border'] = c['editorBracketMatch.border'];
-  if (c['editorWidget.background'])        monacoColors['editorWidget.background'] = c['editorWidget.background'];
-  if (c['editorWidget.border'])            monacoColors['editorWidget.border'] = c['editorWidget.border'];
-  if (c['minimap.background'])             monacoColors['minimap.background'] = c['minimap.background'];
-  if (c['scrollbarSlider.background'])     monacoColors['scrollbarSlider.background'] = c['scrollbarSlider.background'];
-  if (c['scrollbarSlider.hoverBackground']) monacoColors['scrollbarSlider.hoverBackground'] = c['scrollbarSlider.hoverBackground'];
+  if (c['editor.background']) monacoColors['editor.background'] = c['editor.background'];
+  if (c['editor.foreground']) monacoColors['editor.foreground'] = c['editor.foreground'];
+  if (c['editorLineNumber.foreground'])
+    monacoColors['editorLineNumber.foreground'] = c['editorLineNumber.foreground'];
+  if (c['editorLineNumber.activeForeground'])
+    monacoColors['editorLineNumber.activeForeground'] = c['editorLineNumber.activeForeground'];
+  if (c['editor.selectionBackground'])
+    monacoColors['editor.selectionBackground'] = c['editor.selectionBackground'];
+  if (c['editor.lineHighlightBackground'])
+    monacoColors['editor.lineHighlightBackground'] = c['editor.lineHighlightBackground'];
+  if (c['editorCursor.foreground'])
+    monacoColors['editorCursor.foreground'] = c['editorCursor.foreground'];
+  if (c['editorIndentGuide.background'])
+    monacoColors['editorIndentGuide.background'] = c['editorIndentGuide.background'];
+  if (c['editorBracketMatch.background'])
+    monacoColors['editorBracketMatch.background'] = c['editorBracketMatch.background'];
+  if (c['editorBracketMatch.border'])
+    monacoColors['editorBracketMatch.border'] = c['editorBracketMatch.border'];
+  if (c['editorWidget.background'])
+    monacoColors['editorWidget.background'] = c['editorWidget.background'];
+  if (c['editorWidget.border']) monacoColors['editorWidget.border'] = c['editorWidget.border'];
+  if (c['minimap.background']) monacoColors['minimap.background'] = c['minimap.background'];
+  if (c['scrollbarSlider.background'])
+    monacoColors['scrollbarSlider.background'] = c['scrollbarSlider.background'];
+  if (c['scrollbarSlider.hoverBackground'])
+    monacoColors['scrollbarSlider.hoverBackground'] = c['scrollbarSlider.hoverBackground'];
 
   // Also pass through any raw editor.* colors the extension defined
   for (const [key, val] of Object.entries(c)) {
-    if (key.startsWith('editor') || key.startsWith('minimap') || key.startsWith('scrollbar') || key.startsWith('input')) {
+    if (
+      key.startsWith('editor') ||
+      key.startsWith('minimap') ||
+      key.startsWith('scrollbar') ||
+      key.startsWith('input')
+    ) {
       if (!monacoColors[key]) monacoColors[key] = val;
     }
   }
@@ -610,7 +835,8 @@ export function registerExtensionTheme(definition: ThemeDefinition): void {
   const fg = c['editor.foreground'] ?? c['foreground'] ?? (base === 'vs' ? '#1a1a1a' : '#e8e8e8');
   const surface = c['sideBar.background'] ?? c['panel.background'] ?? bg;
   const sidebar = c['activityBar.background'] ?? c['sideBar.background'] ?? bg;
-  const accent = c['focusBorder'] ?? c['button.background'] ?? c['editorCursor.foreground'] ?? '#10a37f';
+  const accent =
+    c['focusBorder'] ?? c['button.background'] ?? c['editorCursor.foreground'] ?? '#10a37f';
   const muted = c['editorLineNumber.foreground'] ?? c['tab.inactiveForeground'] ?? '#888888';
 
   // Remove previous meta entry if re-registering
@@ -648,68 +874,185 @@ export interface XtermTheme {
   cursor: string;
   cursorAccent: string;
   selectionBackground: string;
-  black: string; red: string; green: string; yellow: string;
-  blue: string; magenta: string; cyan: string; white: string;
-  brightBlack: string; brightRed: string; brightGreen: string; brightYellow: string;
-  brightBlue: string; brightMagenta: string; brightCyan: string; brightWhite: string;
+  black: string;
+  red: string;
+  green: string;
+  yellow: string;
+  blue: string;
+  magenta: string;
+  cyan: string;
+  white: string;
+  brightBlack: string;
+  brightRed: string;
+  brightGreen: string;
+  brightYellow: string;
+  brightBlue: string;
+  brightMagenta: string;
+  brightCyan: string;
+  brightWhite: string;
 }
 
 const XTERM_THEMES: Record<string, XtermTheme> = {
   'hyscode-dark': {
-    background: '#202123', foreground: '#ececf1', cursor: '#10a37f', cursorAccent: '#202123',
+    background: '#202123',
+    foreground: '#ececf1',
+    cursor: '#10a37f',
+    cursorAccent: '#202123',
     selectionBackground: 'rgba(16,163,127,0.25)',
-    black: '#0d0d0f', red: '#f87171', green: '#4ade80', yellow: '#facc15',
-    blue: '#60a5fa', magenta: '#10a37f', cyan: '#22d3ee', white: '#ececf1',
-    brightBlack: '#8e8ea0', brightRed: '#fca5a5', brightGreen: '#86efac', brightYellow: '#fde68a',
-    brightBlue: '#93c5fd', brightMagenta: '#2fb28f', brightCyan: '#67e8f9', brightWhite: '#ffffff',
+    black: '#0d0d0f',
+    red: '#f87171',
+    green: '#4ade80',
+    yellow: '#facc15',
+    blue: '#60a5fa',
+    magenta: '#10a37f',
+    cyan: '#22d3ee',
+    white: '#ececf1',
+    brightBlack: '#8e8ea0',
+    brightRed: '#fca5a5',
+    brightGreen: '#86efac',
+    brightYellow: '#fde68a',
+    brightBlue: '#93c5fd',
+    brightMagenta: '#2fb28f',
+    brightCyan: '#67e8f9',
+    brightWhite: '#ffffff',
   },
-  'aura': {
-    background: '#15141b', foreground: '#cdccce', cursor: '#a277ff', cursorAccent: '#15141b',
+  aura: {
+    background: '#15141b',
+    foreground: '#cdccce',
+    cursor: '#a277ff',
+    cursorAccent: '#15141b',
     selectionBackground: 'rgba(61,55,94,0.5)',
-    black: '#15141b', red: '#ff6767', green: '#61ffca', yellow: '#ffca85',
-    blue: '#a277ff', magenta: '#61ffca', cyan: '#a277ff', white: '#cdccce',
-    brightBlack: '#2d2d2d', brightRed: '#ffca85', brightGreen: '#a277ff', brightYellow: '#ffca85',
-    brightBlue: '#a277ff', brightMagenta: '#61ffca', brightCyan: '#61ffca', brightWhite: '#edecee',
+    black: '#15141b',
+    red: '#ff6767',
+    green: '#61ffca',
+    yellow: '#ffca85',
+    blue: '#a277ff',
+    magenta: '#61ffca',
+    cyan: '#a277ff',
+    white: '#cdccce',
+    brightBlack: '#2d2d2d',
+    brightRed: '#ffca85',
+    brightGreen: '#a277ff',
+    brightYellow: '#ffca85',
+    brightBlue: '#a277ff',
+    brightMagenta: '#61ffca',
+    brightCyan: '#61ffca',
+    brightWhite: '#edecee',
   },
   'hyscode-light': {
-    background: '#f7f7f8', foreground: '#0d0d0f', cursor: '#0d8a6c', cursorAccent: '#f7f7f8',
+    background: '#f7f7f8',
+    foreground: '#0d0d0f',
+    cursor: '#0d8a6c',
+    cursorAccent: '#f7f7f8',
     selectionBackground: 'rgba(13,138,108,0.2)',
-    black: '#0d0d0f', red: '#dc2626', green: '#16a34a', yellow: '#d97706',
-    blue: '#1d4ed8', magenta: '#0d8a6c', cyan: '#0891b2', white: '#e5e5e5',
-    brightBlack: '#6e6e80', brightRed: '#ef4444', brightGreen: '#22c55e', brightYellow: '#f59e0b',
-    brightBlue: '#3b82f6', brightMagenta: '#0d8a6c', brightCyan: '#06b6d4', brightWhite: '#ffffff',
+    black: '#0d0d0f',
+    red: '#dc2626',
+    green: '#16a34a',
+    yellow: '#d97706',
+    blue: '#1d4ed8',
+    magenta: '#0d8a6c',
+    cyan: '#0891b2',
+    white: '#e5e5e5',
+    brightBlack: '#6e6e80',
+    brightRed: '#ef4444',
+    brightGreen: '#22c55e',
+    brightYellow: '#f59e0b',
+    brightBlue: '#3b82f6',
+    brightMagenta: '#0d8a6c',
+    brightCyan: '#06b6d4',
+    brightWhite: '#ffffff',
   },
-  'nord': {
-    background: '#2e3440', foreground: '#d8dee9', cursor: '#88c0d0', cursorAccent: '#2e3440',
+  nord: {
+    background: '#2e3440',
+    foreground: '#d8dee9',
+    cursor: '#88c0d0',
+    cursorAccent: '#2e3440',
     selectionBackground: 'rgba(136,192,208,0.25)',
-    black: '#3b4252', red: '#bf616a', green: '#a3be8c', yellow: '#ebcb8b',
-    blue: '#81a1c1', magenta: '#b48ead', cyan: '#88c0d0', white: '#e5e9f0',
-    brightBlack: '#4c566a', brightRed: '#bf616a', brightGreen: '#a3be8c', brightYellow: '#ebcb8b',
-    brightBlue: '#81a1c1', brightMagenta: '#b48ead', brightCyan: '#8fbcbb', brightWhite: '#eceff4',
+    black: '#3b4252',
+    red: '#bf616a',
+    green: '#a3be8c',
+    yellow: '#ebcb8b',
+    blue: '#81a1c1',
+    magenta: '#b48ead',
+    cyan: '#88c0d0',
+    white: '#e5e9f0',
+    brightBlack: '#4c566a',
+    brightRed: '#bf616a',
+    brightGreen: '#a3be8c',
+    brightYellow: '#ebcb8b',
+    brightBlue: '#81a1c1',
+    brightMagenta: '#b48ead',
+    brightCyan: '#8fbcbb',
+    brightWhite: '#eceff4',
   },
-  'monokai': {
-    background: '#272822', foreground: '#f8f8f2', cursor: '#f92672', cursorAccent: '#272822',
+  monokai: {
+    background: '#272822',
+    foreground: '#f8f8f2',
+    cursor: '#f92672',
+    cursorAccent: '#272822',
     selectionBackground: 'rgba(249,38,114,0.25)',
-    black: '#272822', red: '#f92672', green: '#a6e22e', yellow: '#f4bf75',
-    blue: '#66d9e8', magenta: '#ae81ff', cyan: '#a1efe4', white: '#f8f8f2',
-    brightBlack: '#75715e', brightRed: '#f92672', brightGreen: '#a6e22e', brightYellow: '#f4bf75',
-    brightBlue: '#66d9e8', brightMagenta: '#ae81ff', brightCyan: '#a1efe4', brightWhite: '#f9f8f5',
+    black: '#272822',
+    red: '#f92672',
+    green: '#a6e22e',
+    yellow: '#f4bf75',
+    blue: '#66d9e8',
+    magenta: '#ae81ff',
+    cyan: '#a1efe4',
+    white: '#f8f8f2',
+    brightBlack: '#75715e',
+    brightRed: '#f92672',
+    brightGreen: '#a6e22e',
+    brightYellow: '#f4bf75',
+    brightBlue: '#66d9e8',
+    brightMagenta: '#ae81ff',
+    brightCyan: '#a1efe4',
+    brightWhite: '#f9f8f5',
   },
-  'dracula': {
-    background: '#282a36', foreground: '#f8f8f2', cursor: '#bd93f9', cursorAccent: '#282a36',
+  dracula: {
+    background: '#282a36',
+    foreground: '#f8f8f2',
+    cursor: '#bd93f9',
+    cursorAccent: '#282a36',
     selectionBackground: 'rgba(189,147,249,0.25)',
-    black: '#21222c', red: '#ff5555', green: '#50fa7b', yellow: '#f1fa8c',
-    blue: '#6272a4', magenta: '#bd93f9', cyan: '#8be9fd', white: '#f8f8f2',
-    brightBlack: '#6272a4', brightRed: '#ff6e6e', brightGreen: '#69ff94', brightYellow: '#ffffa5',
-    brightBlue: '#d6acff', brightMagenta: '#ff92df', brightCyan: '#a4ffff', brightWhite: '#ffffff',
+    black: '#21222c',
+    red: '#ff5555',
+    green: '#50fa7b',
+    yellow: '#f1fa8c',
+    blue: '#6272a4',
+    magenta: '#bd93f9',
+    cyan: '#8be9fd',
+    white: '#f8f8f2',
+    brightBlack: '#6272a4',
+    brightRed: '#ff6e6e',
+    brightGreen: '#69ff94',
+    brightYellow: '#ffffa5',
+    brightBlue: '#d6acff',
+    brightMagenta: '#ff92df',
+    brightCyan: '#a4ffff',
+    brightWhite: '#ffffff',
   },
   'github-dark': {
-    background: '#0d1117', foreground: '#c9d1d9', cursor: '#58a6ff', cursorAccent: '#0d1117',
+    background: '#0d1117',
+    foreground: '#c9d1d9',
+    cursor: '#58a6ff',
+    cursorAccent: '#0d1117',
     selectionBackground: 'rgba(88,166,255,0.25)',
-    black: '#484f58', red: '#ff7b72', green: '#3fb950', yellow: '#d29922',
-    blue: '#58a6ff', magenta: '#bc8cff', cyan: '#39c5cf', white: '#b1bac4',
-    brightBlack: '#6e7681', brightRed: '#ffa198', brightGreen: '#56d364', brightYellow: '#e3b341',
-    brightBlue: '#79c0ff', brightMagenta: '#d2a8ff', brightCyan: '#56d4dd', brightWhite: '#f0f6fc',
+    black: '#484f58',
+    red: '#ff7b72',
+    green: '#3fb950',
+    yellow: '#d29922',
+    blue: '#58a6ff',
+    magenta: '#bc8cff',
+    cyan: '#39c5cf',
+    white: '#b1bac4',
+    brightBlack: '#6e7681',
+    brightRed: '#ffa198',
+    brightGreen: '#56d364',
+    brightYellow: '#e3b341',
+    brightBlue: '#79c0ff',
+    brightMagenta: '#d2a8ff',
+    brightCyan: '#56d4dd',
+    brightWhite: '#f0f6fc',
   },
 };
 
@@ -729,24 +1072,27 @@ export function getXtermTheme(themeId: string): XtermTheme {
     const fg = c['editor.foreground'] ?? (def.type === 'light' ? '#1a1a1a' : '#e8e8e8');
     const cursor = c['editorCursor.foreground'] ?? c['focusBorder'] ?? '#10a37f';
     return {
-      background: bg, foreground: fg, cursor, cursorAccent: bg,
+      background: bg,
+      foreground: fg,
+      cursor,
+      cursorAccent: bg,
       selectionBackground: c['editor.selectionBackground'] ?? 'rgba(168,85,247,0.25)',
-      black:        c['terminal.ansiBlack']        ?? '#0d0d0d',
-      red:          c['terminal.ansiRed']          ?? '#f87171',
-      green:        c['terminal.ansiGreen']        ?? '#4ade80',
-      yellow:       c['terminal.ansiYellow']       ?? '#facc15',
-      blue:         c['terminal.ansiBlue']         ?? '#60a5fa',
-      magenta:      c['terminal.ansiMagenta']      ?? '#10a37f',
-      cyan:         c['terminal.ansiCyan']         ?? '#22d3ee',
-      white:        c['terminal.ansiWhite']        ?? '#e8e8e8',
-      brightBlack:   c['terminal.ansiBrightBlack']   ?? '#888888',
-      brightRed:     c['terminal.ansiBrightRed']     ?? '#fca5a5',
-      brightGreen:   c['terminal.ansiBrightGreen']   ?? '#86efac',
-      brightYellow:  c['terminal.ansiBrightYellow']  ?? '#fde68a',
-      brightBlue:    c['terminal.ansiBrightBlue']    ?? '#93c5fd',
+      black: c['terminal.ansiBlack'] ?? '#0d0d0d',
+      red: c['terminal.ansiRed'] ?? '#f87171',
+      green: c['terminal.ansiGreen'] ?? '#4ade80',
+      yellow: c['terminal.ansiYellow'] ?? '#facc15',
+      blue: c['terminal.ansiBlue'] ?? '#60a5fa',
+      magenta: c['terminal.ansiMagenta'] ?? '#10a37f',
+      cyan: c['terminal.ansiCyan'] ?? '#22d3ee',
+      white: c['terminal.ansiWhite'] ?? '#e8e8e8',
+      brightBlack: c['terminal.ansiBrightBlack'] ?? '#888888',
+      brightRed: c['terminal.ansiBrightRed'] ?? '#fca5a5',
+      brightGreen: c['terminal.ansiBrightGreen'] ?? '#86efac',
+      brightYellow: c['terminal.ansiBrightYellow'] ?? '#fde68a',
+      brightBlue: c['terminal.ansiBrightBlue'] ?? '#93c5fd',
       brightMagenta: c['terminal.ansiBrightMagenta'] ?? '#c084fc',
-      brightCyan:    c['terminal.ansiBrightCyan']    ?? '#67e8f9',
-      brightWhite:   c['terminal.ansiBrightWhite']   ?? '#ffffff',
+      brightCyan: c['terminal.ansiBrightCyan'] ?? '#67e8f9',
+      brightWhite: c['terminal.ansiBrightWhite'] ?? '#ffffff',
     };
   }
 
@@ -757,32 +1103,71 @@ export function getXtermTheme(themeId: string): XtermTheme {
 
 /** Maps TextMate-style scope names to Monaco token names. */
 const SCOPE_TO_TOKEN: Record<string, string> = {
-  'comment': 'comment',
+  comment: 'comment',
   'comment.line': 'comment',
   'comment.block': 'comment',
-  'keyword': 'keyword',
+  keyword: 'keyword',
   'keyword.control': 'keyword.control',
   'keyword.operator': 'operator',
-  'storage': 'keyword',
+  storage: 'keyword',
   'storage.type': 'type',
-  'string': 'string',
+  'storage.modifier': 'keyword',
+  string: 'string',
   'string.quoted': 'string',
+  'string.escape': 'string.escape',
   'constant.numeric': 'number',
-  'constant.language': 'number',
+  'constant.language': 'constant',
+  'constant.character.escape': 'string.escape',
   'entity.name.type': 'type',
-  'entity.name.class': 'type',
+  'entity.name.class': 'class',
+  'entity.name.struct': 'struct',
+  'entity.name.enum': 'enum',
+  'entity.name.interface': 'interface',
+  'entity.name.namespace': 'namespace',
   'entity.name.function': 'function',
+  'entity.name.method': 'method',
+  'entity.name.macro': 'macro',
   'entity.name.tag': 'tag',
   'entity.other.attribute-name': 'attribute.name',
-  'variable': 'variable',
-  'variable.parameter': 'variable',
+  'entity.name.label': 'label',
+  variable: 'variable',
+  'variable.parameter': 'parameter',
   'variable.other': 'variable',
+  'variable.other.property': 'property',
+  'variable.other.constant': 'constant',
   'support.function': 'function',
   'support.type': 'type',
-  'support.class': 'type',
-  'punctuation': 'delimiter',
+  'support.class': 'class',
+  'support.namespace': 'namespace',
+  'support.constant': 'constant',
+  'support.variable': 'variable',
+  punctuation: 'delimiter',
+  'punctuation.definition.annotation': 'annotation',
   'meta.tag': 'tag',
+  'meta.annotation': 'annotation',
+  'meta.decorator': 'decorator',
+  'meta.attribute': 'attribute',
   'string.regexp': 'regexp',
+  // LSP semantic token names pass through (identity) — listed for clarity.
+  namespace: 'namespace',
+  class: 'class',
+  struct: 'struct',
+  enum: 'enum',
+  interface: 'interface',
+  typeParameter: 'typeParameter',
+  parameter: 'parameter',
+  property: 'property',
+  enumMember: 'enumMember',
+  function: 'function',
+  method: 'method',
+  macro: 'macro',
+  decorator: 'decorator',
+  annotation: 'annotation',
+  attribute: 'attribute',
+  label: 'label',
+  lifetime: 'lifetime',
+  constant: 'constant',
+  event: 'event',
 };
 
 function convertTokenColorsToRules(tokenColors: TokenColorRule[]): Monaco.editor.ITokenThemeRule[] {
@@ -817,12 +1202,15 @@ function injectThemeCssVars(def: ThemeDefinition): void {
   }
 
   const c = def.colors;
-  const bg = c['editor.background'] ?? c['background'] ?? (def.type === 'light' ? '#ffffff' : '#1a1a1a');
-  const fg = c['editor.foreground'] ?? c['foreground'] ?? (def.type === 'light' ? '#1a1a1a' : '#e8e8e8');
+  const bg =
+    c['editor.background'] ?? c['background'] ?? (def.type === 'light' ? '#ffffff' : '#1a1a1a');
+  const fg =
+    c['editor.foreground'] ?? c['foreground'] ?? (def.type === 'light' ? '#1a1a1a' : '#e8e8e8');
   const surface = c['sideBar.background'] ?? c['panel.background'] ?? bg;
   const surfaceRaised = c['editorWidget.background'] ?? c['panel.background'] ?? bg;
   const sidebar = c['activityBar.background'] ?? c['sideBar.background'] ?? bg;
-  const accent = c['focusBorder'] ?? c['button.background'] ?? c['editorCursor.foreground'] ?? '#10a37f';
+  const accent =
+    c['focusBorder'] ?? c['button.background'] ?? c['editorCursor.foreground'] ?? '#10a37f';
   const muted = c['editorLineNumber.foreground'] ?? c['tab.inactiveForeground'] ?? '#888888';
   const mutedFg = c['tab.inactiveForeground'] ?? muted;
   const border = c['panel.border'] ?? c['sideBar.border'] ?? 'transparent';
@@ -894,9 +1282,11 @@ function injectHljsOverrides(def: ThemeDefinition): void {
   const kw = tokenMap['keyword'] ?? tokenMap['keyword.control'] ?? tokenMap['storage'] ?? '';
   const str = tokenMap['string'] ?? tokenMap['string.quoted'] ?? '';
   const num = tokenMap['constant.numeric'] ?? tokenMap['constant.language'] ?? '';
-  const type = tokenMap['entity.name.type'] ?? tokenMap['support.type'] ?? tokenMap['storage.type'] ?? '';
+  const type =
+    tokenMap['entity.name.type'] ?? tokenMap['support.type'] ?? tokenMap['storage.type'] ?? '';
   const fn = tokenMap['entity.name.function'] ?? tokenMap['support.function'] ?? '';
-  const comment = tokenMap['comment'] ?? tokenMap['comment.line'] ?? tokenMap['comment.block'] ?? '';
+  const comment =
+    tokenMap['comment'] ?? tokenMap['comment.line'] ?? tokenMap['comment.block'] ?? '';
   const variable = tokenMap['variable'] ?? tokenMap['variable.other'] ?? '';
   const attr = tokenMap['entity.other.attribute-name'] ?? '';
   const del = tokenMap['markup.deleted'] ?? tokenMap['invalid'] ?? '';
@@ -911,8 +1301,14 @@ function injectHljsOverrides(def: ThemeDefinition): void {
   if (num) rules.push(`${sel} .hljs-number { color: ${num}; }`);
   if (type) rules.push(`${sel} .hljs-type, ${sel} .hljs-built_in { color: ${type}; }`);
   if (fn) rules.push(`${sel} .hljs-function, ${sel} .hljs-title { color: ${fn}; }`);
-  if (comment) rules.push(`${sel} .hljs-comment, ${sel} .hljs-quote { color: ${comment}; font-style: italic; }`);
-  if (variable || fg) rules.push(`${sel} .hljs-variable, ${sel} .hljs-template-variable { color: ${variable || fg}; }`);
+  if (comment)
+    rules.push(
+      `${sel} .hljs-comment, ${sel} .hljs-quote { color: ${comment}; font-style: italic; }`,
+    );
+  if (variable || fg)
+    rules.push(
+      `${sel} .hljs-variable, ${sel} .hljs-template-variable { color: ${variable || fg}; }`,
+    );
   if (attr) rules.push(`${sel} .hljs-attr { color: ${attr}; }`);
   if (del) rules.push(`${sel} .hljs-deletion { color: ${del}; }`);
   if (regexp) rules.push(`${sel} .hljs-regexp { color: ${regexp}; }`);

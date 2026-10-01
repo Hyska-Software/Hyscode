@@ -20,6 +20,7 @@ import {
   validateTerminalFailure,
   createGoalTools,
   GoalService,
+  authorizeToolInvocationArgs,
   type GoalChangeEvent,
   type GoalState,
 } from '@hyscode/agent-harness';
@@ -43,6 +44,9 @@ import type {
   AgentTaskContext,
   GoalEditInput,
   GoalRun,
+  ToolInvocationAuthorization,
+  ExternalPathAccessRequest,
+  FileChangePending,
   GoalRunSource,
   GoalCompletionRequest,
   TurnOutcome,
@@ -52,7 +56,6 @@ import { tauriInvoke, tauriInvokeRaw } from './tauri-invoke';
 import { diagnosticPathsEqual, type DiagnosticContract } from './diagnostics-types';
 import { getEditorDiagnostics, getOpenDiagnosticFiles } from './diagnostics-tracker';
 import { mergeDiagnostics } from './diagnostics-merge';
-import { tauriFs } from './tauri-fs';
 import { listen as tauriListen } from '@tauri-apps/api/event';
 import { McpBridge } from './mcp-bridge';
 import { useAgentStore, type AgentStoreApi } from '@/stores/agent-store';
@@ -62,6 +65,7 @@ import { useSkillsStore } from '@/stores/skills-store';
 import { useRulesStore } from '@/stores/rules-store';
 import { useFileStore } from '@/stores/file-store';
 import { useEditorStore } from '@/stores/editor-store';
+import { useProjectStore } from '@/stores/project-store';
 import { useTerminalStore } from '@/stores/terminal-store';
 import { desktopTerminalRuntime } from './terminal-runtime';
 import type {
@@ -90,6 +94,72 @@ import {
 } from './task-execution-coordinator';
 import { normalizeAgentHistory } from './agent-history';
 import { createDesktopGoalService } from './goal-runtime';
+import { normalizeProjectPath, projectPathKey } from './project-path';
+
+const NATIVE_AUTHORIZED_FILESYSTEM_COMMANDS = new Set([
+  'read_file',
+  'read_file_chunk',
+  'write_file',
+  'create_file',
+  'delete_path',
+  'trash_path',
+  'list_dir',
+  'stat_path',
+  'path_exists',
+  'search_files',
+  'rename_path',
+  'move_path',
+  'find_files',
+  'create_directory',
+  'list_dir_all',
+  'copy_path',
+  'reveal_path',
+  'open_path',
+]);
+
+function expectedContentAfterChange(
+  change: Pick<FileChangePending, 'toolName' | 'newContent'>,
+): string | null {
+  return change.toolName === 'delete_file' ? null : change.newContent;
+}
+
+export interface SubAgentMirrorTarget {
+  /** Store id of the sub-agent entry (the spawn tool-call id). */
+  spawnId: string;
+  /** Inline spawn input when the outer call wraps it (invoke_external_tool). */
+  nestedInput?: Record<string, unknown>;
+}
+
+/**
+ * Resolve which sub-agent store entry a tool result belongs to.
+ * Covers direct spawn_subagent calls, nested `:external` dispatches
+ * (invoke_external_tool reuses the outer toolCallId as its context id),
+ * and invoke_external_tool wrappers (matched via `input.name`).
+ * Returns null for unrelated tools. Pure — unit-tested below.
+ */
+export function resolveSubAgentMirrorTarget(
+  toolCallId: string,
+  toolName: string,
+  findInput: (id: string) => Record<string, unknown> | undefined,
+): SubAgentMirrorTarget | null {
+  if (toolName === 'spawn_subagent') {
+    const spawnId = toolCallId.endsWith(':external')
+      ? toolCallId.slice(0, -':external'.length)
+      : toolCallId;
+    if (!spawnId) return null;
+    return { spawnId };
+  }
+  if (toolName === 'invoke_external_tool') {
+    const input = findInput(toolCallId);
+    if (input?.name !== 'spawn_subagent') return null;
+    const nested =
+      input.input !== null && typeof input.input === 'object' && !Array.isArray(input.input)
+        ? (input.input as Record<string, unknown>)
+        : undefined;
+    return { spawnId: toolCallId, ...(nested ? { nestedInput: nested } : {}) };
+  }
+  return null;
+}
 
 // ─── Error Parser ────────────────────────────────────────────────────────────
 // Converts raw technical error messages into friendly user-facing text.
@@ -164,7 +234,14 @@ function humanizeErrorMessage(msg: string, raw: string): string {
 function collectRuleTargetPaths(workspacePath: string, contextFiles: readonly string[]): string[] {
   const editorState = useEditorStore.getState();
   const activeTab = editorState.tabs.find((tab) => tab.id === editorState.activeTabId);
-  const candidates = [workspacePath, activeTab?.filePath, ...contextFiles];
+  const fileStoreRoot = useFileStore.getState().rootPath;
+  const activeFilePath =
+    activeTab?.type === 'file' &&
+    projectPathKey(fileStoreRoot ?? '') === projectPathKey(workspacePath) &&
+    isPathInsideWorkspace(activeTab.filePath, workspacePath)
+      ? activeTab.filePath
+      : undefined;
+  const candidates = [workspacePath, activeFilePath, ...contextFiles];
   return Array.from(
     new Set(
       candidates.filter(
@@ -175,7 +252,45 @@ function collectRuleTargetPaths(workspacePath: string, contextFiles: readonly st
   );
 }
 
-function extractGoalCompletionRequest(record: TurnRecord, turnId: string): GoalCompletionRequest | undefined {
+function isPathInsideWorkspace(path: string, workspacePath: string): boolean {
+  const normalizedPathname = normalizeProjectPath(path);
+  const normalizedWorkspaceName = normalizeProjectPath(workspacePath);
+  if (
+    normalizedPathname.split('/').includes('..') ||
+    normalizedWorkspaceName.split('/').includes('..')
+  ) {
+    return false;
+  }
+  const normalizedPath = projectPathKey(normalizedPathname);
+  const normalizedWorkspace = projectPathKey(normalizedWorkspaceName);
+  if (!normalizedPath || !normalizedWorkspace) return false;
+  const workspacePrefix = normalizedWorkspace.endsWith('/')
+    ? normalizedWorkspace
+    : `${normalizedWorkspace}/`;
+  return normalizedPath === normalizedWorkspace || normalizedPath.startsWith(workspacePrefix);
+}
+
+type BridgeTurn = {
+  id: number;
+  projectId: string;
+  conversationId: string;
+  tabId: string | null;
+  cancelled: boolean;
+  harnessStarted: boolean;
+  assistantMessageStarted: boolean;
+};
+
+type QueuedBridgeTurn = {
+  projectId: string;
+  conversationId: string;
+  tabId: string | null;
+  cancelled: boolean;
+};
+
+function extractGoalCompletionRequest(
+  record: TurnRecord,
+  turnId: string,
+): GoalCompletionRequest | undefined {
   for (let index = record.toolCalls.length - 1; index >= 0; index -= 1) {
     const metadata = record.toolCalls[index].output.metadata;
     if (!metadata || metadata.action !== 'goal_completion_requested') continue;
@@ -244,6 +359,8 @@ type MutationSnapshot = {
   bufferBefore: string | null;
   wasDirty: boolean;
   tabId: string | null;
+  nativeGrantIds?: string[];
+  expectedContent?: string | null;
 };
 
 export class HarnessBridge {
@@ -267,7 +384,7 @@ export class HarnessBridge {
   private _turnHadSubAgents = false;
   /** Bounds concurrent child execution and serializes workspace-exclusive modes. */
   private subAgentCoordinator: SubAgentCoordinator;
-  /** In-flight mutation snapshot captures, keyed by canonical path. */
+  /** Bridge-local mutation snapshots; cross-session workspace coordination is not included. */
   private mutationSnapshotPromises = new Map<string, Promise<void>>();
   private memoryManager: MemoryManager | null = null;
   private ruleDiagnostics: RuleDiagnostic[] = [];
@@ -286,6 +403,10 @@ export class HarnessBridge {
   private goalService: GoalService;
   private goalContinuationTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private goalContinuationInFlight = new Set<string>();
+  private turnSequence = 0;
+  private activeTurn: BridgeTurn | null = null;
+  private editorTurnQueue: Promise<void> = Promise.resolve();
+  private queuedTurns: QueuedBridgeTurn[] = [];
 
   // ─── Agent Terminal Integration ───────────────────────────────────
   /** Last terminal command, isolated by conversation for deterministic context injection. */
@@ -300,6 +421,7 @@ export class HarnessBridge {
 
   /** Record a completed terminal command under the active conversation. */
   private recordTerminalCommand(command: string, output: string, exitCode: number | null): void {
+    if (this.disposed || (this.activeTurn && !this.isTurnIdentityCurrent(this.activeTurn))) return;
     const useAgentStore = this.agentStore;
     const conversationId = useAgentStore.getState().conversationId;
     if (!conversationId) return;
@@ -328,7 +450,9 @@ export class HarnessBridge {
     this.isolatedRuntime = isolatedRuntime;
     const useAgentStore = this.agentStore;
     this._projectId = projectId;
-    this.goalService = createDesktopGoalService(tauriInvokeRaw, (event) => this.handleGoalChange(event));
+    this.goalService = createDesktopGoalService(tauriInvokeRaw, (event) =>
+      this.handleGoalChange(event),
+    );
     const settings = useSettingsStore.getState();
     this.subAgentCoordinator = new SubAgentCoordinator(
       settings.subAgentMaxConcurrent ?? 2,
@@ -425,7 +549,11 @@ export class HarnessBridge {
     this.harness = new Harness({
       workspacePath,
       projectId,
-      invoke: (command, args) => this.invokeForHarness(command, args),
+      invoke: <T>(
+        command: string,
+        args?: Record<string, unknown>,
+        authorization?: ToolInvocationAuthorization,
+      ): Promise<T> => this.invokeForHarness<T>(command, args, authorization),
       memoryManager,
       sddDb: createSddDatabase(),
       hasDirtyBuffers: () =>
@@ -485,7 +613,11 @@ export class HarnessBridge {
       onUserQuestionRequest: (id, questions, title, signal) =>
         this.handleUserQuestionRequest(id, questions, title, signal),
       terminalRuntime: desktopTerminalRuntime,
-      goalTools: createGoalTools(this.goalService, projectId, () => this.agentStore.getState().mode === 'build'),
+      goalTools: createGoalTools(
+        this.goalService,
+        projectId,
+        () => this.agentStore.getState().mode === 'build',
+      ),
       goalToolsEnabled: () => this.agentStore.getState().mode === 'build',
       onTerminalCommand: (command, output, exitCode) =>
         this.recordTerminalCommand(command, output, exitCode),
@@ -522,18 +654,18 @@ export class HarnessBridge {
         if (!expectedToolCallId) return;
         const current = useAgentStore
           .getState()
-          .pendingToolCalls
-          .find((toolCall) => toolCall.id === expectedToolCallId);
+          .pendingToolCalls.find((toolCall) => toolCall.id === expectedToolCallId);
         if (
-          !current
-          || !(
-            current.status === 'running'
-            || current.status === 'cancelling'
-            || current.terminalState === 'started'
-            || current.terminalState === 'running'
-            || current.terminalState === 'awaiting_input'
+          !current ||
+          !(
+            current.status === 'running' ||
+            current.status === 'cancelling' ||
+            current.terminalState === 'started' ||
+            current.terminalState === 'running' ||
+            current.terminalState === 'awaiting_input'
           )
-        ) return;
+        )
+          return;
         const projection = projectTerminalRuntimeSummary(
           {
             terminalId: current.terminalId,
@@ -566,7 +698,9 @@ export class HarnessBridge {
       } catch (error) {
         const failure = asTerminalRuntimeFailure(error, 'event');
         projectExit(
-          typeof payload.sequence === 'number' && Number.isSafeInteger(payload.sequence) && payload.sequence >= 0
+          typeof payload.sequence === 'number' &&
+            Number.isSafeInteger(payload.sequence) &&
+            payload.sequence >= 0
             ? payload.sequence
             : 0,
           null,
@@ -574,19 +708,26 @@ export class HarnessBridge {
         );
         ts.markPtyDead(session.id, null, failure, expectedToolCallId);
       }
-    }).then((unsubscribe) => {
-      if (this.disposed) {
-        try {
-          unsubscribe();
-        } catch (error) {
-          console.error('[HarnessBridge] PTY exit listener cleanup failed after disposal.', error);
+    })
+      .then((unsubscribe) => {
+        if (this.disposed) {
+          try {
+            unsubscribe();
+          } catch (error) {
+            console.error(
+              '[HarnessBridge] PTY exit listener cleanup failed after disposal.',
+              error,
+            );
+          }
+        } else {
+          this.ptyExitUnsubscribe = unsubscribe;
         }
-      } else {
-        this.ptyExitUnsubscribe = unsubscribe;
-      }
-    }).catch((error: unknown) => {
-      this.debug(`Could not subscribe to PTY exits: ${error instanceof Error ? error.message : String(error)}`);
-    });
+      })
+      .catch((error: unknown) => {
+        this.debug(
+          `Could not subscribe to PTY exits: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      });
   }
 
   private static _homePathCache: string | null = null;
@@ -710,7 +851,7 @@ export class HarnessBridge {
 
   // ─── Public API ─────────────────────────────────────────────────────
 
-  async sendMessage(
+  sendMessage(
     userMessage: string,
     options: {
       hidden?: boolean;
@@ -722,6 +863,131 @@ export class HarnessBridge {
       goalRunId?: string;
       goalSource?: GoalRunSource;
     } = {},
+  ): Promise<TurnOutcome | null> {
+    if (this.disposed) return Promise.resolve(null);
+    if (
+      !this.isolatedRuntime &&
+      projectPathKey(useProjectStore.getState().rootPath ?? '') !== projectPathKey(this._projectId)
+    ) {
+      return Promise.resolve(null);
+    }
+    const state = this.agentStore.getState();
+    const conversationId = state.conversationId ?? crypto.randomUUID();
+    if (!state.conversationId) state.setConversationId(conversationId);
+    const request: QueuedBridgeTurn = {
+      projectId: this._projectId,
+      conversationId,
+      tabId: state.activeTabId,
+      cancelled: false,
+    };
+    this.queuedTurns.push(request);
+    const queuedTurn = this.editorTurnQueue.then(() => {
+      this.queuedTurns = this.queuedTurns.filter((queued) => queued !== request);
+      return this.executeSendMessage(userMessage, options, request);
+    });
+    this.editorTurnQueue = queuedTurn.then(
+      () => undefined,
+      () => undefined,
+    );
+    return queuedTurn;
+  }
+
+  private async executeSendMessage(
+    userMessage: string,
+    options: {
+      hidden?: boolean;
+      excludeLastAssistantFromHistory?: boolean;
+      providerId?: string;
+      modelId?: string;
+      taskContext?: AgentTaskContext;
+      goalContext?: string;
+      goalRunId?: string;
+      goalSource?: GoalRunSource;
+    },
+    request: QueuedBridgeTurn,
+  ): Promise<TurnOutcome | null> {
+    if (this.disposed) return null;
+    const useAgentStore = this.agentStore;
+    const initialState = useAgentStore.getState();
+    if (
+      request.projectId !== this._projectId ||
+      request.conversationId !== initialState.conversationId ||
+      request.tabId !== initialState.activeTabId
+    ) {
+      return null;
+    }
+    if (
+      !this.isolatedRuntime &&
+      projectPathKey(useProjectStore.getState().rootPath ?? '') !== projectPathKey(this._projectId)
+    ) {
+      return null;
+    }
+    if (request.cancelled) {
+      useAgentStore.getState().setTerminalStatus('cancelled');
+      return null;
+    }
+
+    const conversationId = request.conversationId;
+    this.harness.setConversationId(conversationId);
+    const turn: BridgeTurn = {
+      id: ++this.turnSequence,
+      projectId: this._projectId,
+      conversationId,
+      tabId: initialState.activeTabId,
+      cancelled: false,
+      harnessStarted: false,
+      assistantMessageStarted: false,
+    };
+    this.activeTurn = turn;
+    this.activeTurnTabId = turn.tabId;
+    this.activeTurnConversationId = conversationId;
+    this.activeTurnId = null;
+    this.lastCompletedTurnId = null;
+    useAgentStore.getState().setStreaming(true);
+    useAgentStore.getState().setTerminalStatus(null);
+    useAgentStore.getState().setRecoverableError(null);
+
+    try {
+      return await this.runMessage(userMessage, options, turn);
+    } catch (error) {
+      if (this.isTurnIdentityCurrent(turn)) {
+        const message = error instanceof Error ? error.message : String(error);
+        useAgentStore.getState().addDebugLine(`[HarnessBridge] Pre-turn error: ${message}`);
+        if (turn.assistantMessageStarted) {
+          useAgentStore.getState().updateLastAssistantError(parseProviderError(message));
+        }
+      }
+      return null;
+    } finally {
+      if (this.activeTurn === turn) {
+        if (this.isTurnIdentityCurrent(turn)) {
+          useAgentStore.getState().setStreaming(false);
+          if (useAgentStore.getState().connectionState !== 'degraded') {
+            useAgentStore.getState().setConnectionState('idle');
+          }
+        }
+        this.activeTurn = null;
+        this.activeTurnTabId = null;
+        this.activeTurnConversationId = null;
+        this.activeTurnId = null;
+        this.activeTaskContext = null;
+      }
+    }
+  }
+
+  private async runMessage(
+    userMessage: string,
+    options: {
+      hidden?: boolean;
+      excludeLastAssistantFromHistory?: boolean;
+      providerId?: string;
+      modelId?: string;
+      taskContext?: AgentTaskContext;
+      goalContext?: string;
+      goalRunId?: string;
+      goalSource?: GoalRunSource;
+    },
+    turn: BridgeTurn,
   ): Promise<TurnOutcome | null> {
     const useAgentStore = this.agentStore;
     const store = useAgentStore.getState();
@@ -796,11 +1062,14 @@ export class HarnessBridge {
     const contextFiles = store.contextFiles;
     const ruleTargetPaths = collectRuleTargetPaths(this.harness.getWorkspacePath(), contextFiles);
     await this.loadRules(ruleTargetPaths);
-    if (this.disposed) return null;
+    if (!this.canContinueTurn(turn)) return this.cancelBeforeHarness(turn);
 
     // Sync active skills from skills store → harness (respects per-mode assignments)
     const activeSkillNames = this.isolatedRuntime
-      ? (this.harness.getSkillLoader()?.getActive().map((skill) => skill.frontmatter.name) ?? [])
+      ? (this.harness
+          .getSkillLoader()
+          ?.getActive()
+          .map((skill) => skill.frontmatter.name) ?? [])
       : useSkillsStore
           .getState()
           .getActiveForMode(store.mode as AgentType)
@@ -815,35 +1084,34 @@ export class HarnessBridge {
     this.syncActiveRules(activeRules.map((r) => r.id));
     dbg(`Rules ativas: ${activeRules.length}`);
 
-    // Always sync conversationId to harness — tab may have switched since last run
-    if (!store.conversationId) {
-      const id = crypto.randomUUID();
-      useAgentStore.getState().setConversationId(id);
-      this.harness.setConversationId(id);
-    } else {
-      this.harness.setConversationId(store.conversationId);
-    }
     this.bindTaskExecutionTarget(this.harness.getConversationId());
 
     // Start indexing immediately, but do not hold back the local message and
     // working state while SQLite responds. The agent run still awaits this
     // promise before contacting the provider, so VORTEX sees the session as
     // soon as the user submits while persistence remains ordered.
-    const conversationReady = this.ensureConversationExists(userMessage, providerId, modelId).catch((error) => {
-      dbg(
-        `Could not index the conversation before the turn: ${error instanceof Error ? error.message : String(error)}`,
-      );
-    });
+    const conversationReady = this.ensureConversationExists(userMessage, providerId, modelId).catch(
+      (error) => {
+        if (this.isTurnIdentityCurrent(turn)) {
+          dbg(
+            `Could not index the conversation before the turn: ${error instanceof Error ? error.message : String(error)}`,
+          );
+        }
+      },
+    );
 
     // Clear any context carried over from a previous tab before injecting fresh sources
+    if (!this.canContinueTurn(turn)) return this.cancelBeforeHarness(turn);
     this.clearTabContext();
 
     // Inject context files into the harness context manager
     if (contextFiles.length > 0) {
       dbg(`Injetando ${contextFiles.length} arquivo(s) de contexto`);
       for (const filePath of contextFiles) {
+        if (!this.canContinueTurn(turn)) return this.cancelBeforeHarness(turn);
         try {
-          const content = await tauriInvokeRaw<string>('read_file', { path: filePath });
+          const content = await this.invokeForHarness<string>('read_file', { path: filePath });
+          if (!this.canContinueTurn(turn)) return this.cancelBeforeHarness(turn);
           const fileName = filePath.split(/[\\/]/).pop() ?? filePath;
           const tokenEstimate = Math.ceil(content.length / 4);
           this.harness.addContextSource({
@@ -857,12 +1125,14 @@ export class HarnessBridge {
             metadata: { filePath, fileName },
           });
         } catch {
+          if (!this.canContinueTurn(turn)) return this.cancelBeforeHarness(turn);
           // Might be a directory — list its tree instead
           try {
             const entries = await tauriInvokeRaw<Array<{ name: string; is_dir: boolean }>>(
               'list_dir_all',
               { path: filePath },
             );
+            if (!this.canContinueTurn(turn)) return this.cancelBeforeHarness(turn);
             const tree = entries.map((e) => `${e.is_dir ? '📁' : '📄'} ${e.name}`).join('\n');
             const dirName = filePath.split(/[\\/]/).pop() ?? filePath;
             const tokenEstimate = Math.ceil(tree.length / 4);
@@ -882,6 +1152,8 @@ export class HarnessBridge {
         }
       }
     }
+
+    if (!this.canContinueTurn(turn)) return this.cancelBeforeHarness(turn);
 
     const attachedTerminal = store.attachedTerminal;
     if (attachedTerminal) {
@@ -941,10 +1213,6 @@ export class HarnessBridge {
       }
     }
 
-    // Start streaming
-    useAgentStore.getState().setStreaming(true);
-    useAgentStore.getState().setTerminalStatus(null);
-    useAgentStore.getState().setRecoverableError(null);
     configureProviderResilience({
       maxRetries: settings.agentMaxRetries,
       baseDelayMs: settings.agentRetryBaseDelayMs,
@@ -952,11 +1220,6 @@ export class HarnessBridge {
       requestTimeoutMs: settings.agentRequestTimeoutMs,
       streamIdleTimeoutMs: settings.agentStreamIdleTimeoutMs,
     });
-    this.activeTurnTabId = useAgentStore.getState().activeTabId;
-    this.activeTurnConversationId = useAgentStore.getState().conversationId;
-    this.activeTurnId = null;
-    this.lastCompletedTurnId = null;
-
     // Create the first assistant row and bind streaming updates to its identity.
     const assistantMsgId = crypto.randomUUID();
     useAgentStore.getState().beginAssistantMessage({
@@ -965,6 +1228,7 @@ export class HarnessBridge {
       content: '',
       timestamp: Date.now(),
     });
+    turn.assistantMessageStarted = true;
 
     let notificationOutcome: 'success' | 'cancelled' | 'error' = 'error';
     let goalRun: GoalRun | null = null;
@@ -983,16 +1247,22 @@ export class HarnessBridge {
       const history = normalizeAgentHistory(this.buildHistory(historyMessages));
 
       await conversationReady;
+      if (!this.canContinueTurn(turn)) return this.cancelBeforeHarness(turn);
 
-      const conversationId = useAgentStore.getState().conversationId;
+      const conversationId = turn.conversationId;
       if (conversationId && store.mode === 'build') {
         goalState = await this.goalService.getState(conversationId);
+        if (!this.canContinueTurn(turn)) return this.cancelBeforeHarness(turn);
         if (goalState?.goal.status === 'active') {
           if (options.goalRunId) {
             goalRun = goalState.runs.find((run) => run.id === options.goalRunId) ?? null;
             if (!goalRun) throw new Error(`Goal run ${options.goalRunId} was not found.`);
           } else {
             goalRun = await this.goalService.startRun(conversationId, options.goalSource ?? 'user');
+            if (!this.canContinueTurn(turn)) {
+              await this.finishCancelledGoalRun(goalRun, goalState);
+              return this.cancelBeforeHarness(turn);
+            }
           }
         }
       }
@@ -1003,22 +1273,27 @@ export class HarnessBridge {
 
       // ── Inject deterministic environment context ──
       // Gives the agent awareness of the current workspace state before it starts
-      await this.injectEnvironmentContext();
+      await this.injectEnvironmentContext(turn);
+      if (!this.canContinueTurn(turn)) return this.cancelBeforeHarness(turn);
 
       // ── Pre-turn context hints ──
       // Analyze user message for file references and provide hints to the agent
-      await this.injectContextHints(userMessage);
+      await this.injectContextHints(userMessage, turn);
+      if (!this.canContinueTurn(turn)) return this.cancelBeforeHarness(turn);
 
       dbg(`Sending to LLM (${history.length} msgs in history)...`);
 
+      turn.harnessStarted = true;
       const outcome = await this.harness.run({
         userMessage,
         history,
         images: imageContent.length > 0 ? imageContent : undefined,
         ruleTargetPaths,
         taskContext: options.taskContext,
-        goalContext: options.goalContext ?? (goalState ? this.goalService.buildContext(goalState) : undefined),
+        goalContext:
+          options.goalContext ?? (goalState ? this.goalService.buildContext(goalState) : undefined),
       });
+      if (!this.isTurnIdentityCurrent(turn)) return outcome;
       const { turnId, response, turnRecord, status } = outcome;
       this.lastCompletedTurnId = turnId;
       notificationOutcome =
@@ -1047,8 +1322,26 @@ export class HarnessBridge {
         useAgentStore.getState().agentEditSessions,
       );
       useAgentStore.getState().setTurnSummary(turnId, summary);
-      await this.commitTurn(userMessage, turnRecord, providerId, modelId);
-      await this.persistTurnRecord(turnRecord, true);
+      try {
+        await this.commitTurn(userMessage, turnRecord, providerId, modelId);
+      } catch (error) {
+        if (this.isTurnIdentityCurrent(turn)) {
+          dbg(
+            `Could not persist completed turn: ${error instanceof Error ? error.message : String(error)}`,
+          );
+        }
+      }
+      if (!this.isTurnIdentityCurrent(turn)) return outcome;
+      try {
+        await this.persistTurnRecord(turnRecord, true);
+      } catch (error) {
+        if (this.isTurnIdentityCurrent(turn)) {
+          dbg(
+            `Could not persist completed turn record: ${error instanceof Error ? error.message : String(error)}`,
+          );
+        }
+      }
+      if (!this.isTurnIdentityCurrent(turn)) return outcome;
       await this.refreshSessionUsage();
       if (goalRun && goalState) {
         try {
@@ -1066,14 +1359,25 @@ export class HarnessBridge {
             state: decision.state,
             type: decision.state.goal.status === 'complete' ? 'completed' : 'run_completed',
           });
-          if (decision.shouldContinue) this.scheduleGoalContinuation(decision.state.goal.conversationId);
+          if (decision.shouldContinue)
+            this.scheduleGoalContinuation(decision.state.goal.conversationId);
         } catch (goalError) {
-          dbg(`Failed to persist goal turn: ${goalError instanceof Error ? goalError.message : String(goalError)}`);
+          if (this.isTurnIdentityCurrent(turn)) {
+            dbg(
+              `Failed to persist goal turn: ${goalError instanceof Error ? goalError.message : String(goalError)}`,
+            );
+          }
         }
       }
       return outcome;
     } catch (err) {
+      if (!this.isTurnIdentityCurrent(turn)) return null;
       const rawMsg = err instanceof Error ? err.message : 'Unknown error';
+      if (turn.cancelled) {
+        useAgentStore.getState().setTerminalStatus('cancelled');
+        if (goalRun && goalState) await this.finishCancelledGoalRun(goalRun, goalState);
+        return null;
+      }
       const friendlyMsg = parseProviderError(rawMsg);
       dbg(`ERROR: ${rawMsg}`);
       useAgentStore.getState().updateLastAssistantError(friendlyMsg);
@@ -1090,31 +1394,27 @@ export class HarnessBridge {
           });
           this.handleGoalChange({ state: decision.state, type: 'run_completed' });
         } catch (goalError) {
-          dbg(`Failed to account goal turn: ${goalError instanceof Error ? goalError.message : String(goalError)}`);
+          if (this.isTurnIdentityCurrent(turn)) {
+            dbg(
+              `Failed to account goal turn: ${goalError instanceof Error ? goalError.message : String(goalError)}`,
+            );
+          }
         }
       }
       return null;
     } finally {
-      useAgentStore.getState().setStreaming(false);
-      if (useAgentStore.getState().connectionState !== 'degraded') {
-        useAgentStore.getState().setConnectionState('idle');
-      }
-      this.activeTurnTabId = null;
-      this.activeTurnConversationId = null;
-      this.activeTurnId = null;
-      this.activeTaskContext = null;
       // OS notification when the app is in the background
-      if (document.hidden) {
+      if (document.hidden && this.isTurnIdentityCurrent(turn)) {
         try {
           const { openTabs, activeTabId } = useAgentStore.getState();
           const tabTitle = openTabs.find((t) => t.id === activeTabId)?.title ?? 'Agent';
           await tauriInvokeRaw('notify_agent_done', {
             title: tabTitle,
             body:
-              notificationOutcome === 'success'
-                ? 'Agent finished working'
-                : notificationOutcome === 'cancelled'
-                  ? 'Agent run was cancelled'
+              turn.cancelled || notificationOutcome === 'cancelled'
+                ? 'Agent run was cancelled'
+                : notificationOutcome === 'success'
+                  ? 'Agent finished working'
                   : 'Agent needs your attention',
           });
         } catch {
@@ -1238,6 +1538,16 @@ export class HarnessBridge {
 
   cancel(): void {
     const useAgentStore = this.agentStore;
+    const turn = this.activeTurn;
+    if (turn) {
+      turn.cancelled = true;
+      if (!turn.harnessStarted && this.isTurnIdentityCurrent(turn)) {
+        useAgentStore.getState().setTerminalStatus('cancelled');
+        useAgentStore.getState().setStreaming(false);
+      }
+    }
+    const queuedTurn = turn ? undefined : this.queuedTurns.find((request) => !request.cancelled);
+    if (queuedTurn) queuedTurn.cancelled = true;
     useAgentStore.setState((draft) => {
       for (const toolCall of draft.pendingToolCalls) {
         if (toolCall.status === 'running' || toolCall.status === 'approved') {
@@ -1253,7 +1563,60 @@ export class HarnessBridge {
     }
     this._subAgentRunners.clear();
     this._approvalOwner.clear();
-    this.harness.cancel();
+    if ((!turn && !queuedTurn) || turn?.harnessStarted) this.harness.cancel();
+  }
+
+  private isTurnIdentityCurrent(turn: BridgeTurn): boolean {
+    if (this.disposed || this.activeTurn !== turn || turn.projectId !== this._projectId)
+      return false;
+    const state = this.agentStore.getState();
+    if (state.conversationId !== turn.conversationId || state.activeTabId !== turn.tabId)
+      return false;
+    return this.isProjectCurrent(turn.projectId);
+  }
+
+  private isProjectCurrent(projectId = this._projectId): boolean {
+    return (
+      this.isolatedRuntime ||
+      projectPathKey(useProjectStore.getState().rootPath ?? '') === projectPathKey(projectId)
+    );
+  }
+
+  private canContinueTurn(turn: BridgeTurn): boolean {
+    return !turn.cancelled && this.isTurnIdentityCurrent(turn);
+  }
+
+  private cancelBeforeHarness(turn: BridgeTurn): null {
+    if (this.isTurnIdentityCurrent(turn)) {
+      this.agentStore.getState().setTerminalStatus('cancelled');
+    }
+    return null;
+  }
+
+  private async finishCancelledGoalRun(goalRun: GoalRun, goalState: GoalState): Promise<void> {
+    try {
+      const decision = await this.goalService.finishTurn(goalState.goal.conversationId, {
+        runId: goalRun.id,
+        turnId: goalRun.turnId ?? crypto.randomUUID(),
+        status: 'cancelled',
+        tokenUsage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
+        toolCalls: [],
+        durationMs: 0,
+      });
+      const turn = this.activeTurn;
+      if (turn && this.isTurnIdentityCurrent(turn)) {
+        this.handleGoalChange({ state: decision.state, type: 'run_completed' });
+      }
+    } catch (error) {
+      const turn = this.activeTurn;
+      if (turn && this.isTurnIdentityCurrent(turn)) {
+        this.agentStore
+          .getState()
+          .addDebugLine(
+            `[HarnessBridge] Failed to account cancelled goal run: ${error instanceof Error ? error.message : String(error)}`,
+          );
+      }
+    }
   }
 
   dispose(): void {
@@ -1278,6 +1641,7 @@ export class HarnessBridge {
       }
     }
     this.cancel();
+    this.clearExternalPathGrants();
     for (const timer of this.goalContinuationTimers.values()) clearTimeout(timer);
     this.goalContinuationTimers.clear();
     this.goalContinuationInFlight.clear();
@@ -1522,9 +1886,15 @@ Investigate the error, fix the underlying issue in the affected files, and verif
   setAgentType(type: AgentType): void {
     const useAgentStore = this.agentStore;
     const current = useAgentStore.getState();
-    if (type !== 'build' && this.harness.getAgentType() === 'build' && current.goal?.goal.status === 'active') {
+    if (
+      type !== 'build' &&
+      this.harness.getAgentType() === 'build' &&
+      current.goal?.goal.status === 'active'
+    ) {
       void this.pauseActiveGoalBeforeLeavingBuild().catch((error: unknown) => {
-        this.debug(`Could not pause the active goal before leaving Build mode: ${error instanceof Error ? error.message : String(error)}`);
+        this.debug(
+          `Could not pause the active goal before leaving Build mode: ${error instanceof Error ? error.message : String(error)}`,
+        );
       });
     }
     this.harness.setAgentType(type);
@@ -1562,6 +1932,18 @@ Investigate the error, fix the underlying issue in the affected files, and verif
     }
   }
 
+  /** Confirm an external-path request through native OS dialogs before approval. */
+  confirmExternalPathAccess(
+    request: ExternalPathAccessRequest,
+    grantType: 'once' | 'session-directory',
+  ): Promise<string> {
+    return tauriInvoke('workspace_confirm_external_access', {
+      request,
+      grantType,
+      workspacePath: this.harness.getWorkspacePath(),
+    });
+  }
+
   /** Mark a tool as trusted for the current session (session-trust mode).
    *  When `toolCallId` belongs to an active sub-agent approval, the trust is
    *  applied to that sub-agent's own tool router (the one that issued it). */
@@ -1594,7 +1976,12 @@ Investigate the error, fix the underlying issue in the affected files, and verif
   /** Clear mandatory external path grants when switching sessions. */
   clearExternalPathGrants(): void {
     if (this.harness) {
-      this.harness.getToolRouter()?.clearExternalPathGrants?.();
+      const grantIds = this.harness.getToolRouter()?.clearExternalPathGrants?.() ?? [];
+      if (grantIds.length > 0) {
+        void tauriInvoke('workspace_revoke_external_grants', { grantIds }).catch((error) => {
+          this.debug(`Could not revoke native external-path grants: ${String(error)}`);
+        });
+      }
       this.debug('🔒 External path grants cleared');
     }
   }
@@ -1607,10 +1994,21 @@ Investigate the error, fix the underlying issue in the affected files, and verif
     if (!change || change.status !== 'pending') return;
 
     if (!accepted) {
-      await this.restoreMutationSnapshot(change.filePath, {
-        originalContent: change.originalContent,
-      });
-    } else this.acceptMutationSnapshot(change.filePath);
+      try {
+        await this.restoreMutationSnapshot(
+          change.filePath,
+          {
+            originalContent: change.originalContent,
+          },
+          expectedContentAfterChange(change),
+        );
+      } catch (error) {
+        // Keep the change pending for recovery; surface the reason so the UI
+        // can toast instead of silently dropping the revert.
+        console.warn('[HarnessBridge] Revert refused, keeping change pending:', error);
+        throw error;
+      }
+    } else await this.acceptMutationSnapshot(change.filePath);
 
     store.resolvePendingFileChange(id, accepted);
   }
@@ -1622,12 +2020,32 @@ Investigate the error, fix the underlying issue in the affected files, and verif
     const pending = store.pendingFileChanges.filter((c) => c.status === 'pending');
 
     if (!accepted) {
+      const failures: string[] = [];
       for (const change of pending) {
-        await this.restoreMutationSnapshot(change.filePath, {
-          originalContent: change.originalContent,
-        });
+        try {
+          await this.restoreMutationSnapshot(
+            change.filePath,
+            {
+              originalContent: change.originalContent,
+            },
+            expectedContentAfterChange(change),
+          );
+          store.resolvePendingFileChange(change.id, accepted);
+        } catch (error) {
+          console.warn('[HarnessBridge] Revert refused, keeping change pending:', error);
+          failures.push(
+            `${change.filePath}: ${error instanceof Error ? error.message : String(error)}`,
+          );
+        }
       }
-    } else for (const change of pending) this.acceptMutationSnapshot(change.filePath);
+      if (failures.length > 0) {
+        throw new Error(
+          `Could not revert ${failures.length} file(s); they remain pending for recovery:\n${failures.join('\n')}`,
+        );
+      }
+    } else {
+      for (const change of pending) await this.acceptMutationSnapshot(change.filePath);
+    }
 
     store.resolveAllPendingFileChanges(accepted);
   }
@@ -1641,8 +2059,18 @@ Investigate the error, fix the underlying issue in the affected files, and verif
     );
     if (!session) return;
 
-    if (!accepted) await this.restoreMutationSnapshot(session.filePath, session);
-    else this.acceptMutationSnapshot(session.filePath);
+    if (!accepted) {
+      try {
+        await this.restoreMutationSnapshot(
+          session.filePath,
+          session,
+          session.toolName === 'delete_file' ? null : session.newContent,
+        );
+      } catch (error) {
+        console.warn('[HarnessBridge] Revert refused, keeping session pending:', error);
+        throw error;
+      }
+    } else await this.acceptMutationSnapshot(session.filePath);
 
     store.resolveEditSession(id, accepted);
 
@@ -1664,10 +2092,29 @@ Investigate the error, fix the underlying issue in the affected files, and verif
     );
 
     if (!accepted) {
+      const failures: string[] = [];
       for (const session of active) {
-        await this.restoreMutationSnapshot(session.filePath, session);
+        try {
+          await this.restoreMutationSnapshot(
+            session.filePath,
+            session,
+            session.toolName === 'delete_file' ? null : session.newContent,
+          );
+        } catch (error) {
+          console.warn('[HarnessBridge] Revert refused, keeping session pending:', error);
+          failures.push(
+            `${session.filePath}: ${error instanceof Error ? error.message : String(error)}`,
+          );
+        }
       }
-    } else for (const session of active) this.acceptMutationSnapshot(session.filePath);
+      if (failures.length > 0) {
+        throw new Error(
+          `Could not revert ${failures.length} edit(s); they remain pending for recovery:\n${failures.join('\n')}`,
+        );
+      }
+    } else {
+      for (const session of active) await this.acceptMutationSnapshot(session.filePath);
+    }
 
     store.resolveAllEditSessions(accepted);
     store.resolveAllPendingFileChanges(accepted);
@@ -1682,11 +2129,28 @@ Investigate the error, fix the underlying issue in the affected files, and verif
         (session.phase === 'streaming' || session.phase === 'pending_review'),
     );
     if (!accepted) {
+      const failures: string[] = [];
       for (const session of active) {
-        await this.restoreMutationSnapshot(session.filePath, session);
+        try {
+          await this.restoreMutationSnapshot(
+            session.filePath,
+            session,
+            session.toolName === 'delete_file' ? null : session.newContent,
+          );
+        } catch (error) {
+          console.warn('[HarnessBridge] Revert refused, keeping session pending:', error);
+          failures.push(
+            `${session.filePath}: ${error instanceof Error ? error.message : String(error)}`,
+          );
+        }
+      }
+      if (failures.length > 0) {
+        throw new Error(
+          `Could not revert ${failures.length} edit(s); they remain pending for recovery:\n${failures.join('\n')}`,
+        );
       }
     } else {
-      for (const session of active) this.acceptMutationSnapshot(session.filePath);
+      for (const session of active) await this.acceptMutationSnapshot(session.filePath);
     }
     store.resolveTurnEditSessions(turnId, accepted);
     for (const session of active) {
@@ -1700,6 +2164,7 @@ Investigate the error, fix the underlying issue in the affected files, and verif
   /** Sync conversation ID when restoring a previous session */
   restoreSession(conversationId: string): void {
     const useAgentStore = this.agentStore;
+    const previousId = useAgentStore.getState().conversationId;
     this.harness.setConversationId(conversationId);
     useAgentStore.getState().setConversationId(conversationId);
     // A restored chat must be available as a Kanban current-chat target even
@@ -1721,7 +2186,53 @@ Investigate the error, fix the underlying issue in the affected files, and verif
     useAgentStore.getState().setSessionTokenUsage(null);
     void this.refreshSessionUsage();
     void this.restoreGoalForConversation(conversationId);
+    if (previousId !== conversationId) {
+      this.finalizeStaleConversationState(previousId);
+    }
     this.debug(`Session restored: ${conversationId}`);
+  }
+
+  /**
+   * Drop live-run state from the previous conversation and finalize tool
+   * calls that will never resolve (their turn died with the switch or a
+   * reload). Restored transcripts render those via the tool-call fallback
+   * instead of spinning forever.
+   */
+  private finalizeStaleConversationState(_previousId: string | null): void {
+    const state = this.agentStore.getState();
+    if (state.subAgents.length > 0) {
+      this.agentStore.setState({ subAgents: [] });
+    }
+    const interrupted =
+      'Interrupted: the turn did not complete (session switched or app reloaded).';
+    const staleIds = new Set<string>();
+    for (const toolCall of state.pendingToolCalls) {
+      if (
+        toolCall.status === 'pending' ||
+        toolCall.status === 'approved' ||
+        toolCall.status === 'running' ||
+        toolCall.status === 'cancelling'
+      ) {
+        staleIds.add(toolCall.id);
+      }
+    }
+    for (const message of state.messages) {
+      for (const toolCall of message.toolCalls ?? []) {
+        if (
+          toolCall.status === 'pending' ||
+          toolCall.status === 'approved' ||
+          toolCall.status === 'running' ||
+          toolCall.status === 'cancelling'
+        ) {
+          staleIds.add(toolCall.id);
+        }
+      }
+    }
+    for (const id of staleIds) {
+      this.agentStore
+        .getState()
+        .updateToolCall(id, { status: 'cancelled', error: interrupted, completedAt: Date.now() });
+    }
   }
 
   async getGoal(): Promise<GoalState | null> {
@@ -1733,9 +2244,7 @@ Investigate the error, fix the underlying issue in the affected files, and verif
     return state;
   }
 
-  async createGoal(
-    objective: string,
-  ): Promise<GoalState> {
+  async createGoal(objective: string): Promise<GoalState> {
     this.requireBuildGoalMode();
     let conversationId = this.agentStore.getState().conversationId;
     if (!conversationId) {
@@ -1745,11 +2254,7 @@ Investigate the error, fix the underlying issue in the affected files, and verif
       this.bindTaskExecutionTarget(conversationId);
     }
     await this.ensureConversationExists(objective);
-    const state = await this.goalService.createGoal(
-      conversationId,
-      this._projectId,
-      objective,
-    );
+    const state = await this.goalService.createGoal(conversationId, this._projectId, objective);
     this.handleGoalChange({ state, type: 'created' });
     return state;
   }
@@ -1802,11 +2307,18 @@ Investigate the error, fix the underlying issue in the affected files, and verif
   }
 
   private scheduleGoalContinuation(conversationId: string): void {
-    if (this.disposed || this.goalContinuationTimers.has(conversationId) || this.goalContinuationInFlight.has(conversationId)) return;
+    if (
+      this.disposed ||
+      this.goalContinuationTimers.has(conversationId) ||
+      this.goalContinuationInFlight.has(conversationId)
+    )
+      return;
     const timer = setTimeout(() => {
       this.goalContinuationTimers.delete(conversationId);
       void this.runGoalContinuation(conversationId).catch((error) => {
-        this.debug(`Goal continuation stopped: ${error instanceof Error ? error.message : String(error)}`);
+        this.debug(
+          `Goal continuation stopped: ${error instanceof Error ? error.message : String(error)}`,
+        );
       });
     }, 100);
     this.goalContinuationTimers.set(conversationId, timer);
@@ -1863,27 +2375,58 @@ Investigate the error, fix the underlying issue in the affected files, and verif
   }
 
   private async restoreGoalForConversation(conversationId: string): Promise<void> {
+    if (
+      this.disposed ||
+      !this.isProjectCurrent() ||
+      this.agentStore.getState().conversationId !== conversationId
+    ) {
+      return;
+    }
     try {
       const state = await this.goalService.getState(conversationId);
-      if (this.agentStore.getState().conversationId === conversationId) {
+      if (
+        !this.disposed &&
+        this.isProjectCurrent() &&
+        this.agentStore.getState().conversationId === conversationId
+      ) {
         this.agentStore.getState().setGoal(state);
       }
     } catch (error) {
-      this.debug(`Failed to restore goal: ${error instanceof Error ? error.message : String(error)}`);
+      if (!this.disposed && this.isProjectCurrent()) {
+        this.debug(
+          `Failed to restore goal: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
     }
   }
 
   private handleGoalChange(event: GoalChangeEvent): void {
+    if (this.disposed) return;
     const conversationId = this.agentStore.getState().conversationId;
-    if (!conversationId || (event.state && event.state.goal.conversationId !== conversationId)) return;
+    if (!conversationId || (event.state && event.state.goal.conversationId !== conversationId))
+      return;
     this.agentStore.getState().setGoal(event.state);
   }
 
   private async restoreSddForConversation(conversationId: string): Promise<void> {
     const useAgentStore = this.agentStore;
+    if (
+      this.disposed ||
+      !this.isProjectCurrent() ||
+      useAgentStore.getState().conversationId !== conversationId
+    ) {
+      return;
+    }
     const rows = await tauriInvokeRaw<string[]>('db_sdd_list_sessions', {
       projectId: this._projectId,
     });
+    if (
+      this.disposed ||
+      !this.isProjectCurrent() ||
+      useAgentStore.getState().conversationId !== conversationId
+    ) {
+      return;
+    }
     const sessions = rows.map((row) => JSON.parse(row) as SddSession);
     const active = sessions.find(
       (session) =>
@@ -1892,6 +2435,13 @@ Investigate the error, fix the underlying issue in the affected files, and verif
     );
     if (!active) return;
     const taskRows = await tauriInvokeRaw<string[]>('db_sdd_get_tasks', { sessionId: active.id });
+    if (
+      this.disposed ||
+      !this.isProjectCurrent() ||
+      useAgentStore.getState().conversationId !== conversationId
+    ) {
+      return;
+    }
     const tasks = taskRows.map((row) => JSON.parse(row) as SddTask);
     this.harness.restoreSddSession(active.id);
     const store = useAgentStore.getState();
@@ -2005,7 +2555,10 @@ Investigate the error, fix the underlying issue in the affected files, and verif
     }
   }
 
-  async loadRules(targetPaths?: readonly string[]): Promise<import('@hyscode/agent-harness').Rule[]> {
+  async loadRules(
+    targetPaths?: readonly string[],
+  ): Promise<import('@hyscode/agent-harness').Rule[]> {
+    const turn = this.activeTurn;
     try {
       const loader = this.harness.getRuleLoader();
       loader?.setGlobalPath(
@@ -2013,14 +2566,20 @@ Investigate the error, fix the underlying issue in the affected files, and verif
           `${HarnessBridge.getHomePath()}/.config/hyscode/rules`,
       );
       const all = await this.harness.refreshRules(
-        targetPaths ?? collectRuleTargetPaths(this.harness.getWorkspacePath(), this.agentStore.getState().contextFiles),
+        targetPaths ??
+          collectRuleTargetPaths(
+            this.harness.getWorkspacePath(),
+            this.agentStore.getState().contextFiles,
+          ),
       );
-      if (this.disposed) return [];
+      if (this.disposed || (turn && !this.canContinueTurn(turn))) return [];
       this.ruleDiagnostics = this.harness.getRuleLoader()?.getDiagnostics() ?? [];
       this.debug(`Rules loaded: ${all.length} total`);
       return all;
     } catch (err) {
-      this.debug(`Failed to load rules: ${err instanceof Error ? err.message : String(err)}`);
+      if (!this.disposed && (!turn || this.canContinueTurn(turn))) {
+        this.debug(`Failed to load rules: ${err instanceof Error ? err.message : String(err)}`);
+      }
       return [];
     }
   }
@@ -2075,7 +2634,7 @@ Investigate the error, fix the underlying issue in the affected files, and verif
       definition: {
         name: 'spawn_subagent',
         description:
-          'Delegate a focused subtask to a specialized sub-agent. The parent waits for the sub-agent to finish and then receives its result. Multiple spawn_subagent calls in one response run concurrently (review runs in parallel; build/debug/plan wait for an exclusive workspace slot). Use this to apply a specialist agent (for example review or debug) to a self-contained subtask. Not available in chat mode.',
+          'Delegate a focused subtask to a specialized sub-agent. The parent waits for the sub-agent to finish and then receives its result. Call it directly with {task, mode}; never wrap it in invoke_external_tool and never call both for the same subtask. After receiving a sub-agent result, work with it — do not delegate the same analysis again (results may be truncated and cannot be re-fetched). Multiple spawn_subagent calls in one response run concurrently (review runs in parallel; build/debug/plan wait for an exclusive workspace slot). Use this to apply a specialist agent (for example review or debug) to a self-contained subtask. Not available in chat mode.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -2169,69 +2728,73 @@ Investigate the error, fix the underlying issue in the affected files, and verif
           .submit(subAgentId, mode, resourceMode, async () => {
             store.updateSubAgent(subAgentId, { status: 'running', queuePosition: undefined });
 
-          // Inherit skills scoped to the sub-agent's mode (not the parent's).
-          const activeForMode = useSkillsStore.getState().getActiveForMode(mode as AgentType);
-          const modeSkillNames = new Set(activeForMode.map((s) => s.name));
-          const skills = (bridge.harness.getSkillLoader()?.getAll() ?? []).filter((s) =>
-            modeSkillNames.has(s.frontmatter.name),
+            // Inherit skills scoped to the sub-agent's mode (not the parent's).
+            const activeForMode = useSkillsStore.getState().getActiveForMode(mode as AgentType);
+            const modeSkillNames = new Set(activeForMode.map((s) => s.name));
+            const skills = (bridge.harness.getSkillLoader()?.getAll() ?? []).filter((s) =>
+              modeSkillNames.has(s.frontmatter.name),
+            );
+
+            const environmentContext = await bridge.buildEnvironmentContext();
+            const parentConversationId = store.conversationId ?? undefined;
+            const runner = new SubAgentRunner({
+              id: subAgentId,
+              task,
+              mode,
+              workspacePath: bridge.harness.getWorkspacePath(),
+              projectId: bridge._projectId,
+              // Route through the shared invoke: buffered dirty-file reads + mutation
+              // snapshots so sub-agent edits are reviewable/revertable.
+              invoke: <T>(
+                cmd: string,
+                args?: Record<string, unknown>,
+                authorization?: ToolInvocationAuthorization,
+              ): Promise<T> => bridge.invokeForHarness<T>(cmd, args, authorization),
+              listen: async (event: string, handler: (payload: unknown) => void) => {
+                const unlisten = await tauriListen(event, (e) => handler(e.payload));
+                return unlisten;
+              },
+              onApproval: (pending, signal) => bridge.handleApprovalRequest(pending, signal),
+              onApprovalOwner: (approvalId, ownerId) => {
+                bridge._approvalOwner.set(approvalId, ownerId);
+              },
+              onUpdate: (patch) => store.updateSubAgent(subAgentId, patch),
+              onBridgeEvent: (event) => bridge.handleSubAgentEvent(subAgentId, event),
+              activeSkills: skills,
+              activeRules: bridge.harness.getActiveRules(),
+              parentHarness: bridge.harness,
+              conversationId: parentConversationId,
+              parentTurnId: bridge.activeTurnId ?? undefined,
+              environmentContext,
+              delegationChain: store.delegationChain,
+              memoryManager: bridge.memoryManager ?? undefined,
+              externalTools: bridge.getAgentSafeExternalTools(),
+              onTurnRecord: (record) => {
+                void bridge.persistTurnRecord(record);
+              },
+              // Visible terminal runtime so sub-agent commands are watchable, and
+              // command tracking so parent environment context stays fresh.
+              terminalRuntime: desktopTerminalRuntime,
+              onTerminalCommand: (command, output, exitCode) =>
+                bridge.recordTerminalCommand(command, output, exitCode),
+            });
+
+            bridge._subAgentRunners.set(subAgentId, runner);
+
+            try {
+              return await runner.run(task);
+            } finally {
+              bridge._subAgentRunners.delete(subAgentId);
+              bridge.clearSubAgentApprovalOwners(subAgentId);
+            }
+          })
+          .then(
+            (output) => ({ success: true, output }),
+            (err) => {
+              const msg = err instanceof Error ? err.message : String(err);
+              return { success: false, output: '', error: msg };
+            },
           );
-
-          const environmentContext = await bridge.buildEnvironmentContext();
-          const parentConversationId = store.conversationId ?? undefined;
-          const runner = new SubAgentRunner({
-            id: subAgentId,
-            task,
-            mode,
-            workspacePath: bridge.harness.getWorkspacePath(),
-            projectId: bridge._projectId,
-            // Route through the shared invoke: buffered dirty-file reads + mutation
-            // snapshots so sub-agent edits are reviewable/revertable.
-            invoke: (cmd, args) => bridge.invokeForHarness(cmd, args),
-            listen: async (event: string, handler: (payload: unknown) => void) => {
-              const unlisten = await tauriListen(event, (e) => handler(e.payload));
-              return unlisten;
-            },
-            onApproval: (pending, signal) => bridge.handleApprovalRequest(pending, signal),
-            onApprovalOwner: (approvalId, ownerId) => {
-              bridge._approvalOwner.set(approvalId, ownerId);
-            },
-            onUpdate: (patch) => store.updateSubAgent(subAgentId, patch),
-            onBridgeEvent: (event) => bridge.handleSubAgentEvent(subAgentId, event),
-            activeSkills: skills,
-            activeRules: bridge.harness.getActiveRules(),
-            parentHarness: bridge.harness,
-            conversationId: parentConversationId,
-            parentTurnId: bridge.activeTurnId ?? undefined,
-            environmentContext,
-            delegationChain: store.delegationChain,
-            memoryManager: bridge.memoryManager ?? undefined,
-            externalTools: bridge.getAgentSafeExternalTools(),
-            onTurnRecord: (record) => {
-              void bridge.persistTurnRecord(record);
-            },
-            // Visible terminal runtime so sub-agent commands are watchable, and
-            // command tracking so parent environment context stays fresh.
-            terminalRuntime: desktopTerminalRuntime,
-            onTerminalCommand: (command, output, exitCode) =>
-              bridge.recordTerminalCommand(command, output, exitCode),
-          });
-
-          bridge._subAgentRunners.set(subAgentId, runner);
-
-          try {
-            return await runner.run(task);
-          } finally {
-            bridge._subAgentRunners.delete(subAgentId);
-            bridge.clearSubAgentApprovalOwners(subAgentId);
-          }
-        })
-        .then(
-          (output) => ({ success: true, output }),
-          (err) => {
-            const msg = err instanceof Error ? err.message : String(err);
-            return { success: false, output: '', error: msg };
-          },
-        );
       },
     };
 
@@ -2270,10 +2833,12 @@ Investigate the error, fix the underlying issue in the affected files, and verif
           requiresApproval: true,
           execute: async (
             input: Record<string, unknown>,
-            _ctx: ToolExecutionContext,
+            ctx: ToolExecutionContext,
           ): Promise<ToolResult> => {
             try {
-              const result = await mcpBridge.callTool(serverId, tool.name, input);
+              const result = await mcpBridge.callTool(serverId, tool.name, input, {
+                signal: ctx.signal,
+              });
               const output = typeof result === 'string' ? result : JSON.stringify(result, null, 2);
               return { success: true, output };
             } catch (err) {
@@ -2324,6 +2889,8 @@ Investigate the error, fix the underlying issue in the affected files, and verif
 
   private handleEvent(event: HarnessEvent): void {
     if (this.disposed) return;
+    if (this.activeTurn && !this.isTurnIdentityCurrent(this.activeTurn)) return;
+    if (!this.activeTurn && event.turnId) return;
     const useAgentStore = this.agentStore;
     const store = useAgentStore.getState();
 
@@ -2454,6 +3021,33 @@ Investigate the error, fix the underlying issue in the affected files, and verif
           startedAt: Date.now(),
         };
         store.addToolCall(tc);
+        // Anchor the sub-agent card entry to the transcript tool-call id at
+        // start time. The execute() body adds the full entry a moment later,
+        // but policy blocks, approval stalls, coordinator queueing, or a
+        // nested dispatch must never leave the card without live state.
+        // Nested `:external` dispatches are skipped: their store entry is
+        // created under the outer (unsuffixed) id by execute().
+        if (
+          event.toolName === 'spawn_subagent' &&
+          !event.toolCallId.endsWith(':external') &&
+          !store.subAgents.some((agent) => agent.id === event.toolCallId)
+        ) {
+          const input = (event.input ?? {}) as Record<string, unknown>;
+          const mode = input.mode as AgentMode;
+          store.addSubAgent({
+            id: event.toolCallId,
+            task: typeof input.task === 'string' ? input.task : 'Sub-agent task',
+            mode:
+              mode === 'build' || mode === 'review' || mode === 'debug' || mode === 'plan'
+                ? mode
+                : 'build',
+            conversationId: store.conversationId ?? undefined,
+            status: 'running',
+            output: '',
+            toolCalls: [],
+            startedAt: Date.now(),
+          });
+        }
         break;
       }
       case 'terminal_progress': {
@@ -2475,29 +3069,30 @@ Investigate the error, fix the underlying issue in the affected files, and verif
             : undefined,
           progress,
           {
-            provisional: progress.state === 'complete'
-              || progress.state === 'error'
-              || progress.state === 'cancelled'
-              || progress.state === 'background',
+            provisional:
+              progress.state === 'complete' ||
+              progress.state === 'error' ||
+              progress.state === 'cancelled' ||
+              progress.state === 'background',
           },
         );
         if (!projection) break;
         const terminalStore = useTerminalStore.getState();
         terminalStore.setAwaitingInput(progress.terminalId, progress.state === 'awaiting_input');
         if (
-          progress.state === 'complete'
-          || progress.state === 'error'
-          || progress.state === 'cancelled'
-          || progress.state === 'background'
+          progress.state === 'complete' ||
+          progress.state === 'error' ||
+          progress.state === 'cancelled' ||
+          progress.state === 'background'
         ) {
           terminalStore.clearAgentActivityIfOwned(progress.terminalId, progress.toolCallId);
         }
         if (progress.state !== 'awaiting_input') {
           for (const toolCall of useAgentStore.getState().pendingToolCalls) {
             if (
-              toolCall.id !== progress.toolCallId
-              && toolCall.terminalId === progress.terminalId
-              && toolCall.terminalState === 'awaiting_input'
+              toolCall.id !== progress.toolCallId &&
+              toolCall.terminalId === progress.terminalId &&
+              toolCall.terminalState === 'awaiting_input'
             ) {
               store.updateToolCall(toolCall.id, { terminalState: progress.state });
             }
@@ -2550,9 +3145,8 @@ Investigate the error, fix the underlying issue in the affected files, and verif
         const label = event.result.success ? '✓' : '✗';
         this.debug(`${label} ${event.toolName} (${event.durationMs}ms)`);
         const metadata = event.result.metadata ?? {};
-        const terminalId = typeof metadata.terminalId === 'string'
-          ? metadata.terminalId
-          : undefined;
+        const terminalId =
+          typeof metadata.terminalId === 'string' ? metadata.terminalId : undefined;
         let failure: ToolCallDisplay['failure'] = null;
         if ('failure' in metadata) {
           if (metadata.failure === undefined) {
@@ -2579,20 +3173,27 @@ Investigate the error, fix the underlying issue in the affected files, and verif
               : metadata.cancelled === true
                 ? 'cancelled'
                 : event.result.success
-                  ? metadata.background === true ? 'background' : 'complete'
+                  ? metadata.background === true
+                    ? 'background'
+                    : 'complete'
                   : 'error'
           : undefined;
         // Find tool call by the harness-assigned ID (stable correlation)
         store.updateToolCall(event.toolCallId, {
-          status: metadata.cancelled === true || failure
-            ? metadata.cancelled === true ? 'cancelled' : 'error'
-            : event.result.success
-              ? 'success'
-              : 'error',
+          status:
+            metadata.cancelled === true || failure
+              ? metadata.cancelled === true
+                ? 'cancelled'
+                : 'error'
+              : event.result.success
+                ? 'success'
+                : 'error',
           output: event.result.output,
           error: event.result.error,
           completedAt: Date.now(),
-          ...(terminalId ? { terminalCanonical: !awaitingInput, terminalProvisional: awaitingInput } : {}),
+          ...(terminalId
+            ? { terminalCanonical: !awaitingInput, terminalProvisional: awaitingInput }
+            : {}),
           failure,
           ...(terminalId
             ? {
@@ -2601,7 +3202,9 @@ Investigate the error, fix the underlying issue in the affected files, and verif
                 terminalState,
               }
             : {}),
-          ...(typeof metadata.sequence === 'number' && Number.isSafeInteger(metadata.sequence) && metadata.sequence >= 0
+          ...(typeof metadata.sequence === 'number' &&
+          Number.isSafeInteger(metadata.sequence) &&
+          metadata.sequence >= 0
             ? { outputSequence: metadata.sequence }
             : {}),
         });
@@ -2610,6 +3213,10 @@ Investigate the error, fix the underlying issue in the affected files, and verif
           terminalStore.clearAgentActivityIfOwned(terminalId, event.toolCallId);
           terminalStore.setAwaitingInput(terminalId, false);
         }
+        // Mirror spawn outcomes into the sub-agent card state so the card
+        // never sticks on "Running" (timeout/cancel) and rehydrated
+        // transcripts (store entry missing) still render the outcome.
+        this.mirrorSubAgentToolResult(event.toolCallId, event.toolName, event.result);
         if (event.toolName === 'run_terminal_command') {
           const completedCall = useAgentStore
             .getState()
@@ -2820,17 +3427,88 @@ Investigate the error, fix the underlying issue in the affected files, and verif
     }
   }
 
+  /** Find a tool call by id across pending calls and transcript messages. */
+  private findToolCall(id: string): ToolCallDisplay | undefined {
+    const state = this.agentStore.getState();
+    return (
+      state.pendingToolCalls.find((toolCall) => toolCall.id === id) ??
+      state.messages
+        .flatMap((message) => message.toolCalls ?? [])
+        .find((toolCall) => toolCall.id === id)
+    );
+  }
+
+  /**
+   * Mirror a spawn_subagent (or wrapping invoke_external_tool) result into
+   * the sub-agent store entry. Skips entries the runner already finalized so
+   * the runner's own terminal state is never clobbered; synthesizes a
+   * terminal entry when none exists (e.g. transcript restored after reload)
+   * so the card renders the outcome instead of "Sub-agent state not found."
+   */
+  private mirrorSubAgentToolResult(toolCallId: string, toolName: string, result: ToolResult): void {
+    const target = resolveSubAgentMirrorTarget(
+      toolCallId,
+      toolName,
+      (id) => this.findToolCall(id)?.input,
+    );
+    if (!target) return;
+    const store = this.agentStore.getState();
+    const existing = store.subAgents.find((agent) => agent.id === target.spawnId);
+    if (
+      existing &&
+      existing.status !== 'queued' &&
+      existing.status !== 'running' &&
+      existing.status !== 'cancelling'
+    ) {
+      return;
+    }
+    const cancelled = /cancel/i.test(result.error ?? '');
+    const status: SubAgentState['status'] = result.success
+      ? 'done'
+      : cancelled
+        ? 'cancelled'
+        : 'error';
+    const output = result.success ? result.output : (result.error ?? 'Sub-agent failed.');
+    const completedAt = Date.now();
+    if (existing) {
+      store.updateSubAgent(target.spawnId, { status, output, completedAt });
+      return;
+    }
+    const spawnCall = this.findToolCall(target.spawnId);
+    const rawInput = (spawnCall?.input ?? target.nestedInput ?? {}) as Record<string, unknown>;
+    const task = typeof rawInput.task === 'string' ? rawInput.task : 'Sub-agent task';
+    const mode: AgentMode =
+      rawInput.mode === 'build' ||
+      rawInput.mode === 'review' ||
+      rawInput.mode === 'debug' ||
+      rawInput.mode === 'plan' ||
+      rawInput.mode === 'chat'
+        ? rawInput.mode
+        : 'build';
+    store.addSubAgent({
+      id: target.spawnId,
+      task,
+      mode,
+      conversationId: store.conversationId ?? undefined,
+      status,
+      output,
+      toolCalls: [],
+      startedAt: spawnCall?.startedAt ?? completedAt,
+      completedAt,
+    });
+  }
+
   private sweepUnfinalizedTerminalTools(): void {
     const store = this.agentStore.getState();
     for (const toolCall of store.pendingToolCalls) {
       if (!toolCall.terminalId || toolCall.terminalCanonical) continue;
       if (toolCall.input.background === true || toolCall.terminalState === 'background') continue;
       const active =
-        toolCall.status === 'running'
-        || toolCall.status === 'cancelling'
-        || toolCall.terminalState === 'started'
-        || toolCall.terminalState === 'running'
-        || toolCall.terminalState === 'awaiting_input';
+        toolCall.status === 'running' ||
+        toolCall.status === 'cancelling' ||
+        toolCall.terminalState === 'started' ||
+        toolCall.terminalState === 'running' ||
+        toolCall.terminalState === 'awaiting_input';
       if (!active) continue;
       const failure = {
         operation: 'event' as const,
@@ -2844,7 +3522,9 @@ Investigate the error, fix the underlying issue in the affected files, and verif
         failure,
         error: failure.message,
       });
-      const terminal = useTerminalStore.getState().sessions.find((session) => session.id === toolCall.terminalId);
+      const terminal = useTerminalStore
+        .getState()
+        .sessions.find((session) => session.id === toolCall.terminalId);
       if (terminal?.activeToolCallId === toolCall.id) {
         useTerminalStore.getState().clearAgentActivityIfOwned(toolCall.terminalId, toolCall.id);
         useTerminalStore.getState().setAwaitingInput(toolCall.terminalId, false);
@@ -2864,6 +3544,7 @@ Investigate the error, fix the underlying issue in the affected files, and verif
     const useAgentStore = this.agentStore;
     const store = useAgentStore.getState();
     const snapshot = this.mutationSnapshots.get(c.filePath);
+    if (snapshot) snapshot.expectedContent = expectedContentAfterChange(c);
     const isNewFile = c.originalContent === null;
     const hunks = computeDiffHunks(c.originalContent, c.newContent);
 
@@ -2901,14 +3582,15 @@ Investigate the error, fix the underlying issue in the affected files, and verif
     // is instantaneous since we get the full payload at once)
     // Use a microtask so the UI renders the streaming state briefly
     queueMicrotask(() => {
+      if (this.disposed) return;
       const s = useAgentStore.getState();
       const live = s.agentEditSessions.find(
-        (es) => es.filePath === c.filePath && es.phase === 'streaming',
+        (es) => es.id === session.id && es.phase === 'streaming',
       );
       if (live) {
         if (settings.approvalMode === 'yolo' || settings.approvalMode === 'notify') {
-          // Auto-accept: go straight to accepted
-          s.resolveEditSession(live.id, true);
+          // Use the normal resolver so accepting advances the next mutation's baseline.
+          void this.resolveEditSession(live.id, true);
         } else {
           // manual / smart / session-trust / custom → pending_review
           useAgentStore.setState((draft) => {
@@ -2936,9 +3618,7 @@ Investigate the error, fix the underlying issue in the affected files, and verif
     const cacheWriteTokens = (current?.cacheWriteTokens ?? 0) + (u.cacheWriteTokens ?? 0);
     const effectiveInput = Math.max(0, u.inputTokens - (u.cacheReadTokens ?? 0));
     const totalTokens =
-      u.totalTokens > 0
-        ? (current?.totalTokens ?? 0) + u.totalTokens
-        : inputTokens + outputTokens;
+      u.totalTokens > 0 ? (current?.totalTokens ?? 0) + u.totalTokens : inputTokens + outputTokens;
     useAgentStore.getState().setTokenUsage({
       inputTokens,
       outputTokens,
@@ -3212,21 +3892,27 @@ Investigate the error, fix the underlying issue in the affected files, and verif
   // ─── Environment Context Assembly ───────────────────────────────────
 
   /** Build a deterministic environment context package for any child turn. */
-  private async buildEnvironmentContext(): Promise<EnvironmentContext> {
+  private async buildEnvironmentContext(turn?: BridgeTurn): Promise<EnvironmentContext> {
     const useAgentStore = this.agentStore;
+    const workspacePath = this.harness.getWorkspacePath() as string;
     const env: EnvironmentContext = {
-      workspacePath: this.harness.getWorkspacePath() as string,
+      workspacePath,
     };
 
     // Active file from editor + file store
     try {
       const editorState = useEditorStore.getState();
       const activeTab = editorState.tabs.find((t) => t.id === editorState.activeTabId);
-      if (activeTab?.filePath) {
+      const fileStore = useFileStore.getState();
+      if (
+        activeTab?.type === 'file' &&
+        activeTab.filePath &&
+        projectPathKey(fileStore.rootPath ?? '') === projectPathKey(workspacePath) &&
+        isPathInsideWorkspace(activeTab.filePath, workspacePath)
+      ) {
         const activePath = activeTab.filePath;
-        const fileStore = useFileStore.getState();
         const content = fileStore.getFileContent(activePath);
-        if (content) {
+        if (content !== undefined) {
           env.activeFile = {
             path: activePath,
             content,
@@ -3244,6 +3930,7 @@ Investigate the error, fix the underlying issue in the affected files, and verif
         'list_dir_all',
         { path: env.workspacePath },
       );
+      if (turn && !this.canContinueTurn(turn)) return env;
       const tree = entries
         .filter((e) => e.name !== 'node_modules' && e.name !== 'target')
         .map((e) => (e.is_dir ? `${e.name}/` : e.name))
@@ -3258,6 +3945,7 @@ Investigate the error, fix the underlying issue in the affected files, and verif
       const snapshot = await tauriInvoke('git_repository_snapshot', {
         repoPath: env.workspacePath,
       });
+      if (turn && !this.canContinueTurn(turn)) return env;
 
       const total =
         snapshot.staged.length +
@@ -3309,15 +3997,16 @@ Investigate the error, fix the underlying issue in the affected files, and verif
   }
 
   /** Build and inject the environment context for the main harness turn. */
-  private async injectEnvironmentContext(): Promise<void> {
-    this.harness.injectEnvironmentContext(await this.buildEnvironmentContext());
+  private async injectEnvironmentContext(turn: BridgeTurn): Promise<void> {
+    const context = await this.buildEnvironmentContext(turn);
+    if (this.canContinueTurn(turn)) this.harness.injectEnvironmentContext(context);
   }
 
   /**
    * Analyze user message for file references and keywords, then suggest
    * files the agent should consider gathering.
    */
-  private async injectContextHints(userMessage: string): Promise<void> {
+  private async injectContextHints(userMessage: string, turn: BridgeTurn): Promise<void> {
     try {
       const workspacePath = this.harness.getWorkspacePath() as string;
       const hints: string[] = [];
@@ -3333,10 +4022,12 @@ Investigate the error, fix the underlying issue in the affected files, and verif
           const stat = await tauriInvokeRaw<{ is_file: boolean }>('stat_path', {
             path: `${workspacePath}/${candidate}`,
           });
+          if (!this.canContinueTurn(turn)) return;
           if (stat.is_file) {
             hints.push(candidate);
           }
         } catch {
+          if (!this.canContinueTurn(turn)) return;
           // Not a valid file path — skip
         }
       }
@@ -3385,6 +4076,7 @@ Investigate the error, fix the underlying issue in the affected files, and verif
             pattern: `**/*${keyword}*`,
             maxResults: 5,
           });
+          if (!this.canContinueTurn(turn)) return;
           for (const r of results) {
             const rel = r
               .replace(workspacePath, '')
@@ -3393,10 +4085,12 @@ Investigate the error, fix the underlying issue in the affected files, and verif
             if (!hints.includes(rel)) hints.push(rel);
           }
         } catch {
+          if (!this.canContinueTurn(turn)) return;
           // find_files may not exist yet or fail — skip
         }
       }
 
+      if (!this.canContinueTurn(turn)) return;
       if (hints.length > 0) {
         // Add context hints as a low-priority source so the agent knows about them
         this.harness.addContextSource({
@@ -3531,7 +4225,8 @@ ${hints.map((h) => `- ${h}`).join('\n')}
             tokenCacheObservedRequests: record.trace.tokenUsage.cacheObservedRequests ?? 0,
             tokenCacheTotalRequests: record.trace.tokenUsage.cacheTotalRequests ?? 0,
             tokenCacheUnknownRequests: record.trace.tokenUsage.cacheUnknownRequests ?? 0,
-            stopReason: record.trace.stopReason === 'loop_detected' ? 'error' : record.trace.stopReason,
+            stopReason:
+              record.trace.stopReason === 'loop_detected' ? 'error' : record.trace.stopReason,
             verificationPerformed: record.trace.verificationPerformed,
             verificationForced: record.trace.verificationForced,
             filesModified: JSON.stringify(record.trace.filesModified),
@@ -3558,12 +4253,17 @@ ${hints.map((h) => `- ${h}`).join('\n')}
   private async refreshSessionUsage(): Promise<void> {
     const useAgentStore = this.agentStore;
     const conversationId = useAgentStore.getState().conversationId;
-    if (!conversationId) return;
+    if (!conversationId || this.disposed || !this.isProjectCurrent()) return;
     try {
       const usage = await tauriInvokeRaw<TokenUsage | null>('db_get_conversation_token_usage', {
         conversationId,
       });
-      if (usage) {
+      if (
+        usage &&
+        !this.disposed &&
+        this.isProjectCurrent() &&
+        useAgentStore.getState().conversationId === conversationId
+      ) {
         useAgentStore.getState().setSessionTokenUsage(usage);
       }
     } catch (e) {
@@ -3661,7 +4361,19 @@ ${hints.map((h) => `- ${h}`).join('\n')}
   /** Shared Tauri invoke for agent tool execution (main agent AND sub-agents):
    *  serves buffered content for dirty files and captures mutation snapshots
    *  so every agent edit — including sub-agent edits — can be reviewed/reverted. */
-  async invokeForHarness<T>(command: string, args?: Record<string, unknown>): Promise<T> {
+  async invokeForHarness<T>(
+    command: string,
+    args?: Record<string, unknown>,
+    authorization?: ToolInvocationAuthorization,
+  ): Promise<T> {
+    const workspacePath = authorization?.workspacePath ?? this.harness.getWorkspacePath();
+    args = authorizeToolInvocationArgs(args, workspacePath, authorization?.externalPathAccess);
+    if (
+      authorization?.nativeGrantIds?.length &&
+      NATIVE_AUTHORIZED_FILESYSTEM_COMMANDS.has(command)
+    ) {
+      args = { ...args, nativeGrantIds: [...authorization.nativeGrantIds] };
+    }
     const path = typeof args?.path === 'string' ? args.path : null;
     if (command === 'get_diagnostics') {
       const requestedFile = path ?? undefined;
@@ -3673,10 +4385,26 @@ ${hints.map((h) => `- ${h}`).join('\n')}
       let compilerDiagnostics: DiagnosticContract[] = [];
       if (!requestedFileIsOpen) {
         const diagnosticArgs: { workspacePath: string; path?: string } = {
-          workspacePath: this.harness.getWorkspacePath(),
+          workspacePath,
         };
         if (requestedFile) diagnosticArgs.path = requestedFile;
-        compilerDiagnostics = await tauriInvoke('get_diagnostics', diagnosticArgs);
+        const nativeGrantId = await tauriInvoke('workspace_confirm_diagnostics', {
+          workspacePath,
+        });
+        try {
+          compilerDiagnostics = await tauriInvoke('get_diagnostics', {
+            ...diagnosticArgs,
+            nativeGrantIds: [nativeGrantId],
+          });
+        } finally {
+          try {
+            await tauriInvoke('workspace_revoke_external_grants', {
+              grantIds: [nativeGrantId],
+            });
+          } catch (error) {
+            this.debug(`Could not revoke project-diagnostics grant: ${String(error)}`);
+          }
+        }
       }
       return mergeDiagnostics(
         editorDiagnostics,
@@ -3686,38 +4414,74 @@ ${hints.map((h) => `- ${h}`).join('\n')}
       ) as T;
     }
     if (command === 'read_file' && path) {
-      const tab = useEditorStore
-        .getState()
-        .tabs.find((item) => item.filePath === path && item.type === 'file');
-      const buffered = useFileStore.getState().getFileContent(path);
+      const workspacePath = this.harness.getWorkspacePath();
+      const fileStore = useFileStore.getState();
+      const pathKey = projectPathKey(normalizeProjectPath(path));
+      const tab =
+        projectPathKey(fileStore.rootPath ?? '') === projectPathKey(workspacePath) &&
+        isPathInsideWorkspace(path, workspacePath)
+          ? useEditorStore
+              .getState()
+              .tabs.find(
+                (item) =>
+                  item.type === 'file' &&
+                  projectPathKey(normalizeProjectPath(item.filePath)) === pathKey,
+              )
+          : undefined;
+      const buffered = tab ? fileStore.getFileContent(tab.filePath) : undefined;
       if (tab?.isDirty && buffered !== undefined) return buffered as T;
     }
 
     const mutationPaths: string[] = [];
     if (path && ['write_file', 'create_file', 'delete_path'].includes(command))
       mutationPaths.push(path);
-    if (['rename_path', 'copy_path'].includes(command)) {
+    if (['rename_path', 'move_path'].includes(command)) {
       if (typeof args?.from === 'string') mutationPaths.push(args.from);
       if (typeof args?.to === 'string') mutationPaths.push(args.to);
     }
-    for (const mutationPath of mutationPaths) await this.captureMutationSnapshot(mutationPath);
+    if (command === 'copy_path' && typeof args?.to === 'string') mutationPaths.push(args.to);
+    for (const mutationPath of mutationPaths) {
+      await this.captureMutationSnapshot(
+        mutationPath,
+        authorization?.nativeGrantIds,
+        authorization?.revokeNativeGrantIds,
+      );
+    }
     return tauriInvokeRaw<T>(command, args);
   }
 
-  private async captureMutationSnapshot(path: string): Promise<void> {
-    if (this.mutationSnapshots.has(path)) return;
+  private async captureMutationSnapshot(
+    path: string,
+    nativeGrantIds: readonly string[] = [],
+    revokeNativeGrantIds: readonly string[] = [],
+  ): Promise<void> {
+    const mergeGrantIds = (snapshot: MutationSnapshot): void => {
+      snapshot.nativeGrantIds = [
+        ...new Set([...(snapshot.nativeGrantIds ?? []), ...revokeNativeGrantIds]),
+      ];
+    };
+    const existing = this.mutationSnapshots.get(path);
+    if (existing) {
+      mergeGrantIds(existing);
+      return;
+    }
     // Serialize concurrent captures of the same path: two children writing
     // the same file must not both capture and overwrite the baseline.
     const inFlight = this.mutationSnapshotPromises.get(path);
     if (inFlight) {
       await inFlight;
+      const snapshot = this.mutationSnapshots.get(path);
+      if (snapshot) mergeGrantIds(snapshot);
       return;
     }
     const capture = (async () => {
       if (this.mutationSnapshots.has(path)) return;
       let diskBefore: string | null = null;
       try {
-        diskBefore = await tauriInvokeRaw<string>('read_file', { path });
+        diskBefore = await tauriInvokeRaw<string>('read_file', {
+          path,
+          ...(nativeGrantIds.length > 0 ? { nativeGrantIds: [...nativeGrantIds] } : {}),
+        });
       } catch {
         // New file or directory.
       }
@@ -3730,6 +4494,7 @@ ${hints.map((h) => `- ${h}`).join('\n')}
         bufferBefore,
         wasDirty: tab?.isDirty ?? false,
         tabId: tab?.id ?? null,
+        nativeGrantIds: [...revokeNativeGrantIds],
       });
     })();
     this.mutationSnapshotPromises.set(path, capture);
@@ -3743,17 +4508,56 @@ ${hints.map((h) => `- ${h}`).join('\n')}
   private async restoreMutationSnapshot(
     path: string,
     session?: Pick<AgentEditSession, 'diskOriginalContent' | 'originalContent' | 'wasDirty'>,
+    expectedContent?: string | null,
   ): Promise<void> {
     const useAgentStore = this.agentStore;
     const captured = this.mutationSnapshots.get(path);
     const diskBefore =
       captured?.diskBefore ?? session?.diskOriginalContent ?? session?.originalContent ?? null;
     const bufferBefore = captured?.bufferBefore ?? session?.originalContent ?? diskBefore;
+    const expectedOnDisk =
+      captured?.expectedContent !== undefined ? captured.expectedContent : expectedContent;
+    const nativeGrantIds = captured?.nativeGrantIds ?? [];
+    const grantArgs = nativeGrantIds.length > 0 ? { nativeGrantIds: [...nativeGrantIds] } : {};
+    let diskRestored = false;
     try {
-      if (diskBefore === null) await tauriFs.deletePath(path);
-      else await tauriFs.writeFile(path, diskBefore);
+      if (expectedOnDisk === undefined) {
+        throw new Error('The current file revision cannot be verified; refusing to revert it.');
+      }
+      const currentExists = await tauriInvoke('path_exists', { path, ...grantArgs });
+      if (expectedOnDisk === null && currentExists) {
+        throw new Error('The file changed on disk after the agent edit; refusing to revert it.');
+      }
+      if (typeof expectedOnDisk === 'string') {
+        if (!currentExists) {
+          throw new Error('The file changed on disk after the agent edit; refusing to revert it.');
+        }
+        const currentContent = await tauriInvokeRaw<string>('read_file', { path, ...grantArgs });
+        if (currentContent !== expectedOnDisk) {
+          throw new Error('The file changed on disk after the agent edit; refusing to revert it.');
+        }
+      }
+
+      if (diskBefore === null && currentExists) {
+        await tauriInvokeRaw<void>('delete_path', {
+          path,
+          ...grantArgs,
+        });
+      } else if (diskBefore !== null) {
+        await tauriInvokeRaw<void>('write_file', {
+          path,
+          content: diskBefore,
+          ...grantArgs,
+        });
+      }
+      diskRestored = true;
     } catch (error) {
       console.warn('[HarnessBridge] Failed to restore disk snapshot:', error);
+      throw new Error(
+        error instanceof Error && error.message.includes('refusing to revert')
+          ? `${error.message} The change remains pending for recovery.`
+          : `Could not restore the original file at ${path}; the change remains pending for recovery.`,
+      );
     }
     if (bufferBefore !== null) {
       useFileStore.getState().setFileContent(path, bufferBefore);
@@ -3771,14 +4575,34 @@ ${hints.map((h) => `- ${h}`).join('\n')}
       captured?.tabId ?? useEditorStore.getState().tabs.find((tab) => tab.filePath === path)?.id;
     if (tabId)
       useEditorStore.getState().markDirty(tabId, captured?.wasDirty ?? session?.wasDirty ?? false);
-    this.mutationSnapshots.delete(path);
+    if (diskRestored) {
+      this.mutationSnapshots.delete(path);
+      await this.revokeMutationGrants(captured);
+    }
   }
 
-  private acceptMutationSnapshot(path: string): void {
+  private async acceptMutationSnapshot(path: string): Promise<void> {
     const captured = this.mutationSnapshots.get(path);
     const tabId =
       captured?.tabId ?? useEditorStore.getState().tabs.find((tab) => tab.filePath === path)?.id;
     if (tabId) useEditorStore.getState().markDirty(tabId, false);
     this.mutationSnapshots.delete(path);
+    await this.revokeMutationGrants(captured);
+  }
+
+  private async revokeMutationGrants(snapshot: MutationSnapshot | undefined): Promise<void> {
+    if (!snapshot?.nativeGrantIds?.length) return;
+    const stillNeeded = new Set(
+      [...this.mutationSnapshots.values()].flatMap((pending) => pending.nativeGrantIds ?? []),
+    );
+    const grantIds = snapshot.nativeGrantIds.filter((grantId) => !stillNeeded.has(grantId));
+    if (grantIds.length === 0) return;
+    try {
+      await tauriInvoke('workspace_revoke_external_grants', {
+        grantIds,
+      });
+    } catch (error) {
+      this.debug(`Could not revoke mutation-review grants: ${String(error)}`);
+    }
   }
 }

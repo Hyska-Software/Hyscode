@@ -12,6 +12,15 @@ describe('ContextManager protocol framing', () => {
     expect(snapshot.budget.available).toBeLessThanOrEqual(24_000);
   });
 
+  it('rejects a provider frame whose system prompt, tools, and output reserve exceed the limit', () => {
+    const context = new ContextManager();
+    context.setSystemPrompt('x'.repeat(8_000));
+
+    expect(() => context.buildSnapshot([], 1_000, 100)).toThrow(
+      'Context frame exceeds the configured input budget',
+    );
+  });
+
   it('places volatile context after reusable history and before the current turn', () => {
     const context = new ContextManager();
     context.addSource({ id: 'explicit', type: 'context_chip', priority: 'high', content: 'EXPLICIT', tokenEstimate: 2, origin: 'explicit' });

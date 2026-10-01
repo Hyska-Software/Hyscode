@@ -19,8 +19,8 @@ git remote -v
 git fetch <remote>
 git checkout main && git pull --rebase <remote> main
 
-# 4. Node 18+, pnpm 10+, Rust 1.70+
-node -v && pnpm -v && cargo --version
+# 4. Node 20+, npm 11+, Rust 1.70+
+node -v && npm -v && cargo --version
 ```
 
 Para criar o token correto: https://github.com/settings/tokens — escopos
@@ -70,8 +70,8 @@ cards de tool call em tempo real.
 - [ ] Testes unitários cobrem happy path + erro
 
 ## Plano de teste
-1. `pnpm --filter @hyscode/agent-harness test`
-2. Manual: rodar `pnpm dev` e observar agent panel
+1. `npm run test --workspace=@hyscode/agent-harness`
+2. Manual: rodar `npm run dev` e observar agent panel
 EOF
 )"
 ```

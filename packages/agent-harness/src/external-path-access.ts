@@ -27,6 +27,8 @@ export type ExternalPathAccessRequest = {
 export type ExternalPathAccess = {
   /** Resolve a path only when it is inside the workspace or authorized. */
   resolve(path: string): string;
+  /** Opaque Desktop-native grants paired with this approved invocation. */
+  nativeGrantIds?: readonly string[];
 };
 
 function normalizeForComparison(path: string): string {
@@ -68,6 +70,7 @@ function valuesForField(input: Record<string, unknown>, field: ExternalPathField
  */
 export class ExternalPathAccessRegistry {
   private readonly sessionDirectories = new Map<ExternalPathOperation, Set<string>>();
+  private readonly sessionNativeGrantIds = new Map<ExternalPathOperation, Set<string>>();
 
   inspect(
     definition: ExternalPathAccessDefinition,
@@ -108,21 +111,32 @@ export class ExternalPathAccessRegistry {
     return request.paths.every((path) => this.hasSessionDirectoryGrant(request.operation, path));
   }
 
-  grant(request: ExternalPathAccessRequest, grant: ExternalPathGrant): void {
+  grant(
+    request: ExternalPathAccessRequest,
+    grant: ExternalPathGrant,
+    nativeGrantId?: string,
+  ): void {
     if (grant !== 'session-directory') return;
     const directories = this.sessionDirectories.get(request.operation) ?? new Set<string>();
     for (const directory of request.directories) directories.add(normalizeForComparison(directory));
     this.sessionDirectories.set(request.operation, directories);
+    if (nativeGrantId) {
+      const nativeGrantIds = this.sessionNativeGrantIds.get(request.operation) ?? new Set<string>();
+      nativeGrantIds.add(nativeGrantId);
+      this.sessionNativeGrantIds.set(request.operation, nativeGrantIds);
+    }
   }
 
   createAccess(
     request: ExternalPathAccessRequest,
     workspacePath: string,
+    nativeGrantIds: readonly string[] = [],
   ): ExternalPathAccess {
     const invocationPaths = new Set(request.paths.map(normalizeForComparison));
     const invocationDirectories = request.directoryScopes.map(normalizeForComparison);
 
     return {
+      nativeGrantIds,
       resolve: (rawPath: string): string => {
         const resolved = resolveWorkspacePath(rawPath, workspacePath, {
           allowExternalAbsolute: true,
@@ -141,8 +155,17 @@ export class ExternalPathAccessRegistry {
     };
   }
 
-  clear(): void {
+  getSessionNativeGrantIds(operation: ExternalPathOperation): string[] {
+    return [...(this.sessionNativeGrantIds.get(operation) ?? [])];
+  }
+
+  clear(): string[] {
+    const nativeGrantIds = new Set(
+      [...this.sessionNativeGrantIds.values()].flatMap((ids) => [...ids]),
+    );
     this.sessionDirectories.clear();
+    this.sessionNativeGrantIds.clear();
+    return [...nativeGrantIds];
   }
 
   private hasSessionDirectoryGrant(operation: ExternalPathOperation, path: string): boolean {

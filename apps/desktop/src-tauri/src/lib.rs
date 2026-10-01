@@ -37,9 +37,53 @@ pub fn run() {
             let app_dir = dirs::data_dir()
                 .unwrap_or_else(|| std::path::PathBuf::from("."))
                 .join("hyscode");
-            DbState(Mutex::new(commands::db::open_database(&app_dir)))
+            match commands::db::open_database(&app_dir) {
+                Ok(conn) => DbState(Mutex::new(conn)),
+                Err(error) => {
+                    // Never panic at startup: log the actionable error and
+                    // fall back to an ephemeral in-memory database.
+                    eprintln!("[database] {error}");
+                    eprintln!("[database] Falling back to an ephemeral in-memory database.");
+                    match commands::db::open_memory_database() {
+                        Ok(conn) => DbState(Mutex::new(conn)),
+                        Err(fallback_error) => {
+                            eprintln!("[database] {fallback_error}");
+                            eprintln!("[database] In-memory fallback failed; db commands will report errors.");
+                            // `open_in_memory` only fails on allocation
+                            // failure; crashing here would hide the real
+                            // error above, so keep a (broken) handle and let
+                            // each command surface its SQLite error.
+                            DbState(Mutex::new(
+                                rusqlite::Connection::open_in_memory().unwrap_or_else(|_| {
+                                    // Last resort: an unusable connection is
+                                    // impossible to construct without I/O, so
+                                    // as a final fallback open a temp-file DB.
+                                    let fallback_path =
+                                        std::env::temp_dir().join("hyscode-fallback.db");
+                                    rusqlite::Connection::open(fallback_path)
+                                        .expect("SQLite is unusable on this machine")
+                                }),
+                            ))
+                        }
+                    }
+                }
+            }
+        })
+        .setup(|_app| {
+            if let Err(error) = commands::fs::restore_authorized_roots() {
+                // Fail closed on malformed or unavailable grant storage. The
+                // user can still select workspace folders again from the UI.
+                eprintln!("[workspace-authority] {error}");
+            }
+            Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            commands::fs::workspace_confirm_external_access,
+            commands::fs::workspace_confirm_diagnostics,
+            commands::fs::workspace_revoke_external_grants,
+            commands::fs::workspace_pick_folder,
+            commands::fs::workspace_pick_file,
+            commands::fs::workspace_save_file,
             commands::fs::read_file,
             commands::fs::read_file_chunk,
             commands::fs::write_file,
@@ -51,6 +95,7 @@ pub fn run() {
             commands::fs::join_path,
             commands::fs::validate_name,
             commands::fs::stat_path,
+            commands::fs::path_exists,
             commands::fs::search_files,
             commands::fs::rename_path,
             commands::fs::create_directory,
@@ -293,7 +338,11 @@ pub fn run() {
             commands::window::open_devtools,
         ])
         .setup(|app| {
-            let _window = app.get_webview_window("main").unwrap();
+            if let Some(_window) = app.get_webview_window("main") {
+                // Main window present; nothing to initialize yet.
+            } else {
+                eprintln!("[setup] main webview window not found");
+            }
             Ok(())
         })
         .run(tauri::generate_context!())

@@ -34,6 +34,7 @@ interface AnthropicTool {
 
 function toAnthropicMessages(messages: Message[]): AnthropicMessage[] {
   const result: AnthropicMessage[] = [];
+  if (!messages.length) throw new Error('model required: messages must not be empty');
 
   for (const msg of messages) {
     if (msg.role === 'system') continue; // system prompt handled separately
@@ -46,7 +47,14 @@ function toAnthropicMessages(messages: Message[]): AnthropicMessage[] {
         case 'text':
           content.push({ type: 'text', text: c.text });
           break;
+        case 'thinking':
+          // Preserve thinking as text so replay/multi-turn history doesn't lose it.
+          content.push({ type: 'text', text: `[thinking]${c.thinking}` });
+          break;
         case 'image':
+          if (c.base64.length > 20 * 1024 * 1024) {
+            throw new Error('image too large: base64 payload exceeds 20MB');
+          }
           content.push({
             type: 'image',
             source: { type: 'base64', media_type: c.mediaType, data: c.base64 },
@@ -229,14 +237,12 @@ function parseAnthropicEvent(
 }
 
 // ─── Thinking variant presets ────────────────────────────────────────────────
-// Aligned with docs/MODELS_REFERENCE.md §4 (effort parameter):
-//   low / medium / high (default) on all adaptive models,
-//   xhigh only on Fable 5, Mythos 5, Opus 5, Opus 4.8, Opus 4.7, Sonnet 5,
-//   max on Fable 5, Mythos 5, Opus 5, Opus 4.8, Opus 4.7, Opus 4.6,
-//   Sonnet 5, Sonnet 4.6.
-// For adaptive models the level maps directly to thinking.effort. For budget
-// models (sonnet 4.5, haiku 4.5 — "extended thinking") the level maps to a
-// thinking.budget_tokens preset.
+// Aligned with https://platform.claude.com/docs/en/models/overview (Oct 2026):
+// current lineup is Fable 5.1, Opus 5.5, Sonnet 5.5, Haiku 4.5. Adaptive
+// thinking (effort low/medium/high/xhigh/max) is always on for Fable 5.1 and
+// Opus 5.5 and cannot be disabled; Sonnet 5.5 is adaptive with default high;
+// Haiku 4.5 keeps manual extended thinking (budget_tokens).
+// Legacy 4.x/5.0 models remain available via gateways, not direct.
 
 /** Map an OpenCode thinking level to a budget_tokens preset for non-adaptive
  *  Anthropic models. The docs example uses 16000 for sonnet-4-5 ("high"). */
@@ -256,12 +262,21 @@ function budgetTokensForLevel(level?: string): number {
   }
 }
 
-/** Adaptive models with the full effort ladder (fable 5, mythos 5, opus 5,
- *  opus 4.8, opus 4.7, sonnet 5). */
+/** Adaptive models with the full effort ladder and default high
+ *  (fable 5.1, sonnet 5.5). */
 export const ADAPTIVE_CLAUDE_XHIGH_VARIANTS: ThinkingVariants = {
   kind: 'anthropic',
   levels: ['low', 'medium', 'high', 'xhigh', 'max'],
   defaultLevel: 'high',
+  supportsAdaptive: true,
+};
+
+/** Adaptive models with the full effort ladder and default medium
+ *  (opus 5.5 — always-on adaptive thinking, API default medium). */
+export const ADAPTIVE_CLAUDE_XHIGH_MEDIUM_VARIANTS: ThinkingVariants = {
+  kind: 'anthropic',
+  levels: ['low', 'medium', 'high', 'xhigh', 'max'],
+  defaultLevel: 'medium',
   supportsAdaptive: true,
 };
 
@@ -291,11 +306,13 @@ export const BUDGET_CLAUDE_VARIANTS: ThinkingVariants = {
 
 // ─── Provider Implementation ────────────────────────────────────────────────
 
-// SOTA-only direct catalog (verified Sep 2026 against
-// https://platform.claude.com/docs/en/models/overview): the 4-model current
-// lineup — Fable 5.1 (frontier reasoning), Opus 5 (default), Sonnet 5
-// (speed+intelligence), Haiku 4.5 (fastest). Legacy 4.x models remain
-// available via gateways, not direct.
+// SOTA-only direct catalog (verified Oct 2026 against
+// https://platform.claude.com/docs/en/models/overview + /about-claude/pricing):
+// the 4-model current lineup — Fable 5.1 (demanding reasoning, $10/$50,
+// cache reads $0.25 = 2.5%), Opus 5.5 (agentic coding default, $4/$20,
+// cache reads $0.20 = 5%), Sonnet 5.5 (speed+intelligence, $2/$10,
+// cache reads $0.20), Haiku 4.5 (fastest, $1/$5, cache reads $0.10).
+// Legacy models (Opus 5, Sonnet 5, 4.x) remain available via gateways.
 const ANTHROPIC_MODELS: AIModel[] = [
   {
     id: 'claude-fable-5-1',
@@ -308,24 +325,26 @@ const ANTHROPIC_MODELS: AIModel[] = [
     supportsVision: true,
     inputPricePerMToken: 10,
     outputPricePerMToken: 50,
+    cachedInputPricePerMToken: 0.25,
     thinkingVariants: ADAPTIVE_CLAUDE_XHIGH_VARIANTS,
   },
   {
-    id: 'claude-opus-5',
-    name: 'Claude Opus 5',
+    id: 'claude-opus-5-5',
+    name: 'Claude Opus 5.5',
     provider: 'anthropic',
     contextWindow: 1_000_000,
     maxOutputTokens: 128_000,
     supportsTools: true,
     supportsStreaming: true,
     supportsVision: true,
-    inputPricePerMToken: 5,
-    outputPricePerMToken: 25,
-    thinkingVariants: ADAPTIVE_CLAUDE_XHIGH_VARIANTS,
+    inputPricePerMToken: 4,
+    outputPricePerMToken: 20,
+    cachedInputPricePerMToken: 0.2,
+    thinkingVariants: ADAPTIVE_CLAUDE_XHIGH_MEDIUM_VARIANTS,
   },
   {
-    id: 'claude-sonnet-5',
-    name: 'Claude Sonnet 5',
+    id: 'claude-sonnet-5-5',
+    name: 'Claude Sonnet 5.5',
     provider: 'anthropic',
     contextWindow: 1_000_000,
     maxOutputTokens: 128_000,
@@ -334,6 +353,7 @@ const ANTHROPIC_MODELS: AIModel[] = [
     supportsVision: true,
     inputPricePerMToken: 2,
     outputPricePerMToken: 10,
+    cachedInputPricePerMToken: 0.2,
     thinkingVariants: ADAPTIVE_CLAUDE_XHIGH_VARIANTS,
   },
   {
@@ -347,6 +367,7 @@ const ANTHROPIC_MODELS: AIModel[] = [
     supportsVision: true,
     inputPricePerMToken: 1,
     outputPricePerMToken: 5,
+    cachedInputPricePerMToken: 0.1,
     thinkingVariants: BUDGET_CLAUDE_VARIANTS,
   },
 ];
@@ -376,11 +397,22 @@ export class AnthropicProvider implements AIProvider {
     return this.apiKey.length > 0;
   }
 
+  /** Zero the in-memory API key (secret hygiene on reinit/dispose). */
+  clear(): void {
+    this.apiKey = '';
+  }
+
+  dispose(): void {
+    this.clear();
+  }
+
   async listModels(): Promise<AIModel[]> {
     return this.models;
   }
 
   async *chat(params: ChatParams): AsyncIterable<StreamChunk> {
+    if (!params.model) throw new Error('model required');
+    if (!params.messages.length) throw new Error('model required: messages must not be empty');
     const messages = toAnthropicMessages(params.messages);
 
     const body: Record<string, unknown> = {
@@ -453,7 +485,6 @@ export class AnthropicProvider implements AIProvider {
         {
           'Content-Type': 'application/json',
           'x-api-key': this.apiKey,
-          Authorization: `Bearer ${this.apiKey}`,
           'anthropic-version': '2023-06-01',
           'anthropic-beta': 'prompt-caching-2024-07-31',
         },

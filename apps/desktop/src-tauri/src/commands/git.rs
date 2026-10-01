@@ -1,7 +1,7 @@
 use super::git_backend::{
     collect_status, delta_to_status, diff_patch_text, inject_github_auth, list_remotes,
-    normalize_repo_relative_path, run_git_cli_with_github_auth, worktree_root, GitFile,
-    GitStatusResult, PatchTextAccumulator,
+    normalize_repo_relative_path, run_git_cli_with_github_auth, validate_clone_url,
+    validate_git_ref, worktree_root, GitFile, GitStatusResult, PatchTextAccumulator,
 };
 pub use super::git_backend::{open_repo, run_git_cli, GitRemoteInfo};
 use super::keychain::KeychainState;
@@ -333,26 +333,27 @@ fn repository_operation_state(repo: &Repository) -> &'static str {
 
 // ── Commands ────────────────────────────────────────────────────────────────
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub fn git_is_repo(path: String) -> bool {
     Repository::discover(&path).is_ok()
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub fn git_init(path: String, initial_branch: Option<String>) -> Result<(), String> {
     let branch = initial_branch
         .filter(|value| !value.trim().is_empty())
         .unwrap_or_else(|| "main".to_string());
+    validate_git_ref(&branch)?;
     run_git_cli(&path, ["init", "--initial-branch", branch.as_str()]).map(|_| ())
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub fn git_status(repo_path: String) -> Result<GitStatusResult, String> {
     let repo = open_repo(&repo_path)?;
     collect_status(&repo)
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub fn git_repository_snapshot(repo_path: String) -> Result<GitRepositorySnapshot, String> {
     let repo = open_repo(&repo_path)?;
     let status = collect_status(&repo)?;
@@ -455,7 +456,7 @@ pub struct DiffHunkInfo {
     pub old_lines: u32,
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub fn git_diff_hunks(
     repo_path: String,
     file_path: String,
@@ -499,7 +500,7 @@ const DEFAULT_DIFF_BUDGET: usize = 32 * 1024;
 /// Unified diff of all staged changes (index vs HEAD) in a single pass,
 /// capped at `DEFAULT_DIFF_BUDGET` bytes with a truncation note.
 /// Kept for UI compatibility; new consumers use `git_uncommitted_diff`.
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub fn git_diff_staged_all(repo_path: String) -> Result<String, String> {
     git_uncommitted_diff(repo_path, true, None)
 }
@@ -507,7 +508,7 @@ pub fn git_diff_staged_all(repo_path: String) -> Result<String, String> {
 /// Single-pass unified diff of uncommitted changes — index vs HEAD when
 /// `staged`, worktree vs index otherwise — capped at `max_bytes` with a
 /// truncation note. Replaces the agent's N+1 status + per-file diff loop.
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub fn git_uncommitted_diff(
     repo_path: String,
     staged: bool,
@@ -534,20 +535,20 @@ pub fn git_uncommitted_diff(
     Ok(text)
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub fn git_commit_context(repo_path: String) -> Result<GitCommitContext, String> {
     let repo = open_repo(&repo_path)?;
     build_git_commit_context(&repo)
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub fn git_staged_fingerprint(repo_path: String) -> Result<String, String> {
     let repo = open_repo(&repo_path)?;
     let diff = staged_diff(&repo)?;
     staged_context_files(&diff).map(|(fingerprint, _)| fingerprint)
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub fn git_diff_file(repo_path: String, file_path: String, staged: bool) -> Result<String, String> {
     let repo = open_repo(&repo_path)?;
     let file_path = normalize_repo_relative_path(&repo, &file_path)?;
@@ -616,7 +617,7 @@ fn bytes_to_text(bytes: Option<Vec<u8>>) -> (Option<String>, bool, bool) {
     }
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub fn git_diff_content(
     repo_path: String,
     file_path: String,
@@ -662,7 +663,7 @@ pub fn git_diff_content(
     })
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub fn git_file_content(
     repo_path: String,
     file_path: String,
@@ -788,7 +789,7 @@ fn get_tree_content(
     String::from_utf8(blob.content().to_vec()).map_err(|e| format!("UTF-8 error: {}", e))
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub fn git_add(repo_path: String, paths: Vec<String>) -> Result<(), String> {
     if paths.is_empty() {
         return Ok(());
@@ -803,12 +804,12 @@ pub fn git_add(repo_path: String, paths: Vec<String>) -> Result<(), String> {
     run_git_cli(&repo_path, &args).map(|_| ())
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub fn git_add_all(repo_path: String) -> Result<(), String> {
     run_git_cli(&repo_path, ["add", "-A", "--", "."]).map(|_| ())
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub fn git_unstage(repo_path: String, paths: Vec<String>) -> Result<(), String> {
     let repo = open_repo(&repo_path)?;
     if paths.is_empty() {
@@ -841,7 +842,7 @@ pub fn git_unstage(repo_path: String, paths: Vec<String>) -> Result<(), String> 
     run_git_cli(&repo_path, &args).map(|_| ())
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub fn git_discard(repo_path: String, paths: Vec<String>) -> Result<(), String> {
     let repo = open_repo(&repo_path)?;
     if paths.is_empty() {
@@ -888,12 +889,12 @@ pub fn git_discard(repo_path: String, paths: Vec<String>) -> Result<(), String> 
     Ok(())
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub fn git_commit(repo_path: String, message: String) -> Result<String, String> {
     commit_with_cli(&repo_path, &message, false)
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub fn git_commit_amend(repo_path: String, message: String) -> Result<String, String> {
     commit_with_cli(&repo_path, &message, true)
 }
@@ -922,7 +923,7 @@ fn commit_with_cli(repo_path: &str, message: &str, amend: bool) -> Result<String
         .to_string())
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub fn git_log(repo_path: String, limit: u32) -> Result<Vec<GitCommitInfo>, String> {
     let repo = open_repo(&repo_path)?;
     let mut revwalk = repo
@@ -961,7 +962,7 @@ pub fn git_log(repo_path: String, limit: u32) -> Result<Vec<GitCommitInfo>, Stri
     Ok(commits)
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub fn git_log_file(
     repo_path: String,
     file_path: String,
@@ -1046,7 +1047,7 @@ pub fn git_log_file(
     Ok(commits)
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub fn git_branch_current(repo_path: String) -> Result<String, String> {
     let repo = open_repo(&repo_path)?;
     let head = match repo.head() {
@@ -1067,7 +1068,7 @@ pub fn git_branch_current(repo_path: String) -> Result<String, String> {
     }
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub fn git_branch_list(repo_path: String) -> Result<Vec<GitBranchInfo>, String> {
     let repo = open_repo(&repo_path)?;
     let mut branches = Vec::new();
@@ -1117,55 +1118,84 @@ pub fn git_branch_list(repo_path: String) -> Result<Vec<GitBranchInfo>, String> 
     Ok(branches)
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub fn git_branch_create(
     repo_path: String,
     name: String,
     checkout: bool,
     source: Option<String>,
 ) -> Result<(), String> {
+    validate_git_ref(&name)?;
+    // NOTE: `switch -c <name>` cannot take a `--` separator (it would be
+    // consumed as `-c`'s value); leading-dash rejection in `validate_git_ref`
+    // already rules out option injection here.
     let mut args = if checkout {
         vec!["switch".to_string(), "-c".to_string(), name]
     } else {
-        vec!["branch".to_string(), name]
+        vec!["branch".to_string(), "--".to_string(), name]
     };
     if let Some(source) = source.filter(|value| !value.trim().is_empty()) {
+        // `source` is a rev-parse revision (may legitimately be `HEAD~1` or a
+        // SHA), so only leading-dash/empty injection is rejected here — the
+        // full `validate_git_ref` would reject valid `~` revisions.
+        validate_cli_value(&source)?;
         args.push(source);
     }
     run_git_cli(&repo_path, &args).map(|_| ())
 }
 
-#[tauri::command]
+/// Light validation for values that occupy a CLI *value* position (rev-parse
+/// revisions, `-m` messages excluded): non-empty, no leading dash (option
+/// injection), no control characters.
+fn validate_cli_value(value: &str) -> Result<(), String> {
+    if value.trim().is_empty() {
+        return Err("Validation: value cannot be empty".to_string());
+    }
+    if value.starts_with('-') {
+        return Err(format!("Validation: invalid value: '{value}'"));
+    }
+    if value.chars().any(|c| c.is_control()) {
+        return Err(format!("Validation: invalid value: '{value}'"));
+    }
+    Ok(())
+}
+
+#[tauri::command(rename_all = "camelCase")]
 pub fn git_branch_delete(
     repo_path: String,
     name: String,
     force: Option<bool>,
 ) -> Result<(), String> {
+    validate_git_ref(&name)?;
     let flag = if force.unwrap_or(false) { "-D" } else { "-d" };
-    run_git_cli(&repo_path, ["branch", flag, name.as_str()]).map(|_| ())
+    run_git_cli(&repo_path, ["branch", flag, "--", name.as_str()]).map(|_| ())
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub fn git_checkout(repo_path: String, branch: String) -> Result<(), String> {
+    validate_git_ref(&branch)?;
     let repo = open_repo(&repo_path)?;
     let is_local = repo.find_branch(&branch, BranchType::Local).is_ok();
     let is_remote = repo.find_branch(&branch, BranchType::Remote).is_ok();
     if is_local {
-        run_git_cli(&repo_path, ["switch", branch.as_str()]).map(|_| ())
+        run_git_cli(&repo_path, ["switch", "--", branch.as_str()]).map(|_| ())
     } else if is_remote {
+        // `switch --track <branch>`: no `--` separator possible here (`--track`
+        // takes no value but `--` after it breaks branch parsing on some git
+        // versions); `validate_git_ref` above already blocks option injection.
         run_git_cli(&repo_path, ["switch", "--track", branch.as_str()]).map(|_| ())
     } else {
         Err(format!("Branch '{branch}' was not found"))
     }
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub fn git_remote_list(repo_path: String) -> Result<Vec<GitRemoteInfo>, String> {
     let repo = open_repo(&repo_path)?;
     list_remotes(&repo)
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub fn git_ahead_behind(repo_path: String) -> Result<GitAheadBehind, String> {
     let repo = open_repo(&repo_path)?;
 
@@ -1218,7 +1248,7 @@ pub fn git_ahead_behind(repo_path: String) -> Result<GitAheadBehind, String> {
     Ok(GitAheadBehind { ahead, behind })
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub fn git_stash(
     repo_path: String,
     message: Option<String>,
@@ -1235,7 +1265,7 @@ pub fn git_stash(
     run_git_cli(&repo_path, &args).map(|_| ())
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub fn git_stash_list(repo_path: String) -> Result<Vec<GitStashEntry>, String> {
     let mut repo = Repository::discover(&repo_path).map_err(|e| format!("Git error: {}", e))?;
 
@@ -1252,19 +1282,19 @@ pub fn git_stash_list(repo_path: String) -> Result<Vec<GitStashEntry>, String> {
     Ok(stashes)
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub fn git_stash_pop(repo_path: String, index: usize) -> Result<(), String> {
     let stash = format!("stash@{{{index}}}");
     run_git_cli(&repo_path, ["stash", "pop", stash.as_str()]).map(|_| ())
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub fn git_stash_apply(repo_path: String, index: usize) -> Result<(), String> {
     let stash = format!("stash@{{{index}}}");
     run_git_cli(&repo_path, ["stash", "apply", stash.as_str()]).map(|_| ())
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub fn git_config_identity(
     repo_path: Option<String>,
     scope: String,
@@ -1292,7 +1322,7 @@ pub fn git_config_identity(
     })
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub fn git_config_set_identity(
     repo_path: Option<String>,
     scope: String,
@@ -1313,6 +1343,14 @@ pub fn git_config_set_identity(
     if user_name.trim().is_empty() || user_email.trim().is_empty() {
         return Err("Git user name and email are required".to_string());
     }
+    // Config values are written verbatim to `.git/config` / `~/.gitconfig`;
+    // reject control characters (notably newlines) so a value cannot inject
+    // additional config lines.
+    for value in [user_name.trim(), user_email.trim()] {
+        if value.chars().any(|c| c.is_control()) {
+            return Err("Validation: git identity contains invalid characters".to_string());
+        }
+    }
     run_git_cli(cwd, ["config", scope_flag, "user.name", user_name.trim()])?;
     run_git_cli(cwd, ["config", scope_flag, "user.email", user_email.trim()])?;
     Ok(())
@@ -1320,7 +1358,7 @@ pub fn git_config_set_identity(
 
 // ── Commit Detail ────────────────────────────────────────────────────────────
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub fn git_commit_detail(repo_path: String, hash: String) -> Result<CommitDetail, String> {
     let repo = open_repo(&repo_path)?;
     let oid = git2::Oid::from_str(&hash).map_err(|e| format!("Invalid hash: {}", e))?;
@@ -1406,7 +1444,7 @@ pub fn git_commit_detail(repo_path: String, hash: String) -> Result<CommitDetail
     })
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub fn git_commit_file_diff(
     repo_path: String,
     hash: String,
@@ -1458,7 +1496,7 @@ pub struct GraphCommit {
     pub refs: Vec<String>,
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub fn git_log_graph(repo_path: String, limit: u32) -> Result<Vec<GraphCommit>, String> {
     let repo = open_repo(&repo_path)?;
     let mut revwalk = repo
@@ -1590,7 +1628,7 @@ pub fn git_log_graph(repo_path: String, limit: u32) -> Result<Vec<GraphCommit>, 
 /// default) is injected so private repositories can be cloned without extra
 /// credential configuration. The cloned `origin` remote is bound to the
 /// selected account so future push/pull/fetch keep using it.
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub fn git_clone(
     keychain: State<'_, KeychainState>,
     url: String,
@@ -1598,11 +1636,30 @@ pub fn git_clone(
     branch: Option<String>,
     account_id: Option<String>,
 ) -> Result<(), String> {
+    // SECURITY: only https://, git@ and gh: URLs; file:// and local paths
+    // are rejected so clone cannot be abused for local file reads.
+    let url = validate_clone_url(&url)?;
+    let branch = branch
+        .filter(|value| !value.trim().is_empty())
+        .map(|value| validate_git_ref(value.trim()).map(|()| value.trim().to_string()))
+        .transpose()?;
+    if target_path.trim().is_empty() {
+        return Err("Validation: target path cannot be empty".to_string());
+    }
     let target = PathBuf::from(&target_path);
     let parent = target
         .parent()
         .filter(|parent| !parent.as_os_str().is_empty())
         .ok_or_else(|| "Invalid target path".to_string())?;
+    // Guard the clone destination: never clone onto/above a filesystem root.
+    if parent.exists() {
+        let canonical = std::fs::canonicalize(parent)
+            .map_err(|e| format!("Cannot access clone parent '{}': {e}", parent.display()))?;
+        let root = canonical.parent().is_none_or(|p| p.as_os_str().is_empty());
+        if root {
+            return Err("Validation: cannot clone onto a filesystem root".to_string());
+        }
+    }
     if !parent.exists() {
         std::fs::create_dir_all(parent)
             .map_err(|e| format!("Failed to create target directory: {}", e))?;
@@ -1626,9 +1683,9 @@ pub fn git_clone(
     inject_github_auth(&mut command, &url, token.as_deref());
 
     let mut args = vec!["clone".to_string()];
-    if let Some(branch) = branch.filter(|value| !value.trim().is_empty()) {
+    if let Some(branch) = branch.as_deref() {
         args.push("--branch".to_string());
-        args.push(branch);
+        args.push(branch.to_string());
     }
     args.push(url.clone());
     args.push(target_path.clone());
@@ -1657,20 +1714,25 @@ pub fn git_clone(
 }
 
 /// Add a git remote to the repository.
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub fn git_remote_add(repo_path: String, name: String, url: String) -> Result<(), String> {
+    validate_git_ref(&name)?;
+    let url = validate_clone_url(&url)?;
     run_git_cli(&repo_path, ["remote", "add", name.as_str(), url.as_str()]).map(|_| ())
 }
 
 /// Remove a git remote from the repository.
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub fn git_remote_remove(repo_path: String, name: String) -> Result<(), String> {
+    validate_git_ref(&name)?;
     run_git_cli(&repo_path, ["remote", "remove", name.as_str()]).map(|_| ())
 }
 
 /// Change the URL of a git remote in the repository.
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub fn git_remote_set_url(repo_path: String, name: String, url: String) -> Result<(), String> {
+    validate_git_ref(&name)?;
+    let url = validate_clone_url(&url)?;
     run_git_cli(
         &repo_path,
         ["remote", "set-url", name.as_str(), url.as_str()],
@@ -1679,20 +1741,22 @@ pub fn git_remote_set_url(repo_path: String, name: String, url: String) -> Resul
 }
 
 /// Read which GitHub account is bound to a remote (local git config).
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub fn git_remote_account_get(repo_path: String, remote: String) -> Result<Option<String>, String> {
+    validate_git_ref(&remote)?;
     Ok(super::git_backend::remote_account_binding(
         &repo_path, &remote,
     ))
 }
 
 /// Bind (or clear, with `null`) the GitHub account used by a remote.
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub fn git_remote_account_set(
     repo_path: String,
     remote: String,
     account_id: Option<String>,
 ) -> Result<(), String> {
+    validate_git_ref(&remote)?;
     let account_id = account_id
         .as_deref()
         .map(str::trim)
@@ -1700,13 +1764,19 @@ pub fn git_remote_account_set(
     super::git_backend::set_remote_account_binding(&repo_path, &remote, account_id)
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub fn git_push(
     keychain: State<'_, KeychainState>,
     repo_path: String,
     remote: Option<String>,
     branch: Option<String>,
 ) -> Result<String, String> {
+    if let Some(remote) = remote.as_deref() {
+        validate_git_ref(remote)?;
+    }
+    if let Some(branch) = branch.as_deref() {
+        validate_git_ref(branch)?;
+    }
     match (remote, branch) {
         (Some(remote), Some(branch)) => run_git_cli_with_github_auth(
             &keychain,
@@ -1726,13 +1796,15 @@ pub fn git_push(
     }
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub fn git_publish_branch(
     keychain: State<'_, KeychainState>,
     repo_path: String,
     remote: String,
     branch: String,
 ) -> Result<String, String> {
+    validate_git_ref(&remote)?;
+    validate_git_ref(&branch)?;
     run_git_cli_with_github_auth(
         &keychain,
         &repo_path,
@@ -1746,12 +1818,15 @@ pub fn git_publish_branch(
     )
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub fn git_pull(
     keychain: State<'_, KeychainState>,
     repo_path: String,
     remote: Option<String>,
 ) -> Result<String, String> {
+    if let Some(remote) = remote.as_deref() {
+        validate_git_ref(remote)?;
+    }
     match remote {
         Some(remote) => run_git_cli_with_github_auth(
             &keychain,
@@ -1763,12 +1838,15 @@ pub fn git_pull(
     }
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub fn git_fetch(
     keychain: State<'_, KeychainState>,
     repo_path: String,
     remote: Option<String>,
 ) -> Result<String, String> {
+    if let Some(remote) = remote.as_deref() {
+        validate_git_ref(remote)?;
+    }
     match remote {
         Some(remote) => run_git_cli_with_github_auth(
             &keychain,
@@ -1782,7 +1860,7 @@ pub fn git_fetch(
     }
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub fn git_fetch_all(
     keychain: State<'_, KeychainState>,
     repo_path: String,
@@ -1795,24 +1873,34 @@ pub fn git_fetch_all(
     run_git_cli_with_github_auth(&keychain, &repo_path, None, args)
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub fn git_merge(repo_path: String, branch: String) -> Result<String, String> {
+    validate_git_ref(&branch)?;
+    // `git merge` has no `--` separator; leading-dash rejection above already
+    // blocks option injection.
     run_git_cli(&repo_path, ["merge", &branch])
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub fn git_reset(repo_path: String, mode: String, target: String) -> Result<String, String> {
-    let repo = open_repo(&repo_path)?;
-    let obj = repo
-        .revparse_single(&target)
-        .map_err(|e| format!("Invalid target: {}", e))?;
-
+    // Strict mode enum (previously any unknown mode silently became "mixed").
     let kind = match mode.as_str() {
         "soft" => git2::ResetType::Soft,
         "mixed" => git2::ResetType::Mixed,
         "hard" => git2::ResetType::Hard,
-        _ => git2::ResetType::Mixed,
+        _ => {
+            return Err(format!(
+                "Validation: invalid reset mode: '{mode}' (expected soft, mixed or hard)"
+            ))
+        }
     };
+    // `target` goes to libgit2 `revparse_single` (no CLI flag parsing), so
+    // only leading-dash/empty values are rejected — `HEAD~3` stays valid.
+    validate_cli_value(&target)?;
+    let repo = open_repo(&repo_path)?;
+    let obj = repo
+        .revparse_single(&target)
+        .map_err(|e| format!("Invalid target: {}", e))?;
 
     repo.reset(&obj, kind, None)
         .map_err(|e| format!("Reset error: {}", e))?;
@@ -1820,7 +1908,7 @@ pub fn git_reset(repo_path: String, mode: String, target: String) -> Result<Stri
     Ok(format!("Reset {} to {}", mode, target))
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub fn git_blame(
     repo_path: String,
     file_path: String,
@@ -1873,24 +1961,27 @@ pub fn git_blame(
     Ok(hunks)
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub fn git_tag_create(
     repo_path: String,
     name: String,
     message: Option<String>,
 ) -> Result<(), String> {
+    validate_git_ref(&name)?;
+    // `message` is always consumed as `-m`'s value (never flag-parsed, no
+    // shell involved), so multiline messages stay allowed.
     if let Some(message) = message.filter(|value| !value.trim().is_empty()) {
         run_git_cli(
             &repo_path,
             ["tag", "-a", name.as_str(), "-m", message.as_str()],
         )?;
     } else {
-        run_git_cli(&repo_path, ["tag", name.as_str()])?;
+        run_git_cli(&repo_path, ["tag", "--", name.as_str()])?;
     }
     Ok(())
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub fn git_branch_changes(
     repo_path: String,
     base_branch: Option<String>,
@@ -1905,7 +1996,12 @@ pub fn git_branch_changes(
     // Resolve the base reference. If none is provided, try common upstream/base
     // branch names in order of preference.
     let base_name = match base_branch {
-        Some(name) => name,
+        Some(name) => {
+            // Rev-parse revision (not a CLI flag position): light validation
+            // so `HEAD~1` keeps working while empty/leading-dash values fail.
+            validate_cli_value(name.trim())?;
+            name.trim().to_string()
+        }
         None => {
             let upstream = head
                 .shorthand()
@@ -2016,6 +2112,25 @@ mod tests {
     use super::*;
     use std::process::Command;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn git_commit_info_serializes_with_snake_case_keys() {
+        let commit = GitCommitInfo {
+            hash: "full-hash".to_string(),
+            short_hash: "short".to_string(),
+            message: "message".to_string(),
+            author: "author".to_string(),
+            email: "author@example.invalid".to_string(),
+            timestamp: 0,
+        };
+        let value = serde_json::to_value(commit).expect("commit info serializes");
+
+        assert_eq!(
+            value.get("short_hash").and_then(|v| v.as_str()),
+            Some("short")
+        );
+        assert!(value.get("shortHash").is_none());
+    }
 
     struct TestRepository {
         path: PathBuf,
@@ -2343,6 +2458,21 @@ mod tests {
             normalize_repo_relative_path(&opened, &absolute_inside).unwrap(),
             "file.txt"
         );
+
+        #[cfg(windows)]
+        {
+            let extended_path = format!(r"\\?\{}", absolute_inside);
+            assert_eq!(
+                normalize_repo_relative_path(&opened, &extended_path).unwrap(),
+                "file.txt"
+            );
+
+            let forward_slash_extended = format!("//?/{}", absolute_inside.replace('\\', "/"));
+            assert_eq!(
+                normalize_repo_relative_path(&opened, &forward_slash_extended).unwrap(),
+                "file.txt"
+            );
+        }
 
         let absolute_outside = std::env::temp_dir()
             .join("hyscode-outside-worktree.txt")

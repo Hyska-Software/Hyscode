@@ -95,13 +95,43 @@ export class ProviderRegistry {
     this.retryConfig = config;
   }
 
-  /** Get all available models across all configured providers */
+  /** Get all available models across all configured providers.
+   *  Fail-fast per provider: one provider's outage must not hide the rest.
+   *  Each provider gets a 15s timeout; failures are logged and skipped. */
   async listAllModels(): Promise<AIModel[]> {
+    const configured = this.listConfigured();
+    const settled = await Promise.allSettled(
+      configured.map(async (provider) => {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 15_000);
+        try {
+          // Providers that accept AbortSignal-aware listModels can use it;
+          // most ignore extra args — race still bounds the wait.
+          const models = await Promise.race([
+            provider.listModels(),
+            new Promise<never>((_, reject) => {
+              controller.signal.addEventListener('abort', () =>
+                reject(new Error(`listModels timeout (15s) for "${provider.id}"`)),
+              );
+            }),
+          ]);
+          return models;
+        } finally {
+          clearTimeout(timer);
+        }
+      }),
+    );
     const allModels: AIModel[] = [];
-    for (const provider of this.listConfigured()) {
-      const models = await provider.listModels();
-      allModels.push(...models);
-    }
+    settled.forEach((result, index) => {
+      if (result.status === 'fulfilled') {
+        allModels.push(...result.value);
+      } else {
+        console.warn(
+          `[ProviderRegistry] listModels failed for "${configured[index].id}":`,
+          result.reason,
+        );
+      }
+    });
     return allModels;
   }
 
@@ -147,8 +177,12 @@ export class ProviderRegistry {
     // (retrying mid-stream would break the protocol)
     let retryCount = 0;
     const stream = await withRetry(
-      async () => {
-        const iter = provider.chat({ ...chatParams, model });
+      async (attemptSignal) => {
+        const iter = provider.chat({
+          ...chatParams,
+          model,
+          signal: attemptSignal ?? chatParams.signal,
+        });
         // Get the iterator and try the first read to verify connection works
         const asyncIter = iter[Symbol.asyncIterator]();
         let first: IteratorResult<StreamChunk>;
@@ -158,6 +192,7 @@ export class ProviderRegistry {
           throw normalizeProviderError(error, provider.id, 'connecting');
         }
         if (!first.done && first.value.type === 'error' && first.value.retryable) {
+          await asyncIter.return?.();
           throw new ProviderError(first.value.error, provider.id, undefined, true);
         }
         return { asyncIter, first };
@@ -309,6 +344,13 @@ export class ProviderRegistry {
     codexInvoke?: CodexInvoke,
     codexAuthDetected = false,
   ): Promise<void> {
+    // Clear any in-memory secrets held by the old instance before dropping it.
+    const existing = this.providers.get(providerId) as { dispose?: () => void } | undefined;
+    try {
+      existing?.dispose?.();
+    } catch (err) {
+      console.warn(`[ProviderRegistry] dispose failed for "${providerId}":`, err);
+    }
     this.unregister(providerId);
 
     switch (providerId) {

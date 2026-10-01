@@ -5,6 +5,8 @@ const DEFAULT_RETRY_CONFIG: RetryConfig = {
   baseDelayMs: 1000,
   maxDelayMs: 30_000,
   retryableStatuses: [429, 500, 502, 503, 529],
+  requestTimeoutMs: 120_000,
+  streamIdleTimeoutMs: 90_000,
 };
 
 function jitter(delayMs: number): number {
@@ -17,7 +19,7 @@ function getDelay(attempt: number, config: RetryConfig): number {
 }
 
 export async function withRetry<T>(
-  fn: () => Promise<T>,
+  fn: (signal?: AbortSignal) => Promise<T>,
   config: Partial<RetryConfig> = {},
 ): Promise<T> {
   const cfg: RetryConfig = { ...DEFAULT_RETRY_CONFIG, ...config };
@@ -25,7 +27,7 @@ export async function withRetry<T>(
 
   for (let attempt = 0; attempt <= cfg.maxRetries; attempt++) {
     try {
-      return await fn();
+      return await withRequestTimeout(fn, cfg.requestTimeoutMs, cfg.signal);
     } catch (err) {
       lastError = err;
 
@@ -72,6 +74,174 @@ export async function withRetry<T>(
   }
 
   throw lastError;
+}
+
+/**
+ * Race a single attempt against `requestTimeoutMs`. Uses a `setTimeout` that
+ * rejects with a timeout ProviderError so slow connects don't hang forever.
+ * When the caller passes its own `signal`, an abort still wins immediately.
+ */
+function withRequestTimeout<T>(
+  fn: (signal?: AbortSignal) => Promise<T>,
+  requestTimeoutMs: number | undefined,
+  signal?: AbortSignal,
+): Promise<T> {
+  if (signal?.aborted) {
+    return Promise.reject(signal.reason ?? new DOMException('Request aborted', 'AbortError'));
+  }
+  if (!requestTimeoutMs || requestTimeoutMs <= 0) return fn(signal);
+
+  const timeoutController = new AbortController();
+  const attemptSignal = signal
+    ? combineAbortSignals(signal, timeoutController.signal)
+    : timeoutController.signal;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let onAbort: (() => void) | undefined;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      const timeoutError = new ProviderError(
+        `Request timed out after ${requestTimeoutMs}ms`,
+        'unknown',
+        undefined,
+        true,
+        undefined,
+        'timeout',
+        'connecting',
+      );
+      timeoutController.abort(timeoutError);
+      reject(timeoutError);
+    }, requestTimeoutMs);
+    onAbort = () => {
+      if (timer) clearTimeout(timer);
+      reject(signal?.reason ?? new DOMException('Request aborted', 'AbortError'));
+    };
+    signal?.addEventListener('abort', onAbort, { once: true });
+  });
+  return Promise.race([Promise.resolve().then(() => fn(attemptSignal)), timeoutPromise]).finally(
+    () => {
+      if (timer) clearTimeout(timer);
+      if (onAbort) signal?.removeEventListener('abort', onAbort);
+    },
+  );
+}
+
+function combineAbortSignals(first: AbortSignal, second: AbortSignal): AbortSignal {
+  const abortSignal = AbortSignal as typeof AbortSignal & {
+    any?: (signals: AbortSignal[]) => AbortSignal;
+  };
+  if (abortSignal.any) return abortSignal.any([first, second]);
+
+  const controller = new AbortController();
+  const sources = [first, second];
+  const listeners = new Map<AbortSignal, () => void>();
+  const cleanup = () => {
+    for (const [source, listener] of listeners) source.removeEventListener('abort', listener);
+    listeners.clear();
+  };
+  for (const source of sources) {
+    const abort = () => {
+      if (!controller.signal.aborted) controller.abort(source.reason);
+      cleanup();
+    };
+    if (source.aborted) {
+      abort();
+      break;
+    }
+    listeners.set(source, abort);
+    source.addEventListener('abort', abort, { once: true });
+  }
+  return controller.signal;
+}
+
+function createReaderCancellation(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  signal?: AbortSignal,
+): { cancel: () => Promise<void>; dispose: () => void } {
+  let cancelPromise: Promise<void> | undefined;
+  const cancel = (): Promise<void> => {
+    cancelPromise ??= reader.cancel().then(
+      () => undefined,
+      () => undefined,
+    );
+    return cancelPromise;
+  };
+  const onAbort = () => {
+    void cancel();
+  };
+  if (signal?.aborted) onAbort();
+  else signal?.addEventListener('abort', onAbort, { once: true });
+
+  return {
+    cancel,
+    dispose: () => signal?.removeEventListener('abort', onAbort),
+  };
+}
+
+/**
+ * Wrap an async iterable so a stalled stream (no chunks for
+ * `streamIdleTimeoutMs`) aborts via the returned controller. Callers forward
+ * `controller.signal` into the fetch and break the loop on abort.
+ */
+export function withStreamIdleTimeout<T>(
+  stream: AsyncIterable<T>,
+  streamIdleTimeoutMs: number | undefined,
+  signal?: AbortSignal,
+): { stream: AsyncIterable<T>; controller: AbortController } {
+  const controller = new AbortController();
+  if (signal?.aborted) controller.abort(signal.reason);
+  else signal?.addEventListener('abort', () => controller.abort(signal.reason), { once: true });
+  if (!streamIdleTimeoutMs || streamIdleTimeoutMs <= 0) return { stream, controller };
+  const wrapped: AsyncIterable<T> = {
+    [Symbol.asyncIterator]() {
+      const iter = stream[Symbol.asyncIterator]();
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const reset = () => {
+        if (timer) clearTimeout(timer);
+        timer = setTimeout(
+          () =>
+            controller.abort(
+              new ProviderError(
+                `Stream idle for ${streamIdleTimeoutMs}ms`,
+                'unknown',
+                undefined,
+                true,
+                undefined,
+                'timeout',
+                'streaming',
+              ),
+            ),
+          streamIdleTimeoutMs,
+        );
+      };
+      reset();
+      return {
+        next: async (...args: []) => {
+          try {
+            const result = await iter.next(...args);
+            if (!result.done) reset();
+            else if (timer) clearTimeout(timer);
+            return result;
+          } catch (err) {
+            if (timer) clearTimeout(timer);
+            throw err;
+          }
+        },
+        return: async (value?: unknown) => {
+          if (timer) clearTimeout(timer);
+          return iter.return?.(value as never) ?? ({ done: true, value } as IteratorResult<T>);
+        },
+        throw: async (e?: unknown) => {
+          if (timer) clearTimeout(timer);
+          if (iter.throw) return iter.throw(e);
+          throw e;
+        },
+        [Symbol.asyncIterator]() {
+          return this;
+        },
+      };
+    },
+  };
+  return { stream: wrapped, controller };
 }
 
 function abortableDelay(delayMs: number, signal?: AbortSignal): Promise<void> {
@@ -123,6 +293,8 @@ export async function* parseSSEStream(
 
   const decoder = new TextDecoder();
   let buffer = '';
+  let streamDone = false;
+  const cancellation = createReaderCancellation(reader, signal);
 
   function extractFrameData(frame: string): string | null {
     const dataLines: string[] = [];
@@ -162,6 +334,7 @@ export async function* parseSSEStream(
 
       const { done, value } = await reader.read();
       if (done) {
+        streamDone = true;
         break;
       }
 
@@ -182,7 +355,12 @@ export async function* parseSSEStream(
       }
     }
   } finally {
-    reader.releaseLock();
+    cancellation.dispose();
+    try {
+      if (!streamDone || signal?.aborted) await cancellation.cancel();
+    } finally {
+      reader.releaseLock();
+    }
   }
 }
 
@@ -199,6 +377,8 @@ export async function* parseNDJSONStream(
 
   const decoder = new TextDecoder();
   let buffer = '';
+  let streamDone = false;
+  const cancellation = createReaderCancellation(reader, signal);
 
   try {
     while (true) {
@@ -208,7 +388,10 @@ export async function* parseNDJSONStream(
       }
 
       const { done, value } = await reader.read();
-      if (done) break;
+      if (done) {
+        streamDone = true;
+        break;
+      }
 
       buffer += decoder.decode(value, { stream: true });
       const lines = buffer.split('\n');
@@ -249,6 +432,11 @@ export async function* parseNDJSONStream(
       }
     }
   } finally {
-    reader.releaseLock();
+    cancellation.dispose();
+    try {
+      if (!streamDone || signal?.aborted) await cancellation.cancel();
+    } finally {
+      reader.releaseLock();
+    }
   }
 }

@@ -460,7 +460,7 @@ active project's runtime.
 | Editor | Monaco Editor | LSP support, diff view, same engine as VS Code |
 | State | Zustand + Immer | Minimal boilerplate, fine-grained subscriptions |
 | Database | SQLite (sqlx) | Structured queries, migrations, Rust-native |
-| Monorepo | Turborepo + pnpm | Build caching, workspace linking, Tauri-compatible |
+| Monorepo | Turborepo + npm workspaces | Build caching, workspace linking, Tauri-compatible |
 | AI abstraction | Custom provider layer | Full streaming control, no SDK bundle overhead |
 | Agent protocol | MCP (@modelcontextprotocol/sdk) | Official standard, growing ecosystem |
 

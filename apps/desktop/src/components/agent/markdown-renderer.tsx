@@ -1,5 +1,5 @@
 import { memo, useRef, useState, useCallback } from 'react';
-import ReactMarkdown from 'react-markdown';
+import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import rehypeHighlight from 'rehype-highlight';
@@ -25,8 +25,9 @@ function extractTextContent(node: React.ReactNode): string {
 export function CodeBlock({
   children,
   className,
+  node: _node,
   ...props
-}: React.HTMLAttributes<HTMLElement> & { children?: React.ReactNode }) {
+}: React.HTMLAttributes<HTMLElement> & { children?: React.ReactNode; node?: unknown }) {
   const [copied, setCopied] = useState(false);
   const codeRef = useRef<HTMLElement>(null);
 
@@ -135,8 +136,8 @@ export function CodeBlock({
 
 // ─── Markdown Component Map ────────────────────────────────────────────────────
 
-export const MARKDOWN_COMPONENTS = {
-  code: CodeBlock as any,
+export const MARKDOWN_COMPONENTS: Components = {
+  code: CodeBlock,
   pre: ({ children }: { children?: React.ReactNode }) => <>{children}</>,
 
   // Paragraphs & text
@@ -270,12 +271,15 @@ export const MARKDOWN_COMPONENTS = {
   sub: ({ children }: { children?: React.ReactNode }) => (
     <sub className="text-[9px] text-muted-foreground/70">{children}</sub>
   ),
-} as const;
+};
 
 // ─── Plugin Arrays ─────────────────────────────────────────────────────────────
 
-export const REMARK_PLUGINS = [remarkGfm, remarkMath] as const;
-export const REHYPE_PLUGINS = [[rehypeKatex], [rehypeHighlight, { ignoreMissing: true }]] as const;
+export const REMARK_PLUGINS = [remarkGfm, remarkMath];
+export const REHYPE_PLUGINS: React.ComponentProps<typeof ReactMarkdown>['rehypePlugins'] = [
+  [rehypeKatex],
+  [rehypeHighlight, { ignoreMissing: true }],
+];
 
 // ─── Content Cleaner ───────────────────────────────────────────────────────────
 
@@ -291,7 +295,7 @@ export function cleanMarkdownContent(content: string): string {
 // colors, no KaTeX/highlight/mermaid/copy button. Cheap enough to re-render on
 // every streaming chunk without throttling.
 
-const THINKING_MARKDOWN_COMPONENTS = {
+const THINKING_MARKDOWN_COMPONENTS: Components = {
   code: ({ children, className }: { children?: React.ReactNode; className?: string }) => {
     const isBlock = className;
     if (!isBlock) {
@@ -384,7 +388,7 @@ const THINKING_MARKDOWN_COMPONENTS = {
   td: ({ children }: { children?: React.ReactNode }) => (
     <td className="border-b border-border/25 px-2.5 py-1 text-foreground/65">{children}</td>
   ),
-} as const;
+};
 
 export const ThinkingMarkdown = memo(function ThinkingMarkdown({
   content,
@@ -395,10 +399,7 @@ export const ThinkingMarkdown = memo(function ThinkingMarkdown({
 }) {
   return (
     <div className={cn('cursor-text select-text', className)}>
-      <ReactMarkdown
-        remarkPlugins={[remarkGfm] as any}
-        components={THINKING_MARKDOWN_COMPONENTS as any}
-      >
+      <ReactMarkdown remarkPlugins={[remarkGfm]} components={THINKING_MARKDOWN_COMPONENTS}>
         {content}
       </ReactMarkdown>
     </div>
@@ -423,9 +424,9 @@ export const MarkdownContent = memo(function MarkdownContent({
       )}
     >
       <ReactMarkdown
-        remarkPlugins={REMARK_PLUGINS as any}
-        rehypePlugins={REHYPE_PLUGINS as any}
-        components={MARKDOWN_COMPONENTS as any}
+        remarkPlugins={REMARK_PLUGINS}
+        rehypePlugins={REHYPE_PLUGINS}
+        components={MARKDOWN_COMPONENTS}
       >
         {cleaned}
       </ReactMarkdown>

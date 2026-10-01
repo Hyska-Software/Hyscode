@@ -14,6 +14,12 @@ function context(
   return {
     workspacePath,
     conversationId: 'conversation',
+    policyAllowedToolNames: new Set([
+      'read_file',
+      'write_file',
+      'run_terminal_command',
+      'external_probe',
+    ]),
     toolCallId: 'call',
     signal,
     invoke,
@@ -37,7 +43,7 @@ describe('ExternalPathAccessRegistry', () => {
     });
     expect(request && registry.isCovered(request)).toBe(false);
 
-    registry.grant(request!, 'session-directory');
+    registry.grant(request!, 'session-directory', 'native-read-grant');
     expect(
       registry.isCovered(
         registry.inspect(
@@ -56,6 +62,11 @@ describe('ExternalPathAccessRegistry', () => {
         )!,
       ),
     ).toBe(false);
+    expect(registry.getSessionNativeGrantIds('read')).toEqual(['native-read-grant']);
+    expect(
+      registry.createAccess(request!, workspacePath, ['native-read-grant']).nativeGrantIds,
+    ).toEqual(['native-read-grant']);
+    expect(registry.clear()).toEqual(['native-read-grant']);
     expect(
       registry.isCovered(
         registry.inspect(
@@ -144,7 +155,11 @@ describe('ToolRouter external path approval', () => {
       directories: ['c:/external'],
       directoryScopes: [],
     });
-    expect(invoke).toHaveBeenCalledWith('read_file', { path: 'c:/external/file.ts' });
+    expect(invoke).toHaveBeenCalledWith(
+      'read_file',
+      { path: 'c:/external/file.ts' },
+      expect.objectContaining({ workspacePath, externalPathAccess: expect.any(Object) }),
+    );
   });
 
   it('does not persist an allow-once decision', async () => {
@@ -155,13 +170,28 @@ describe('ToolRouter external path approval', () => {
     let approvalCount = 0;
     router.setApprovalCallback(async () => {
       approvalCount += 1;
-      return { approved: true, externalGrant: 'once' };
+      return {
+        approved: true,
+        externalGrant: 'once',
+        nativeGrantId: `native-once-${approvalCount}`,
+      };
     });
 
     await router.execute('read_file', 'read-1', { path: 'C:/external/file.ts' }, context(invoke));
     await router.execute('read_file', 'read-2', { path: 'C:/external/file.ts' }, context(invoke));
 
     expect(approvalCount).toBe(2);
+    expect(invoke).toHaveBeenCalledWith(
+      'read_file',
+      { path: 'c:/external/file.ts' },
+      expect.objectContaining({ nativeGrantIds: ['native-once-1'] }),
+    );
+    expect(invoke).toHaveBeenCalledWith('workspace_revoke_external_grants', {
+      grantIds: ['native-once-1'],
+    });
+    expect(invoke).toHaveBeenCalledWith('workspace_revoke_external_grants', {
+      grantIds: ['native-once-2'],
+    });
   });
 
   it('shares a session-directory grant with descendants but not writes', async () => {

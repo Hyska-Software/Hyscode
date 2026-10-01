@@ -282,7 +282,7 @@ const MODEL_PROFILES: ModelProfile[] = [
     supportsThinking: true,
   },
   {
-    pattern: 'gpt-5\\.6|gpt-5\\.5',
+    pattern: 'gpt-6|gpt-5\\.6|gpt-5\\.5',
     maxContext: 1_050_000,
     recommendedMaxOutput: 128_000,
     supportsToolCalling: true,
@@ -331,7 +331,7 @@ const MODEL_PROFILES: ModelProfile[] = [
     supportsThinking: true,
   },
   {
-    pattern: 'glm-5\\.2|glm-5\\.1',
+    pattern: 'glm-5\\.3|glm-5\\.2|glm-5\\.1',
     maxContext: 200_000,
     recommendedMaxOutput: 128_000,
     supportsToolCalling: true,
@@ -345,7 +345,8 @@ const MODEL_PROFILES: ModelProfile[] = [
     supportsThinking: true,
   },
   {
-    pattern: 'qwen3\\.7-max|qwen3\\.7-plus|qwen3\\.6-plus|qwen3\\.5-plus',
+    pattern:
+      'qwen3\\.8-max|qwen3\\.8-flash|qwen3\\.7-max|qwen3\\.7-plus|qwen3\\.6-plus|qwen3\\.5-plus',
     maxContext: 1_000_000,
     recommendedMaxOutput: 32_768,
     supportsToolCalling: true,
@@ -359,7 +360,7 @@ const MODEL_PROFILES: ModelProfile[] = [
     supportsThinking: true,
   },
   {
-    pattern: 'mai-code-1-flash',
+    pattern: 'mai-code-1\\.1-flash|mai-code-1-flash',
     maxContext: 262_144,
     recommendedMaxOutput: 32_768,
     supportsToolCalling: true,
@@ -373,21 +374,21 @@ const MODEL_PROFILES: ModelProfile[] = [
     supportsThinking: true,
   },
   {
-    pattern: 'deepseek-v4-pro|deepseek-v4-flash',
+    pattern: 'deepseek-v4\\.1-flash|deepseek-v4-pro|deepseek-v4-flash',
     maxContext: 1_000_000,
     recommendedMaxOutput: 8_192,
     supportsToolCalling: true,
     supportsThinking: true,
   },
   {
-    pattern: 'mimo-v2\\.5-pro|mimo-v2\\.5|mimo-v2\\.5-free',
+    pattern: 'mimo-v2\\.6|mimo-v2\\.5-pro|mimo-v2\\.5|mimo-v2\\.5-free',
     maxContext: 1_000_000,
     recommendedMaxOutput: 8_192,
     supportsToolCalling: true,
     supportsThinking: true,
   },
   {
-    pattern: 'grok-4\\.5|grok-build-0\\.1',
+    pattern: 'grok-4\\.7|grok-4\\.6|grok-4\\.5|grok-build-0\\.1',
     maxContext: 500_000,
     recommendedMaxOutput: 16_384,
     supportsToolCalling: true,
@@ -428,35 +429,43 @@ const MODEL_PROFILES: ModelProfile[] = [
 // iteration caps to avoid burning budget. GitHub Copilot uses a multiplier
 // model where each request counts as 1× (or more) toward the user's quota.
 
-/** Model ID prefixes known to be served via GitHub Copilot */
+/** Model IDs served via GitHub Copilot (mirrors the provider catalog — see
+ *  docs.github.com/copilot/reference/ai-models/supported-models). */
 const COPILOT_MODEL_IDS = new Set([
-  'gpt-5-mini',
-  'gpt-5.3-codex',
-  'gpt-5.4',
-  'gpt-5.4-mini',
-  'gpt-5.4-pro',
-  'gpt-5.5',
-  'gpt-5.6',
+  'gpt-6.1-sol',
+  'gpt-6-sol',
+  'gpt-6-luna',
+  'gpt-6-astra',
   'gpt-5.6-sol',
   'gpt-5.6-terra',
   'gpt-5.6-luna',
-  'raptor-mini',
-  'mai-code-1-flash',
-  'claude-sonnet-4.5',
-  'claude-sonnet-4.6',
-  'claude-sonnet-5',
-  'claude-haiku-4.5',
-  'claude-opus-4.5',
-  'claude-opus-4.6',
-  'claude-opus-4.7',
-  'claude-opus-4.8',
+  'gpt-5.5',
+  'gpt-5.4',
+  'gpt-5.4-mini',
+  'gpt-5.4-nano',
+  'gpt-5-mini',
+  'gpt-5.3-codex',
+  'claude-fable-5-1',
+  'claude-fable-5',
+  'claude-opus-5-5',
   'claude-opus-5',
-  'claude-opus-4.8-fast',
-  'gemini-3.5-flash',
+  'claude-opus-4-8',
+  'claude-opus-4-8-fast',
+  'claude-opus-4-7',
+  'claude-sonnet-5-5',
+  'claude-sonnet-5',
+  'claude-sonnet-4-6',
+  'claude-haiku-4-5',
+  'gemini-3.8-flash',
+  'gemini-3.7-flash',
   'gemini-3.6-flash',
-  'gemini-3.1-pro',
-  'gemini-3-flash',
-  'gemini-3.5-flash-lite',
+  'gemini-3.5-flash',
+  'mai-code-1.1-flash',
+  'kimi-k3',
+  'kimi-k2.7-code',
+  'grok-4.7',
+  'grok-4.6',
+  'grok-4.5',
 ]);
 
 /** Check if a model ID belongs to a per-request-cost provider. */
@@ -483,6 +492,13 @@ export function getPerRequestIterationCap(
   if (!isPerRequestCostModel(modelId, providerId)) return null;
   return PER_REQUEST_ITERATION_CAPS[mode] ?? null;
 }
+
+/**
+ * Hard upper bound for a user-configured iteration limit. Kept in sync with
+ * the Settings slider max (Settings → Max Interactions) so a configured 500
+ * is never silently truncated by a lower internal fuse.
+ */
+export const MAX_ITERATIONS_FUSE = 500;
 
 /**
  * Get the model profile matching the given model ID.

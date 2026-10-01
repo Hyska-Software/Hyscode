@@ -66,9 +66,9 @@ export function DatabaseViewer({ filePath }: DatabaseViewerProps) {
         } else {
           await closeConnection(conn.id);
         }
-      } catch (err: any) {
+      } catch (err: unknown) {
         if (!cancelled) {
-          setConnectionError(err.message ?? 'Failed to connect to database');
+          setConnectionError(err instanceof Error ? err.message : 'Failed to connect to database');
         }
       } finally {
         if (!cancelled) {

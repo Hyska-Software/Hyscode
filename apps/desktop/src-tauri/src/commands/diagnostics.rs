@@ -45,8 +45,17 @@ struct ProviderProject {
 pub async fn get_diagnostics(
     workspace_path: String,
     path: Option<String>,
+    native_grant_ids: Option<Vec<String>>,
 ) -> Result<Vec<Diagnostic>, String> {
-    let workspace = validate_workspace(&workspace_path)?;
+    let workspace =
+        super::fs::require_native_diagnostics_grant(&workspace_path, native_grant_ids.as_deref())?;
+    run_diagnostics_in_workspace(workspace, path).await
+}
+
+async fn run_diagnostics_in_workspace(
+    workspace: PathBuf,
+    path: Option<String>,
+) -> Result<Vec<Diagnostic>, String> {
     let requested = path
         .as_deref()
         .map(|value| resolve_requested_path(&workspace, value))
@@ -65,27 +74,6 @@ pub async fn get_diagnostics(
 
     sort_and_deduplicate(&mut diagnostics);
     Ok(diagnostics)
-}
-
-fn validate_workspace(raw_path: &str) -> Result<PathBuf, String> {
-    if raw_path.trim().is_empty() {
-        return Err("Diagnostic workspace path cannot be empty.".to_string());
-    }
-
-    let path = Path::new(raw_path);
-    let canonical = fs::canonicalize(path).map_err(|error| {
-        format!(
-            "Cannot access diagnostic workspace '{}': {error}",
-            path.display()
-        )
-    })?;
-    if !canonical.is_dir() {
-        return Err(format!(
-            "Diagnostic workspace '{}' is not a directory.",
-            canonical.display()
-        ));
-    }
-    Ok(canonical)
 }
 
 fn resolve_requested_path(workspace: &Path, raw_path: &str) -> Result<PathBuf, String> {
@@ -869,8 +857,8 @@ mod tests {
             .build()
             .expect("test runtime should be created");
 
-        let result = runtime.block_on(get_diagnostics(
-            workspace.path().to_string_lossy().into_owned(),
+        let result = runtime.block_on(run_diagnostics_in_workspace(
+            workspace.path().to_path_buf(),
             Some(source.to_string_lossy().into_owned()),
         ));
 

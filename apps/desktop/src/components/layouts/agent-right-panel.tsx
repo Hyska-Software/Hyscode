@@ -469,30 +469,38 @@ function AgentChangesContent() {
                   </span>
                   {/* Per-file actions for pending agent edits */}
                   {entry.agentSession && isPending && (
-                    <div className="flex shrink-0 items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                      <span
-                        role="button"
+                    <span className="flex shrink-0 items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity focus-within:opacity-100">
+                      <button
+                        type="button"
+                        aria-label={`Keep changes in ${entry.relPath}`}
                         onClick={(e) => {
                           e.stopPropagation();
                           handleAcceptOne(entry.agentSession!.id);
                         }}
-                        className="rounded p-0.5 hover:bg-success/15 text-success"
+                        onKeyDown={(e) => {
+                          if (e.key === 'Escape') (e.target as HTMLElement).blur();
+                        }}
+                        className="rounded p-0.5 hover:bg-success/15 text-success focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                         title="Keep"
                       >
                         <Check className="h-3 w-3" />
-                      </span>
-                      <span
-                        role="button"
+                      </button>
+                      <button
+                        type="button"
+                        aria-label={`Undo changes in ${entry.relPath}`}
                         onClick={(e) => {
                           e.stopPropagation();
                           handleRejectOne(entry.agentSession!.id);
                         }}
-                        className="rounded p-0.5 hover:bg-muted"
+                        onKeyDown={(e) => {
+                          if (e.key === 'Escape') (e.target as HTMLElement).blur();
+                        }}
+                        className="rounded p-0.5 hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                         title="Undo"
                       >
                         <Undo2 className="h-3 w-3" />
-                      </span>
-                    </div>
+                      </button>
+                    </span>
                   )}
                 </button>
 

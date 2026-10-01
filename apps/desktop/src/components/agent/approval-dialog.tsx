@@ -8,10 +8,11 @@ import {
   CheckCheck,
   AlertTriangle,
 } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import type { PendingApproval } from '@/stores/agent-store';
 import { useSettingsStore } from '@/stores/settings-store';
+import { useExtensionUiStore } from '@/stores/extension-ui-store';
 import { getActiveAgentBridge } from '@/lib/active-agent-bridge';
 
 // ─── Risk badge config ───────────────────────────────────────────────────────
@@ -76,6 +77,14 @@ interface ApprovalDialogProps {
 
 export function ApprovalDialog({ approval }: ApprovalDialogProps) {
   const [detailOpen, setDetailOpen] = useState(false);
+  const [confirmingExternalAccess, setConfirmingExternalAccess] = useState(false);
+  // Two-click confirm for "Approve all": the first click arms the button and
+  // explains the consequence instead of silently flipping global approval mode.
+  const [approveAllArmed, setApproveAllArmed] = useState(false);
+  useEffect(() => {
+    setApproveAllArmed(false);
+    setConfirmingExternalAccess(false);
+  }, [approval.id]);
   const approvalMode = useSettingsStore((s) => s.approvalMode);
   const risk = inferRiskLevel(approval.toolName);
   const riskDisplay = RISK_DISPLAY[risk];
@@ -89,24 +98,64 @@ export function ApprovalDialog({ approval }: ApprovalDialogProps) {
         ? 'execute a command with an external working directory'
         : 'read external files or directories';
 
+  const confirmExternalAccess = async (grantType: 'once' | 'session-directory') => {
+    if (!externalAccess || confirmingExternalAccess) return;
+    setConfirmingExternalAccess(true);
+    try {
+      const bridge = getActiveAgentBridge();
+      const nativeGrantId = await bridge.confirmExternalPathAccess(externalAccess, grantType);
+      bridge.resolveApproval(approval.id, {
+        approved: true,
+        externalGrant: grantType,
+        nativeGrantId,
+      });
+    } catch (error) {
+      useExtensionUiStore
+        .getState()
+        .showNotification(
+          'warning',
+          `External access was not approved by the native path picker: ${error instanceof Error ? error.message : String(error)}`,
+          'Approvals',
+        );
+    } finally {
+      setConfirmingExternalAccess(false);
+    }
+  };
+
   const handleApprove = () => {
-    getActiveAgentBridge().resolveApproval(
-      approval.id,
-      isExternal ? { approved: true, externalGrant: 'once' } : true,
-    );
+    if (isExternal) {
+      void confirmExternalAccess('once');
+      return;
+    }
+    getActiveAgentBridge().resolveApproval(approval.id, true);
   };
 
   const handleAllowDirectory = () => {
-    getActiveAgentBridge().resolveApproval(approval.id, {
-      approved: true,
-      externalGrant: 'session-directory',
-    });
+    void confirmExternalAccess('session-directory');
   };
 
   const handleApproveAll = () => {
+    if (!approveAllArmed) {
+      setApproveAllArmed(true);
+      useExtensionUiStore
+        .getState()
+        .showNotification(
+          'warning',
+          'Aprovar tudo ativa o modo YOLO: todas as próximas ações serão executadas sem revisão. Clique novamente para confirmar.',
+          'Approvals',
+        );
+      return;
+    }
     getActiveAgentBridge().resolveApproval(approval.id, true);
     // Temporarily switch to yolo for this session
     useSettingsStore.getState().set('approvalMode', 'yolo');
+    useExtensionUiStore
+      .getState()
+      .showNotification(
+        'info',
+        'Modo YOLO ativado para esta sessão: as próximas ações do agente serão auto-aprovadas. Troque o modo de aprovação no input para voltar atrás.',
+        'Approvals',
+      );
   };
 
   const handleTrustTool = () => {
@@ -158,7 +207,7 @@ export function ApprovalDialog({ approval }: ApprovalDialogProps) {
                 Approval Required
               </span>
               <span
-                className={`rounded-full px-1.5 py-0.5 text-[8px] font-medium ${riskDisplay.color} bg-current/10`}
+                className={`rounded-full px-1.5 py-0.5 text-[8px] font-medium ${riskDisplay.color} bg-muted`}
               >
                 {riskDisplay.label}
               </span>
@@ -183,8 +232,8 @@ export function ApprovalDialog({ approval }: ApprovalDialogProps) {
         </p>
 
         {externalAccess && (
-          <div className="mb-3 rounded-md border border-amber-500/30 bg-amber-500/5 p-2.5 text-[11px] leading-relaxed">
-            <p className="font-medium text-amber-300">External access required</p>
+          <div className="mb-3 rounded-md border border-warning/30 bg-warning/5 p-2.5 text-[11px] leading-relaxed">
+            <p className="font-medium text-warning">External access required</p>
             <p className="mt-1 text-foreground/80">
               The agent wants to {externalOperationLabel}. This permission is mandatory even when
               Auto-Approve is enabled.
@@ -236,7 +285,8 @@ export function ApprovalDialog({ approval }: ApprovalDialogProps) {
           <Button
             size="sm"
             onClick={handleApprove}
-            className="h-7 gap-1.5 rounded-md bg-green-600 px-3.5 text-[11px] font-medium hover:bg-success transition-colors"
+            disabled={confirmingExternalAccess}
+            className="h-7 gap-1.5 rounded-md bg-success px-3.5 text-[11px] font-medium hover:bg-success/90 transition-colors"
           >
             <Check className="h-3 w-3" />
             {isExternal ? 'Allow once' : 'Approve'}
@@ -247,7 +297,8 @@ export function ApprovalDialog({ approval }: ApprovalDialogProps) {
               size="sm"
               variant="ghost"
               onClick={handleAllowDirectory}
-              className="h-7 gap-1.5 rounded-md px-3 text-[11px] text-amber-300/90 hover:bg-amber-500/10 hover:text-amber-200 transition-colors"
+              disabled={confirmingExternalAccess}
+              className="h-7 gap-1.5 rounded-md px-3 text-[11px] text-warning/90 hover:bg-warning/10 hover:text-warning transition-colors"
             >
               Allow directory for this session
             </Button>
@@ -257,7 +308,7 @@ export function ApprovalDialog({ approval }: ApprovalDialogProps) {
                 size="sm"
                 variant="ghost"
                 onClick={handleTrustTool}
-                className="h-7 gap-1.5 rounded-md px-3 text-[11px] text-emerald-400/80 hover:bg-emerald-500/10 hover:text-emerald-300 transition-colors"
+                className="h-7 gap-1.5 rounded-md px-3 text-[11px] text-success/80 hover:bg-success/10 hover:text-success transition-colors"
               >
                 <ShieldCheck className="h-3 w-3" />
                 Trust this tool
@@ -267,10 +318,15 @@ export function ApprovalDialog({ approval }: ApprovalDialogProps) {
                 size="sm"
                 variant="ghost"
                 onClick={handleApproveAll}
-                className="h-7 gap-1.5 rounded-md px-3 text-[11px] text-amber-400/80 hover:bg-amber-500/10 hover:text-amber-300 transition-colors"
+                title={
+                  approveAllArmed
+                    ? 'Clique novamente para confirmar o modo YOLO'
+                    : 'Aprovar tudo (ativa o modo YOLO)'
+                }
+                className="h-7 gap-1.5 rounded-md px-3 text-[11px] text-warning/80 hover:bg-warning/10 hover:text-warning transition-colors"
               >
                 <CheckCheck className="h-3 w-3" />
-                Approve all
+                {approveAllArmed ? 'Confirm approve all' : 'Approve all'}
               </Button>
             </>
           )}

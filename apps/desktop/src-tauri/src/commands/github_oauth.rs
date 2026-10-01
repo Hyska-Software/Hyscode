@@ -204,11 +204,13 @@ pub async fn github_oauth_poll(
     // Store the long-lived access token in keychain
     {
         let mut store = keychain.0.lock().map_err(|e| e.to_string())?;
-        store.insert(
-            "hyscode:github_copilot_access_token".to_string(),
-            resp.access_token.clone(),
-        );
-        super::keychain::persist_keychain_ref(&store);
+        super::keychain::update_keychain_ref(&mut store, |store| {
+            store.insert(
+                "hyscode:github_copilot_access_token".to_string(),
+                resp.access_token.clone(),
+            );
+            Ok(())
+        })?;
         eprintln!("[CopilotAuth] github_oauth_poll — access_token stored in keychain");
     }
 
@@ -286,9 +288,11 @@ pub async fn ensure_copilot_token(
         if status_u16 == 401 {
             // Access token is invalid/revoked — clear it
             let mut store = keychain.lock().map_err(|e| e.to_string())?;
-            store.remove("hyscode:github_copilot_access_token");
-            store.remove("hyscode:github_copilot_token");
-            super::keychain::persist_keychain_ref(&store);
+            super::keychain::update_keychain_ref(&mut store, |store| {
+                store.remove("hyscode:github_copilot_access_token");
+                store.remove("hyscode:github_copilot_token");
+                Ok(())
+            })?;
             return Err("GitHub access token is invalid. Please re-authenticate.".to_string());
         }
         return Err(format!("Copilot token exchange failed ({status_u16})"));
@@ -304,11 +308,13 @@ pub async fn ensure_copilot_token(
     // Store the short-lived Copilot API token
     {
         let mut store = keychain.lock().map_err(|e| e.to_string())?;
-        store.insert(
-            "hyscode:github_copilot_token".to_string(),
-            data.token.clone(),
-        );
-        super::keychain::persist_keychain_ref(&store);
+        super::keychain::update_keychain_ref(&mut store, |store| {
+            store.insert(
+                "hyscode:github_copilot_token".to_string(),
+                data.token.clone(),
+            );
+            Ok(())
+        })?;
         eprintln!(
             "[CopilotAuth] ensure_copilot_token — Copilot token stored, expires_at: {}",
             data.expires_at
@@ -333,10 +339,11 @@ pub async fn github_copilot_ensure_token(
 #[tauri::command]
 pub async fn github_copilot_disconnect(keychain: State<'_, KeychainState>) -> Result<(), String> {
     let mut store = keychain.0.lock().map_err(|e| e.to_string())?;
-    store.remove("hyscode:github_copilot_access_token");
-    store.remove("hyscode:github_copilot_token");
-    super::keychain::persist_keychain_ref(&store);
-    Ok(())
+    super::keychain::update_keychain_ref(&mut store, |store| {
+        store.remove("hyscode:github_copilot_access_token");
+        store.remove("hyscode:github_copilot_token");
+        Ok(())
+    })
 }
 
 /// Check if GitHub Copilot is authenticated (has a stored access token).

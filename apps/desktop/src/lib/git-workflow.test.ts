@@ -3,6 +3,7 @@ import {
   assertGitOperationAvailable,
   chooseDefaultGitRemote,
   getGitAutoFetchIntervalMs,
+  getGitRelativePath,
   getGitStatusBarPresentation,
   getCommitRemoteActions,
   getSourceControlPrimaryAction,
@@ -21,6 +22,16 @@ describe('Git workflow state', () => {
   it('filters watcher events to the active worktree', () => {
     expect(isPathWithinGitRoot('C:\\repo\\src\\file.ts', 'C:\\repo')).toBe(true);
     expect(isPathWithinGitRoot('C:\\repository-other\\file.ts', 'C:\\repo')).toBe(false);
+    expect(isPathWithinGitRoot('\\\\?\\C:\\repo\\src\\file.ts', 'C:\\repo')).toBe(true);
+    expect(isPathWithinGitRoot('//?/C:/repo/src/file.ts', 'C:/repo')).toBe(true);
+  });
+
+  it('converts Windows extended paths to worktree-relative Git paths', () => {
+    expect(getGitRelativePath('\\\\?\\D:\\Hyscode\\.gitignore', 'd:/Hyscode')).toBe('.gitignore');
+    expect(getGitRelativePath('//?/D:/Hyscode/apps/main.ts', 'D:/Hyscode')).toBe('apps/main.ts');
+    expect(getGitRelativePath('D:/Hyscode-other/file.ts', 'D:/Hyscode')).toBeNull();
+    expect(getGitRelativePath('D:/Hyscode/../outside.ts', 'D:/Hyscode')).toBeNull();
+    expect(getGitRelativePath('src/../../outside.ts', 'D:/Hyscode')).toBeNull();
   });
 
   it('always confirms permanent deletion of untracked files', () => {

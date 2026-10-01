@@ -54,6 +54,8 @@ interface GitFileItemProps {
   onOpenDiff?: () => void;
   onOpenFile?: () => void;
   onOpenPreview?: () => void;
+  depth?: number;
+  showDirectoryPath?: boolean;
 }
 
 export function GitFileItem({
@@ -65,6 +67,8 @@ export function GitFileItem({
   onOpenDiff,
   onOpenFile,
   onOpenPreview,
+  depth = 0,
+  showDirectoryPath = true,
 }: GitFileItemProps) {
   const [showContext, setShowContext] = useState(false);
   const [contextPos, setContextPos] = useState({ x: 0, y: 0 });
@@ -100,10 +104,11 @@ export function GitFileItem({
         onClick={onOpenDiff ?? onOpenFile}
         onContextMenu={handleContextMenu}
         title={`${STATUS_LABELS[file.status] ?? file.status}: ${file.path}`}
+        style={{ paddingLeft: `${depth * 12 + 8}px` }}
       >
         <Icon className={`h-3 w-3 shrink-0 ${statusColor}`} />
         <span className="truncate text-foreground">{fileName}</span>
-        {dirPath && (
+        {showDirectoryPath && dirPath && (
           <span className="truncate text-[10px] text-muted-foreground opacity-60">{dirPath}</span>
         )}
         <span className={`ml-auto shrink-0 text-[10px] font-mono ${statusColor}`}>

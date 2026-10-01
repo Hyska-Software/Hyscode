@@ -23,6 +23,7 @@ export interface ReleaseInfo {
   assetSize: number;
   currentVersion: string;
   commits: CommitInfo[];
+  sha256?: string | null;
 }
 
 export interface DownloadProgress {
@@ -128,6 +129,7 @@ export const useUpdateStore = create<UpdateState>()(
         const path = await invoke<string>('updater_download', {
           assetUrl: releaseInfo.assetUrl,
           assetName: releaseInfo.assetName,
+          expectedSha256: releaseInfo.sha256 ?? null,
         });
 
         set((s) => {

@@ -102,8 +102,8 @@ export function PullRequestDialog({ open, onClose }: PullRequestDialogProps) {
         accountId: effectiveAccountId,
       });
       setResult({ type: 'success', msg: 'Pull request created', url });
-    } catch (err: any) {
-      setResult({ type: 'error', msg: err.message ?? String(err) });
+    } catch (err: unknown) {
+      setResult({ type: 'error', msg: err instanceof Error ? err.message : String(err) });
     } finally {
       setIsSubmitting(false);
     }

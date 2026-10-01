@@ -12,17 +12,19 @@ import type {
 } from '../types';
 import { ProviderError } from '../types';
 import { withOpencodeHeaders } from '../opencode-headers';
+import { parseSSEStream } from '../retry';
 
 // ─── Thinking variant presets ────────────────────────────────────────────────
-// Per official Gemini docs — 3.8 Flash / 3.6 Flash / 3.5 Flash support
-// thinking levels low/medium/high; 3.5 Flash Lite supports low/medium.
+// Per official Gemini docs (ai.google.dev/gemini-api/docs/pricing, Oct 2026):
+// 3.8 / 3.7 / 3.6 Flash + 3.5 Flash support thinking levels low/medium/high
+// (3.8 default medium); 3.5 Flash Lite + 3 Flash support low/medium.
 // The Gemini API uses a numeric thinkingBudget; map the level to a token count.
 
-/** low/medium/high — Gemini 3.6 Flash, 3.5 Flash, 3.1 Pro */
+/** low/medium/high — Gemini 3.8 Flash (default medium), 3.7/3.6/3.5 Flash, 3.1 Pro */
 export const GEMINI_THINKING_LMH_VARIANTS: ThinkingVariants = {
   kind: 'gemini',
   levels: ['low', 'medium', 'high'],
-  defaultLevel: 'high',
+  defaultLevel: 'medium',
 };
 
 /** low/medium — Gemini 3.5 Flash Lite, 3 Flash */
@@ -66,6 +68,7 @@ interface GeminiFunctionDeclaration {
 }
 
 function toGeminiContents(messages: Message[]): GeminiContent[] {
+  if (!messages.length) throw new Error('model required: messages must not be empty');
   const result: GeminiContent[] = [];
 
   // Build a map from tool call ID → function name so that functionResponse
@@ -91,7 +94,14 @@ function toGeminiContents(messages: Message[]): GeminiContent[] {
         case 'text':
           parts.push({ text: c.text });
           break;
+        case 'thinking':
+          // Preserve thinking as text so replay history doesn't lose it.
+          parts.push({ text: `[thinking]${c.thinking}` });
+          break;
         case 'image':
+          if (c.base64.length > 20 * 1024 * 1024) {
+            throw new Error('image too large: base64 payload exceeds 20MB');
+          }
           parts.push({ inlineData: { mimeType: c.mediaType, data: c.base64 } });
           break;
         case 'tool_call':
@@ -186,7 +196,7 @@ function* parseGeminiResponse(data: string): Iterable<StreamChunk> {
       }
       if (part.functionCall) {
         hasFunctionCalls = true;
-        const callId = `gemini_${part.functionCall.name}_${Date.now()}`;
+        const callId = `gemini_${part.functionCall.name}_${crypto.randomUUID()}`;
         yield { type: 'tool_call_start', id: callId, name: part.functionCall.name };
         yield {
           type: 'tool_call_delta',
@@ -243,11 +253,11 @@ function* parseGeminiResponse(data: string): Iterable<StreamChunk> {
 
 // ─── Provider Implementation ────────────────────────────────────────────────
 
-// SOTA-only direct catalog (verified Sep 2026 against
-// https://ai.google.dev/gemini-api/docs/models + DeepMind model cards): GA
-// stable models only — 3.8 Flash (newest iteration), 3.6 Flash (stable
-// flagship), 3.5 Flash (stable), 3.5 Flash-Lite (fastest). Preview models
-// (3.1 Pro, 3 Flash) are excluded until GA.
+// SOTA-only direct catalog (verified Oct 2026 against
+// https://ai.google.dev/gemini-api/docs/pricing): GA text models —
+// 3.8 / 3.7 / 3.6 Flash at introductory pricing ($0.75/$3.75, cache $0.075)
+// through Dec 31 2026 (standard $1.50/$7.50 from Jan 01 2027),
+// 3.5 Flash ($1.50/$9.00) and 3.5 Flash-Lite ($0.30/$2.50).
 const GEMINI_MODELS: AIModel[] = [
   {
     id: 'gemini-3.8-flash',
@@ -258,9 +268,23 @@ const GEMINI_MODELS: AIModel[] = [
     supportsTools: true,
     supportsStreaming: true,
     supportsVision: true,
-    inputPricePerMToken: 1.5,
-    outputPricePerMToken: 7.5,
-    cachedInputPricePerMToken: 0.15,
+    inputPricePerMToken: 0.75, // intro through Dec 31 2026; standard $1.50 from Jan 01 2027
+    outputPricePerMToken: 3.75, // intro through Dec 31 2026; standard $7.50 from Jan 01 2027
+    cachedInputPricePerMToken: 0.075,
+    thinkingVariants: GEMINI_THINKING_LMH_VARIANTS,
+  },
+  {
+    id: 'gemini-3.7-flash',
+    name: 'Gemini 3.7 Flash',
+    provider: 'gemini',
+    contextWindow: 1_048_576,
+    maxOutputTokens: 65_536,
+    supportsTools: true,
+    supportsStreaming: true,
+    supportsVision: true,
+    inputPricePerMToken: 0.75, // intro through Dec 31 2026; standard $1.50 from Jan 01 2027
+    outputPricePerMToken: 3.75, // intro through Dec 31 2026; standard $7.50 from Jan 01 2027
+    cachedInputPricePerMToken: 0.075,
     thinkingVariants: GEMINI_THINKING_LMH_VARIANTS,
   },
   {
@@ -272,9 +296,9 @@ const GEMINI_MODELS: AIModel[] = [
     supportsTools: true,
     supportsStreaming: true,
     supportsVision: true,
-    inputPricePerMToken: 1.5,
-    outputPricePerMToken: 7.5,
-    cachedInputPricePerMToken: 0.15,
+    inputPricePerMToken: 0.75, // intro through Dec 31 2026; standard $1.50 from Jan 01 2027
+    outputPricePerMToken: 3.75, // intro through Dec 31 2026; standard $7.50 from Jan 01 2027
+    cachedInputPricePerMToken: 0.075,
     thinkingVariants: GEMINI_THINKING_LMH_VARIANTS,
   },
   {
@@ -336,11 +360,22 @@ export class GeminiProvider implements AIProvider {
     return this.apiKey.length > 0;
   }
 
+  /** Zero the in-memory API key (secret hygiene on reinit/dispose). */
+  clear(): void {
+    this.apiKey = '';
+  }
+
+  dispose(): void {
+    this.clear();
+  }
+
   async listModels(): Promise<AIModel[]> {
     return this.models;
   }
 
   async *chat(params: ChatParams): AsyncIterable<StreamChunk> {
+    if (!params.model) throw new Error('model required');
+    if (!params.messages.length) throw new Error('model required: messages must not be empty');
     const contents = toGeminiContents(params.messages);
 
     const body: Record<string, unknown> = { contents };
@@ -391,42 +426,18 @@ export class GeminiProvider implements AIProvider {
         `Gemini API error: ${response.status} ${errorBody}`,
         'gemini',
         response.status,
-        [429, 500, 502, 503].includes(response.status),
+        [429, 500, 502, 503, 529].includes(response.status),
         retryAfterMs,
       );
     }
 
-    // Gemini streams SSE with JSON chunks containing candidates
-    const reader = response.body?.getReader();
-    if (!reader) throw new ProviderError('No response body', 'gemini');
+    if (!response.body) throw new ProviderError('No response body', 'gemini');
 
-    const decoder = new TextDecoder();
-    let buffer = '';
-
-    try {
-      while (true) {
-        if (params.signal?.aborted) break;
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop() ?? '';
-
-        for (const line of lines) {
-          const trimmed = line.trim();
-          if (!trimmed || trimmed.startsWith(':')) continue;
-          if (trimmed.startsWith('data: ')) {
-            const data = trimmed.slice(6);
-            if (data === '[DONE]') return;
-            for (const chunk of parseGeminiResponse(data)) {
-              yield chunk;
-            }
-          }
-        }
+    // Gemini streams SSE with JSON chunks containing candidates.
+    for await (const data of parseSSEStream(response, params.signal)) {
+      for (const chunk of parseGeminiResponse(data)) {
+        yield chunk;
       }
-    } finally {
-      reader.releaseLock();
     }
   }
 }

@@ -23,9 +23,9 @@ export function DbExplorer() {
       console.log('[DbExplorer] Loaded tables:', tableList.length, 'views:', viewList.length);
       setTables(tableList);
       setViews(viewList);
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('[DbExplorer] loadSchema error:', err);
-      setError(err.message ?? 'Failed to load schema');
+      setError(err instanceof Error ? err.message : 'Failed to load schema');
     } finally {
       setLoading(false);
     }

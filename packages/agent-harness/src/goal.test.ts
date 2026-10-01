@@ -81,7 +81,7 @@ describe('GoalService', () => {
     expect(available).toMatchObject({ success: true, output: 'No persistent goal is active for this conversation.' });
   });
 
-  it('persists one goal per conversation with an unlimited runtime budget', async () => {
+  it('persists one goal per conversation with a bounded runtime budget', async () => {
     const service = new GoalService(createMemoryRepository());
     const created = await service.createGoal('conversation-1', 'project-1', 'Build the feature');
 
@@ -89,9 +89,9 @@ describe('GoalService', () => {
     expect(created.goal.status).toBe('active');
     expect(created.goal.budget).toEqual({
       maxTokens: null,
-      maxTurns: null,
-      maxDurationMs: null,
-      maxToolCalls: null,
+      maxTurns: 50,
+      maxDurationMs: 300_000,
+      maxToolCalls: 200,
       maxCostUsd: null,
       maxConsecutiveErrors: null,
     });
@@ -107,7 +107,7 @@ describe('GoalService', () => {
 
     expect(edited.goal.version).toBe(3);
     expect(edited.goal.objective).toBe('Build and verify the feature');
-    expect(edited.goal.budget.maxTurns).toBeNull();
+    expect(edited.goal.budget.maxTurns).toBe(50);
     expect(edited.events.at(-1)?.type).toBe('updated');
     await expect(service.createGoal('conversation-1', 'project-1', 'Another goal')).rejects.toThrow('already has a goal');
   });
@@ -233,7 +233,7 @@ describe('GoalService', () => {
     expect(updated.events.some((event) => event.type === 'evidence')).toBe(true);
   });
 
-  it('keeps autonomous continuation active across turns without a token or turn ceiling', async () => {
+  it('keeps autonomous continuation active across turns within budget', async () => {
     const service = new GoalService(createMemoryRepository());
     await service.createGoal('conversation-4', 'project-1', 'Keep working');
     for (const turnId of ['turn-1', 'turn-2']) {
@@ -242,14 +242,30 @@ describe('GoalService', () => {
         runId: run.id,
         turnId,
         status: 'complete',
-        tokenUsage: { inputTokens: 1_000_000, outputTokens: 1_000_000, totalTokens: 2_000_000 },
+        tokenUsage: { inputTokens: 100, outputTokens: 50, totalTokens: 150 },
         toolCalls: [],
-        durationMs: 7_200_000,
+        durationMs: 1000,
       });
 
       expect(decision.state.goal.status).toBe('active');
       expect(decision.shouldContinue).toBe(true);
     }
+  });
+
+  it('stops autonomous continuation when the duration budget is reached', async () => {
+    const service = new GoalService(createMemoryRepository());
+    await service.createGoal('conversation-4b', 'project-1', 'Keep working');
+    const run = await service.startRun('conversation-4b', 'continuation');
+    const decision = await service.finishTurn('conversation-4b', {
+      runId: run.id,
+      turnId: 'turn-1',
+      status: 'complete',
+      tokenUsage: { inputTokens: 1_000_000, outputTokens: 1_000_000, totalTokens: 2_000_000 },
+      toolCalls: [],
+      durationMs: 7_200_000,
+    });
+
+    expect(decision.shouldContinue).toBe(false);
   });
 
   it('does not complete until the agent defines acceptance criteria', async () => {

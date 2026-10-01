@@ -9,6 +9,7 @@ use super::utils::cmd;
 // via stdin, and reads NDJSON events from stdout, emitting them as Tauri events.
 
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ClaudeAgentRequest {
     pub request_id: String,
     pub model: String,
@@ -25,6 +26,7 @@ pub struct ClaudeAgentMessage {
 }
 
 #[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ClaudeAgentChunk {
     pub request_id: String,
     #[serde(rename = "type")]
@@ -38,7 +40,7 @@ pub struct ClaudeAgentChunk {
     pub done: bool,
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub async fn claude_agent_run(
     window: Window,
     keychain: State<'_, KeychainState>,
@@ -229,7 +231,7 @@ pub async fn claude_agent_run(
 }
 
 /// Cancel a running Claude Agent sidecar request.
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub async fn claude_agent_cancel(window: Window, request_id: String) -> Result<(), String> {
     let _ = window.emit(
         "agent:chunk",

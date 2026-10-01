@@ -30,6 +30,9 @@ interface OllamaTool {
 }
 
 function toOllamaMessages(messages: Message[], systemPrompt?: string): OllamaMessage[] {
+  if (!messages.length && !systemPrompt) {
+    throw new Error('model required: messages must not be empty');
+  }
   const result: OllamaMessage[] = [];
 
   if (systemPrompt) {
@@ -60,7 +63,16 @@ function toOllamaMessages(messages: Message[], systemPrompt?: string): OllamaMes
 
     for (const c of msg.content) {
       if (c.type === 'text') textParts.push(c.text);
-      if (c.type === 'image') images.push(c.base64);
+      if (c.type === 'thinking') {
+        // Preserve thinking as text so replay history doesn't lose it.
+        textParts.push(`[thinking]${c.thinking}`);
+      }
+      if (c.type === 'image') {
+        if (c.base64.length > 20 * 1024 * 1024) {
+          throw new Error('image too large: base64 payload exceeds 20MB');
+        }
+        images.push(c.base64);
+      }
       if (c.type === 'tool_call') {
         toolCalls.push({ function: { name: c.name, arguments: c.input } });
       }
@@ -80,6 +92,13 @@ function toOllamaTools(tools: ToolDefinition[]): OllamaTool[] {
     type: 'function' as const,
     function: { name: t.name, description: t.description, parameters: t.inputSchema },
   }));
+}
+
+function isConnectionUnavailable(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return /error sending request|connection refused|actively refused|failed to fetch|fetch failed|timed out/i.test(
+    message,
+  );
 }
 
 // ─── Provider Implementation ────────────────────────────────────────────────
@@ -110,9 +129,14 @@ export class OllamaProvider implements AIProvider {
   async listModels(): Promise<AIModel[]> {
     try {
       const response = await this.fetchImpl(`${this.baseUrl}/api/tags`);
-      if (!response.ok) return [];
+      if (!response.ok) {
+        this.models = [];
+        return [];
+      }
 
-      const data = (await response.json()) as { models?: Array<{ name: string; details?: { parameter_size?: string }; size?: number }> };
+      const data = (await response.json()) as {
+        models?: Array<{ name: string; details?: { parameter_size?: string }; size?: number }>;
+      };
       this.models = (data.models ?? []).map((m) => ({
         id: m.name,
         name: m.name,
@@ -125,12 +149,22 @@ export class OllamaProvider implements AIProvider {
       }));
 
       return this.models;
-    } catch {
+    } catch (err) {
+      this.models = [];
+      if (isConnectionUnavailable(err)) {
+        console.info(
+          `[OllamaProvider] Local service unavailable at ${this.baseUrl}; start Ollama to discover local models.`,
+        );
+        return [];
+      }
+      console.warn('[OllamaProvider] Model discovery failed:', err);
       return [];
     }
   }
 
   async *chat(params: ChatParams): AsyncIterable<StreamChunk> {
+    if (!params.model) throw new Error('model required');
+    if (!params.messages.length) throw new Error('model required: messages must not be empty');
     const messages = toOllamaMessages(params.messages, params.systemPrompt);
 
     const body: Record<string, unknown> = {
@@ -178,7 +212,7 @@ export class OllamaProvider implements AIProvider {
       if (obj.message?.tool_calls) {
         hasToolCalls = true;
         for (const tc of obj.message.tool_calls) {
-          const callId = `ollama_${tc.function.name}_${Date.now()}`;
+          const callId = `ollama_${tc.function.name}_${crypto.randomUUID()}`;
           yield { type: 'tool_call_start', id: callId, name: tc.function.name };
           yield {
             type: 'tool_call_delta',

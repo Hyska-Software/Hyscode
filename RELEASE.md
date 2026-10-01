@@ -1,3 +1,20 @@
+# HysCode v0.15.0 — Estado Atual
+
+## O que mudou desde v0.1.0
+
+- **Monaco Editor funcional**: integração lazy-loaded com tema escuro customizado,
+  LSP via URIs `file:` canônicas (`@hyscode/lsp-client`), inlay hints com range visível.
+- **Terminal funcional**: xterm.js + PTY Tauri (`pty_spawn`, `pty_write`, `pty_resize`),
+  múltiplas sessões, build target ES2021 fixado contra o bug de lowering `||=` do esbuild.
+- **MCP implementado**: `@hyscode/mcp-client` com transportes stdio/SSE/WS,
+  registro dinâmico de ferramentas no Tool Router.
+- **Monorepo em npm workspaces**: `npm ci` / `npm run` (Turborepo, sem pnpm).
+- **VORTEX CLI**: cliente TUI standalone (`tools/hyscode-tui`) com bundle de produção
+  e instaladores próprios, separado dos assets desktop.
+- **LSP no Windows**: `rust-analyzer` resolvido via `rustup which` (sem symlink proxy).
+
+---
+
 # HysCode v0.1.0 — Release Inicial
 
 ## Bem-vindo ao HysCode
@@ -22,7 +39,7 @@ HysCode reimagina o desenvolvimento de software ao trazer a inteligência artifi
 ## Funcionalidades da Versão 0.1.0
 
 ### Infraestrutura Base (M0)
-- Monorepo Turborepo com pnpm workspaces
+- Monorepo Turborepo com npm workspaces
 - Desktop nativo com Tauri v2 + React 19
 - Interface moderna com **shadcn/ui** e tema Zinc escuro
 - **Tailwind CSS v4** com configuração CSS-first
@@ -47,7 +64,7 @@ HysCode reimagina o desenvolvimento de software ao trazer a inteligência artifi
 - 500MB espaço em disco
 
 ### Para Desenvolvedores
-- **Node.js** 18+ ou **pnpm** 10+
+- **Node.js** 18+ com **npm** 10+
 - **Rust** 1.70+ (para builds do Tauri)
 - **Tauri CLI** (`npm install -g @tauri-apps/cli`)
 - Git
@@ -64,10 +81,10 @@ git clone https://github.com/Hyska-Software/Hyscode.git
 cd Hyscode
 
 # Instalar dependências
-pnpm install
+npm ci
 
 # Executar em modo desenvolvimento
-pnpm dev
+npm run dev
 
 # O app Tauri abrirá automaticamente
 ```
@@ -76,13 +93,13 @@ pnpm dev
 
 ```bash
 # Windows (PowerShell)
-pnpm run build:prod
+npm run build:prod
 
 # macOS
-pnpm run build:prod
+npm run build:prod
 
 # Linux
-pnpm run build:prod
+npm run build:prod
 
 # Instalar o executável gerado
 ```
@@ -140,7 +157,7 @@ Adoraríamos sua contribuição! Aqui está como começar:
 
 ### Diretrizes de Contribuição
 - Siga o padrão de código TypeScript existente
-- Execute `pnpm lint` e `pnpm typecheck` antes de commitar
+- Execute `npm run lint` e `npm run typecheck` antes de commitar
 - Adicione testes para novas funcionalidades
 - Atualize a documentação conforme necessário
 
@@ -175,7 +192,7 @@ Veja [MILESTONES.md](./docs/MILESTONES.md) para detalhes completos.
 
 ### Adições
 - Primeiro release do HysCode
-- Monorepo Turborepo configurado com pnpm
+- Monorepo Turborepo configurado com npm workspaces
 - Tauri v2 desktop app com React 19
 - shadcn/ui integrado com tema Zinc
 - Tailwind CSS v4 com configuração moderna
@@ -238,7 +255,7 @@ HysCode foi construído por **Estêvão Bonatto** e contribuidores. Obrigado a:
 
 Novo no HysCode? Recomendamos:
 
-1. Clonar e executar `pnpm dev`
+1. Clonar e executar `npm run dev`
 2. Ler [OVERVIEW.md](./docs/architecture/OVERVIEW.md)
 3. Verificar [MILESTONES.md](./docs/MILESTONES.md) para o que vem next
 4. Considere contribuir — achamos great desenvolvedores como você!

@@ -22,7 +22,7 @@ export interface McpServerConfig {
   env?: Record<string, string>;
   /** SSE: HTTP endpoint URL */
   url?: string;
-  /** SSE: HTTP headers */
+  /** Auth headers for HTTP transports. WebSocket auth headers are unsupported. */
   headers?: Record<string, string>;
   /** WebSocket: URL */
   wsUrl?: string;
@@ -31,6 +31,11 @@ export interface McpServerConfig {
   /** Auto-connect on startup */
   autoConnect?: boolean;
 }
+
+export type McpRequestOptions = {
+  signal?: AbortSignal;
+  timeoutMs?: number;
+};
 
 export interface McpToolDefinition {
   name: string;

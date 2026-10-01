@@ -6,7 +6,10 @@ import type {
   ServerCapabilities,
   InitializeResult,
   LspRange,
+  SemanticTokensFullResponse,
+  SemanticTokensDeltaResponse,
 } from './types';
+import { SEMANTIC_TOKEN_MODIFIERS, SEMANTIC_TOKEN_TYPES } from './semantic-tokens';
 
 type NotificationHandler = (params: unknown) => void;
 type ResponseResolver = { resolve: (result: unknown) => void; reject: (error: Error) => void };
@@ -53,7 +56,12 @@ export class LspConnection {
       ...(initializationOptions !== undefined ? { initializationOptions } : {}),
       capabilities: {
         textDocument: {
-          synchronization: { dynamicRegistration: false, willSave: false, didSave: true, willSaveWaitUntil: false },
+          synchronization: {
+            dynamicRegistration: false,
+            willSave: false,
+            didSave: true,
+            willSaveWaitUntil: false,
+          },
           completion: {
             dynamicRegistration: false,
             completionItem: {
@@ -90,7 +98,21 @@ export class LspConnection {
           documentHighlight: { dynamicRegistration: false },
           selectionRange: { dynamicRegistration: false },
           inlayHint: { dynamicRegistration: false },
-          publishDiagnostics: { relatedInformation: true, versionSupport: true, tagSupport: { valueSet: [1, 2] } },
+          semanticTokens: {
+            dynamicRegistration: false,
+            requests: { range: false, full: { delta: true } },
+            tokenTypes: SEMANTIC_TOKEN_TYPES,
+            tokenModifiers: SEMANTIC_TOKEN_MODIFIERS,
+            formats: ['relative'],
+            overlappingTokenSupport: false,
+            multilineTokenSupport: true,
+            augmentsSyntaxTokens: true,
+          },
+          publishDiagnostics: {
+            relatedInformation: true,
+            versionSupport: true,
+            tagSupport: { valueSet: [1, 2] },
+          },
         },
         workspace: {
           workspaceFolders: true,
@@ -113,6 +135,11 @@ export class LspConnection {
     } catch {
       // Process may have already died
     }
+    // Fail fast: pending requests would otherwise hang until the 30s timer.
+    for (const [, pending] of this.pendingRequests) {
+      pending.reject(new Error('shutdown'));
+    }
+    this.pendingRequests.clear();
     this.setStatus('stopped');
     this.transport.close();
   }
@@ -196,7 +223,11 @@ export class LspConnection {
     });
   }
 
-  codeAction(uri: string, range: { start: { line: number; character: number }; end: { line: number; character: number } }, diagnostics: unknown[]) {
+  codeAction(
+    uri: string,
+    range: { start: { line: number; character: number }; end: { line: number; character: number } },
+    diagnostics: unknown[],
+  ) {
     return this.sendRequest('textDocument/codeAction', {
       textDocument: { uri },
       range,
@@ -262,6 +293,32 @@ export class LspConnection {
     });
   }
 
+  semanticTokensFull(uri: string) {
+    return this.sendRequest<SemanticTokensFullResponse | null>('textDocument/semanticTokens/full', {
+      textDocument: { uri },
+    });
+  }
+
+  semanticTokensFullDelta(uri: string, previousResultId: string) {
+    return this.sendRequest<SemanticTokensFullResponse | SemanticTokensDeltaResponse | null>(
+      'textDocument/semanticTokens/full/delta',
+      {
+        textDocument: { uri },
+        previousResultId,
+      },
+    );
+  }
+
+  semanticTokensRange(uri: string, range: LspRange) {
+    return this.sendRequest<SemanticTokensFullResponse | null>(
+      'textDocument/semanticTokens/range',
+      {
+        textDocument: { uri },
+        range,
+      },
+    );
+  }
+
   workspaceSymbol(query: string) {
     return this.sendRequest('workspace/symbol', {
       query,
@@ -272,11 +329,22 @@ export class LspConnection {
 
   onNotification(method: string, handler: NotificationHandler) {
     this.notificationHandlers.set(method, handler);
+    return () => {
+      if (this.notificationHandlers.get(method) === handler) {
+        this.notificationHandlers.delete(method);
+      }
+    };
+  }
+
+  removeNotificationHandler(method: string): void {
+    this.notificationHandlers.delete(method);
   }
 
   onStatusChange(listener: (status: LspConnectionStatus) => void) {
     this.statusListeners.add(listener);
-    return () => { this.statusListeners.delete(listener); };
+    return () => {
+      this.statusListeners.delete(listener);
+    };
   }
 
   // ── Internals ─────────────────────────────────────────────────────────────
@@ -284,18 +352,41 @@ export class LspConnection {
   private sendRequest<T = unknown>(method: string, params: unknown): Promise<T> {
     return new Promise((resolve, reject) => {
       const id = this.nextId++;
-      this.pendingRequests.set(id, { resolve: resolve as (v: unknown) => void, reject });
-
-      const msg: LspRequest = { jsonrpc: '2.0', id, method, params };
-      this.transport.send(msg);
-
-      // Timeout after 30s
-      setTimeout(() => {
+      // Timeout after 30s — created first so a sync/async transport failure
+      // can clear it immediately instead of leaking the timer.
+      const handle = setTimeout(() => {
         if (this.pendingRequests.has(id)) {
           this.pendingRequests.delete(id);
           reject(new Error(`LSP request "${method}" timed out (30s).`));
         }
       }, 30_000);
+      const wrappedResolve = (v: unknown) => {
+        clearTimeout(handle);
+        (resolve as (val: unknown) => void)(v);
+      };
+      const wrappedReject = (e: Error) => {
+        clearTimeout(handle);
+        reject(e);
+      };
+      this.pendingRequests.set(id, { resolve: wrappedResolve, reject: wrappedReject });
+
+      const msg: LspRequest = { jsonrpc: '2.0', id, method, params };
+      try {
+        const result = this.transport.send(msg) as unknown;
+        // Async transports (Tauri IPC) surface failures as rejections —
+        // fail the request now instead of waiting out the 30s timer.
+        if (result instanceof Promise) {
+          result.catch((err: unknown) => {
+            if (this.pendingRequests.has(id)) {
+              this.pendingRequests.delete(id);
+              wrappedReject(err instanceof Error ? err : new Error(String(err)));
+            }
+          });
+        }
+      } catch (err) {
+        this.pendingRequests.delete(id);
+        wrappedReject(err instanceof Error ? err : new Error(String(err)));
+      }
     });
   }
 
@@ -306,7 +397,10 @@ export class LspConnection {
 
   private handleMessage(msg: unknown) {
     if (typeof msg !== 'object' || msg === null) {
-      console.error(`[LspConnection ${this.languageId}] Malformed LSP message (not an object):`, msg);
+      console.error(
+        `[LspConnection ${this.languageId}] Malformed LSP message (not an object):`,
+        msg,
+      );
       return;
     }
 

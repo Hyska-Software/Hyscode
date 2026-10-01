@@ -19,7 +19,15 @@ export class CommandRegistry {
     handler: CommandHandler,
     meta?: { title?: string; category?: string; extensionName?: string },
   ): Disposable {
-    if (this.commands.has(id)) {
+    const existing = this.commands.get(id);
+    if (existing) {
+      // Same extension re-registering (e.g. hot reload) is fine; a DIFFERENT
+      // publisher claiming an existing id is a conflict — fail loudly.
+      if (existing.extensionName && meta?.extensionName && existing.extensionName !== meta.extensionName) {
+        throw new Error(
+          `Command "${id}" already registered by "${existing.extensionName}" — "${meta.extensionName}" cannot overwrite it.`,
+        );
+      }
       console.warn(`[CommandRegistry] Command "${id}" already registered, overwriting.`);
     }
 
@@ -63,11 +71,17 @@ export class CommandRegistry {
 
   registerContributions(contributions: CommandContribution[], extensionName: string): Disposable[] {
     return contributions.map((cmd) =>
-      this.registerCommand(cmd.id, () => {}, {
-        title: cmd.title,
-        category: cmd.category,
-        extensionName,
-      }),
+      this.registerCommand(
+        cmd.id,
+        () => {
+          throw new Error(`not implemented: ${cmd.id} (contributed by "${extensionName}" with no handler)`);
+        },
+        {
+          title: cmd.title,
+          category: cmd.category,
+          extensionName,
+        },
+      ),
     );
   }
 

@@ -114,6 +114,9 @@ export class DesktopTerminalRuntime implements TerminalRuntimeAdapter {
           () => tauriInvokeRaw<unknown>('pty_spawn', {
             shell: shell.command,
             cwd: request.cwd,
+            ...(request.nativeGrantIds?.length
+              ? { nativeGrantIds: [...request.nativeGrantIds] }
+              : {}),
             env: null,
             cols: 120,
             rows: 32,

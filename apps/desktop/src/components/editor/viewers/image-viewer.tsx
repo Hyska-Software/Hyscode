@@ -82,8 +82,8 @@ export function ImageViewer({ filePath }: ImageViewerProps) {
             setImageSrc(`data:${mime};base64,${base64}`);
           }
         }
-      } catch (err: any) {
-        if (!cancelled) setError(err.message ?? String(err));
+      } catch (err: unknown) {
+        if (!cancelled) setError(err instanceof Error ? err.message : String(err));
       } finally {
         if (!cancelled) setLoading(false);
       }

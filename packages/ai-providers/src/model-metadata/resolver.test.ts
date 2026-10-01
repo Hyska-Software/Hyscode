@@ -8,16 +8,28 @@ import {
 } from './resolver';
 
 const ZEN_LIVE_IDS = [
-  'claude-fable-5', 'claude-opus-5', 'claude-opus-4-8', 'claude-opus-4-7',
-  'claude-opus-4-6', 'claude-opus-4-5', 'claude-sonnet-5', 'claude-sonnet-4-6',
-  'gpt-5.6-sol', 'gpt-5.6-luna', 'glm-5.2', 'kimi-k3', 'brand-new-upstream-model',
+  'claude-fable-5',
+  'claude-opus-5',
+  'claude-opus-4-8',
+  'claude-opus-4-7',
+  'claude-opus-4-6',
+  'claude-opus-4-5',
+  'claude-sonnet-5',
+  'claude-sonnet-4-6',
+  'gpt-5.6-sol',
+  'gpt-5.6-luna',
+  'glm-5.2',
+  'kimi-k3',
+  'brand-new-upstream-model',
 ];
 
 describe('resolveZenCatalog', () => {
   it('without live ids publishes the full curated catalog', () => {
     const { models } = resolveZenCatalog();
-    expect(models.length).toBe(65); // parity with the retired static ZEN_MODELS literal
-    expect(models.every((m) => m.provider === undefined || m.provider === 'opencode-zen' || true)).toBe(true);
+    expect(models.length).toBe(81); // curated ZEN_CATALOG rows (Oct 2026)
+    expect(
+      models.every((m) => m.provider === undefined || m.provider === 'opencode-zen' || true),
+    ).toBe(true);
   });
 
   it('keeps curated ids present live and drops retired ones', () => {
@@ -92,7 +104,9 @@ describe('resolveGoCatalog', () => {
 describe('fetchLiveModelIds', () => {
   it('returns ids from an OpenAI-style response', async () => {
     const fetchImpl = (async () =>
-      new Response(JSON.stringify({ object: 'list', data: [{ id: 'a' }, { id: 'b' }] }), { status: 200 })) as never;
+      new Response(JSON.stringify({ object: 'list', data: [{ id: 'a' }, { id: 'b' }] }), {
+        status: 200,
+      })) as never;
     expect(await fetchLiveModelIds('https://x/v1/models', 'key', fetchImpl)).toEqual(['a', 'b']);
   });
 
@@ -102,7 +116,9 @@ describe('fetchLiveModelIds', () => {
   });
 
   it('returns undefined on network failure', async () => {
-    const fetchImpl = (async () => { throw new Error('offline'); }) as never;
+    const fetchImpl = (async () => {
+      throw new Error('offline');
+    }) as never;
     expect(await fetchLiveModelIds('https://x/v1/models', '', fetchImpl)).toBeUndefined();
   });
 });

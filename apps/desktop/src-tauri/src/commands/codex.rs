@@ -18,6 +18,7 @@ use super::utils::cmd;
 // `~/.codex/auth.json`.
 
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CodexRequest {
     pub request_id: String,
     pub model: String,
@@ -33,6 +34,7 @@ pub struct CodexRequest {
 }
 
 #[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CodexChunk {
     pub request_id: String,
     #[serde(rename = "type")]
@@ -264,7 +266,7 @@ fn session_key(session_id: Option<&str>, fingerprint: Option<&str>) -> Option<St
     session_id.map(|id| format!("{}:{}", id, fingerprint.unwrap_or("default")))
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub async fn codex_run(
     window: Window,
     keychain: State<'_, KeychainState>,
@@ -468,7 +470,7 @@ pub async fn codex_run(
 }
 
 /// Kill a running Codex sidecar request and emit a terminal error chunk.
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub async fn codex_cancel(
     window: Window,
     active_requests: State<'_, CodexRequestState>,

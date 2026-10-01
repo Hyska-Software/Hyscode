@@ -67,6 +67,14 @@ specific, shared with child agents, cleared when changing sessions, and never
 persisted. For terminal tools, only an external `cwd` is covered by this
 permission boundary.
 
+Desktop Rust is the final filesystem authority: a project root is registered
+only from an OS folder-picker selection (or restored from app-owned root state),
+and external operations require an expiring native grant scoped to the selected
+path and operation. Project diagnostics are explicit-approval tools; running
+project-configured compiler/linter commands also requires a separate native
+confirmation token that Rust validates before spawning them. Approval mode
+overrides alone cannot authorize diagnostics or manufacture filesystem access.
+
 Every runtime event is correlated with `turnId`, `conversationId`, `iteration`, and `iterationId`. The UI ignores stale events and prevents closing the tab that owns an active turn.
 
 ### Chat Mode (default)

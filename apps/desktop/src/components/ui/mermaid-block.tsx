@@ -244,7 +244,7 @@ export function MermaidBlock({ code }: { code: string }) {
     };
     el.addEventListener('wheel', onWheel, { passive: false });
     return () => el.removeEventListener('wheel', onWheel);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+   
   }, [!!displaySvg]);
 
   useEffect(() => {

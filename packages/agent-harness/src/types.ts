@@ -29,6 +29,15 @@ export type ToolCategory =
   | 'meta'
   | 'docker';
 
+export type ToolInvocationAuthorization = {
+  workspacePath: string;
+  externalPathAccess?: ExternalPathAccess;
+  /** Opaque native grants minted only after Desktop OS-dialog confirmation. */
+  nativeGrantIds?: readonly string[];
+  /** One-call grants retained until pending file edits are accepted or reverted. */
+  revokeNativeGrantIds?: readonly string[];
+};
+
 export interface ToolResult {
   success: boolean;
   output: string;
@@ -40,6 +49,8 @@ export interface ToolHandler {
   definition: ToolDefinition;
   category: ToolCategory;
   requiresApproval: boolean;
+  /** Requires a user approval prompt unless the tool has been session-trusted. */
+  requiresExplicitApproval?: boolean;
   /** Risk classification for approval routing. Built-in tools declare it via
    *  `defineTool` (defaulting to `CATEGORY_RISK[category]`); the router and
    *  the bridge consume it so no separate name-based registry can drift. */
@@ -55,6 +66,8 @@ export interface ToolHandler {
 export interface ToolExecutionContext {
   workspacePath: string;
   conversationId: string;
+  /** Tool names permitted by the effective policy for this Harness turn. */
+  policyAllowedToolNames?: ReadonlySet<string>;
   /** Stable canonical identity of the owning Harness turn. */
   turnId?: string;
   /** The ID of the current tool call (set per-call by the harness) */
@@ -70,7 +83,11 @@ export interface ToolExecutionContext {
    *  Used to isolate terminal sessions and other per-owner resources. */
   ownerId?: string;
   /** Invoke a Tauri command */
-  invoke: <T>(cmd: string, args?: Record<string, unknown>) => Promise<T>;
+  invoke: <T>(
+    cmd: string,
+    args?: Record<string, unknown>,
+    authorization?: ToolInvocationAuthorization,
+  ) => Promise<T>;
   /** Listen to a Tauri event. Returns an unlisten function. */
   listen?: (event: string, handler: (payload: unknown) => void) => Promise<() => void>;
   /** Callback fired when a file-writing tool mutates a file on disk */
@@ -121,6 +138,8 @@ export type TerminalAcquireRequest = {
   forceNew: boolean;
   sessionName?: string;
   background: boolean;
+  /** Desktop-native proof for a Harness-approved external execution directory. */
+  nativeGrantIds?: readonly string[];
   /** Owner (sub-agent id) that must own the acquired session. When set, the
    *  runtime must not reuse a session owned by a different owner. */
   ownerId?: string;
@@ -350,6 +369,8 @@ export interface PendingToolCall {
   riskLevel?: ToolRiskLevel;
   externalAccess?: ExternalPathAccessRequest;
   resolve: (decision: ApprovalDecision, reason?: string) => void;
+  /** Optional cleanup hook invoked when the owning turn is cancelled. */
+  onAbort?: () => void;
 }
 
 /** Approval result. Boolean callbacks remain supported for compatibility. */
@@ -358,6 +379,8 @@ export type ApprovalDecision =
   | {
       approved: boolean;
       externalGrant?: ExternalPathGrant;
+      /** Opaque native grants minted only after Desktop OS-dialog confirmation. */
+      nativeGrantId?: string;
     };
 
 export type ToolApprovalRequest = Omit<PendingToolCall, 'resolve'>;
@@ -634,7 +657,7 @@ export type TurnOutcome = {
 export const DEFAULT_HARNESS_CONFIG: HarnessConfig = {
   providerId: '',
   modelId: '',
-  maxIterations: null,
+  maxIterations: 50,
   maxInputTokens: 200_000,
   maxOutputTokens: 16_000,
   turnTimeoutMs: 300_000, // 5 minutes

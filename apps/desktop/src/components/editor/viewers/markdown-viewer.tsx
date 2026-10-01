@@ -5,7 +5,11 @@ import { useSettingsStore } from '../../../stores';
 import type { MarkdownViewMode } from '../../../stores/editor-store';
 import { defineAllMonacoThemes, getMonacoThemeName } from '../../../lib/monaco-themes';
 import { loadMonacoEditor } from '../../../lib/monaco-loader';
-import { registerAllLanguages, disableNativeTypeScriptValidation, pathToFileUri } from '@hyscode/lsp-client';
+import {
+  registerAllLanguages,
+  disableNativeTypeScriptValidation,
+  pathToFileUri,
+} from '@hyscode/lsp-client';
 import { LspBridge } from '../../../lib/lsp-bridge';
 import { GIT_GUTTER_WIDTH } from '../../../hooks/use-git-decorations';
 import { MarkdownDocumentPreview } from './markdown-document-preview';
@@ -73,16 +77,10 @@ function MarkdownCodeEditor({
   const editorLineNumbers = useSettingsStore((state) => state.lineNumbers);
   const editorCursorStyle = useSettingsStore((state) => state.cursorStyle);
   const editorRenderWhitespace = useSettingsStore((state) => state.renderWhitespace);
-  const editorBracketPairColorization = useSettingsStore(
-    (state) => state.bracketPairColorization,
-  );
-  const editorScrollBeyondLastLine = useSettingsStore(
-    (state) => state.scrollBeyondLastLine,
-  );
+  const editorBracketPairColorization = useSettingsStore((state) => state.bracketPairColorization);
+  const editorScrollBeyondLastLine = useSettingsStore((state) => state.scrollBeyondLastLine);
   const editorSmoothScrolling = useSettingsStore((state) => state.smoothScrolling);
-  const editorAutoClosingBrackets = useSettingsStore(
-    (state) => state.autoClosingBrackets,
-  );
+  const editorAutoClosingBrackets = useSettingsStore((state) => state.autoClosingBrackets);
   const editorAutoClosingQuotes = useSettingsStore((state) => state.autoClosingQuotes);
   const editorFormatOnPaste = useSettingsStore((state) => state.formatOnPaste);
   const editorFormatOnType = useSettingsStore((state) => state.formatOnType);
@@ -143,6 +141,7 @@ function MarkdownCodeEditor({
           autoClosingQuotes: editorAutoClosingQuotes,
           formatOnPaste: editorFormatOnPaste,
           formatOnType: editorFormatOnType,
+          'semanticHighlighting.enabled': true,
           padding: { top: 8 },
           overviewRulerLanes: 3,
           overviewRulerBorder: false,
@@ -175,9 +174,9 @@ export function MarkdownViewer({
   const unlockFrameRef = useRef<number | null>(null);
   const isApplyingScrollRef = useRef(false);
   const lastScrollRef = useRef<PendingScroll | null>(null);
-  const [splitEditor, setSplitEditor] = useState<
-    monacoEditor.editor.IStandaloneCodeEditor | null
-  >(null);
+  const [splitEditor, setSplitEditor] = useState<monacoEditor.editor.IStandaloneCodeEditor | null>(
+    null,
+  );
   const [previewContainer, setPreviewContainer] = useState<HTMLDivElement | null>(null);
 
   const scheduleSync = useCallback(
@@ -335,9 +334,7 @@ export function MarkdownViewer({
           <Columns2 className="h-3 w-3" />
           Split
         </button>
-        {readOnly && (
-          <span className="ml-auto text-[10px] text-muted-foreground">Read only</span>
-        )}
+        {readOnly && <span className="ml-auto text-[10px] text-muted-foreground">Read only</span>}
       </div>
 
       <div className="min-h-0 flex-1 overflow-hidden">

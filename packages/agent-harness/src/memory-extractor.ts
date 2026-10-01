@@ -247,8 +247,9 @@ export class MemoryExtractor {
     for (const extractor of ALL_EXTRACTORS) {
       try {
         all.push(...extractor.extract(userMessage, assistantText, toolNames));
-      } catch {
+      } catch (e) {
         // Never let extractor failures surface to caller
+        console.warn('[harness] memory extractor failed', extractor.name, e);
       }
     }
 
@@ -265,7 +266,7 @@ export class MemoryExtractor {
   /**
    * Extract memories from a completed turn and persist them.
    * Skips extractions below minConfidence (default 0.6).
-   * Returns the count of saved memories.
+   * Returns the saved memories (callers use `.length` for the count).
    */
   async extractAndPersist(
     manager: MemoryManager,
@@ -275,9 +276,9 @@ export class MemoryExtractor {
     projectId: string,
     conversationId: string,
     minConfidence = 0.6,
-  ): Promise<number> {
+  ): Promise<import('./types').Memory[]> {
     const extractions = this.extract(userMessage, assistantText, toolNames);
-    if (extractions.length === 0) return 0;
+    if (extractions.length === 0) return [];
 
     const saved = await manager.persistExtractions(
       extractions,
@@ -285,7 +286,7 @@ export class MemoryExtractor {
       conversationId,
       minConfidence,
     );
-    return saved.length;
+    return saved;
   }
 
   /** Reset deduplication cache — call at session start or per-conversation. */

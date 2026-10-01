@@ -14,6 +14,18 @@ describe('pathToFileUri', () => {
     );
   });
 
+  it('removes Windows extended-length prefixes before encoding', () => {
+    expect(pathToFileUri('\\\\?\\D:\\Hyscode\\apps\\desktop\\build.rs')).toBe(
+      'file:///d%3A/Hyscode/apps/desktop/build.rs',
+    );
+    expect(pathToFileUri('//?/D:/Hyscode/apps/desktop/build.rs')).toBe(
+      'file:///d%3A/Hyscode/apps/desktop/build.rs',
+    );
+    expect(pathToFileUri('\\\\?\\UNC\\server\\share\\src\\file.rs')).toBe(
+      'file://server/share/src/file.rs',
+    );
+  });
+
   it('encodes spaces and reserved characters per segment', () => {
     expect(pathToFileUri('C:\\a b\\c#d.rs')).toBe('file:///c%3A/a%20b/c%23d.rs');
   });

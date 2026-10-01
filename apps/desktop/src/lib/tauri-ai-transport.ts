@@ -18,14 +18,14 @@ import {
 // ─── Types matching the Rust AiStreamChunk struct ─────────────────────────
 
 interface AiStreamChunk {
-  request_id: string;
+  requestId: string;
   data: string;
   done: boolean;
   error?: string | null;
-  status_code?: number | null;
-  retry_after_ms?: number | null;
-  error_kind?: ProviderErrorKind | null;
-  error_phase?: ProviderErrorPhase | null;
+  statusCode?: number | null;
+  retryAfterMs?: number | null;
+  errorKind?: ProviderErrorKind | null;
+  errorPhase?: ProviderErrorPhase | null;
 }
 
 // ─── Provider detection ───────────────────────────────────────────────────
@@ -44,12 +44,13 @@ function detectProvider(url: string): string {
 // ─── Header extraction ────────────────────────────────────────────────────
 // Strip auth headers — Rust injects them from the keychain.
 
-function extractHeaders(init?: RequestInit): Record<string, string> {
+function extractHeaders(init?: RequestInit, request?: Request): Record<string, string> {
   const result: Record<string, string> = {};
-  if (!init?.headers) return result;
-
   const authKeys = new Set(['x-api-key', 'authorization', 'x-goog-api-key']);
-  const h = new Headers(init.headers as HeadersInit);
+  const h = new Headers(request?.headers);
+  if (init?.headers) {
+    new Headers(init.headers as HeadersInit).forEach((value, key) => h.set(key, value));
+  }
   h.forEach((value, key) => {
     if (!authKeys.has(key.toLowerCase())) {
       result[key] = value;
@@ -86,16 +87,33 @@ export function createTauriFetch(resilience: Partial<ResilienceConfig> = {}): Fe
         : input instanceof URL
           ? input.href
           : (input as Request).url;
+    const request = typeof Request !== 'undefined' && input instanceof Request ? input : undefined;
+    const method = (init?.method ?? request?.method ?? 'GET').toUpperCase();
 
+    const requestBody = init?.body ?? (request ? await request.clone().text() : null);
     const body =
-      typeof init?.body === 'string'
-        ? init.body
-        : init?.body instanceof URLSearchParams
-          ? init.body.toString()
-          : JSON.stringify(init?.body ?? '');
+      typeof requestBody === 'string'
+        ? requestBody
+        : requestBody instanceof URLSearchParams
+          ? requestBody.toString()
+          : requestBody == null
+            ? ''
+            : requestBody instanceof Blob
+              ? await requestBody.text()
+              : requestBody instanceof ArrayBuffer
+                ? new TextDecoder().decode(requestBody)
+                : ArrayBuffer.isView(requestBody)
+                  ? new TextDecoder().decode(requestBody)
+                  : (() => {
+                      throw new TypeError('The Tauri AI transport only accepts textual request bodies.');
+                    })();
+
+    if (method === 'GET' && body.length > 0) {
+      throw new TypeError('GET requests cannot include a body.');
+    }
 
     const provider = detectProvider(url);
-    const headers = extractHeaders(init);
+    const headers = extractHeaders(init, request);
     const requestId = nextRequestId();
     const encoder = new TextEncoder();
 
@@ -118,6 +136,24 @@ export function createTauriFetch(resilience: Partial<ResilienceConfig> = {}): Fe
     let transportErrorPhase: ProviderErrorPhase | null = null;
     let disposed = false;
     let idleTimer: ReturnType<typeof setTimeout> | null = null;
+    let requestStarted = false;
+    let abortBeforeRequestStarted = false;
+    const signal = init?.signal ?? request?.signal;
+
+    const onAbort = (): void => {
+      if (!requestStarted) {
+        abortBeforeRequestStarted = true;
+        return;
+      }
+      cancelNativeRequest();
+      dispose();
+      if (!statusResolved) {
+        statusResolved = true;
+        rejectStatus(new Error('Request aborted'));
+      } else {
+        enqueue(new Error('Request aborted'));
+      }
+    };
 
     const cancelNativeRequest = (): void => {
       void invoke('ai_stream_cancel', { requestId }).catch(() => undefined);
@@ -132,6 +168,7 @@ export function createTauriFetch(resilience: Partial<ResilienceConfig> = {}): Fe
       if (disposed) return;
       disposed = true;
       clearIdleTimer();
+      signal?.removeEventListener('abort', onAbort);
       unlisten();
     };
 
@@ -157,13 +194,13 @@ export function createTauriFetch(resilience: Partial<ResilienceConfig> = {}): Fe
       resetIdleTimer();
       if (!statusResolved) {
         statusResolved = true;
-        retryAfterMs = chunk.retry_after_ms ?? null;
-        transportErrorKind = chunk.error_kind ?? null;
-        transportErrorPhase = chunk.error_phase ?? null;
-        const code = chunk.status_code ?? 200;
+        retryAfterMs = chunk.retryAfterMs ?? null;
+        transportErrorKind = chunk.errorKind ?? null;
+        transportErrorPhase = chunk.errorPhase ?? null;
+        const code = chunk.statusCode ?? 200;
 
         if (chunk.error && chunk.done) {
-          if (chunk.status_code == null) {
+          if (chunk.statusCode == null) {
             rejectStatus(new Error(chunk.error));
             dispose();
             return;
@@ -197,29 +234,37 @@ export function createTauriFetch(resilience: Partial<ResilienceConfig> = {}): Fe
 
     // Register the event listener before invoking so no chunks are missed.
     const unlisten = await listen<AiStreamChunk>('ai:chunk', (event) => {
-      if (event.payload.request_id === requestId) {
+      if (event.payload.requestId === requestId) {
         onChunk(event.payload);
       }
     });
 
     // Going offline is not a retry attempt: wait until connectivity returns.
     try {
-      await waitUntilOnline(init?.signal ?? undefined);
+      await waitUntilOnline(signal);
     } catch (error) {
       dispose();
       throw error;
     }
 
+    if (signal?.aborted) {
+      dispose();
+      throw new Error('Request aborted');
+    }
+
+    signal?.addEventListener('abort', onAbort, { once: true });
+
     // Start the streaming request in Rust.
     try {
       await invoke<void>('ai_stream_request', {
         request: {
-          request_id: requestId,
+          requestId,
           provider,
+          method,
           url,
           headers,
           body,
-          timeout_ms: config.requestTimeoutMs,
+          timeoutMs: config.requestTimeoutMs,
         },
       });
     } catch (err) {
@@ -228,23 +273,12 @@ export function createTauriFetch(resilience: Partial<ResilienceConfig> = {}): Fe
       throw err;
     }
 
-    // If the AbortSignal fires before the first chunk, reject the status promise.
-    const signal = init?.signal;
-    if (signal) {
-      signal.addEventListener(
-        'abort',
-        () => {
-          cancelNativeRequest();
-          dispose();
-          if (!statusResolved) {
-            statusResolved = true;
-            rejectStatus(new Error('Request aborted'));
-          } else {
-            enqueue(new Error('Request aborted'));
-          }
-        },
-        { once: true },
-      );
+    requestStarted = true;
+    if (abortBeforeRequestStarted || signal?.aborted) {
+      cancelNativeRequest();
+      dispose();
+      statusResolved = true;
+      throw new Error('Request aborted');
     }
 
     // Await first chunk to determine HTTP status code.
@@ -294,7 +328,16 @@ export function createTauriFetch(resilience: Partial<ResilienceConfig> = {}): Fe
 }
 
 function waitUntilOnline(signal?: AbortSignal): Promise<void> {
-  if (typeof navigator === 'undefined' || navigator.onLine) return Promise.resolve();
+  if (signal?.aborted) {
+    return Promise.reject(signal.reason ?? new DOMException('Request aborted', 'AbortError'));
+  }
+  if (
+    typeof navigator === 'undefined' ||
+    navigator.onLine !== false ||
+    typeof window === 'undefined'
+  ) {
+    return Promise.resolve();
+  }
   return new Promise((resolve, reject) => {
     const cleanup = (): void => {
       window.removeEventListener('online', handleOnline);

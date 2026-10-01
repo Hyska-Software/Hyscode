@@ -34,6 +34,33 @@ vi.mock('@monaco-editor/react', () => ({
   },
 }));
 
+vi.mock('../../../lib/monaco-loader', () => ({
+  loadMonacoEditor: () =>
+    Promise.resolve({
+      default: ({
+        value,
+        onChange,
+        options,
+        onMount,
+      }: {
+        value: string;
+        onChange?: (value: string) => void;
+        options?: { readOnly?: boolean };
+        onMount?: (editor: unknown, monaco: unknown) => void;
+      }) => {
+        monacoHarness.onMount = onMount;
+        return (
+          <textarea
+            aria-label="Markdown source"
+            value={value}
+            readOnly={options?.readOnly}
+            onChange={(event) => onChange?.(event.currentTarget.value)}
+          />
+        );
+      },
+    }),
+}));
+
 vi.mock('react-resizable-panels', () => ({
   PanelGroup: ({
     children,

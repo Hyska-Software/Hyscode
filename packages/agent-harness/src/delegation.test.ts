@@ -1,8 +1,17 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { getProviderRegistry, type AIProvider, type ChatParams, type StreamChunk } from '@hyscode/ai-providers';
+import {
+  getProviderRegistry,
+  type AIProvider,
+  type ChatParams,
+  type StreamChunk,
+} from '@hyscode/ai-providers';
 import type { ToolHandler } from './types';
 import { Harness } from './harness';
-import { DelegatedRunner } from './delegated-runner';
+import {
+  DelegatedRunner,
+  SUB_AGENT_MAX_OUTPUT_CHARS,
+  truncateSubAgentOutput,
+} from './delegated-runner';
 
 function externalTool(name: string): ToolHandler {
   return {
@@ -89,9 +98,11 @@ describe('Harness child delegation', () => {
 
   it('runs a delegated turn with parent identity and environment context', async () => {
     const observedParams: ChatParams[] = [];
-    getProviderRegistry().register(finalResponseProvider((params) => {
-      observedParams.push(params);
-    }));
+    getProviderRegistry().register(
+      finalResponseProvider((params) => {
+        observedParams.push(params);
+      }),
+    );
 
     const parent = new Harness({
       workspacePath: 'C:/workspace',
@@ -121,7 +132,11 @@ describe('Harness child delegation', () => {
       conversationId: 'parent-conversation',
       environmentContext: {
         workspacePath: 'C:/workspace',
-        activeFile: { path: 'src/app.ts', content: 'export const app = true;', language: 'typescript' },
+        activeFile: {
+          path: 'src/app.ts',
+          content: 'export const app = true;',
+          language: 'typescript',
+        },
       },
       onEvent: (event) => events.push({ type: event.type, conversationId: event.conversationId }),
     });
@@ -166,5 +181,20 @@ describe('Harness child delegation', () => {
 
     expect(result.success).toBe(false);
     expect(result.error).toContain('not available inside sub-agents');
+  });
+});
+
+describe('truncateSubAgentOutput', () => {
+  it('passes short responses through untouched', () => {
+    expect(truncateSubAgentOutput('Done.')).toBe('Done.');
+  });
+
+  it('caps mega-analyses with an explicit cut marker', () => {
+    const output = `conclusion\n${'detail line\n'.repeat(2000)}tail`;
+    expect(output.length).toBeGreaterThan(SUB_AGENT_MAX_OUTPUT_CHARS);
+    const truncated = truncateSubAgentOutput(output);
+    expect(truncated).toContain('conclusion');
+    expect(truncated).toContain('sub-agent output truncated');
+    expect(truncated.length).toBeLessThan(output.length);
   });
 });

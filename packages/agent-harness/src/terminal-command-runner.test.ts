@@ -51,6 +51,30 @@ function staticAdapter(overrides: Partial<TerminalRuntimeAdapter> = {}): Termina
 }
 
 describe('terminal command framing', () => {
+  it('passes approved native execution grants to the terminal host', async () => {
+    const acquire = vi.fn(async () => {
+      throw new Error('stop after observing the acquisition request');
+    });
+    const adapter = staticAdapter({ acquire });
+    const runner = new TerminalCommandRunner();
+    const externalPathAccess = {
+      resolve: (path: string) => path,
+      nativeGrantIds: ['native-execute-grant'],
+    };
+
+    await runner.run(
+      { command: 'echo approved', cwd: 'C:/external/workspace' },
+      contextWith(adapter, { externalPathAccess }),
+    );
+
+    expect(acquire).toHaveBeenCalledWith(
+      expect.objectContaining({
+        cwd: 'C:/external/workspace',
+        nativeGrantIds: ['native-execute-grant'],
+      }),
+    );
+  });
+
   it('does not complete from the echoed wrapper and waits for the standalone end marker', () => {
     const nonce = 'abc123';
     const echoed = buildTerminalFrame('echo hello', 'bash', nonce);

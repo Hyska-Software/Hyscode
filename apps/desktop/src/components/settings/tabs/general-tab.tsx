@@ -2,6 +2,7 @@ import { useSettingsStore } from '../../../stores';
 import type { ActivityBarPosition, ApprovalMode, UpdateChannel } from '../../../stores/settings-store';
 import { useUpdateStore } from '../../../stores/update-store';
 import { useOnboardingStore } from '../../../stores/onboarding-store';
+import { MAX_ITERATIONS_FUSE } from '@hyscode/agent-harness';
 import { Loader2, CheckCircle, ArrowUpCircle, RefreshCw, RotateCcw } from 'lucide-react';
 import { SettingRow, SettingSection, SettingSelect, SettingSlider, SettingToggle } from '../controls';
 
@@ -163,7 +164,7 @@ export function GeneralTab() {
               value={store.maxIterations}
               onChange={(v) => store.set('maxIterations', v)}
               min={1}
-              max={500}
+              max={MAX_ITERATIONS_FUSE}
             />
           </SettingRow>
         )}

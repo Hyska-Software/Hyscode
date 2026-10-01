@@ -90,4 +90,98 @@ describe('ProviderRegistry per-request retry policy', () => {
     expect(chunks).toEqual([{ type: 'text_delta', text: 'recovered' }]);
     expect(attempts).toBe(2);
   });
+
+  it('does not retry a connection failure after semantic output was delivered', async () => {
+    let attempts = 0;
+    const provider: AIProvider = {
+      id: 'test-provider',
+      name: 'Test provider',
+      models: [model],
+      capabilities: {
+        promptCache: 'none',
+        reasoningReplay: 'none',
+        nativeTokenCounting: false,
+        acceptsPromptCacheKey: false,
+      },
+      isConfigured: () => true,
+      listModels: async () => [model],
+      async *chat() {
+        attempts += 1;
+        yield { type: 'text_delta', text: 'partial answer' };
+        throw new ProviderError(
+          'stream interrupted',
+          'test-provider',
+          undefined,
+          false,
+          undefined,
+          'stream_interrupted',
+          'streaming',
+        );
+      },
+    };
+    const registry = new ProviderRegistry();
+    registry.register(provider);
+    const chunks: unknown[] = [];
+
+    await expect(
+      (async () => {
+        for await (const chunk of registry.chat({
+          providerId: 'test-provider',
+          model: model.id,
+          messages: [],
+          retry: { maxRetries: 1, baseDelayMs: 0 },
+        })) {
+          chunks.push(chunk);
+        }
+      })(),
+    ).rejects.toMatchObject({ kind: 'stream_interrupted' });
+
+    expect(chunks).toEqual([{ type: 'text_delta', text: 'partial answer' }]);
+    expect(attempts).toBe(1);
+  });
+
+  it('passes a distinct abort signal to each timed-out provider attempt', async () => {
+    const attemptSignals: AbortSignal[] = [];
+    const provider: AIProvider = {
+      id: 'test-provider',
+      name: 'Test provider',
+      models: [model],
+      capabilities: {
+        promptCache: 'none',
+        reasoningReplay: 'none',
+        nativeTokenCounting: false,
+        acceptsPromptCacheKey: false,
+      },
+      isConfigured: () => true,
+      listModels: async () => [model],
+      async *chat(params) {
+        const signal = params.signal;
+        if (!signal) throw new Error('Attempt signal was not provided');
+        attemptSignals.push(signal);
+        await new Promise<void>((resolve) => {
+          signal.addEventListener('abort', () => resolve(), { once: true });
+        });
+        throw signal.reason;
+      },
+    };
+    const registry = new ProviderRegistry();
+    registry.register(provider);
+
+    await expect(
+      (async () => {
+        for await (const _chunk of registry.chat({
+          providerId: 'test-provider',
+          model: model.id,
+          messages: [],
+          retry: { maxRetries: 1, baseDelayMs: 0, requestTimeoutMs: 10 },
+        })) {
+          void _chunk;
+        }
+      })(),
+    ).rejects.toMatchObject({ kind: 'timeout' });
+
+    expect(attemptSignals).toHaveLength(2);
+    expect(new Set(attemptSignals).size).toBe(2);
+    expect(attemptSignals.map((signal) => signal.aborted)).toEqual([true, true]);
+  });
 });

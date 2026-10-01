@@ -36,6 +36,7 @@ function defineTool(
   requiresApproval: boolean,
   execute: (input: Record<string, unknown>, ctx: ToolExecutionContext) => Promise<ToolResult>,
   riskLevel?: ToolRiskLevel,
+  requiresExplicitApproval = false,
 ): ToolHandler {
   const definition: ToolDefinition = {
     name,
@@ -46,6 +47,7 @@ function defineTool(
     definition,
     category,
     requiresApproval,
+    requiresExplicitApproval,
     riskLevel: riskLevel ?? CATEGORY_RISK[category],
     execute,
   };
@@ -1115,6 +1117,8 @@ export const getDiagnosticsTool = defineTool(
       return { success: false, output: '', error: String(err) };
     }
   },
+  undefined,
+  true,
 );
 
 // ─── Browser Tools ──────────────────────────────────────────────────────────

@@ -200,7 +200,7 @@ export function MarkdownDocumentPreview({
             />
           );
         }
-        const Paragraph = MARKDOWN_COMPONENTS.p;
+        const Paragraph = MARKDOWN_COMPONENTS.p ?? 'p';
         return <Paragraph>{props.children}</Paragraph>;
       },
       a: ({ href, children }: { href?: string; children?: React.ReactNode }) => (
@@ -246,8 +246,8 @@ export function MarkdownDocumentPreview({
       <article className="markdown-preview cursor-text select-text">
         <ReactMarkdown
           remarkPlugins={[remarkGfm, remarkMath, remarkBreaks, remarkPreserveBlankLines]}
-          rehypePlugins={[[rehypeKatex], [rehypeHighlight, { ignoreMissing: true }]] as any}
-          components={components as any}
+          rehypePlugins={[[rehypeKatex], [rehypeHighlight, { ignoreMissing: true }]] as unknown as React.ComponentProps<typeof ReactMarkdown>['rehypePlugins']}
+          components={components as unknown as React.ComponentProps<typeof ReactMarkdown>['components']}
         >
           {content}
         </ReactMarkdown>

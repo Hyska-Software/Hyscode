@@ -84,6 +84,7 @@ describe('DesktopTerminalRuntime', () => {
         conversationId: 'conversation-a',
         toolCallId: 'tool-configured',
         cwd: 'C:/workspace',
+        nativeGrantIds: ['native-execute-grant'],
         forceNew: false,
         background: false,
       });
@@ -91,6 +92,7 @@ describe('DesktopTerminalRuntime', () => {
       expect(binding.frameLanguage).toBe('bash');
       expect(invokeMock).toHaveBeenCalledWith('pty_spawn', expect.objectContaining({
         shell: 'C:\\Git\\bin\\bash.exe',
+        nativeGrantIds: ['native-execute-grant'],
       }));
     });
 

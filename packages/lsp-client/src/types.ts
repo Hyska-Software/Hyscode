@@ -30,12 +30,39 @@ export interface LspError {
 // ── Transport Interface ──────────────────────────────────────────────────────
 
 export interface MessageTransport {
-  send(message: LspRequest | LspNotification): void;
+  send(message: LspRequest | LspNotification): void | Promise<void>;
   onMessage(handler: (message: LspResponse | LspNotification) => void): void;
   close(): void;
 }
 
 // ── Server Capabilities (subset) ─────────────────────────────────────────────
+
+export interface SemanticTokensLegend {
+  tokenTypes: string[];
+  tokenModifiers: string[];
+}
+
+export interface SemanticTokensProviderOptions {
+  legend: SemanticTokensLegend;
+  range?: boolean | Record<string, unknown>;
+  full?: boolean | { delta?: boolean };
+}
+
+export interface SemanticTokensFullResponse {
+  resultId?: string;
+  data: number[];
+}
+
+export interface SemanticTokensDeltaEdit {
+  start: number;
+  deleteCount: number;
+  data?: number[];
+}
+
+export interface SemanticTokensDeltaResponse {
+  resultId?: string;
+  edits: SemanticTokensDeltaEdit[];
+}
 
 export interface ServerCapabilities {
   completionProvider?: { triggerCharacters?: string[]; resolveProvider?: boolean };
@@ -55,8 +82,11 @@ export interface ServerCapabilities {
   documentHighlightProvider?: boolean;
   selectionRangeProvider?: boolean;
   inlayHintProvider?: boolean;
+  semanticTokensProvider?: SemanticTokensProviderOptions;
   diagnosticProvider?: { interFileDependencies?: boolean; workspaceDiagnostics?: boolean };
-  textDocumentSync?: number | { openClose?: boolean; change?: number; save?: boolean | { includeText?: boolean } };
+  textDocumentSync?:
+    | number
+    | { openClose?: boolean; change?: number; save?: boolean | { includeText?: boolean } };
 }
 
 export interface InitializeResult {
@@ -107,7 +137,10 @@ export interface CompletionList {
 // ── Hover ────────────────────────────────────────────────────────────────────
 
 export interface Hover {
-  contents: string | { kind: string; value: string } | Array<string | { kind: string; value: string }>;
+  contents:
+    | string
+    | { kind: string; value: string }
+    | Array<string | { kind: string; value: string }>;
   range?: LspRange;
 }
 

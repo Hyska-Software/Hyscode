@@ -84,7 +84,17 @@ pub fn validate_repo_relative_path(path: &str) -> Result<PathBuf, String> {
 
 fn normalize_separators(path: &str) -> String {
     if cfg!(windows) {
-        path.replace('/', "\\")
+        let normalized = path.replace('/', "\\");
+        if normalized
+            .get(..8)
+            .is_some_and(|prefix| prefix.eq_ignore_ascii_case("\\\\?\\UNC\\"))
+        {
+            format!("\\\\{}", &normalized[8..])
+        } else if let Some(path) = normalized.strip_prefix("\\\\?\\") {
+            path.to_string()
+        } else {
+            normalized
+        }
     } else {
         path.to_string()
     }
@@ -108,14 +118,15 @@ pub fn normalize_repo_relative_path(repo: &Repository, path: &str) -> Result<Str
     if path.trim().is_empty() {
         return Err("Invalid repository-relative path: ''".to_string());
     }
-    if !Path::new(path).is_absolute() {
+    let normalized_path = normalize_separators(path);
+    if !Path::new(path).is_absolute() && !Path::new(&normalized_path).is_absolute() {
         validate_repo_relative_path(path)?;
         return Ok(path.to_string());
     }
 
     let worktree = normalize_separators(&worktree_root(repo)?.to_string_lossy());
     let worktree = worktree.trim_end_matches(['\\', '/']);
-    let candidate = normalize_separators(path);
+    let candidate = normalized_path;
     let candidate = candidate.trim_end_matches(['\\', '/']);
     let prefix = format!("{worktree}\\");
     let inside = candidate
@@ -125,6 +136,72 @@ pub fn normalize_repo_relative_path(repo: &Repository, path: &str) -> Result<Str
         return Err(format!("Path escapes the repository worktree: '{path}'"));
     }
     Ok(candidate[prefix.len()..].to_string())
+}
+
+// ── Ref / URL validation (CLI injection hardening) ───────────────────────
+// SECURITY: write/remote git operations shell out to the `git` CLI with
+// caller-supplied refs, branch names, remote names and URLs. A value starting
+// with `-` would be parsed as a CLI flag (option injection); `..`, `~`, `^`,
+// `:`, `?`, `*`, `[`, `@{` and `\` are either ref-spec metacharacters or
+// path escapes. Every command in `git.rs` / `extension.rs` that forwards such
+// values to `run_git_cli` must pass them through `validate_git_ref` (refs,
+// branch/tag/remote names) or `validate_clone_url` (remote URLs) first.
+
+/// Validate a git ref, branch name, tag name or remote name.
+/// Rejects empty values, leading `-` (option injection), ref-spec
+/// metacharacters and control characters. `/` stays allowed so hierarchical
+/// branch names (`feature/foo`) keep working.
+pub fn validate_git_ref(value: &str) -> Result<(), String> {
+    if value.trim().is_empty() {
+        return Err("Validation: git ref cannot be empty".to_string());
+    }
+    if value.starts_with('-') || value.starts_with(' ') {
+        return Err(format!("Validation: invalid git ref: '{value}'"));
+    }
+    for forbidden in ["..", "~", "^", ":", "?", "*", "[", "@{", "\\"] {
+        if value.contains(forbidden) {
+            return Err(format!("Validation: invalid git ref: '{value}'"));
+        }
+    }
+    if value.chars().any(|c| c.is_control()) {
+        return Err(format!("Validation: invalid git ref: '{value}'"));
+    }
+    if value.ends_with('/') || value.ends_with('.') {
+        return Err(format!("Validation: invalid git ref: '{value}'"));
+    }
+    Ok(())
+}
+
+/// Validate a remote/clone URL: only `https://`, `git@` (scp-like SSH) and
+/// `gh:` (GitHub CLI shorthand) are accepted. `file://` URLs and local paths
+/// are rejected — they would give the backend arbitrary local read/clone and
+/// bypass the HTTPS/GitHub-auth path entirely.
+pub fn validate_clone_url(url: &str) -> Result<String, String> {
+    let trimmed = url.trim();
+    if trimmed.is_empty() {
+        return Err("Validation: git URL cannot be empty".to_string());
+    }
+    let lower = trimmed.to_ascii_lowercase();
+    if lower.starts_with("file://")
+        || lower.starts_with("ftp://")
+        || lower.starts_with("http://")
+        || trimmed.contains('\0')
+        || trimmed.contains(' ')
+        || trimmed.contains('\\')
+    {
+        return Err(format!("Validation: git URL not allowed: '{trimmed}'"));
+    }
+    if !(trimmed.starts_with("https://")
+        || trimmed.starts_with("git@")
+        || trimmed.starts_with("gh:"))
+    {
+        // Anything else (bare paths, `ssh://`, custom schemes) is rejected
+        // fail-closed; extend explicitly if a new transport is ever needed.
+        return Err(format!(
+            "Validation: git URL must use https://, git@ or gh:: '{trimmed}'"
+        ));
+    }
+    Ok(trimmed.to_string())
 }
 
 pub fn absolute_worktree_path(repo: &Repository, path: &str) -> Result<String, String> {
@@ -486,4 +563,112 @@ pub fn run_git_cli_with_github_auth(
         }
     }
     run_git_command(&mut command, repo_path, args)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn git_file_serializes_with_snake_case_path_keys() {
+        let file = GitFile {
+            path: "new-name.txt".to_string(),
+            absolute_path: "C:/repo/new-name.txt".to_string(),
+            status: "R".to_string(),
+            old_path: Some("old-name.txt".to_string()),
+        };
+        let value = serde_json::to_value(file).expect("git file serializes");
+
+        assert_eq!(
+            value.get("absolute_path").and_then(|v| v.as_str()),
+            Some("C:/repo/new-name.txt")
+        );
+        assert_eq!(
+            value.get("old_path").and_then(|v| v.as_str()),
+            Some("old-name.txt")
+        );
+        assert!(value.get("absolutePath").is_none());
+        assert!(value.get("oldPath").is_none());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn strips_windows_extended_prefixes_without_changing_unc_paths() {
+        assert_eq!(
+            normalize_separators(r"\\?\D:\Hyscode\src\main.rs"),
+            r"D:\Hyscode\src\main.rs"
+        );
+        assert_eq!(
+            normalize_separators(r"\\?\UNC\server\share\src\main.rs"),
+            r"\\server\share\src\main.rs"
+        );
+    }
+
+    #[test]
+    fn git_ref_validation_accepts_normal_names() {
+        for valid in [
+            "main",
+            "feature/foo",
+            "release-1.0",
+            "v1.2.3",
+            "origin",
+            "user_name-test",
+        ] {
+            assert!(validate_git_ref(valid).is_ok(), "{valid}");
+        }
+    }
+
+    #[test]
+    fn git_ref_validation_rejects_injection_and_metachars() {
+        for invalid in [
+            "",
+            "   ",
+            "-f",
+            "--upload-pack=touch pwned",
+            "branch..other",
+            "HEAD~1",
+            "HEAD^",
+            "refs:foo",
+            "a?b",
+            "a*b",
+            "a[b",
+            "stash@{0}",
+            "a\\b",
+            "trail/",
+            "trail.",
+            "a\nb",
+        ] {
+            assert!(validate_git_ref(invalid).is_err(), "{invalid}");
+        }
+    }
+
+    #[test]
+    fn clone_url_validation_allows_https_ssh_and_gh() {
+        for valid in [
+            "https://github.com/Hyska-Software/Hyscode.git",
+            "https://github.com/org/repo",
+            "git@github.com:org/repo.git",
+            "gh:org/repo",
+        ] {
+            assert!(validate_clone_url(valid).is_ok(), "{valid}");
+        }
+    }
+
+    #[test]
+    fn clone_url_validation_rejects_local_and_file_urls() {
+        for invalid in [
+            "",
+            "file:///etc/passwd",
+            "FILE://server/share",
+            "/home/user/repo",
+            "C:\\repos\\local",
+            "../sibling",
+            "http://github.com/org/repo.git",
+            "ftp://host/repo.git",
+            "ssh://git@github.com/org/repo.git",
+            "https://github.com/org/repo with space",
+        ] {
+            assert!(validate_clone_url(invalid).is_err(), "{invalid}");
+        }
+    }
 }

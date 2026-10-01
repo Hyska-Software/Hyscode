@@ -40,12 +40,30 @@ interface OpenAITool {
   function: { name: string; description: string; parameters: Record<string, unknown> };
 }
 
+type ParsedOpenAIChunk =
+  | StreamChunk
+  | {
+      type: 'tool_call_fragment';
+      index?: number;
+      id?: string;
+      name?: string;
+      arguments?: string;
+    };
+
+type OpenAIToolCallState = {
+  id?: string;
+  name?: string;
+  started: boolean;
+  pendingArguments: string;
+};
+
 export function toOpenAIMessages(
   messages: Message[],
   systemPrompt?: string,
   alwaysReasoningContent = false,
   explicitCacheBreakpoint = false,
 ): OpenAIMessage[] {
+  if (!messages.length) throw new Error('model required: messages must not be empty');
   const result: OpenAIMessage[] = [];
 
   if (systemPrompt) {
@@ -119,7 +137,14 @@ export function toOpenAIMessages(
     const contentParts: OpenAIContentPart[] = [];
     for (const c of msg.content) {
       if (c.type === 'text') contentParts.push({ type: 'text', text: c.text });
+      if (c.type === 'thinking') {
+        // Preserve thinking as text so replay history doesn't lose it.
+        contentParts.push({ type: 'text', text: `[thinking]${c.thinking}` });
+      }
       if (c.type === 'image') {
+        if (c.base64.length > 20 * 1024 * 1024) {
+          throw new Error('image too large: base64 payload exceeds 20MB');
+        }
         contentParts.push({
           type: 'image_url',
           image_url: { url: `data:${c.mediaType};base64,${c.base64}` },
@@ -147,7 +172,7 @@ export function toOpenAITools(tools: ToolDefinition[]): OpenAITool[] {
 
 // ─── SSE Parsing ────────────────────────────────────────────────────────────
 
-function parseOpenAIChunk(data: string): StreamChunk[] {
+function parseOpenAIChunk(data: string): ParsedOpenAIChunk[] {
   let parsed: Record<string, unknown>;
   try {
     parsed = JSON.parse(data);
@@ -163,11 +188,8 @@ function parseOpenAIChunk(data: string): StreamChunk[] {
     );
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const usage = parsed.usage as any;
-
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const choices = parsed.choices as any[];
+  const usage = parsed.usage as Record<string, unknown> | undefined;
+  const choices = parsed.choices as Array<Record<string, unknown>> | undefined;
   if (!choices?.length) {
     // Usage-only chunk (no choices).
     if (usage) {
@@ -182,8 +204,8 @@ function parseOpenAIChunk(data: string): StreamChunk[] {
   }
 
   const choice = choices[0];
-  const delta = choice.delta;
-  const finishReason = choice.finish_reason;
+  const delta = choice.delta as Record<string, unknown> | undefined;
+  const finishReason = choice.finish_reason as string | null | undefined;
 
   if (finishReason) {
     const reasonMap: Record<string, StopReason> = {
@@ -191,7 +213,7 @@ function parseOpenAIChunk(data: string): StreamChunk[] {
       tool_calls: 'tool_use',
       length: 'max_tokens',
     };
-    const chunks: StreamChunk[] = [];
+    const chunks: ParsedOpenAIChunk[] = [];
     // OpenAI may include usage in the same chunk as finish_reason — emit it first.
     if (usage) {
       chunks.push({
@@ -203,32 +225,38 @@ function parseOpenAIChunk(data: string): StreamChunk[] {
     return chunks;
   }
 
-  if (delta?.reasoning_content) {
-    return [{ type: 'thinking_delta', text: delta.reasoning_content }];
+  const chunks: ParsedOpenAIChunk[] = [];
+  if (typeof delta?.reasoning_content === 'string' && delta.reasoning_content) {
+    chunks.push({ type: 'thinking_delta', text: delta.reasoning_content });
+  } else if (typeof delta?.reasoning === 'string' && delta.reasoning) {
+    // Some proxies (e.g., Xiaomi/MiMo via OpenRouter) use delta.reasoning.
+    chunks.push({ type: 'thinking_delta', text: delta.reasoning });
+  } else if (typeof delta?.content === 'string' && delta.content) {
+    chunks.push({ type: 'text_delta', text: delta.content });
   }
 
-  // Some proxies (e.g., Xiaomi/MiMo via OpenRouter) return reasoning in delta.reasoning
-  // instead of the OpenAI-standard delta.reasoning_content.
-  if (delta?.reasoning) {
-    return [{ type: 'thinking_delta', text: delta.reasoning }];
+  const toolCalls = delta?.tool_calls as Array<Record<string, unknown>> | undefined;
+  for (const toolCall of toolCalls ?? []) {
+    const fn = toolCall.function as Record<string, unknown> | undefined;
+    const hasArguments = typeof fn?.arguments === 'string' && fn.arguments.length > 0;
+    const hasName = typeof fn?.name === 'string' && fn.name.length > 0;
+    const hasId = typeof toolCall.id === 'string' && toolCall.id.length > 0;
+    const hasIndex = typeof toolCall.index === 'number';
+    // Drop empty fragments that carry neither identity nor payload. Without
+    // this, index-less/identity-less heartbeats would create orphan states
+    // that never start and leak pending arguments.
+    if (!hasIndex && !hasId && !hasName && !hasArguments) continue;
+    const fragment = {
+      type: 'tool_call_fragment',
+      index: hasIndex ? (toolCall.index as number) : undefined,
+      id: hasId ? (toolCall.id as string) : undefined,
+      name: hasName ? (fn?.name as string) : undefined,
+      arguments: hasArguments ? (fn?.arguments as string) : undefined,
+    } as const;
+    chunks.push(fragment);
   }
 
-  if (delta?.content) {
-    return [{ type: 'text_delta', text: delta.content }];
-  }
-
-  if (delta?.tool_calls) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const tc = delta.tool_calls[0] as any;
-    if (tc.function?.name) {
-      return [{ type: 'tool_call_start', id: tc.id ?? '', name: tc.function.name }];
-    }
-    if (tc.function?.arguments) {
-      return [{ type: 'tool_call_delta', id: tc.id ?? '', input: tc.function.arguments }];
-    }
-  }
-
-  return [];
+  return chunks;
 }
 
 function normalizeOpenAIUsage(usage: Record<string, unknown>): import('../types').TokenUsage {
@@ -260,7 +288,7 @@ export const OPENAI_THINKING_FULL: ThinkingVariants = {
   defaultLevel: 'medium',
 };
 
-/** Full ladder + standard/pro reasoning mode — GPT-5.6 Sol/Terra/Luna */
+/** Full ladder + standard/pro reasoning mode — GPT-6 Astra / 6.1 Sol / 6 Sol / 6 Luna (and 5.6 Sol/Terra/Luna via gateways) */
 export const OPENAI_THINKING_FULL_PRO: ThinkingVariants = {
   kind: 'openai',
   levels: ['none', 'low', 'medium', 'high', 'xhigh', 'max'],
@@ -292,29 +320,32 @@ export const OPENAI_THINKING_LOW: ThinkingVariants = {
 
 // ─── Provider Implementation ────────────────────────────────────────────────
 
-// SOTA-only direct catalog (verified Sep 2026 against
-// https://developers.openai.com/api/docs/models + /pricing, short-context
-// Standard tier): the GPT-5.6 flagship family is the current generation —
-// Sol (flagship), Terra (balanced), Luna (high-volume). Legacy generations
-// (5.5, 5.4, 5.3-codex, …) remain available via gateways, not direct.
+// SOTA-only direct catalog (verified Oct 2026 against
+// https://openai.com/index/introducing-gpt-6-sol-and-luna +
+// /introducing-gpt-6-1-sol + Zen pricing, Standard tier short-context
+// ≤272K): the GPT-6 current generation — Astra (flagship, $10/$50,
+// cache $1.00), 6.1 Sol (near-Astra, $2/$10, cache $0.10 = 95% off),
+// 6 Sol (frontier efficiency, $2/$10, cache $0.20), 6 Luna
+// (high-volume, $0.10/$0.50, cache $0.01). Legacy GPT-5.x remains
+// available via gateways, not direct.
 const OPENAI_MODELS: AIModel[] = [
   {
-    id: 'gpt-5.6-sol',
-    name: 'GPT-5.6 Sol',
+    id: 'gpt-6-astra',
+    name: 'GPT-6 Astra',
     provider: 'openai',
     contextWindow: 1_050_000,
     maxOutputTokens: 128_000,
     supportsTools: true,
     supportsStreaming: true,
     supportsVision: true,
-    inputPricePerMToken: 4,
-    outputPricePerMToken: 20,
-    cachedInputPricePerMToken: 0.4,
+    inputPricePerMToken: 10,
+    outputPricePerMToken: 50,
+    cachedInputPricePerMToken: 1,
     thinkingVariants: OPENAI_THINKING_FULL_PRO,
   },
   {
-    id: 'gpt-5.6-terra',
-    name: 'GPT-5.6 Terra',
+    id: 'gpt-6.1-sol',
+    name: 'GPT-6.1 Sol',
     provider: 'openai',
     contextWindow: 1_050_000,
     maxOutputTokens: 128_000,
@@ -322,22 +353,36 @@ const OPENAI_MODELS: AIModel[] = [
     supportsStreaming: true,
     supportsVision: true,
     inputPricePerMToken: 2,
-    outputPricePerMToken: 12,
-    cachedInputPricePerMToken: 0.2,
+    outputPricePerMToken: 10,
+    cachedInputPricePerMToken: 0.1,
     thinkingVariants: OPENAI_THINKING_FULL_PRO,
   },
   {
-    id: 'gpt-5.6-luna',
-    name: 'GPT-5.6 Luna',
+    id: 'gpt-6-sol',
+    name: 'GPT-6 Sol',
     provider: 'openai',
     contextWindow: 1_050_000,
     maxOutputTokens: 128_000,
     supportsTools: true,
     supportsStreaming: true,
     supportsVision: true,
-    inputPricePerMToken: 0.2,
-    outputPricePerMToken: 1.2,
-    cachedInputPricePerMToken: 0.02,
+    inputPricePerMToken: 2,
+    outputPricePerMToken: 10,
+    cachedInputPricePerMToken: 0.2,
+    thinkingVariants: OPENAI_THINKING_FULL_PRO,
+  },
+  {
+    id: 'gpt-6-luna',
+    name: 'GPT-6 Luna',
+    provider: 'openai',
+    contextWindow: 1_050_000,
+    maxOutputTokens: 128_000,
+    supportsTools: true,
+    supportsStreaming: true,
+    supportsVision: true,
+    inputPricePerMToken: 0.1,
+    outputPricePerMToken: 0.5,
+    cachedInputPricePerMToken: 0.01,
     thinkingVariants: OPENAI_THINKING_FULL_PRO,
   },
 ];
@@ -356,8 +401,7 @@ export class OpenAIProvider implements AIProvider {
         if (this.id !== 'openai') return 'automatic';
         return supportsExplicitPromptCaching(modelId) ? 'explicit-breakpoints' : 'automatic-keyed';
       },
-      acceptsPromptCacheKeyForModel: (modelId) =>
-        this.id === 'openai' && modelId.length > 0,
+      acceptsPromptCacheKeyForModel: (modelId) => this.id === 'openai' && modelId.length > 0,
     };
   }
 
@@ -385,11 +429,22 @@ export class OpenAIProvider implements AIProvider {
     return this.apiKey.length > 0;
   }
 
+  /** Zero the in-memory API key (secret hygiene on reinit/dispose). */
+  clear(): void {
+    this.apiKey = '';
+  }
+
+  dispose(): void {
+    this.clear();
+  }
+
   async listModels(): Promise<AIModel[]> {
     return this.models;
   }
 
   async *chat(params: ChatParams): AsyncIterable<StreamChunk> {
+    if (!params.model) throw new Error('model required');
+    if (!params.messages.length) throw new Error('model required: messages must not be empty');
     const explicitCache =
       (params.cachePrompt === true || params.promptCacheOptions?.mode === 'explicit') &&
       this.capabilities.promptCacheModeForModel?.(params.model) === 'explicit-breakpoints';
@@ -475,35 +530,68 @@ export class OpenAIProvider implements AIProvider {
         `${this.name} API error: ${response.status} ${errorBody}`,
         this.id,
         response.status,
-        [429, 500, 502, 503].includes(response.status),
+        [429, 500, 502, 503, 529].includes(response.status),
         retryAfterMs,
       );
     }
 
-    // Track tool call IDs across delta chunks.
-    // OpenAI never sends tool_call_end — we must synthesize it when a new
-    // tool starts or the stream finishes with stopReason 'tool_use'.
-    let currentToolCallId = '';
+    // Parallel tool-call deltas are interleaved by index. Keep their identity and
+    // any arguments that arrive before both ID and name are available.
+    const toolCallsByIndex = new Map<number, OpenAIToolCallState>();
+    const toolCallsById = new Map<string, OpenAIToolCallState>();
+    const toolCallStates = new Set<OpenAIToolCallState>();
+    // Fallback for providers that omit both `index` and `id` on continuation
+    // fragments: attach the payload to the most recently touched call instead
+    // of spawning an orphan state per chunk.
+    let mostRecentState: OpenAIToolCallState | undefined;
 
     for await (const data of parseSSEStream(response, params.signal)) {
       const chunks = parseOpenAIChunk(data);
 
       for (const chunk of chunks) {
-        if (chunk.type === 'tool_call_start' && chunk.id) {
-          // A new tool call starting means the previous one is done
-          if (currentToolCallId) {
-            yield { type: 'tool_call_end' as const, id: currentToolCallId };
+        if (chunk.type === 'tool_call_fragment') {
+          let state = chunk.index !== undefined ? toolCallsByIndex.get(chunk.index) : undefined;
+          if (!state && chunk.id) state = toolCallsById.get(chunk.id);
+          if (!state && chunk.index === undefined && chunk.id === undefined)
+            state = mostRecentState;
+          if (!state) {
+            state = { started: false, pendingArguments: '' };
+            toolCallStates.add(state);
           }
-          currentToolCallId = chunk.id;
-        } else if (chunk.type === 'tool_call_delta' && !chunk.id) {
-          yield { ...chunk, id: currentToolCallId };
+          mostRecentState = state;
+          if (chunk.index !== undefined) toolCallsByIndex.set(chunk.index, state);
+          if (chunk.id) {
+            state.id = chunk.id;
+            toolCallsById.set(chunk.id, state);
+          }
+          if (chunk.name) state.name = chunk.name;
+          if (chunk.arguments) state.pendingArguments += chunk.arguments;
+
+          if (!state.started && state.id && state.name) {
+            state.started = true;
+            yield { type: 'tool_call_start', id: state.id, name: state.name };
+          }
+          if (state.started && state.id && state.pendingArguments) {
+            yield {
+              type: 'tool_call_delta',
+              id: state.id,
+              input: state.pendingArguments,
+            };
+            state.pendingArguments = '';
+          }
           continue;
-        } else if (chunk.type === 'done' && chunk.stopReason === 'tool_use') {
-          // Emit tool_call_end for the last active tool before the done signal
-          if (currentToolCallId) {
-            yield { type: 'tool_call_end' as const, id: currentToolCallId };
-            currentToolCallId = '';
+        }
+
+        if (chunk.type === 'done') {
+          for (const state of toolCallStates) {
+            if (state.started && state.id) {
+              yield { type: 'tool_call_end', id: state.id };
+            }
           }
+          toolCallsByIndex.clear();
+          toolCallsById.clear();
+          toolCallStates.clear();
+          mostRecentState = undefined;
         }
 
         yield chunk;
@@ -513,5 +601,5 @@ export class OpenAIProvider implements AIProvider {
 }
 
 export function supportsExplicitPromptCaching(modelId: string): boolean {
-  return /^gpt-5\.6(?:-|$)/.test(modelId);
+  return /^gpt-(5\.6|6(?:\.1)?)(?:-|$)/.test(modelId);
 }

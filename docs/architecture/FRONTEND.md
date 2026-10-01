@@ -60,7 +60,7 @@ cache/session state.
 │      │                                      │   │  [Send] [Mode]  │ │
 ├──────┴──────────────────────────────────────┤   └─────────────────┘ │
 │  Terminal Panel (xterm.js)                  │                       │
-│  $ pnpm dev                                 │                       │
+│  $ npm run dev                             │                       │
 │  > ready on http://localhost:3000           │                       │
 ├─────────────────────────────────────────────┴───────────────────────┤
 │  Status Bar: branch • line:col • language • AI model • tokens       │
@@ -190,14 +190,14 @@ interface AgentStore {
   activeConversationId: string | null;
   isStreaming: boolean;
   pendingToolCalls: ToolCall[];
-  mode: 'chat' | 'build' | 'review';
+  mode: 'Chat' | 'Build' | 'Review' | 'Debug' | 'Plan';
 
   // Actions
   sendMessage(content: string, attachments?: ContextAttachment[]): Promise<void>;
   cancelStream(): void;
   approveToolCall(toolCallId: string): void;
   rejectToolCall(toolCallId: string, reason?: string): void;
-  setMode(mode: 'chat' | 'build' | 'review'): void;
+  setMode(mode: 'Chat' | 'Build' | 'Review' | 'Debug' | 'Plan'): void;
   newConversation(): void;
 }
 ```

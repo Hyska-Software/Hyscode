@@ -20,14 +20,19 @@ type IMonaco = typeof monacoEditor;
 /** Width needed for the shared Git/agent change bar in Monaco's margin. */
 export const GIT_GUTTER_WIDTH = 4;
 
-// ── One-time CSS injection ────────────────────────────────────────────────────
+// ── One-time CSS injection (ref-counted) ─────────────────────────────────────
+// Shared <style> survives across hook instances; the last unmount removes it so
+// StrictMode remounts and HMR don't leak duplicate style tags.
 
-let cssInjected = false;
+const GIT_GUTTER_STYLE_ID = 'hyscode-git-gutter-css';
 
-function ensureGitGutterCss() {
-  if (cssInjected) return;
-  cssInjected = true;
+let gitGutterRefCount = 0;
+
+function ensureGitGutterCss(): void {
+  gitGutterRefCount += 1;
+  if (document.getElementById(GIT_GUTTER_STYLE_ID)) return;
   const el = document.createElement('style');
+  el.id = GIT_GUTTER_STYLE_ID;
   el.textContent = `
     /* VS Code dirty-diff style – border-left only, never override Monaco's
        inline top/height on .cdr elements or all bars pile at container-top */
@@ -44,6 +49,13 @@ function ensureGitGutterCss() {
     }
   `;
   document.head.appendChild(el);
+}
+
+function releaseGitGutterCss(): void {
+  gitGutterRefCount = Math.max(0, gitGutterRefCount - 1);
+  if (gitGutterRefCount === 0) {
+    document.getElementById(GIT_GUTTER_STYLE_ID)?.remove();
+  }
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -185,6 +197,9 @@ export function useGitDecorations(
   // Inject CSS once on mount
   useEffect(() => {
     ensureGitGutterCss();
+    return () => {
+      releaseGitGutterCss();
+    };
   }, []);
 
   // Core function to apply decorations

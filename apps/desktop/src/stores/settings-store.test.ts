@@ -74,17 +74,17 @@ describe('agent interaction limit settings', () => {
         },
       },
       3,
-    ) as Record<string, any>;
+    ) as Record<string, unknown>;
 
     expect(migrated.activeProviderId).toBeNull();
     expect(migrated.activeModelId).toBeNull();
     expect(migrated.inlineCompletionProviderId).toBeNull();
     expect(migrated.inlineCompletionModelId).toBeNull();
-    expect(migrated.enabledModels['claude-agent']).toBeUndefined();
-    expect(migrated.enabledModels.openai).toEqual(['gpt-5.5']);
+    expect((migrated.enabledModels as Record<string, unknown>)['claude-agent']).toBeUndefined();
+    expect((migrated.enabledModels as Record<string, unknown>).openai).toEqual(['gpt-5.5']);
     expect(migrated.customModels).toEqual([]);
-    expect(migrated.thinkingSettings['claude-agent::claude-sonnet-5']).toBeUndefined();
-    expect(migrated.thinkingSettings['openai::gpt-5.5']).toEqual({ enabled: false });
+    expect((migrated.thinkingSettings as Record<string, unknown>)['claude-agent::claude-sonnet-5']).toBeUndefined();
+    expect((migrated.thinkingSettings as Record<string, unknown>)['openai::gpt-5.5']).toEqual({ enabled: false });
   });
 
   it('keeps other active providers when migrating', () => {
@@ -116,6 +116,39 @@ describe('inline completion settings', () => {
     expect(useSettingsStore.getState()).toMatchObject({
       inlineCompletionProviderId: null,
       inlineCompletionModelId: null,
+    });
+  });
+});
+
+describe('Git changes view preference', () => {
+  beforeEach(() => {
+    useSettingsStore.setState({ gitChangesView: SETTINGS_DEFAULTS.gitChangesView });
+  });
+
+  it('defaults to tree view for new and migrated installations', () => {
+    expect(SETTINGS_DEFAULTS.gitChangesView).toBe('tree');
+    expect(migrateSettingsState({ gitConfirmDiscard: false }, 4)).toMatchObject({
+      gitConfirmDiscard: false,
+      gitChangesView: 'tree',
+    });
+  });
+
+  it('preserves a valid view preference and resets an invalid persisted value', () => {
+    expect(migrateSettingsState({ gitChangesView: 'list' }, 5)).toMatchObject({
+      gitChangesView: 'list',
+    });
+    expect(migrateSettingsState({ gitChangesView: 'grid' }, 5)).toMatchObject({
+      gitChangesView: 'tree',
+    });
+  });
+
+  it('updates the persisted setting through the settings store', () => {
+    useSettingsStore.getState().set('gitChangesView', 'list');
+
+    expect(useSettingsStore.getState().gitChangesView).toBe('list');
+    expect(JSON.parse(localStorage.getItem('hyscode-settings') ?? '{}')).toMatchObject({
+      version: 5,
+      state: { gitChangesView: 'list' },
     });
   });
 });

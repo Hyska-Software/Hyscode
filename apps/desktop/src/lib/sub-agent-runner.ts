@@ -1,4 +1,13 @@
-import { DelegatedRunner, Harness, projectTerminalProgress, resolveEffectiveAgentPolicy, SUB_AGENT_PREAMBLE, asTerminalRuntimeFailure, validateTerminalFailure } from '@hyscode/agent-harness';
+import {
+  DelegatedRunner,
+  Harness,
+  projectTerminalProgress,
+  resolveEffectiveAgentPolicy,
+  SUB_AGENT_PREAMBLE,
+  truncateSubAgentOutput,
+  asTerminalRuntimeFailure,
+  validateTerminalFailure,
+} from '@hyscode/agent-harness';
 import type {
   AgentType,
   Skill,
@@ -108,10 +117,9 @@ export class SubAgentRunner {
           ? {
               // Settings store uses: true = auto-approve. Harness uses: true = needs approval.
               categoryOverrides: Object.fromEntries(
-                Object.entries(settings.customApprovalRules.categoryRules).map(([k, autoApprove]) => [
-                  k,
-                  !autoApprove,
-                ]),
+                Object.entries(settings.customApprovalRules.categoryRules).map(
+                  ([k, autoApprove]) => [k, !autoApprove],
+                ),
               ) as Record<string, boolean>,
               toolOverrides: Object.fromEntries(
                 Object.entries(settings.customApprovalRules.toolRules).map(([k, autoApprove]) => [
@@ -205,7 +213,11 @@ export class SubAgentRunner {
         conversationId: convId,
         parentTurnId: this.optionsParentTurnId,
         trace: outcome.turnRecord.trace
-          ? { ...outcome.turnRecord.trace, conversationId: convId, parentTurnId: this.optionsParentTurnId }
+          ? {
+              ...outcome.turnRecord.trace,
+              conversationId: convId,
+              parentTurnId: this.optionsParentTurnId,
+            }
           : undefined,
       };
       this.onTurnRecord?.(record);
@@ -231,7 +243,9 @@ export class SubAgentRunner {
 
       // When max_iterations is hit the response may be empty — synthesize a
       // fallback from the gathered tool call history so the parent gets context.
-      const finalOutput = response || this.buildFallbackOutput(toolCalls);
+      // Bound the final payload: unbounded child analyses make the parent
+      // loop (it can neither hold the full output nor re-fetch it).
+      const finalOutput = truncateSubAgentOutput(response || this.buildFallbackOutput(toolCalls));
 
       this.onUpdate({
         status: status === 'complete' ? 'done' : 'error',
@@ -271,22 +285,32 @@ export class SubAgentRunner {
       return '__SUBAGENT_STATUS__:reached max iterations without producing output. No tool calls were made.';
     }
 
-    const successCalls = toolCalls.filter(tc => tc.output.success);
+    const successCalls = toolCalls.filter((tc) => tc.output.success);
     const parts: string[] = [];
 
-    const fileReads  = successCalls.filter(tc => ['read_file', 'read_multiple_files', 'gather_context'].includes(tc.toolName));
-    const fileWrites = successCalls.filter(tc => ['write_file', 'create_file', 'edit_file'].includes(tc.toolName));
-    const commands   = successCalls.filter(tc => ['run_command', 'run_terminal_command'].includes(tc.toolName));
+    const fileReads = successCalls.filter((tc) =>
+      ['read_file', 'read_multiple_files', 'gather_context'].includes(tc.toolName),
+    );
+    const fileWrites = successCalls.filter((tc) =>
+      ['write_file', 'create_file', 'edit_file'].includes(tc.toolName),
+    );
+    const commands = successCalls.filter((tc) =>
+      ['run_command', 'run_terminal_command'].includes(tc.toolName),
+    );
 
     parts.push(`Reached max iterations after ${toolCalls.length} tool calls.`);
-    if (fileReads.length)  parts.push(`Read ${fileReads.length} file(s).`);
+    if (fileReads.length) parts.push(`Read ${fileReads.length} file(s).`);
     if (fileWrites.length) {
-      const names = fileWrites.map(tc => (tc.input as Record<string, unknown>)?.path as string || '?').join(', ');
+      const names = fileWrites
+        .map((tc) => ((tc.input as Record<string, unknown>)?.path as string) || '?')
+        .join(', ');
       parts.push(`Modified/created: ${names}.`);
     }
     if (commands.length) parts.push(`Ran ${commands.length} command(s).`);
     if (!fileWrites.length && !commands.length) {
-      parts.push('No files were modified. The agent gathered context but did not complete a final response.');
+      parts.push(
+        'No files were modified. The agent gathered context but did not complete a final response.',
+      );
     }
 
     return `__SUBAGENT_STATUS__:${parts.join(' ')}`;
@@ -329,18 +353,24 @@ export class SubAgentRunner {
             }
           }
         }
-        const terminalId = typeof metadata.terminalId === 'string' ? metadata.terminalId : undefined;
+        const terminalId =
+          typeof metadata.terminalId === 'string' ? metadata.terminalId : undefined;
         const awaitingInput = metadata.awaitingInput === true;
         this.replaceToolCall(event.toolCallId, {
-          status: metadata.cancelled === true || failure
-            ? metadata.cancelled === true ? 'cancelled' : 'error'
-            : event.result.success
-              ? 'success'
-              : 'error',
+          status:
+            metadata.cancelled === true || failure
+              ? metadata.cancelled === true
+                ? 'cancelled'
+                : 'error'
+              : event.result.success
+                ? 'success'
+                : 'error',
           output: event.result.output,
           error: event.result.error,
           completedAt: Date.now(),
-          ...(terminalId ? { terminalCanonical: !awaitingInput, terminalProvisional: awaitingInput } : {}),
+          ...(terminalId
+            ? { terminalCanonical: !awaitingInput, terminalProvisional: awaitingInput }
+            : {}),
           ...(terminalId
             ? {
                 terminalId,
@@ -352,11 +382,15 @@ export class SubAgentRunner {
                     : metadata.cancelled === true
                       ? 'cancelled'
                       : event.result.success
-                        ? metadata.background === true ? 'background' : 'complete'
+                        ? metadata.background === true
+                          ? 'background'
+                          : 'complete'
                         : 'error',
               }
             : {}),
-          ...(typeof metadata.sequence === 'number' && Number.isSafeInteger(metadata.sequence) && metadata.sequence >= 0
+          ...(typeof metadata.sequence === 'number' &&
+          Number.isSafeInteger(metadata.sequence) &&
+          metadata.sequence >= 0
             ? { outputSequence: metadata.sequence }
             : {}),
           failure,
@@ -381,10 +415,11 @@ export class SubAgentRunner {
             : undefined,
           progress,
           {
-            provisional: progress.state === 'complete'
-              || progress.state === 'error'
-              || progress.state === 'cancelled'
-              || progress.state === 'background',
+            provisional:
+              progress.state === 'complete' ||
+              progress.state === 'error' ||
+              progress.state === 'cancelled' ||
+              progress.state === 'background',
           },
         );
         if (!projection) break;

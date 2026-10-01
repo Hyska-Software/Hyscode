@@ -79,4 +79,6 @@ export {
   estimateMessageTokens,
   estimateToolDefinitionTokens,
   estimateSystemPromptTokens,
+  estimateTokensMaybeNative,
 } from './token-counter';
+export { withStreamIdleTimeout } from './retry';

@@ -14,15 +14,15 @@ Each task follows this format:
 
 | ID | Type | Size | Title | Description | Deps |
 |---|---|---|---|---|---|
-| M0-T1 | setup | M | Initialize Turborepo + pnpm workspaces | Create root `package.json`, `pnpm-workspace.yaml`, `turbo.json`. Configure workspace packages: `apps/desktop`, `packages/ui`, `packages/ai-providers`, `packages/agent-harness`, `packages/mcp-client`, `packages/skills`. | — |
-| M0-T2 | setup | L | Scaffold Tauri v2 + React + Vite | `pnpm create tauri-app` in `apps/desktop/`. Configure `tauri.conf.json` with app name, window settings, CSP. Verify `pnpm tauri dev` works. | M0-T1 |
+| M0-T1 | setup | M | Initialize Turborepo + npm workspaces | Create root `package.json`, `turbo.json`. Configure workspace packages: `apps/desktop`, `packages/ui`, `packages/ai-providers`, `packages/agent-harness`, `packages/mcp-client`, `packages/skills`. | — |
+| M0-T2 | setup | L | Scaffold Tauri v2 + React + Vite | `npm create tauri-app` in `apps/desktop/`. Configure `tauri.conf.json` with app name, window settings, CSP. Verify `npm run dev` works. | M0-T1 |
 | M0-T3 | setup | M | Configure Tailwind CSS v4 | Install `@tailwindcss/vite`, set up CSS-first config in `app.css`. No `tailwind.config.js` (v4 style). | M0-T2 |
 | M0-T4 | setup | M | Configure shadcn/ui with Zinc theme | Run `npx shadcn@latest init`. Select Zinc base color. Install: Button, Input, Textarea, Card, Dialog, Sheet, Tabs, DropdownMenu, ScrollArea, Tooltip, Separator. | M0-T3 |
 | M0-T5 | setup | S | Install Geist fonts | Add `geist` npm package. Configure `@font-face` in CSS. Set as default UI and mono fonts in Tailwind config. | M0-T3 |
 | M0-T6 | setup | L | Configure SQLite via tauri-plugin-sql | Add `tauri-plugin-sql` to Cargo.toml. Register plugin in `main.rs`. Write initial migration (`001_initial.sql`) with all tables from DATABASE.md. Set WAL mode pragmas. | M0-T2 |
 | M0-T7 | feat | M | Create Zustand stores skeleton | Create store files: `editorStore.ts`, `agentStore.ts`, `fileStore.ts`, `settingsStore.ts`, `projectStore.ts`. Define interfaces and initial state (no implementations yet). | M0-T2 |
 | M0-T8 | feat | L | Build base IDE layout shell | Create App shell with `react-resizable-panels`. 3-panel layout: sidebar, editor area (with terminal below), agent panel. TauriTitleBar component. StatusBar component. All with placeholder content. | M0-T4, M0-T5 |
-| M0-T9 | setup | M | GitHub Actions CI | Workflow: checkout, install pnpm, install deps, `pnpm lint`, `pnpm typecheck`, `pnpm tauri build --ci`. Matrix: ubuntu-latest. | M0-T2 |
+| M0-T9 | setup | M | GitHub Actions CI | Workflow: checkout, install npm deps, `npm run lint`, `npm run typecheck`, `npm run tauri build --ci`. Matrix: ubuntu-latest. | M0-T2 |
 | M0-T10 | setup | S | Configure ESLint + Prettier | Shared ESLint config in root. Prettier config. Lint scripts in root `package.json`. | M0-T1 |
 | M0-T11 | setup | S | Add tsconfig base configs | Root `tsconfig.base.json` with strict mode. Package-specific `tsconfig.json` extending base. Path aliases for `@hyscode/*`. | M0-T1 |
 | M0-T12 | setup | S | Configure Tauri capabilities | Create `capabilities/main.json` with permissions for FS, shell, sql, http, dialog, clipboard. Scope FS access. | M0-T2 |

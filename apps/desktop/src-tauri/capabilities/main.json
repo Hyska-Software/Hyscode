@@ -1,6 +1,6 @@
 {
   "identifier": "main-capability",
-  "description": "Main window permissions",
+  "description": "Main window permissions. SECURITY (Phase 1): direct plugin-fs WRITES are blocked (no fs:allow-write-file/mkdir/remove/rename/copy-file) — all filesystem mutation goes through hardened custom commands (fs.rs: canonicalize + filesystem-root guard). Plugin-fs reads remain for compatibility. Direct plugin-sql stays for the user-driven DB viewer (db-engine.ts); app state uses db.rs commands. shell git keeps args:true because git CLI args are validated in Rust (git_backend::validate_git_ref + validate_clone_url); shell_exec itself is allowlisted to git/node/npm/bun in utils.rs.",
   "windows": ["main"],
   "permissions": [
     "core:default",
@@ -22,27 +22,7 @@
       "allow": [{ "path": "**" }]
     },
     {
-      "identifier": "fs:allow-write-file",
-      "allow": [{ "path": "**" }]
-    },
-    {
       "identifier": "fs:allow-exists",
-      "allow": [{ "path": "**" }]
-    },
-    {
-      "identifier": "fs:allow-mkdir",
-      "allow": [{ "path": "**" }]
-    },
-    {
-      "identifier": "fs:allow-remove",
-      "allow": [{ "path": "**" }]
-    },
-    {
-      "identifier": "fs:allow-rename",
-      "allow": [{ "path": "**" }]
-    },
-    {
-      "identifier": "fs:allow-copy-file",
       "allow": [{ "path": "**" }]
     },
     {

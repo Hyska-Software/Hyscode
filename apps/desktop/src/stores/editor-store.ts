@@ -2,6 +2,8 @@ import { create } from 'zustand';
 import { immer } from 'zustand/middleware/immer';
 import type { ViewerType } from '../lib/utils';
 import type { SubAgentState } from './agent-store';
+import { tauriInvoke } from '../lib/tauri-invoke';
+import { useTerminalStore } from './terminal-store';
 
 export type MarkdownViewMode = 'preview' | 'code' | 'split';
 
@@ -112,6 +114,10 @@ interface EditorState {
   closeAllTabs: () => void;
   setActiveTab: (id: string) => void;
   markDirty: (id: string, dirty: boolean) => void;
+  updateTab: (
+    id: string,
+    patch: { id?: string; filePath?: string; fileName?: string; language?: string },
+  ) => void;
   reorderTabs: (fromIndex: number, toIndex: number) => void;
   pinTab: (id: string) => void;
   unpinTab: (id: string) => void;
@@ -121,7 +127,7 @@ interface EditorState {
 }
 
 export const useEditorStore = create<EditorState>()(
-  immer((set) => ({
+  immer((set, get) => ({
     tabs: [],
     activeTabId: null,
 
@@ -433,22 +439,34 @@ export const useEditorStore = create<EditorState>()(
         state.activeTabId = id;
       }),
 
-    closeTab: (id) =>
+    closeTab: (id) => {
+      // Capture the PTY id before mutating: terminal-store only drops the
+      // session row, so the native PTY must be killed explicitly to avoid
+      // leaking the OS process after the tab is gone.
+      const tab = get().tabs.find((t) => t.id === id);
+      let ptyId: string | null = null;
+      if (tab?.type === 'terminal' && tab.terminalSessionId) {
+        const terminalSessionId = tab.terminalSessionId;
+        const session = useTerminalStore
+          .getState()
+          .sessions.find((s) => s.id === terminalSessionId);
+        ptyId = session?.ptyId ?? null;
+        useTerminalStore.getState().closeSession(terminalSessionId);
+      }
       set((state) => {
         const idx = state.tabs.findIndex((t) => t.id === id);
         if (idx < 0) return;
-        const tab = state.tabs[idx];
         state.tabs.splice(idx, 1);
         if (state.activeTabId === id) {
           state.activeTabId = state.tabs[Math.min(idx, state.tabs.length - 1)]?.id ?? null;
         }
-        // If closing a terminal tab, also remove the underlying terminal session
-        if (tab.type === 'terminal' && tab.terminalSessionId) {
-          import('./terminal-store').then((m) => {
-            m.useTerminalStore.getState().closeSession(tab.terminalSessionId!);
-          });
-        }
-      }),
+      });
+      if (ptyId) {
+        tauriInvoke('pty_kill', { ptyId }).catch((err: unknown) => {
+          console.warn('[Editor] pty_kill failed for closed terminal tab', { ptyId, err });
+        });
+      }
+    },
 
     closeAllTabs: () =>
       set((state) => {
@@ -492,6 +510,22 @@ export const useEditorStore = create<EditorState>()(
           tab.isDirty = dirty;
           if (dirty) tab.isPreview = false;
         }
+      }),
+
+    updateTab: (id, patch) =>
+      set((state) => {
+        const tab = state.tabs.find((t) => t.id === id);
+        if (!tab) return;
+        // Renaming the id (Save-As for untitled tabs) must not collide and
+        // must follow the active tab pointer.
+        if (patch.id !== undefined && patch.id !== id) {
+          if (state.tabs.some((t) => t.id === patch.id)) return;
+          tab.id = patch.id;
+          if (state.activeTabId === id) state.activeTabId = patch.id;
+        }
+        if (patch.filePath !== undefined) tab.filePath = patch.filePath;
+        if (patch.fileName !== undefined) tab.fileName = patch.fileName;
+        if (patch.language !== undefined) tab.language = patch.language;
       }),
 
     reorderTabs: (fromIndex, toIndex) =>

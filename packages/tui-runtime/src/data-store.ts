@@ -104,19 +104,24 @@ export class CliDataStore {
 
   async load(): Promise<void> {
     if (this.loaded) return;
+    let contents: string;
     try {
-      const parsed = JSON.parse(await readFile(this.dataPath, 'utf8')) as Partial<PersistedData>;
-      this.data = {
-        conversations: Array.isArray(parsed.conversations) ? parsed.conversations : [],
-        memories: Array.isArray(parsed.memories) ? parsed.memories : [],
-        sddSessions: parsed.sddSessions ?? {},
-        sddTasks: parsed.sddTasks ?? {},
-        traces: Array.isArray(parsed.traces) ? parsed.traces : [],
-        goals: parsed.goals && typeof parsed.goals === 'object' ? parsed.goals : {},
-      };
-    } catch {
+      contents = await readFile(this.dataPath, 'utf8');
+    } catch (error) {
+      if (!isMissingFileError(error)) throw error;
       this.data = cloneData(EMPTY_DATA);
+      this.loaded = true;
+      return;
     }
+
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(contents) as unknown;
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      throw new Error(`Failed to parse TUI data store "${this.dataPath}": ${reason}`);
+    }
+    this.data = normalizePersistedData(parsed, this.dataPath);
     this.loaded = true;
   }
 
@@ -222,6 +227,7 @@ export class CliDataStore {
   }
 
   async deleteSession(id: string): Promise<boolean> {
+    await this.load();
     const before = this.data.conversations.length;
     this.data.conversations = this.data.conversations.filter((conversation) => conversation.id !== id);
     if (this.data.conversations.length === before) return false;
@@ -231,6 +237,7 @@ export class CliDataStore {
   }
 
   async renameSession(id: string, title: string): Promise<SessionRecord | null> {
+    await this.load();
     const conversation = this.data.conversations.find((candidate) => candidate.id === id);
     if (!conversation) return null;
     conversation.title = title.trim().slice(0, 160) || 'Untitled session';
@@ -240,6 +247,7 @@ export class CliDataStore {
   }
 
   async saveSession(session: SessionRecord): Promise<void> {
+    await this.load();
     const existing = this.data.conversations.findIndex((conversation) => conversation.id === session.id);
     const existingConversation = existing >= 0 ? this.data.conversations[existing] : undefined;
     const record: PersistedConversation = {
@@ -494,14 +502,55 @@ export class CliDataStore {
 
   private async persist(): Promise<void> {
     const snapshot = cloneData(this.data);
-    this.writeQueue = this.writeQueue.then(async () => {
+    const write = this.writeQueue.then(async () => {
       await mkdir(path.dirname(this.dataPath), { recursive: true });
       const temporaryPath = `${this.dataPath}.${process.pid}.tmp`;
       await writeFile(temporaryPath, `${JSON.stringify(snapshot, null, 2)}\n`, 'utf8');
       await rename(temporaryPath, this.dataPath);
     });
-    await this.writeQueue;
+    // Keep the ordering tail fulfilled after a failed operation. The caller
+    // still receives the original write error, while later writes can retry.
+    this.writeQueue = write.then(() => undefined, () => undefined);
+    await write;
   }
+}
+
+function isMissingFileError(error: unknown): boolean {
+  return typeof error === 'object'
+    && error !== null
+    && 'code' in error
+    && error.code === 'ENOENT';
+}
+
+function normalizePersistedData(value: unknown, dataPath: string): PersistedData {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    throw new Error(`TUI data store "${dataPath}" must contain a JSON object.`);
+  }
+  const parsed = value as Partial<PersistedData>;
+  const conversations = parsed.conversations === undefined ? [] : parsed.conversations;
+  const memories = parsed.memories === undefined ? [] : parsed.memories;
+  const sddSessions = parsed.sddSessions === undefined ? {} : parsed.sddSessions;
+  const sddTasks = parsed.sddTasks === undefined ? {} : parsed.sddTasks;
+  const traces = parsed.traces === undefined ? [] : parsed.traces;
+  const goals = parsed.goals === undefined ? {} : parsed.goals;
+  if (!Array.isArray(conversations) || !Array.isArray(memories) || !Array.isArray(traces)) {
+    throw new Error(`TUI data store "${dataPath}" contains invalid collection data.`);
+  }
+  if (!isRecord(sddSessions) || !isRecord(sddTasks) || !isRecord(goals)) {
+    throw new Error(`TUI data store "${dataPath}" contains invalid indexed data.`);
+  }
+  return {
+    conversations,
+    memories,
+    sddSessions: sddSessions as Record<string, string>,
+    sddTasks: sddTasks as Record<string, string[]>,
+    traces,
+    goals: goals as Record<string, GoalState>,
+  };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 function numberValue(value: unknown, fallback: number): number {

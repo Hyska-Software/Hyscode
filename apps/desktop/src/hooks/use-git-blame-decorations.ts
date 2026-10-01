@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react';
 import { useGitStore } from '../stores/git-store';
 import { useFileStore } from '../stores/file-store';
 import { useSettingsStore } from '../stores/settings-store';
+import { getGitRelativePath } from '../lib/git-workflow';
 import type * as monacoEditor from 'monaco-editor';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -19,14 +20,17 @@ interface GitBlameHunk {
   message: string;
 }
 
-// ── One-time CSS injection ────────────────────────────────────────────────────
+// ── One-time CSS injection (ref-counted) ─────────────────────────────────────
 
-let cssInjected = false;
+const GIT_BLAME_STYLE_ID = 'hyscode-git-blame-css';
 
-function ensureGitBlameCss() {
-  if (cssInjected) return;
-  cssInjected = true;
+let gitBlameRefCount = 0;
+
+function ensureGitBlameCss(): void {
+  gitBlameRefCount += 1;
+  if (document.getElementById(GIT_BLAME_STYLE_ID)) return;
   const el = document.createElement('style');
+  el.id = GIT_BLAME_STYLE_ID;
   el.textContent = `
     .monaco-editor .git-blame-inline {
       color: #8b949e;
@@ -41,17 +45,17 @@ function ensureGitBlameCss() {
   document.head.appendChild(el);
 }
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
-function normalizeRelPath(filePath: string, rootPath: string): string {
-  const norm = filePath.replace(/\\/g, '/');
-  let root = rootPath.replace(/\\/g, '/');
-  if (!root.endsWith('/')) root += '/';
-  return norm.startsWith(root) ? norm.slice(root.length) : norm;
+function releaseGitBlameCss(): void {
+  gitBlameRefCount = Math.max(0, gitBlameRefCount - 1);
+  if (gitBlameRefCount === 0) {
+    document.getElementById(GIT_BLAME_STYLE_ID)?.remove();
+  }
 }
 
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
 function formatTimeAgo(timestamp: number): string {
-  const seconds = Math.floor((Date.now() / 1000) - timestamp);
+  const seconds = Math.floor(Date.now() / 1000 - timestamp);
   const intervals: [number, string][] = [
     [31536000, 'year'],
     [2592000, 'month'],
@@ -118,6 +122,9 @@ export function useGitBlameDecorations(
   // Inject CSS once on mount
   useEffect(() => {
     ensureGitBlameCss();
+    return () => {
+      releaseGitBlameCss();
+    };
   }, []);
 
   // Main effect: runs whenever prerequisites change
@@ -150,7 +157,8 @@ export function useGitBlameDecorations(
     const model = editor.getModel();
     if (!model) return;
 
-    const relPath = normalizeRelPath(filePath, rootPath);
+    const relPath = getGitRelativePath(filePath, rootPath);
+    if (relPath === null || relPath.length === 0) return;
     let cancelled = false;
 
     // Apply blame for a specific line using current editor/monaco/hunks state
@@ -193,7 +201,9 @@ export function useGitBlameDecorations(
     };
 
     // Fetch blame for this file
-    useGitStore.getState().getBlame(relPath)
+    useGitStore
+      .getState()
+      .getBlame(relPath)
       .then((hunks) => {
         if (cancelled) return;
         hunksRef.current = hunks;
@@ -221,9 +231,11 @@ export function useGitBlameDecorations(
       timer = setTimeout(() => {
         const ed = editorRef.current;
         if (!ed) return;
-        const rel = rootPath ? normalizeRelPath(filePath, rootPath) : null;
+        const rel = rootPath ? getGitRelativePath(filePath, rootPath) : null;
         if (!rel) return;
-        useGitStore.getState().getBlame(rel)
+        useGitStore
+          .getState()
+          .getBlame(rel)
           .then((hunks) => {
             hunksRef.current = hunks;
             const e2 = editorRef.current;

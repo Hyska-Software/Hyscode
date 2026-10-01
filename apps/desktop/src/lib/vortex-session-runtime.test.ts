@@ -57,6 +57,7 @@ const {
 
 class FakeHarnessBridge {
   readonly store: AgentStoreApi;
+  readonly sentMessages: string[] = [];
   private currentMessage: string | null = null;
   private cancelled = false;
 
@@ -84,6 +85,7 @@ class FakeHarnessBridge {
   }
 
   async sendMessage(message: string): Promise<void> {
+    this.sentMessages.push(message);
     this.currentMessage = message;
     runtimeEvents.push(`send:${message}`);
     this.cancelled = false;
@@ -432,6 +434,49 @@ describe('VortexSessionRuntimeManager', () => {
     release('keep-me');
     await second;
     expect(useVortexRuntimeStore.getState().snapshots[getVortexRuntimeKey('C:/project-a', 'session-b')].status).toBe('completed');
+  });
+
+  it('keeps a cancellation requested during bridge initialization through the first send', async () => {
+    let releaseBridge!: () => void;
+    const bridgeReady = new Promise<void>((resolve) => {
+      releaseBridge = resolve;
+    });
+    createSessionMock.mockImplementation(
+      async (_path: string, _projectId: string, store: AgentStoreApi) => {
+        await bridgeReady;
+        return new FakeHarnessBridge(store);
+      },
+    );
+    useAgentStore.getState().setConversationId('session-cancel-init');
+
+    const manager = new VortexSessionRuntimeManager();
+    const sending = manager.sendFocusedMessage('must-not-start');
+    await vi.waitFor(() => expect(createSessionMock).toHaveBeenCalledTimes(1));
+
+    manager.cancelSession('C:/project-a', 'session-cancel-init');
+    releaseBridge();
+    await sending;
+
+    const snapshot = manager.getSnapshot('C:/project-a', 'session-cancel-init');
+    expect(snapshot?.status).toBe('cancelled');
+    expect(createdBridges[0]?.sentMessages).toEqual([]);
+  });
+
+  it('does not republish a runtime after its in-flight send is forgotten', async () => {
+    const manager = new VortexSessionRuntimeManager();
+    await manager.focusSession('C:/project-a', 'session-forgotten', { allowMissing: true });
+    const sending = manager.sendFocusedMessage('forget-me');
+    await vi.waitFor(() => expect(pendingRuns.has('forget-me')).toBe(true));
+
+    manager.forgetSession('C:/project-a', 'session-forgotten');
+    await sending;
+
+    expect(manager.getSnapshot('C:/project-a', 'session-forgotten')).toBeNull();
+    expect(
+      useVortexRuntimeStore.getState().snapshots[
+        getVortexRuntimeKey('C:/project-a', 'session-forgotten')
+      ],
+    ).toBeUndefined();
   });
 
   it('projects the focused runtime without copying another session into it', async () => {

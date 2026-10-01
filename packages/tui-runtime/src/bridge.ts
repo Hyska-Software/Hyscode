@@ -221,7 +221,7 @@ export class TuiBridge {
         case 'session_list':
           return this.ok(request.id, this.listSessions());
         case 'session_load':
-          return this.ok(request.id, this.loadSession(String(request.params?.id ?? '')));
+          return this.ok(request.id, await this.loadSession(String(request.params?.id ?? '')));
         case 'session_new':
           return this.ok(request.id, await this.newSession());
         case 'project_list':
@@ -444,6 +444,7 @@ export class TuiBridge {
       ? this.dataStore.loadSession(existingSession.id)
       : await this.dataStore.createSession(workspacePath, this.harness.getAgentType(), this.currentProviderId(), this.currentModelId());
     this.harness.setConversationId(this.session?.id ?? crypto.randomUUID());
+    if (this.session) await this.restoreSddForConversation(this.session.id);
     const ready = await this.runtimeReady();
     this.emit({ type: 'event', event: 'runtime_ready', payload: ready });
     return ready;
@@ -564,6 +565,7 @@ export class TuiBridge {
 
   private cancel(): void {
     this.harness?.cancel();
+    for (const child of this.childAgents.values()) child.cancel();
     for (const [requestId, interaction] of this.interactions) {
       interaction.resolve({ requestId, approved: false, answers: [] });
     }
@@ -812,7 +814,11 @@ export class TuiBridge {
   }
 
   private async listTerminals(): Promise<TerminalSummary[]> {
-    return this.requireTerminalRuntime().list();
+    const conversationId = this.session?.id;
+    if (!conversationId) return [];
+    return (await this.requireTerminalRuntime().list()).filter(
+      (terminal) => !terminal.ownerConversationId || terminal.ownerConversationId === conversationId,
+    );
   }
 
   private async openTerminal(rawParams: Record<string, unknown>): Promise<TerminalSummary> {
@@ -945,15 +951,29 @@ export class TuiBridge {
 
   private async readSddState(spec: string | null = null, review: string | null = null): Promise<SddStatePayload> {
     const harness = this.requireHarness();
-    const sessionId = harness.getSddSessionId();
+    const sessionId = harness.getSddSessionId() || null;
     const rawSession = sessionId
       ? await this.dataStore.invoke<string | null>('db_sdd_get_session', { id: sessionId })
       : null;
-    const session = rawSession ? ({ ...JSON.parse(rawSession), tasks: [] } as SddSession) : null;
+    let session: SddSession | null = null;
+    if (rawSession) {
+      try {
+        session = { ...JSON.parse(rawSession), tasks: [] } as SddSession;
+      } catch (error) {
+        console.warn('[TuiBridge] Ignoring corrupt SDD session row:', error);
+      }
+    }
     const rawTasks = sessionId
       ? await this.dataStore.invoke<string[]>('db_sdd_get_tasks', { sessionId })
       : [];
-    const tasks = rawTasks.map((raw) => JSON.parse(raw) as SddTask);
+    const tasks: SddTask[] = [];
+    for (const raw of rawTasks) {
+      try {
+        tasks.push(JSON.parse(raw) as SddTask);
+      } catch (error) {
+        console.warn('[TuiBridge] Ignoring corrupt SDD task row:', error);
+      }
+    }
     return {
       sessionId,
       session,
@@ -961,8 +981,30 @@ export class TuiBridge {
       phase: session?.status ?? null,
       spec: spec ?? session?.spec ?? null,
       review,
-      failedTask: harness.getSddFailedTask(),
+      failedTask: harness.getSddFailedTask() ?? tasks.find((task) => task.status === 'failed') ?? null,
     };
+  }
+
+  private async restoreSddForConversation(conversationId: string): Promise<SddStatePayload> {
+    const rawSessions = await this.dataStore.invoke<string[]>('db_sdd_list_sessions', {
+      projectId: this.projectId,
+    });
+    const sessions: SddSession[] = [];
+    for (const raw of rawSessions) {
+      try {
+        const session = JSON.parse(raw) as SddSession;
+        if (session.conversationId === conversationId) sessions.push(session);
+      } catch (error) {
+        console.warn('[TuiBridge] Ignoring corrupt SDD session row:', error);
+      }
+    }
+    sessions.sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+    const latest = sessions[0];
+    const active = latest && latest.status !== 'completed' && latest.status !== 'cancelled'
+      ? latest
+      : null;
+    this.requireHarness().restoreSddSession(active?.id ?? '');
+    return this.readSddState();
   }
 
   private cancelSubAgent(ownerId: string): { cancelled: boolean } {
@@ -1011,15 +1053,18 @@ export class TuiBridge {
     return this.dataStore.invoke('db_list_traces', { conversationId: this.session?.id ?? '' });
   }
 
-  private loadSession(id: string): SessionRecord | null {
+  private async loadSession(id: string): Promise<SessionRecord | null> {
     const session = this.dataStore.loadSession(id);
     if (session && this.harness) {
       this.resetConversationContext();
       this.clearSessionPathGrants();
       this.session = session;
+      this.pendingFileChanges.clear();
       this.harness.setConversationId(session.id);
       this.harness.setAgentType(session.agentType);
       this.harness.setMode(session.agentType === 'chat' ? 'chat' : 'agent');
+      const sdd = await this.restoreSddForConversation(session.id);
+      this.emit({ type: 'event', event: 'sdd_updated', payload: sdd });
     }
     return session;
   }
@@ -1028,6 +1073,8 @@ export class TuiBridge {
     const harness = this.requireHarness();
     this.resetConversationContext();
     this.clearSessionPathGrants();
+    this.pendingFileChanges.clear();
+    harness.restoreSddSession('');
     this.session = await this.dataStore.createSession(this.workspacePath, harness.getAgentType(), this.currentProviderId(), this.currentModelId());
     harness.setConversationId(this.session.id);
     this.emit({ type: 'event', event: 'session_updated', payload: this.session });
@@ -1527,8 +1574,7 @@ export class TuiBridge {
 
   private emitHarnessEvent(event: HarnessEvent): void {
     if (event.type === 'turn_recoverable_error') this.lastRecovery = event.recovery;
-    if (event.type === 'terminal_progress') this.terminalRuntime?.setProgress(event.progress);
-    if (event.type === 'tool_call_result') this.terminalRuntime?.setResult(event.toolCallId, event.result);
+    this.trackHarnessEvent(event);
     if (event.type === 'turn_start' && !this.activeTurnId) this.activeTurnId = event.turnId ?? null;
     if (event.type === 'transcript_message' && this.belongsToActiveTurn(event)) {
       this.activeTurnMessages.push({ role: event.role, content: event.blocks });
@@ -1538,17 +1584,23 @@ export class TuiBridge {
       this.emit({ type: 'event', event: 'harness_event', payload: { ...event, pending: { id: pending.id, toolName: pending.toolName, input: pending.input, description: pending.description, riskLevel: pending.riskLevel, ...(pending.externalAccess ? { externalAccess: pending.externalAccess } : {}) } } as HarnessEvent });
       return;
     }
+    this.emit({ type: 'event', event: 'harness_event', payload: event });
+  }
+
+  private emitScopedHarnessEvent(ownerId: string, event: HarnessEvent): void {
+    this.trackHarnessEvent(event);
+    this.emit({ type: 'event', event: 'scoped_harness_event', payload: { ownerId, event } });
+  }
+
+  private trackHarnessEvent(event: HarnessEvent): void {
+    if (event.type === 'terminal_progress') this.terminalRuntime?.setProgress(event.progress);
+    if (event.type === 'tool_call_result') this.terminalRuntime?.setResult(event.toolCallId, event.result);
     if (event.type === 'file_change_pending') {
       this.pendingFileChanges.set(event.change.toolCallId, {
         ...event.change,
         status: this.pendingFileChanges.get(event.change.toolCallId)?.status ?? 'pending',
       });
     }
-    this.emit({ type: 'event', event: 'harness_event', payload: event });
-  }
-
-  private emitScopedHarnessEvent(ownerId: string, event: HarnessEvent): void {
-    this.emit({ type: 'event', event: 'scoped_harness_event', payload: { ownerId, event } });
   }
 
   private belongsToActiveTurn(event: HarnessEvent): boolean {
@@ -1623,16 +1675,8 @@ export class TuiBridge {
         goals: true,
       },
       context: this.contextState(),
-      sdd: {
-        sessionId: harness.getSddSessionId(),
-        session: null,
-        tasks: [],
-        phase: null,
-        spec: null,
-        review: null,
-        failedTask: harness.getSddFailedTask(),
-      },
-      terminals: await this.requireTerminalRuntime().list(),
+      sdd: await this.readSddState(),
+      terminals: await this.listTerminals(),
       ...(this.session ? { session: this.session } : {}),
     };
   }

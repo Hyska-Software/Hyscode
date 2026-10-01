@@ -249,7 +249,7 @@ const FILENAME_MAP: Record<string, string> = {
 function getExtension(filePath: string): { filename: string; ext: string } {
   const segments = filePath.replace(/\\/g, '/').split('/');
   const filename = segments[segments.length - 1] ?? '';
-  const ext = filename.includes('.') ? filename.split('.').pop()?.toLowerCase() ?? '' : '';
+  const ext = filename.includes('.') ? (filename.split('.').pop()?.toLowerCase() ?? '') : '';
   return { filename, ext };
 }
 
@@ -321,7 +321,21 @@ export function getAllLanguageIds(): string[] {
  * We register additional languages with Monarch tokenizers.
  */
 export function disableNativeTypeScriptValidation(monaco: MonacoInstance) {
-  const tsLang = (monaco.languages as any).typescript;
+  const tsLang = (
+    monaco.languages as unknown as Record<
+      string,
+      {
+        typescriptDefaults?: {
+          setDiagnosticsOptions(o: Record<string, unknown>): void;
+          getDiagnosticsOptions(): Record<string, unknown>;
+        };
+        javascriptDefaults?: {
+          setDiagnosticsOptions(o: Record<string, unknown>): void;
+          getDiagnosticsOptions(): Record<string, unknown>;
+        };
+      }
+    >
+  ).typescript;
   if (!tsLang) return;
   tsLang.typescriptDefaults?.setDiagnosticsOptions({
     ...tsLang.typescriptDefaults.getDiagnosticsOptions(),
@@ -345,7 +359,21 @@ export function disableNativeTypeScriptValidation(monaco: MonacoInstance) {
 }
 
 export function enableNativeTypeScriptValidation(monaco: MonacoInstance) {
-  const tsLang = (monaco.languages as any).typescript;
+  const tsLang = (
+    monaco.languages as unknown as Record<
+      string,
+      {
+        typescriptDefaults?: {
+          setDiagnosticsOptions(o: Record<string, unknown>): void;
+          getDiagnosticsOptions(): Record<string, unknown>;
+        };
+        javascriptDefaults?: {
+          setDiagnosticsOptions(o: Record<string, unknown>): void;
+          getDiagnosticsOptions(): Record<string, unknown>;
+        };
+      }
+    >
+  ).typescript;
   if (!tsLang) return;
   tsLang.typescriptDefaults?.setDiagnosticsOptions({
     ...tsLang.typescriptDefaults.getDiagnosticsOptions(),
@@ -383,6 +411,9 @@ export function registerAllLanguages(monaco: MonacoInstance): void {
   registerTypescriptReact(monaco);
   registerReactSnippets(monaco);
   registerSpectraSnippets(monaco);
+
+  // Rich fallback for built-ins with coarse grammars (VS Code parity when LSP is off).
+  registerRustRichTokenizer(monaco);
 
   // Register language configurations for languages Monaco supports
   // but doesn't have comment/bracket configs for
@@ -507,7 +538,10 @@ function registerToml(monaco: MonacoInstance) {
 
   monaco.languages.setLanguageConfiguration('toml', {
     comments: { lineComment: '#' },
-    brackets: [['[', ']'], ['{', '}']],
+    brackets: [
+      ['[', ']'],
+      ['{', '}'],
+    ],
     autoClosingPairs: [
       { open: '"', close: '"' },
       { open: "'", close: "'" },
@@ -538,23 +572,53 @@ function registerSpectra(monaco: MonacoInstance) {
         [/'(\\.|[^\\'])'/, 'string.quoted.single.char'],
 
         // Numbers (decimal / hex / binary)
-        [/\b(0[xX][0-9a-fA-F_]+|0[bB][01_]+|[0-9](?:[0-9_]*[0-9])?(?:\.[0-9_]+)?(?:[eE][+-]?[0-9_]+)?)\b/, 'number'],
+        [
+          /\b(0[xX][0-9a-fA-F_]+|0[bB][01_]+|[0-9](?:[0-9_]*[0-9])?(?:\.[0-9_]+)?(?:[eE][+-]?[0-9_]+)?)\b/,
+          'number',
+        ],
 
         // Declarations: fn / struct·enum·trait·module / impl (name follows the keyword)
-        [/\b(fn)\s+([A-Za-z_][A-Za-z0-9_]*)/, ['keyword.declaration.function', 'entity.name.function']],
-        [/\b(struct|enum|trait|module)\s+([A-Za-z_][A-Za-z0-9_]*)/, ['keyword.declaration.type', 'entity.name.type']],
-        [/\b(impl)\s+([A-Za-z_][A-Za-z0-9_:<>]*)/, ['keyword.declaration.impl', 'entity.name.type']],
+        [
+          /\b(fn)\s+([A-Za-z_][A-Za-z0-9_]*)/,
+          ['keyword.declaration.function', 'entity.name.function'],
+        ],
+        [
+          /\b(struct|enum|trait|module)\s+([A-Za-z_][A-Za-z0-9_]*)/,
+          ['keyword.declaration.type', 'entity.name.type'],
+        ],
+        [
+          /\b(impl)\s+([A-Za-z_][A-Za-z0-9_:<>]*)/,
+          ['keyword.declaration.impl', 'entity.name.type'],
+        ],
 
         // std.api namespace — the whole dotted path (std.api.http.Request) is a
         // single token so names are never split across two colors.
-        [/\b(?:std\.api|spectra\.api|spectra\.std\.api)(?:\.[A-Za-z_][A-Za-z0-9_]*)*/, 'support.namespace.std-api'],
-        [/\b(?:get|post|put|patch|delete|options|route_add|route_match|match_param|match_query)\b/, 'support.function.std-api.routing'],
-        [/\b(?:text|json|bytes|status|with_header|into_response|register_sync|register_async|dispatch_sync|dispatch_async)\b/, 'support.function.std-api.handler'],
-        [/\b(?:policy|permissive|allow_origin|allow_method|allow_header|expose_header|allow_credentials|max_age|middleware|is_preflight|preflight|apply|allowed_origin)\b/, 'support.function.std-api.cors'],
-        [/\b(?:chain|chain_new|chain_len|register_sync_short_circuit|register_async_short_circuit|use_sync|use_async|execute_sync|execute_async|last_trace|trace_len|trace_event|trace_short_circuited)\b/, 'support.function.std-api.middleware'],
+        [
+          /\b(?:std\.api|spectra\.api|spectra\.std\.api)(?:\.[A-Za-z_][A-Za-z0-9_]*)*/,
+          'support.namespace.std-api',
+        ],
+        [
+          /\b(?:get|post|put|patch|delete|options|route_add|route_match|match_param|match_query)\b/,
+          'support.function.std-api.routing',
+        ],
+        [
+          /\b(?:text|json|bytes|status|with_header|into_response|register_sync|register_async|dispatch_sync|dispatch_async)\b/,
+          'support.function.std-api.handler',
+        ],
+        [
+          /\b(?:policy|permissive|allow_origin|allow_method|allow_header|expose_header|allow_credentials|max_age|middleware|is_preflight|preflight|apply|allowed_origin)\b/,
+          'support.function.std-api.cors',
+        ],
+        [
+          /\b(?:chain|chain_new|chain_len|register_sync_short_circuit|register_async_short_circuit|use_sync|use_async|execute_sync|execute_async|last_trace|trace_len|trace_event|trace_short_circuited)\b/,
+          'support.function.std-api.middleware',
+        ],
 
         // Keywords
-        [/\b(if|elif|elseif|else|unless|match|switch|case|cond|while|do|for|foreach|in|of|repeat|until|loop|return|break|continue|yield|goto|let|await)\b/, 'keyword.control'],
+        [
+          /\b(if|elif|elseif|else|unless|match|switch|case|cond|while|do|for|foreach|in|of|repeat|until|loop|return|break|continue|yield|goto|let|await)\b/,
+          'keyword.control',
+        ],
         [/\b(module|import|export|fn|async|struct|enum|impl|class|trait)\b/, 'keyword.declaration'],
         [/\b(pub|mut|internal|Self|self)\b/, 'storage.modifier'],
         [/\b(true|false)\b/, 'constant.language'],
@@ -565,7 +629,10 @@ function registerSpectra(monaco: MonacoInstance) {
         [/[A-Z][A-Za-z0-9_]*(?:<[A-Za-z0-9_,: <>]+>)?/, 'entity.name.type'],
 
         // Operators (multi-char before single-char so `=>`, `..`, `::` win)
-        [/(\.\.=|\.\.|=>|==|!=|<=|>=|&&|\|\||::|->|\+=|-=|\*=|\/=|%=|\+|-|\*|\/|%|<|>|=|\?|!|&)/, 'operator'],
+        [
+          /(\.\.=|\.\.|=>|==|!=|<=|>=|&&|\|\||::|->|\+=|-=|\*=|\/=|%=|\+|-|\*|\/|%|<|>|=|\?|!|&)/,
+          'operator',
+        ],
         [/\./, 'operator'],
 
         // Brackets & delimiters
@@ -625,7 +692,8 @@ function registerSpectra(monaco: MonacoInstance) {
       { open: "'", close: "'" },
       { open: '`', close: '`' },
     ],
-    wordPattern: /(-?\d*\.?\d+([eE][\-+]?\d+)?[fFdD]?|\b(0[xX][0-9a-fA-F]+|\d+)[uUlL]*\b|\b[A-Za-z_][A-Za-z0-9_]*\b)/,
+    wordPattern:
+      /(-?\d*\.?\d+([eE][\-+]?\d+)?[fFdD]?|\b(0[xX][0-9a-fA-F]+|\d+)[uUlL]*\b|\b[A-Za-z_][A-Za-z0-9_]*\b)/,
     indentationRules: {
       increaseIndentPattern: /^.*(\{[^"']*|\([^)"']*)$/,
       decreaseIndentPattern: /^\s*[\}\)].*$/,
@@ -643,14 +711,32 @@ function registerDockerfile(monaco: MonacoInstance) {
 
   monaco.languages.setMonarchTokensProvider('dockerfile', {
     keywords: [
-      'FROM', 'RUN', 'CMD', 'LABEL', 'MAINTAINER', 'EXPOSE', 'ENV', 'ADD',
-      'COPY', 'ENTRYPOINT', 'VOLUME', 'USER', 'WORKDIR', 'ARG', 'ONBUILD',
-      'STOPSIGNAL', 'HEALTHCHECK', 'SHELL',
+      'FROM',
+      'RUN',
+      'CMD',
+      'LABEL',
+      'MAINTAINER',
+      'EXPOSE',
+      'ENV',
+      'ADD',
+      'COPY',
+      'ENTRYPOINT',
+      'VOLUME',
+      'USER',
+      'WORKDIR',
+      'ARG',
+      'ONBUILD',
+      'STOPSIGNAL',
+      'HEALTHCHECK',
+      'SHELL',
     ],
     tokenizer: {
       root: [
         [/#.*$/, 'comment'],
-        [/\b(FROM|RUN|CMD|LABEL|MAINTAINER|EXPOSE|ENV|ADD|COPY|ENTRYPOINT|VOLUME|USER|WORKDIR|ARG|ONBUILD|STOPSIGNAL|HEALTHCHECK|SHELL)\b/i, 'keyword'],
+        [
+          /\b(FROM|RUN|CMD|LABEL|MAINTAINER|EXPOSE|ENV|ADD|COPY|ENTRYPOINT|VOLUME|USER|WORKDIR|ARG|ONBUILD|STOPSIGNAL|HEALTHCHECK|SHELL)\b/i,
+          'keyword',
+        ],
         [/\b(AS)\b/i, 'keyword.control'],
         [/\$\{[^}]+\}/, 'variable'],
         [/\$[a-zA-Z_]\w*/, 'variable'],
@@ -664,7 +750,11 @@ function registerDockerfile(monaco: MonacoInstance) {
 
   monaco.languages.setLanguageConfiguration('dockerfile', {
     comments: { lineComment: '#' },
-    brackets: [['[', ']'], ['{', '}'], ['(', ')']],
+    brackets: [
+      ['[', ']'],
+      ['{', '}'],
+      ['(', ')'],
+    ],
     autoClosingPairs: [
       { open: '"', close: '"' },
       { open: "'", close: "'" },
@@ -684,14 +774,32 @@ function registerHcl(monaco: MonacoInstance) {
   });
 
   monaco.languages.setMonarchTokensProvider('hcl', {
-    keywords: ['resource', 'data', 'variable', 'output', 'locals', 'module', 'terraform', 'provider', 'provisioner', 'lifecycle', 'dynamic', 'for_each', 'count', 'depends_on'],
+    keywords: [
+      'resource',
+      'data',
+      'variable',
+      'output',
+      'locals',
+      'module',
+      'terraform',
+      'provider',
+      'provisioner',
+      'lifecycle',
+      'dynamic',
+      'for_each',
+      'count',
+      'depends_on',
+    ],
     typeKeywords: ['string', 'number', 'bool', 'list', 'map', 'set', 'object', 'tuple', 'any'],
     tokenizer: {
       root: [
         [/#.*$/, 'comment'],
         [/\/\/.*$/, 'comment'],
         [/\/\*/, 'comment', '@comment'],
-        [/\b(resource|data|variable|output|locals|module|terraform|provider|provisioner|lifecycle|dynamic|for_each|count|depends_on)\b/, 'keyword'],
+        [
+          /\b(resource|data|variable|output|locals|module|terraform|provider|provisioner|lifecycle|dynamic|for_each|count|depends_on)\b/,
+          'keyword',
+        ],
         [/\b(string|number|bool|list|map|set|object|tuple|any)\b/, 'type'],
         [/\b(true|false|null)\b/, 'keyword'],
         [/\b(if|else|endif|for|in|endfor)\b/, 'keyword.control'],
@@ -710,7 +818,11 @@ function registerHcl(monaco: MonacoInstance) {
 
   monaco.languages.setLanguageConfiguration('hcl', {
     comments: { lineComment: '#', blockComment: ['/*', '*/'] },
-    brackets: [['{', '}'], ['[', ']'], ['(', ')']],
+    brackets: [
+      ['{', '}'],
+      ['[', ']'],
+      ['(', ')'],
+    ],
     autoClosingPairs: [
       { open: '{', close: '}' },
       { open: '[', close: ']' },
@@ -733,8 +845,14 @@ function registerProtobuf(monaco: MonacoInstance) {
       root: [
         [/\/\/.*$/, 'comment'],
         [/\/\*/, 'comment', '@comment'],
-        [/\b(syntax|import|package|option|message|enum|service|rpc|returns|oneof|map|repeated|optional|required|reserved|extensions|extend|group)\b/, 'keyword'],
-        [/\b(double|float|int32|int64|uint32|uint64|sint32|sint64|fixed32|fixed64|sfixed32|sfixed64|bool|string|bytes)\b/, 'type'],
+        [
+          /\b(syntax|import|package|option|message|enum|service|rpc|returns|oneof|map|repeated|optional|required|reserved|extensions|extend|group)\b/,
+          'keyword',
+        ],
+        [
+          /\b(double|float|int32|int64|uint32|uint64|sint32|sint64|fixed32|fixed64|sfixed32|sfixed64|bool|string|bytes)\b/,
+          'type',
+        ],
         [/\b(true|false)\b/, 'keyword'],
         [/"[^"]*"/, 'string'],
         [/'[^']*'/, 'string'],
@@ -750,7 +868,11 @@ function registerProtobuf(monaco: MonacoInstance) {
 
   monaco.languages.setLanguageConfiguration('protobuf', {
     comments: { lineComment: '//', blockComment: ['/*', '*/'] },
-    brackets: [['{', '}'], ['[', ']'], ['(', ')']],
+    brackets: [
+      ['{', '}'],
+      ['[', ']'],
+      ['(', ')'],
+    ],
     autoClosingPairs: [
       { open: '{', close: '}' },
       { open: '[', close: ']' },
@@ -772,8 +894,14 @@ function registerElixir(monaco: MonacoInstance) {
     tokenizer: {
       root: [
         [/#.*$/, 'comment'],
-        [/\b(def|defp|defmodule|defmacro|defmacrop|defstruct|defprotocol|defimpl|defdelegate|defguard|defexception|defoverridable)\b/, 'keyword'],
-        [/\b(do|end|fn|case|cond|if|else|unless|when|with|for|receive|after|try|catch|rescue|raise|throw|import|require|use|alias|quote|unquote|in|and|or|not|true|false|nil)\b/, 'keyword.control'],
+        [
+          /\b(def|defp|defmodule|defmacro|defmacrop|defstruct|defprotocol|defimpl|defdelegate|defguard|defexception|defoverridable)\b/,
+          'keyword',
+        ],
+        [
+          /\b(do|end|fn|case|cond|if|else|unless|when|with|for|receive|after|try|catch|rescue|raise|throw|import|require|use|alias|quote|unquote|in|and|or|not|true|false|nil)\b/,
+          'keyword.control',
+        ],
         [/@\w+/, 'attribute.name'],
         [/:[\w!?]+/, 'type.identifier'],
         [/\b[A-Z]\w*/, 'type'],
@@ -790,7 +918,12 @@ function registerElixir(monaco: MonacoInstance) {
 
   monaco.languages.setLanguageConfiguration('elixir', {
     comments: { lineComment: '#' },
-    brackets: [['do', 'end'], ['{', '}'], ['[', ']'], ['(', ')']],
+    brackets: [
+      ['do', 'end'],
+      ['{', '}'],
+      ['[', ']'],
+      ['(', ')'],
+    ],
     autoClosingPairs: [
       { open: '{', close: '}' },
       { open: '[', close: ']' },
@@ -814,7 +947,10 @@ function registerHaskell(monaco: MonacoInstance) {
       root: [
         [/--.*$/, 'comment'],
         [/\{-/, 'comment', '@comment'],
-        [/\b(module|where|import|qualified|as|hiding|data|type|newtype|class|instance|deriving|do|let|in|if|then|else|case|of|where|infixl|infixr|infix|foreign)\b/, 'keyword'],
+        [
+          /\b(module|where|import|qualified|as|hiding|data|type|newtype|class|instance|deriving|do|let|in|if|then|else|case|of|where|infixl|infixr|infix|foreign)\b/,
+          'keyword',
+        ],
         [/\b(True|False|Nothing|Just|Left|Right|IO|Maybe|Either)\b/, 'type.identifier'],
         [/\b[A-Z]\w*/, 'type'],
         [/"[^"\\]*(?:\\.[^"\\]*)*"/, 'string'],
@@ -832,7 +968,11 @@ function registerHaskell(monaco: MonacoInstance) {
 
   monaco.languages.setLanguageConfiguration('haskell', {
     comments: { lineComment: '--', blockComment: ['{-', '-}'] },
-    brackets: [['(', ')'], ['[', ']'], ['{', '}']],
+    brackets: [
+      ['(', ')'],
+      ['[', ']'],
+      ['{', '}'],
+    ],
     autoClosingPairs: [
       { open: '(', close: ')' },
       { open: '[', close: ']' },
@@ -855,9 +995,18 @@ function registerZig(monaco: MonacoInstance) {
     tokenizer: {
       root: [
         [/\/\/.*$/, 'comment'],
-        [/\b(const|var|fn|pub|extern|export|inline|comptime|test|try|catch|return|if|else|while|for|switch|break|continue|unreachable|defer|errdefer|orelse|and|or|struct|enum|union|error|packed|opaque|threadlocal|volatile|allowzero|noalias|usingnamespace|asm|nosuspend|async|await|suspend|resume)\b/, 'keyword'],
-        [/\b(void|bool|noreturn|type|anyerror|anyframe|anytype|anyopaque|undefined|null|true|false)\b/, 'keyword'],
-        [/\b(u8|u16|u32|u64|u128|usize|i8|i16|i32|i64|i128|isize|f16|f32|f64|f80|f128|c_short|c_ushort|c_int|c_uint|c_long|c_ulong|c_longlong|c_ulonglong|c_longdouble|c_void)\b/, 'type'],
+        [
+          /\b(const|var|fn|pub|extern|export|inline|comptime|test|try|catch|return|if|else|while|for|switch|break|continue|unreachable|defer|errdefer|orelse|and|or|struct|enum|union|error|packed|opaque|threadlocal|volatile|allowzero|noalias|usingnamespace|asm|nosuspend|async|await|suspend|resume)\b/,
+          'keyword',
+        ],
+        [
+          /\b(void|bool|noreturn|type|anyerror|anyframe|anytype|anyopaque|undefined|null|true|false)\b/,
+          'keyword',
+        ],
+        [
+          /\b(u8|u16|u32|u64|u128|usize|i8|i16|i32|i64|i128|isize|f16|f32|f64|f80|f128|c_short|c_ushort|c_int|c_uint|c_long|c_ulong|c_longlong|c_ulonglong|c_longdouble|c_void)\b/,
+          'type',
+        ],
         [/@\w+/, 'attribute.name'],
         [/"[^"\\]*(?:\\.[^"\\]*)*"/, 'string'],
         [/'[^'\\]*'/, 'string'],
@@ -872,7 +1021,11 @@ function registerZig(monaco: MonacoInstance) {
 
   monaco.languages.setLanguageConfiguration('zig', {
     comments: { lineComment: '//' },
-    brackets: [['{', '}'], ['[', ']'], ['(', ')']],
+    brackets: [
+      ['{', '}'],
+      ['[', ']'],
+      ['(', ')'],
+    ],
     autoClosingPairs: [
       { open: '{', close: '}' },
       { open: '[', close: ']' },
@@ -894,7 +1047,10 @@ function registerNim(monaco: MonacoInstance) {
     tokenizer: {
       root: [
         [/#.*$/, 'comment'],
-        [/\b(proc|func|method|template|macro|iterator|converter|type|var|let|const|import|include|from|export|when|if|elif|else|case|of|while|for|in|do|block|try|except|finally|raise|return|yield|discard|break|continue|object|tuple|enum|concept|distinct|ref|ptr|addr|cast|nil|true|false|and|or|not|xor|shl|shr|div|mod|is|isnot|as)\b/, 'keyword'],
+        [
+          /\b(proc|func|method|template|macro|iterator|converter|type|var|let|const|import|include|from|export|when|if|elif|else|case|of|while|for|in|do|block|try|except|finally|raise|return|yield|discard|break|continue|object|tuple|enum|concept|distinct|ref|ptr|addr|cast|nil|true|false|and|or|not|xor|shl|shr|div|mod|is|isnot|as)\b/,
+          'keyword',
+        ],
         [/\b[A-Z]\w*/, 'type'],
         [/"""[\s\S]*?"""/, 'string'],
         [/"[^"\\]*(?:\\.[^"\\]*)*"/, 'string'],
@@ -906,7 +1062,11 @@ function registerNim(monaco: MonacoInstance) {
 
   monaco.languages.setLanguageConfiguration('nim', {
     comments: { lineComment: '#' },
-    brackets: [['(', ')'], ['[', ']'], ['{', '}']],
+    brackets: [
+      ['(', ')'],
+      ['[', ']'],
+      ['{', '}'],
+    ],
     autoClosingPairs: [
       { open: '(', close: ')' },
       { open: '[', close: ']' },
@@ -928,7 +1088,10 @@ function registerClojure(monaco: MonacoInstance) {
     tokenizer: {
       root: [
         [/;.*$/, 'comment'],
-        [/\b(def|defn|defn-|defmacro|defmethod|defmulti|defprotocol|defrecord|defstruct|deftype|fn|let|loop|recur|do|if|if-not|when|when-not|when-let|cond|condp|case|try|catch|finally|throw|monitor-enter|monitor-exit|new|quote|var|set!|import|require|use|ns|in-ns|refer)\b/, 'keyword'],
+        [
+          /\b(def|defn|defn-|defmacro|defmethod|defmulti|defprotocol|defrecord|defstruct|deftype|fn|let|loop|recur|do|if|if-not|when|when-not|when-let|cond|condp|case|try|catch|finally|throw|monitor-enter|monitor-exit|new|quote|var|set!|import|require|use|ns|in-ns|refer)\b/,
+          'keyword',
+        ],
         [/\b(nil|true|false)\b/, 'keyword'],
         [/:[a-zA-Z][\w?!*-]*/, 'type.identifier'],
         [/"[^"\\]*(?:\\.[^"\\]*)*"/, 'string'],
@@ -942,7 +1105,11 @@ function registerClojure(monaco: MonacoInstance) {
 
   monaco.languages.setLanguageConfiguration('clojure', {
     comments: { lineComment: ';' },
-    brackets: [['(', ')'], ['[', ']'], ['{', '}']],
+    brackets: [
+      ['(', ')'],
+      ['[', ']'],
+      ['{', '}'],
+    ],
     autoClosingPairs: [
       { open: '(', close: ')' },
       { open: '[', close: ']' },
@@ -964,7 +1131,10 @@ function registerOcaml(monaco: MonacoInstance) {
     tokenizer: {
       root: [
         [/\(\*/, 'comment', '@comment'],
-        [/\b(let|in|and|rec|val|fun|function|match|with|type|module|sig|struct|end|open|include|if|then|else|for|do|done|while|to|downto|begin|end|try|raise|exception|external|mutable|assert|lazy)\b/, 'keyword'],
+        [
+          /\b(let|in|and|rec|val|fun|function|match|with|type|module|sig|struct|end|open|include|if|then|else|for|do|done|while|to|downto|begin|end|try|raise|exception|external|mutable|assert|lazy)\b/,
+          'keyword',
+        ],
         [/\b(int|float|char|string|bool|unit|list|array|option|ref)\b/, 'type'],
         [/\b(true|false)\b/, 'keyword'],
         [/\b[A-Z]\w*/, 'type.identifier'],
@@ -983,7 +1153,11 @@ function registerOcaml(monaco: MonacoInstance) {
 
   monaco.languages.setLanguageConfiguration('ocaml', {
     comments: { blockComment: ['(*', '*)'] },
-    brackets: [['(', ')'], ['[', ']'], ['{', '}']],
+    brackets: [
+      ['(', ')'],
+      ['[', ']'],
+      ['{', '}'],
+    ],
     autoClosingPairs: [
       { open: '(', close: ')' },
       { open: '[', close: ']' },
@@ -1011,7 +1185,10 @@ function registerMakefile(monaco: MonacoInstance) {
         [/\$\([^)]+\)/, 'variable'],
         [/\$\{[^}]+\}/, 'variable'],
         [/\$[@<^?*%]/, 'variable'],
-        [/\b(ifeq|ifneq|ifdef|ifndef|else|endif|define|endef|include|override|export|unexport|vpath|\.PHONY|\.DEFAULT|\.PRECIOUS|\.INTERMEDIATE|\.SECONDARY|\.SUFFIXES|\.DELETE_ON_ERROR)\b/, 'keyword'],
+        [
+          /\b(ifeq|ifneq|ifdef|ifndef|else|endif|define|endef|include|override|export|unexport|vpath|\.PHONY|\.DEFAULT|\.PRECIOUS|\.INTERMEDIATE|\.SECONDARY|\.SUFFIXES|\.DELETE_ON_ERROR)\b/,
+          'keyword',
+        ],
         [/\t.*$/, 'string'],
       ],
     },
@@ -1019,7 +1196,10 @@ function registerMakefile(monaco: MonacoInstance) {
 
   monaco.languages.setLanguageConfiguration('makefile', {
     comments: { lineComment: '#' },
-    brackets: [['(', ')'], ['{', '}']],
+    brackets: [
+      ['(', ')'],
+      ['{', '}'],
+    ],
   });
 }
 
@@ -1126,8 +1306,14 @@ function registerAsm(monaco: MonacoInstance) {
         [/[;#].*$/, 'comment'],
         [/\/\/.*$/, 'comment'],
         [/\.\w+/, 'keyword'],
-        [/\b(mov|add|sub|mul|div|push|pop|call|ret|jmp|je|jne|jg|jl|jge|jle|cmp|test|and|or|xor|not|shl|shr|lea|nop|int|syscall|inc|dec)\b/i, 'keyword'],
-        [/\b(rax|rbx|rcx|rdx|rsi|rdi|rsp|rbp|r8|r9|r10|r11|r12|r13|r14|r15|eax|ebx|ecx|edx|esi|edi|esp|ebp|ax|bx|cx|dx|al|bl|cl|dl|ah|bh|ch|dh|xmm\d+|ymm\d+)\b/i, 'type'],
+        [
+          /\b(mov|add|sub|mul|div|push|pop|call|ret|jmp|je|jne|jg|jl|jge|jle|cmp|test|and|or|xor|not|shl|shr|lea|nop|int|syscall|inc|dec)\b/i,
+          'keyword',
+        ],
+        [
+          /\b(rax|rbx|rcx|rdx|rsi|rdi|rsp|rbp|r8|r9|r10|r11|r12|r13|r14|r15|eax|ebx|ecx|edx|esi|edi|esp|ebp|ax|bx|cx|dx|al|bl|cl|dl|ah|bh|ch|dh|xmm\d+|ymm\d+)\b/i,
+          'type',
+        ],
         [/\b[a-zA-Z_]\w*:/, 'type.identifier'],
         [/"[^"]*"/, 'string'],
         [/'[^']*'/, 'string'],
@@ -1142,7 +1328,10 @@ function registerAsm(monaco: MonacoInstance) {
 
   monaco.languages.setLanguageConfiguration('asm', {
     comments: { lineComment: ';' },
-    brackets: [['(', ')'], ['[', ']']],
+    brackets: [
+      ['(', ')'],
+      ['[', ']'],
+    ],
   });
 }
 
@@ -1159,8 +1348,14 @@ function registerCmake(monaco: MonacoInstance) {
     tokenizer: {
       root: [
         [/#.*$/, 'comment'],
-        [/\b(if|elseif|else|endif|foreach|endforeach|while|endwhile|function|endfunction|macro|endmacro|return|break|continue)\b/i, 'keyword.control'],
-        [/\b(project|cmake_minimum_required|add_executable|add_library|target_link_libraries|target_include_directories|set|list|message|find_package|include|install|option|add_subdirectory|configure_file|add_definitions|add_dependencies|add_custom_command|add_custom_target|execute_process|file|string|math|get_filename_component|get_target_property|set_target_properties|cmake_policy)\b/i, 'keyword'],
+        [
+          /\b(if|elseif|else|endif|foreach|endforeach|while|endwhile|function|endfunction|macro|endmacro|return|break|continue)\b/i,
+          'keyword.control',
+        ],
+        [
+          /\b(project|cmake_minimum_required|add_executable|add_library|target_link_libraries|target_include_directories|set|list|message|find_package|include|install|option|add_subdirectory|configure_file|add_definitions|add_dependencies|add_custom_command|add_custom_target|execute_process|file|string|math|get_filename_component|get_target_property|set_target_properties|cmake_policy)\b/i,
+          'keyword',
+        ],
         [/\$\{[^}]+\}/, 'variable'],
         [/\$ENV\{[^}]+\}/, 'variable'],
         [/"[^"]*"/, 'string'],
@@ -1193,7 +1388,10 @@ function registerWat(monaco: MonacoInstance) {
       root: [
         [/;;.*$/, 'comment'],
         [/\(;/, 'comment', '@comment'],
-        [/\b(module|func|param|result|local|global|memory|table|elem|data|start|import|export|type|mut|offset|block|loop|if|then|else|end|br|br_if|br_table|return|call|call_indirect|drop|select|unreachable|nop)\b/, 'keyword'],
+        [
+          /\b(module|func|param|result|local|global|memory|table|elem|data|start|import|export|type|mut|offset|block|loop|if|then|else|end|br|br_if|br_table|return|call|call_indirect|drop|select|unreachable|nop)\b/,
+          'keyword',
+        ],
         [/\b(i32|i64|f32|f64|v128|funcref|externref)\b/, 'type'],
         [/\$[\w!#$%&'*+\-./:<=>?@\\^_`|~]+/, 'variable'],
         [/"[^"]*"/, 'string'],
@@ -1231,8 +1429,14 @@ function registerV(monaco: MonacoInstance) {
       root: [
         [/\/\/.*$/, 'comment'],
         [/\/\*/, 'comment', '@comment'],
-        [/\b(fn|pub|mut|const|struct|enum|union|interface|type|import|module|return|if|else|for|in|match|or|go|spawn|defer|assert|unsafe|asm|shared|lock|rlock|select|as|is|none|true|false|it|dump)\b/, 'keyword'],
-        [/\b(bool|string|i8|i16|int|i64|i128|u8|u16|u32|u64|u128|f32|f64|rune|byte|byteptr|voidptr|charptr)\b/, 'type'],
+        [
+          /\b(fn|pub|mut|const|struct|enum|union|interface|type|import|module|return|if|else|for|in|match|or|go|spawn|defer|assert|unsafe|asm|shared|lock|rlock|select|as|is|none|true|false|it|dump)\b/,
+          'keyword',
+        ],
+        [
+          /\b(bool|string|i8|i16|int|i64|i128|u8|u16|u32|u64|u128|f32|f64|rune|byte|byteptr|voidptr|charptr)\b/,
+          'type',
+        ],
         [/\b[A-Z]\w*/, 'type.identifier'],
         [/'[^'\\]*(?:\\.[^'\\]*)*'/, 'string'],
         [/"[^"\\]*(?:\\.[^"\\]*)*"/, 'string'],
@@ -1253,7 +1457,11 @@ function registerV(monaco: MonacoInstance) {
 
   monaco.languages.setLanguageConfiguration('v', {
     comments: { lineComment: '//', blockComment: ['/*', '*/'] },
-    brackets: [['{', '}'], ['[', ']'], ['(', ')']],
+    brackets: [
+      ['{', '}'],
+      ['[', ']'],
+      ['(', ')'],
+    ],
     autoClosingPairs: [
       { open: '{', close: '}' },
       { open: '[', close: ']' },
@@ -1264,12 +1472,177 @@ function registerV(monaco: MonacoInstance) {
   });
 }
 
+function registerRustRichTokenizer(monaco: MonacoInstance) {
+  // Rich Monarch fallback for Rust — VS Code parity when rust-analyzer is off.
+  // Distinguishes namespaces (`std::`), types (`HashMap`), functions/macros,
+  // attributes (`#[...]`), lifetimes (`'a`), so themes can color them like the
+  // screenshot even without semantic tokens.
+  try {
+    monaco.languages.setMonarchTokensProvider('rust', {
+      keywords: [
+        'as',
+        'async',
+        'await',
+        'break',
+        'const',
+        'continue',
+        'crate',
+        'dyn',
+        'else',
+        'enum',
+        'extern',
+        'fn',
+        'for',
+        'if',
+        'impl',
+        'in',
+        'let',
+        'loop',
+        'match',
+        'mod',
+        'move',
+        'mut',
+        'pub',
+        'ref',
+        'return',
+        'self',
+        'Self',
+        'static',
+        'struct',
+        'super',
+        'trait',
+        'type',
+        'unsafe',
+        'use',
+        'where',
+        'while',
+        'try',
+        'union',
+        'default',
+        'crate',
+      ],
+      typeKeywords: [
+        'bool',
+        'char',
+        'str',
+        'u8',
+        'u16',
+        'u32',
+        'u64',
+        'u128',
+        'usize',
+        'i8',
+        'i16',
+        'i32',
+        'i64',
+        'i128',
+        'isize',
+        'f32',
+        'f64',
+        'String',
+        'Option',
+        'Result',
+        'Vec',
+        'Box',
+        'Self',
+      ],
+      escapes: /\\(?:[nrt0"'\\]|x[0-9a-fA-F]{2}|u\{[0-9a-fA-F]{1,6}\})/,
+      tokenizer: {
+        root: [
+          [/\/\/.*$/, 'comment'],
+          [/\/\*/, 'comment', '@comment'],
+          // Attributes: #[...] / #![...]
+          [/#!?\[/, 'annotation', '@attribute'],
+          // Raw strings r#"..."#
+          [/r(#+)?"/, 'string', '@stringraw.$1'],
+          // Char / byte literals before lifetimes so `'a'` isn't a lifetime.
+          [/'(?:[^\\']|\\.)'/, 'string'],
+          [/b'(?:[^\\']|\\.)'/, 'string'],
+          // Lifetimes: 'a, 'static
+          [/'[a-zA-Z_][a-zA-Z0-9_]*/, 'lifetime'],
+          // Byte strings / normal strings
+          [/b"/, 'string', '@string'],
+          [/"/, 'string', '@string'],
+          // Numbers
+          [/0[xX][0-9a-fA-F_]+[uUiI]*\d*/, 'number.hex'],
+          [/0[oO][0-7_]+/, 'number.octal'],
+          [/0[bB][01_]+/, 'number.binary'],
+          [/\d[\d_]*\.\d[\d_]*(?:[eE][+-]?\d+)?(?:f(?:32|64))?/, 'number.float'],
+          [/\d[\d_]*(?:[eE][+-]?\d+)?(?:[uUiI](?:8|16|32|64|128|size)|f(?:32|64))?/, 'number'],
+          // Namespaces: foo:: (lowercase path segment before ::)
+          [/[a-z_][a-zA-Z0-9_]*(?=::)/, 'namespace'],
+          [/::/, 'operator'],
+          // Macros: foo! (not !=)
+          [/[a-zA-Z_][a-zA-Z0-9_]*!(?!=)/, 'macro'],
+          // Keywords / primitive types
+          [
+            /[a-zA-Z_][a-zA-Z0-9_]*/,
+            {
+              cases: {
+                '@keywords': 'keyword',
+                '@typeKeywords': 'type',
+                'true|false|Some|None|Ok|Err|Left|Right': 'constant',
+                '@default': 'identifier',
+              },
+            },
+          ],
+          // Functions: identifier followed by (
+          [/[a-z_][a-zA-Z0-9_]*(?=\s*\()/, 'function'],
+          // Types: UpperCamelCase
+          [/[A-Z][a-zA-Z0-9_]*/, 'type'],
+          // Constants: UPPER_SNAKE_CASE
+          [/[A-Z][A-Z0-9_]+/, 'constant'],
+          [/[{}()[\]<>]/, '@brackets'],
+          [/[,;]/, 'delimiter'],
+          [/[+\-*/%=&|^!~?@<>.]+/, 'operator'],
+          [/[a-z_][a-zA-Z0-9_]*/, 'variable'],
+        ],
+        comment: [
+          [/[^/*]+/, 'comment'],
+          [/\/\*/, 'comment', '@push'],
+          [/\*\//, 'comment', '@pop'],
+          [/[/*]/, 'comment'],
+        ],
+        string: [
+          [/[^\\"]+/, 'string'],
+          [/@escapes/, 'string.escape'],
+          [/\\./, 'string.escape'],
+          [/"/, 'string', '@pop'],
+        ],
+        stringraw: [
+          [/[^"#]+/, 'string'],
+          [
+            /"(#+)/,
+            { cases: { '$1==$S2': { token: 'string', next: '@pop' }, '@default': 'string' } },
+          ],
+          [/"/, { token: 'string', next: '@pop' }],
+          [/[#"]/, 'string'],
+        ],
+        attribute: [
+          [/[^\]"'\/]+/, 'annotation'],
+          [/"[^"]*"/, 'string'],
+          [/\/\*/, 'comment', '@comment'],
+          [/\/\/.*$/, 'comment'],
+          [/\]/, 'annotation', '@pop'],
+          [/["/[\]]/, 'annotation'],
+        ],
+      },
+    } as import('monaco-editor').languages.IMonarchLanguage);
+  } catch {
+    // Monaco may not have rust registered yet in some test harnesses.
+  }
+}
+
 function registerRustConfig(monaco: MonacoInstance) {
   // Rust is built-in to Monaco but ensure language config is set
   try {
     monaco.languages.setLanguageConfiguration('rust', {
       comments: { lineComment: '//', blockComment: ['/*', '*/'] },
-      brackets: [['{', '}'], ['[', ']'], ['(', ')']],
+      brackets: [
+        ['{', '}'],
+        ['[', ']'],
+        ['(', ')'],
+      ],
       autoClosingPairs: [
         { open: '{', close: '}' },
         { open: '[', close: ']' },
@@ -1297,7 +1670,11 @@ function registerCConfig(monaco: MonacoInstance) {
   try {
     monaco.languages.setLanguageConfiguration('c', {
       comments: { lineComment: '//', blockComment: ['/*', '*/'] },
-      brackets: [['{', '}'], ['[', ']'], ['(', ')']],
+      brackets: [
+        ['{', '}'],
+        ['[', ']'],
+        ['(', ')'],
+      ],
       autoClosingPairs: [
         { open: '{', close: '}' },
         { open: '[', close: ']' },

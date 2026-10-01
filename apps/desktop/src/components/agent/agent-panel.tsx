@@ -200,15 +200,16 @@ function ContextPieButton({
           render={
             <button
               onClick={() => setOpen((v) => !v)}
+              aria-label="Context usage"
               className={cn(
                 'flex cursor-pointer items-center justify-center rounded p-0.5 transition-colors',
                 open ? 'text-foreground' : 'text-muted-foreground/60 hover:text-foreground',
               )}
-            />
+            >
+              <PieChart pct={hasContextWindow ? pct : 0} size={14} color={pieColor} />
+            </button>
           }
-        >
-          <PieChart pct={hasContextWindow ? pct : 0} size={14} color={pieColor} />
-        </TooltipTrigger>
+        />
         <TooltipContent side="bottom">Context usage</TooltipContent>
       </Tooltip>
 
@@ -436,6 +437,12 @@ export function AgentPanel() {
                 isStreaming && tab.id !== activeTabId && 'cursor-not-allowed opacity-50',
               )}
               onClick={() => switchTab(tab.id)}
+              aria-disabled={isStreaming && tab.id !== activeTabId}
+              title={
+                isStreaming && tab.id !== activeTabId
+                  ? 'Aguarde o streaming terminar para trocar de conversa'
+                  : tab.title
+              }
               onMouseDown={(e) => {
                 if (e.button === 1) {
                   e.preventDefault();
@@ -446,7 +453,10 @@ export function AgentPanel() {
               <span className="min-w-0 truncate">{tab.title}</span>
               {openTabs.length > 1 && (
                 <button
-                  className="ml-0.5 shrink-0 rounded p-0.5 opacity-0 transition-opacity hover:bg-foreground/[0.04] group-hover:opacity-100"
+                  className="ml-0.5 shrink-0 rounded p-0.5 opacity-0 transition-opacity hover:bg-foreground/[0.04] group-hover:opacity-100 disabled:cursor-not-allowed disabled:opacity-30"
+                  disabled={isStreaming}
+                  title={isStreaming ? 'Aguarde o streaming terminar' : `Close ${tab.title}`}
+                  aria-label={`Close ${tab.title}`}
                   onClick={(e) => {
                     e.stopPropagation();
                     closeTab(tab.id);
@@ -490,15 +500,16 @@ export function AgentPanel() {
                 render={
                   <button
                     onClick={() => setRulesOpen(!rulesOpen)}
+                    aria-label="Active rules"
                     className={cn(
                       'rounded-md p-1 transition-colors hover:bg-muted hover:text-foreground',
                       rulesOpen ? 'text-primary' : 'text-muted-foreground/60',
                     )}
-                  />
+                  >
+                    <BookText className="h-3 w-3" />
+                  </button>
                 }
-              >
-                <BookText className="h-3 w-3" />
-              </TooltipTrigger>
+              />
               <TooltipContent side="bottom">Active Rules</TooltipContent>
             </Tooltip>
             <RulesPanelDialog open={rulesOpen} onClose={() => setRulesOpen(false)} />
@@ -515,16 +526,17 @@ export function AgentPanel() {
                         agentCenterPanelMode === 'terminal' ? 'chat' : 'terminal',
                       )
                   }
+                  aria-label={agentCenterPanelMode === 'terminal' ? 'Show chat' : 'Show terminal'}
                   className="rounded-md p-1 text-muted-foreground/60 transition-colors hover:bg-muted hover:text-foreground"
-                />
+                >
+                  {agentCenterPanelMode === 'terminal' ? (
+                    <MessageSquare className="h-3 w-3" />
+                  ) : (
+                    <Terminal className="h-3 w-3" />
+                  )}
+                </button>
               }
-            >
-              {agentCenterPanelMode === 'terminal' ? (
-                <MessageSquare className="h-3 w-3" />
-              ) : (
-                <Terminal className="h-3 w-3" />
-              )}
-            </TooltipTrigger>
+            />
             <TooltipContent side="bottom">
               {agentCenterPanelMode === 'terminal' ? 'Show Chat' : 'Show Terminal'}
             </TooltipContent>
@@ -539,12 +551,13 @@ export function AgentPanel() {
               render={
                 <button
                   onClick={() => openNewTab()}
+                  aria-label="New conversation"
                   className="rounded-md p-1 text-muted-foreground/60 transition-colors hover:bg-muted hover:text-foreground"
-                />
+                >
+                  <Plus className="h-3 w-3" />
+                </button>
               }
-            >
-              <Plus className="h-3 w-3" />
-            </TooltipTrigger>
+            />
             <TooltipContent side="bottom">New conversation</TooltipContent>
           </Tooltip>
           <Tooltip>
@@ -552,15 +565,16 @@ export function AgentPanel() {
               render={
                 <button
                   onClick={() => setHistoryOpen(!historyOpen)}
+                  aria-label="Session history"
                   className={cn(
                     'rounded-md p-1 transition-colors hover:bg-muted hover:text-foreground',
                     historyOpen ? 'text-primary' : 'text-muted-foreground/60',
                   )}
-                />
+                >
+                  <History className="h-3 w-3" />
+                </button>
               }
-            >
-              <History className="h-3 w-3" />
-            </TooltipTrigger>
+            />
             <TooltipContent side="bottom">Session history</TooltipContent>
           </Tooltip>
           {messageCount > 0 && (
@@ -569,12 +583,13 @@ export function AgentPanel() {
                 render={
                   <button
                     onClick={clearConversation}
+                    aria-label="Clear conversation"
                     className="rounded-md p-1 text-muted-foreground/60 transition-colors hover:bg-muted hover:text-foreground"
-                  />
+                  >
+                    <Trash2 className="h-3 w-3" />
+                  </button>
                 }
-              >
-                <Trash2 className="h-3 w-3" />
-              </TooltipTrigger>
+              />
               <TooltipContent side="bottom">Clear conversation</TooltipContent>
             </Tooltip>
           )}

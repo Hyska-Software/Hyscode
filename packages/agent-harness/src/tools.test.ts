@@ -2,7 +2,9 @@ import { describe, expect, it, vi } from 'vitest';
 import type { ToolExecutionContext } from './types';
 import { getDiagnosticsTool, webFetchTool, webSearchTool } from './tools';
 
-function mockContext(invoke: (cmd: string, args?: Record<string, unknown>) => Promise<unknown>): ToolExecutionContext {
+function mockContext(
+  invoke: (cmd: string, args?: Record<string, unknown>) => Promise<unknown>,
+): ToolExecutionContext {
   return {
     workspacePath: '/workspace',
     conversationId: 'conv-1',
@@ -48,9 +50,11 @@ describe('webSearchTool', () => {
   });
 
   it('maps engine_blocked backend errors to a friendly message', async () => {
-    const invoke = vi.fn().mockRejectedValue(
-      '[engine_blocked] The search engine blocked the request (anomaly/CAPTCHA detected). Try again later or rephrase the query.',
-    );
+    const invoke = vi
+      .fn()
+      .mockRejectedValue(
+        '[engine_blocked] The search engine blocked the request (anomaly/CAPTCHA detected). Try again later or rephrase the query.',
+      );
     const result = await webSearchTool.execute({ query: 'x' }, mockContext(invoke));
     expect(result.success).toBe(false);
     expect(result.error).toContain('search engine blocked');
@@ -65,6 +69,10 @@ describe('webSearchTool', () => {
 });
 
 describe('getDiagnosticsTool', () => {
+  it('requires explicit approval or per-session trust', () => {
+    expect(getDiagnosticsTool.requiresExplicitApproval).toBe(true);
+  });
+
   it('formats filtered diagnostics and reports the count', async () => {
     const invoke = vi.fn().mockResolvedValue([
       {
@@ -85,10 +93,7 @@ describe('getDiagnosticsTool', () => {
       },
     ]);
 
-    const result = await getDiagnosticsTool.execute(
-      { file: 'src/app.ts' },
-      mockContext(invoke),
-    );
+    const result = await getDiagnosticsTool.execute({ file: 'src/app.ts' }, mockContext(invoke));
 
     expect(result).toEqual({
       success: true,
@@ -129,7 +134,10 @@ describe('webFetchTool', () => {
     expect(result.output).toContain('URL: https://example.com/docs');
     expect(result.output).toContain('Status: 200 | text/html');
     expect(result.output).toContain('Page body text.');
-    expect(invoke).toHaveBeenCalledWith('web_fetch', { url: 'https://example.com/docs', maxLength: 5000 });
+    expect(invoke).toHaveBeenCalledWith('web_fetch', {
+      url: 'https://example.com/docs',
+      maxLength: 5000,
+    });
   });
 
   it('rejects non-http(s) URLs without invoking the backend', async () => {
@@ -149,18 +157,30 @@ describe('webFetchTool', () => {
   });
 
   it('maps http_status backend errors to a friendly message', async () => {
-    const invoke = vi.fn().mockRejectedValue('[http_status] HTTP 404 error fetching https://example.com/missing');
-    const result = await webFetchTool.execute({ url: 'https://example.com/missing' }, mockContext(invoke));
+    const invoke = vi
+      .fn()
+      .mockRejectedValue('[http_status] HTTP 404 error fetching https://example.com/missing');
+    const result = await webFetchTool.execute(
+      { url: 'https://example.com/missing' },
+      mockContext(invoke),
+    );
     expect(result.success).toBe(false);
     expect(result.error).toContain('HTTP error');
     expect(result.error).toContain('404');
   });
 
   it('lets the backend own SSRF decisions (private host passed through)', async () => {
-    const invoke = vi.fn().mockRejectedValue('[private_address] Fetching internal/private addresses is not allowed (127.0.0.1).');
+    const invoke = vi
+      .fn()
+      .mockRejectedValue(
+        '[private_address] Fetching internal/private addresses is not allowed (127.0.0.1).',
+      );
     const result = await webFetchTool.execute({ url: 'http://127.0.0.1/' }, mockContext(invoke));
     expect(result.success).toBe(false);
     expect(result.error).toContain('internal/private addresses');
-    expect(invoke).toHaveBeenCalledWith('web_fetch', { url: 'http://127.0.0.1/', maxLength: 10000 });
+    expect(invoke).toHaveBeenCalledWith('web_fetch', {
+      url: 'http://127.0.0.1/',
+      maxLength: 10000,
+    });
   });
 });

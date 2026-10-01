@@ -2,7 +2,7 @@
 
 ## Overview
 
-HysCode implements an **MCP client** that connects to external tool servers using the official `@modelcontextprotocol/sdk`. This allows the agent to dynamically discover and use tools provided by MCP servers — extending capabilities without modifying the core application.
+HysCode implements an MCP client that connects to configured remote tool servers and exposes their allowed tools to the Harness. MCP stdio is currently disabled because the interactive PTY contract is not a safe raw-process JSON-RPC transport.
 
 ---
 
@@ -25,7 +25,7 @@ HysCode implements an **MCP client** that connects to external tool servers usin
      │     │                  │
 ┌────▼───┐ ┌────▼───┐ ┌──────▼──────┐
 │ stdio  │ │  SSE   │ │  WebSocket  │
-│ server │ │ server │ │   server    │
+│disabled│ │ server │ │   server    │
 └────────┘ └────────┘ └─────────────┘
   local      remote       remote
   process    HTTP         persistent
@@ -45,7 +45,7 @@ interface McpClientManager {
   // Discovery
   listServers(): McpConnection[];
   getServerTools(serverId: string): ToolDefinition[];
-  getAllTools(): ToolDefinition[];          // merged from all connected servers
+  getAllTools(): ToolDefinition[]; // merged from all connected servers
 
   // Execution
   callTool(serverId: string, toolName: string, args: unknown): Promise<ToolResult>;
@@ -56,7 +56,11 @@ interface McpClientManager {
 
   // Prompts (MCP prompts protocol)
   listPrompts(serverId: string): Promise<McpPrompt[]>;
-  getPrompt(serverId: string, name: string, args?: Record<string, string>): Promise<McpPromptResult>;
+  getPrompt(
+    serverId: string,
+    name: string,
+    args?: Record<string, string>,
+  ): Promise<McpPromptResult>;
 }
 ```
 
@@ -70,30 +74,30 @@ interface McpServerConfig {
   name: string;
   transport: 'stdio' | 'sse' | 'websocket';
 
-  // stdio transport
-  command?: string;                       // e.g., "npx"
-  args?: string[];                        // e.g., ["-y", "@modelcontextprotocol/server-filesystem", "/path"]
-  env?: Record<string, string>;           // environment variables
+  // stdio configuration is retained for compatibility but connect fails closed
+  command?: string; // e.g., "npx"
+  args?: string[]; // e.g., ["-y", "@modelcontextprotocol/server-filesystem", "/path"]
+  env?: Record<string, string>; // environment variables
 
   // SSE transport
-  url?: string;                           // e.g., "https://mcp-server.example.com/sse"
-  headers?: Record<string, string>;       // auth headers
+  url?: string; // e.g., "https://mcp-server.example.com/sse"
+  headers?: Record<string, string>; // auth headers
 
-  // WebSocket transport
-  wsUrl?: string;                         // e.g., "ws://localhost:8080/mcp"
+  // WebSocket transport (custom authentication headers are unsupported)
+  wsUrl?: string; // e.g., "ws://localhost:8080/mcp"
 
   // Capability gating
   capabilities: McpCapabilities;
 
   // Delegation gating (desktop settings)
-  agentSafe: boolean;                       // expose tools to sub-agents when true
+  agentSafe: boolean; // expose tools to sub-agents when true
 }
 
 interface McpCapabilities {
-  allowedTools: string[] | '*';           // tool names or wildcard
-  allowedResources: string[] | '*';       // resource URI patterns
-  maxConcurrentCalls: number;             // default: 5
-  timeoutMs: number;                      // default: 30000
+  allowedTools: string[] | '*'; // tool names or wildcard
+  allowedResources: string[] | '*'; // resource URI patterns
+  maxConcurrentCalls: number; // default: 5
+  timeoutMs: number; // default: 30000
 }
 ```
 
@@ -107,32 +111,20 @@ server, not which protocol methods the server exposes.
 
 ## Transport Implementations
 
-### stdio (Local Process)
+### stdio (Local Process) — Disabled
 
-```typescript
-// Spawns a local process and communicates via stdin/stdout (JSON-RPC)
-// Best for: local tools, CLI wrappers, filesystem servers
-// Lifecycle: process spawned on connect, killed on disconnect
-// Via Tauri: uses pty_spawn command for process management
-
-class StdioTransport implements McpTransport {
-  async connect(config: McpServerConfig): Promise<void> {
-    const ptyId = await invoke('pty_spawn', {
-      command: config.command,
-      args: config.args,
-      env: config.env,
-    });
-    // Set up JSON-RPC message framing over stdout/stdin
-  }
-}
-```
+stdio is intentionally unavailable. The Desktop PTY contract is interactive and framed for user
+terminals; it does not provide a safe raw-process stdin/stdout contract for JSON-RPC. `StdioTransport`
+fails closed on connect and send. Do not route MCP stdio through `pty_spawn`. Re-enable only after
+the host has a dedicated raw-process API with argument/environment validation, bounded startup and
+shutdown, cancellation, output framing, and process-tree cleanup tests.
 
 ### SSE (Server-Sent Events)
 
 ```typescript
 // Connects to a remote HTTP server using SSE for server→client and POST for client→server
 // Best for: remote servers, cloud-hosted tools
-// Via Tauri: uses tauri-plugin-http for both SSE stream and POST requests
+// Uses authenticated fetch for both SSE stream and POST requests
 
 class SseTransport implements McpTransport {
   async connect(config: McpServerConfig): Promise<void> {
@@ -142,6 +134,12 @@ class SseTransport implements McpTransport {
   }
 }
 ```
+
+Authenticated SSE configuration secrets are resolved from the OS credential store and are never
+persisted in settings. Authentication headers require HTTPS except for loopback development
+servers. Redirects are rejected, and the negotiated message endpoint must remain on the original
+authenticated origin. Connect, RPC, and cancellation paths have bounded deadlines; failure and
+disconnect reject pending requests and clean up stream readers.
 
 ### WebSocket
 
@@ -161,81 +159,21 @@ class WebSocketTransport implements McpTransport {
 
 ## Built-in MCP Servers
 
-HysCode ships with pre-configured MCP servers that can be enabled from settings:
+## Built-in Capabilities
 
-### Filesystem MCP Server
-```json
-{
-  "id": "builtin-filesystem",
-  "name": "Filesystem",
-  "transport": "stdio",
-  "command": "node",
-  "args": ["node_modules/@modelcontextprotocol/server-filesystem/dist/index.js"],
-  "capabilities": { "allowedTools": "*", "maxConcurrentCalls": 10, "timeoutMs": 10000 }
-}
-```
-
-**Tools provided**: `read_file`, `read_multiple_files`, `write_file`, `create_directory`, `list_directory`, `move_file`, `search_files`, `get_file_info`
-
-### Git MCP Server
-```json
-{
-  "id": "builtin-git",
-  "name": "Git",
-  "transport": "stdio",
-  "command": "node",
-  "args": ["node_modules/@anthropic/mcp-server-git/dist/index.js"],
-  "capabilities": { "allowedTools": "*", "maxConcurrentCalls": 5, "timeoutMs": 30000 }
-}
-```
-
-**Tools provided**: `git_status`, `git_diff`, `git_commit`, `git_log`, `git_branch_create`, `git_checkout`
-
-### Browser MCP Server (Playwright)
-```json
-{
-  "id": "builtin-browser",
-  "name": "Browser",
-  "transport": "stdio",
-  "command": "node",
-  "args": ["node_modules/@anthropic/mcp-server-playwright/dist/index.js"],
-  "capabilities": {
-    "allowedTools": ["navigate", "screenshot", "click", "type", "get_text"],
-    "maxConcurrentCalls": 1,
-    "timeoutMs": 60000
-  }
-}
-```
+Filesystem, Git, and browser capabilities are provided by HysCode's native Harness tools; they are
+not spawned as built-in MCP servers. No stdio MCP server is enabled. Configured external MCP
+servers use the SSE or WebSocket transports supported by the client.
 
 ---
 
 ## Dynamic Tool Registration
 
-When an MCP server connects, its tools are dynamically merged into the Tool Router:
-
-```typescript
-// On MCP server connect
-async function onServerConnected(connection: McpConnection) {
-  const serverTools = await connection.listTools();
-
-  for (const tool of serverTools) {
-    toolRouter.register({
-      name: `mcp_${connection.id}_${tool.name}`,   // namespaced
-      description: tool.description,
-      inputSchema: tool.inputSchema,
-      category: 'mcp',
-      requiresApproval: !connection.config.capabilities.allowedTools.includes(tool.name),
-      handler: async (input) => {
-        const result = await mcpManager.callTool(connection.id, tool.name, input);
-        return { success: !result.isError, output: result.content };
-      }
-    });
-  }
-
-  // Re-generate tool definitions for next LLM call
-  agentStore.refreshToolDefinitions();
-}
-```
+Connected server tools are namespaced and registered with the Harness. `McpClientManager`
+filters discovery through `allowedTools` and checks the same allowlist again in `callTool`, so
+registry visibility is not the security boundary. Harness approval remains an independent policy
+check for every MCP tool call. Delegated Harnesses only receive tools from servers configured as
+safe for delegation.
 
 ---
 
@@ -246,18 +184,11 @@ Settings > MCP Servers
 ┌──────────────────────────────────────────────┐
 │  MCP Servers                         [+ Add] │
 │                                               │
-│  ● Filesystem (built-in)          [Connected] │
-│    Tools: 8 │ Calls: 142 │ Errors: 0         │
+│  ● Docs server (SSE)              [Connected] │
+│    Tools: 3 │ Calls: 14 │ Errors: 0          │
 │                                               │
-│  ● Git (built-in)                 [Connected] │
-│    Tools: 6 │ Calls: 34 │ Errors: 1          │
-│                                               │
-│  ○ Browser (built-in)         [Disconnected]  │
-│    Click to enable                            │
-│                                               │
-│  ● My Custom Server (stdio)       [Connected] │
-│    npx my-mcp-server --port 3001              │
-│    Tools: 3 │ [Edit] [Remove]                 │
+│  ○ Local server (stdio)  [Unavailable]        │
+│    Raw-process transport is not implemented   │
 └──────────────────────────────────────────────┘
 ```
 
@@ -265,9 +196,9 @@ Settings > MCP Servers
 
 ## Security
 
-1. **Capability gating**: each MCP server is restricted to declared allowed tools/resources
-2. **No auto-connect**: external (non-built-in) servers require explicit user configuration
-3. **Timeout enforcement**: tool calls that exceed timeout are killed
-4. **Concurrent call limits**: prevent DoS from runaway agent loops
-5. **Transport security**: SSE/WebSocket servers should use HTTPS/WSS (warning shown for HTTP in UI)
-6. **Input validation**: tool inputs validated against declared JSON Schema before sending to server
+1. **Capability gating**: tool and resource calls are checked against the configured allowlists.
+2. **Delegation gating**: child agents only receive tools from servers marked safe for delegation.
+3. **Deadlines and cancellation**: pending RPCs have bounded deadlines; cancellation and disconnect reject pending requests and release readers. A remote server may continue work after the client has cancelled, so remote side effects are not claimed to have stopped.
+4. **Transport security**: authenticated SSE requires HTTPS except loopback; redirects and cross-origin negotiated endpoints are rejected. WebSocket requires WSS except loopback and does not accept custom auth headers.
+5. **Secret storage**: Desktop MCP secrets are resolved from OS credential storage and are not stored in settings JSON.
+6. **stdio disabled**: the PTY is never used as a JSON-RPC process channel.

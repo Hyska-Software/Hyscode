@@ -7,7 +7,8 @@ import {
 } from '@hyscode/ai-providers';
 import { Harness } from './harness';
 import { RuleLoader } from './rule-loader';
-import type { HarnessEvent, TerminalRuntimeAdapter, ToolResult } from './types';
+import { MAX_ITERATIONS_FUSE } from './mode-policies';
+import type { HarnessConfig, HarnessEvent, TerminalRuntimeAdapter, ToolResult } from './types';
 
 const model = {
   id: 'test-model',
@@ -47,9 +48,9 @@ function longRunningProvider(iterationsBeforeCompletion: number): AIProvider {
     models: [model],
     isConfigured: () => true,
     listModels: async () => [model],
-    async *chat(params: ChatParams): AsyncIterable<StreamChunk> {
+    async *chat(_params: ChatParams): AsyncIterable<StreamChunk> {
       call++;
-      expect(params.maxTurns).toBeUndefined();
+      void _params;
       if (call > iterationsBeforeCompletion) {
         yield { type: 'text_delta', text: 'completed after a long run' };
         yield { type: 'done', stopReason: 'end_turn' };
@@ -267,7 +268,7 @@ describe('Harness lifecycle', () => {
     expect(prompts[2]).toContain('updated instruction');
   });
 
-  it('runs beyond the former 25-iteration default when unlimited', async () => {
+  it('runs a 27-iteration task within the bounded 50-iteration default', async () => {
     getProviderRegistry().register(longRunningProvider(26));
     const harness = new Harness({
       workspacePath: 'C:/workspace',
@@ -278,6 +279,7 @@ describe('Harness lifecycle', () => {
         modelId: 'test-model',
         approval: { mode: 'yolo' },
         costOptimization: false,
+        maxIterations: 50,
       },
     });
     harness.setAgentType('build');
@@ -554,6 +556,135 @@ describe('Harness lifecycle', () => {
     expect(events.filter((event) => event.type === 'turn_end')).toHaveLength(1);
   });
 
+  it('enforces the initial Chat policy against a hidden terminal tool call', async () => {
+    let providerCalls = 0;
+    const restrictedProvider: AIProvider = {
+      ...provider('hidden_terminal_tool', {}),
+      async *chat(params: ChatParams): AsyncIterable<StreamChunk> {
+        providerCalls += 1;
+        if (providerCalls === 1) {
+          expect(params.tools?.some((tool) => tool.name === 'hidden_terminal_tool')).toBe(false);
+          yield { type: 'tool_call_start', id: 'hidden-call', name: 'hidden_terminal_tool' };
+          yield { type: 'tool_call_delta', id: 'hidden-call', input: '{}' };
+          yield { type: 'tool_call_end', id: 'hidden-call' };
+          yield { type: 'done', stopReason: 'tool_use' };
+          return;
+        }
+        yield { type: 'text_delta', text: 'The restricted tool was denied.' };
+        yield { type: 'done', stopReason: 'end_turn' };
+      },
+    };
+    getProviderRegistry().register(restrictedProvider);
+    const execute = vi.fn(async () => ({ success: true, output: 'must not execute' }));
+    const harness = new Harness({
+      workspacePath: 'C:/workspace',
+      projectId: 'project',
+      invoke: async () => undefined as never,
+      config: {
+        providerId: 'harness-test',
+        modelId: 'test-model',
+        maxIterations: 3,
+        approval: { mode: 'yolo' },
+      },
+    });
+    harness.registerExternalTool({
+      definition: {
+        name: 'hidden_terminal_tool',
+        description: 'A terminal-only test tool.',
+        inputSchema: { type: 'object', properties: {}, required: [] },
+      },
+      category: 'terminal',
+      requiresApproval: false,
+      execute,
+    });
+    harness.setMode('chat');
+    harness.setConversationId('conversation');
+
+    const result = await harness.run('inspect only', []);
+
+    expect(result.status).toBe('complete');
+    expect(execute).not.toHaveBeenCalled();
+    expect(result.turnRecord.toolCalls[0]?.output.error).toContain('active agent policy');
+  });
+
+  it('enforces the active policy when invoke_external_tool dispatches a nested handler', async () => {
+    let providerCalls = 0;
+    const nestedProvider: AIProvider = {
+      ...provider('invoke_external_tool', { name: 'hidden_terminal_tool', input: {} }),
+      async *chat(): AsyncIterable<StreamChunk> {
+        providerCalls += 1;
+        if (providerCalls === 1) {
+          yield { type: 'tool_call_start', id: 'nested-call', name: 'invoke_external_tool' };
+          yield {
+            type: 'tool_call_delta',
+            id: 'nested-call',
+            input: JSON.stringify({ name: 'hidden_terminal_tool', input: {} }),
+          };
+          yield { type: 'tool_call_end', id: 'nested-call' };
+          yield { type: 'done', stopReason: 'tool_use' };
+          return;
+        }
+        yield { type: 'text_delta', text: 'The nested tool was denied.' };
+        yield { type: 'done', stopReason: 'end_turn' };
+      },
+    };
+    getProviderRegistry().register(nestedProvider);
+    const execute = vi.fn(async () => ({ success: true, output: 'must not execute' }));
+    const harness = new Harness({
+      workspacePath: 'C:/workspace',
+      projectId: 'project',
+      invoke: async () => undefined as never,
+      config: {
+        providerId: 'harness-test',
+        modelId: 'test-model',
+        maxIterations: 3,
+        approval: { mode: 'yolo' },
+      },
+    });
+    harness.registerExternalTool({
+      definition: {
+        name: 'hidden_terminal_tool',
+        description: 'A terminal-only test tool.',
+        inputSchema: { type: 'object', properties: {}, required: [] },
+      },
+      category: 'terminal',
+      requiresApproval: false,
+      execute,
+    });
+    harness.setMode('chat');
+    harness.setConversationId('conversation');
+
+    const result = await harness.run('inspect only', []);
+
+    expect(result.status).toBe('complete');
+    expect(execute).not.toHaveBeenCalled();
+    expect(result.turnRecord.toolCalls[0]?.output.error).toContain('active agent policy');
+  });
+
+  it('keeps a successful final answer when it uses the last allowed iteration', async () => {
+    const finalProvider: AIProvider = {
+      ...provider('read_file', { path: 'unused.ts' }),
+      async *chat(): AsyncIterable<StreamChunk> {
+        yield { type: 'text_delta', text: 'Finished on the final permitted iteration.' };
+        yield { type: 'done', stopReason: 'end_turn' };
+      },
+    };
+    getProviderRegistry().register(finalProvider);
+    const harness = new Harness({
+      workspacePath: 'C:/workspace',
+      projectId: 'project',
+      invoke: async () => undefined as never,
+      config: { providerId: 'harness-test', modelId: 'test-model', maxIterations: 1 },
+    });
+    harness.setAgentType('build');
+    harness.setConversationId('conversation');
+
+    const result = await harness.run('finish', []);
+
+    expect(result.status).toBe('complete');
+    expect(result.response).toBe('Finished on the final permitted iteration.');
+  });
+
   it('cancels a turn waiting for tool approval', async () => {
     getProviderRegistry().register(provider('write_file', { path: 'a.ts', content: 'x' }));
     let approvalStarted!: () => void;
@@ -688,5 +819,55 @@ describe('Harness lifecycle', () => {
       }),
     );
     expect(events.filter((event) => event.type === 'assistant_segment_end')).toHaveLength(1);
+  });
+});
+
+describe('effective iteration limits (Settings → Limit Interactions)', () => {
+  function policyHarness(config: Partial<HarnessConfig> = {}): Harness {
+    return new Harness({
+      workspacePath: 'C:/workspace',
+      projectId: 'project',
+      invoke: async () => undefined as never,
+      config: {
+        providerId: 'harness-test',
+        modelId: 'test-model',
+        approval: { mode: 'yolo' },
+        ...config,
+      },
+    });
+  }
+
+  it('treats an explicit null as unlimited instead of falling back to the agent default', () => {
+    // Regression: "Limit Interactions off" sends maxIterations=null; the old
+    // `??` chain silently re-imposed the plan agent default (20).
+    const harness = policyHarness({ maxIterations: null });
+    harness.setAgentType('plan');
+    expect(harness.getEffectivePolicy().maxIterations).toBeNull();
+  });
+
+  it('honors a user limit of 500 instead of a lower internal fuse', () => {
+    const harness = policyHarness({ maxIterations: 500 });
+    harness.setAgentType('plan');
+    expect(harness.getEffectivePolicy().maxIterations).toBe(500);
+  });
+
+  it('bounds values above the fuse at MAX_ITERATIONS_FUSE', () => {
+    const harness = policyHarness({ maxIterations: 999 });
+    harness.setAgentType('build');
+    expect(harness.getEffectivePolicy().maxIterations).toBe(MAX_ITERATIONS_FUSE);
+  });
+
+  it('keeps the built-in default when nothing was configured', () => {
+    expect(policyHarness().getEffectivePolicy().maxIterations).toBe(50);
+  });
+
+  it('still applies the per-request provider cost cap to unlimited runs', () => {
+    const harness = policyHarness({
+      providerId: 'github-copilot',
+      modelId: 'gpt-5.5',
+      maxIterations: null,
+    });
+    harness.setAgentType('plan');
+    expect(harness.getEffectivePolicy().maxIterations).toBe(5);
   });
 });

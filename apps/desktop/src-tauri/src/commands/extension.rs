@@ -1,4 +1,6 @@
+use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::fs;
 use std::io;
 use std::path::PathBuf;
@@ -60,28 +62,34 @@ fn save_states(states: &ExtensionStates) -> Result<(), String> {
 }
 
 fn load_icon_as_data_uri(icon_name: &str, ext_path: &PathBuf) -> Option<String> {
-    // Basic security: reject paths that try to escape the extension directory
-    if icon_name.contains("..") {
+    // Basic security: reject paths that try to escape the extension directory.
+    // The join result is canonicalized and must stay inside the canonical
+    // extension dir (blocks `..`, absolute paths and symlink escapes).
+    if icon_name.contains("..") || icon_name.contains('\0') {
         return None;
     }
-
+    let canonical_ext_dir = ext_path.canonicalize().ok()?;
     let icon_path = ext_path.join(icon_name);
-    if !icon_path.exists() {
+    let canonical_icon = icon_path.canonicalize().ok()?;
+    if !canonical_icon.starts_with(&canonical_ext_dir) {
+        return None;
+    }
+    if !canonical_icon.is_file() {
         return None;
     }
 
-    let file_ext = icon_path.extension()?.to_str()?.to_lowercase();
+    let file_ext = canonical_icon.extension()?.to_str()?.to_lowercase();
 
     match file_ext.as_str() {
         "svg" => {
             // SVG is text — URL-encode as a compact data URI (no base64 overhead)
-            let content = fs::read_to_string(&icon_path).ok()?;
+            let content = fs::read_to_string(&canonical_icon).ok()?;
             let encoded = urlencoding::encode(&content);
             Some(format!("data:image/svg+xml,{}", encoded))
         }
         "png" => {
             use base64::prelude::*;
-            let bytes = fs::read(&icon_path).ok()?;
+            let bytes = fs::read(&canonical_icon).ok()?;
             Some(format!(
                 "data:image/png;base64,{}",
                 BASE64_STANDARD.encode(&bytes)
@@ -89,7 +97,7 @@ fn load_icon_as_data_uri(icon_name: &str, ext_path: &PathBuf) -> Option<String> 
         }
         "jpg" | "jpeg" => {
             use base64::prelude::*;
-            let bytes = fs::read(&icon_path).ok()?;
+            let bytes = fs::read(&canonical_icon).ok()?;
             Some(format!(
                 "data:image/jpeg;base64,{}",
                 BASE64_STANDARD.encode(&bytes)
@@ -195,7 +203,7 @@ fn parse_manifest(
 }
 
 /// Install from a folder (existing behavior)
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub async fn extension_install(source_path: String) -> Result<ExtensionMeta, String> {
     let source = PathBuf::from(&source_path);
 
@@ -237,7 +245,7 @@ pub async fn extension_install(source_path: String) -> Result<ExtensionMeta, Str
 }
 
 /// Install from a .zip or .rar archive file
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub async fn extension_install_zip(zip_path: String) -> Result<ExtensionMeta, String> {
     let archive_file = PathBuf::from(&zip_path);
     if !archive_file.exists() {
@@ -262,7 +270,10 @@ pub async fn extension_install_zip(zip_path: String) -> Result<ExtensionMeta, St
         "No extension.json found in archive.".to_string()
     })?;
 
-    let ext_root = manifest_path.parent().unwrap().to_path_buf();
+    let ext_root = manifest_path
+        .parent()
+        .ok_or("extension.json has no parent directory")?
+        .to_path_buf();
 
     let manifest_str = fs::read_to_string(&manifest_path)
         .map_err(|e| format!("Failed to read extension.json: {}", e))?;
@@ -309,7 +320,7 @@ pub async fn extension_install_zip(zip_path: String) -> Result<ExtensionMeta, St
     Ok(meta)
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub async fn extension_uninstall(name: String) -> Result<(), String> {
     // Validate name to prevent path traversal
     if !name
@@ -333,7 +344,7 @@ pub async fn extension_uninstall(name: String) -> Result<(), String> {
 }
 
 /// Toggle extension enabled/disabled, persists to disk
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub async fn extension_toggle(name: String, enabled: bool) -> Result<(), String> {
     let mut states = load_states();
     states.states.insert(name, enabled);
@@ -341,7 +352,7 @@ pub async fn extension_toggle(name: String, enabled: bool) -> Result<(), String>
     Ok(())
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub async fn extension_list() -> Result<Vec<ExtensionMeta>, String> {
     let dir = extensions_dir();
     if !dir.exists() {
@@ -434,14 +445,14 @@ fn resolve_extension_asset(name: &str, asset_path: &str) -> Result<PathBuf, Stri
     Ok(canonical_asset)
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub async fn extension_read_asset(name: String, asset_path: String) -> Result<String, String> {
     let canonical_asset = resolve_extension_asset(&name, &asset_path)?;
     fs::read_to_string(&canonical_asset).map_err(|e| format!("Failed to read asset: {}", e))
 }
 
 /// Read an extension asset without assuming it is UTF-8 text.
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub async fn extension_read_asset_base64(
     name: String,
     asset_path: String,
@@ -454,7 +465,7 @@ pub async fn extension_read_asset_base64(
 }
 
 /// Get the extension directory path for the frontend to know where extensions live
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub async fn extension_get_dir() -> Result<String, String> {
     let dir = extensions_dir();
     fs::create_dir_all(&dir).map_err(|e| format!("Failed to create extensions dir: {}", e))?;
@@ -566,18 +577,36 @@ fn run_git(args: &[&str], cwd: Option<&PathBuf>) -> Result<String, String> {
 }
 
 /// Normalize a git URL: add https:// scheme if missing, strip trailing .git.
-fn normalize_git_url(raw: &str) -> String {
+/// SECURITY: delegates scheme validation to `git_backend::validate_clone_url`
+/// — `file://` URLs and local paths are rejected (fail-closed).
+fn normalize_git_url(raw: &str) -> Result<String, String> {
     let trimmed = raw.trim().trim_end_matches('/');
-    let with_scheme = if trimmed.starts_with("http://")
-        || trimmed.starts_with("https://")
-        || trimmed.starts_with("git@")
-    {
+    if trimmed.is_empty() {
+        return Err("Validation: git URL cannot be empty".to_string());
+    }
+    // Reject local paths before any scheme handling: absolute paths, Windows
+    // drive prefixes (`C:...`), home/parent-relative forms.
+    let bytes = trimmed.as_bytes();
+    let looks_like_path = trimmed.starts_with('/')
+        || trimmed.starts_with('\\')
+        || trimmed.starts_with('.')
+        || trimmed.starts_with('~')
+        || (bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':');
+    if looks_like_path {
+        return Err(format!("Validation: git URL not allowed: '{trimmed}'"));
+    }
+    let with_scheme = if trimmed.contains("://") {
+        // Explicit scheme: validate as-is (notably, `file://` is rejected and
+        // must NOT be masked by prepending `https://`).
+        trimmed.to_string()
+    } else if trimmed.starts_with("git@") || trimmed.starts_with("gh:") {
         trimmed.to_string()
     } else {
         format!("https://{}", trimmed)
     };
+    let validated = super::git_backend::validate_clone_url(&with_scheme)?;
     // Strip trailing .git for storage consistency (git clone works with or without it)
-    with_scheme.trim_end_matches(".git").to_string()
+    Ok(validated.trim_end_matches(".git").to_string())
 }
 
 /// Find extension.json at root or one level deep inside `dir`.
@@ -628,6 +657,9 @@ fn extract_archive_to_dir(
 }
 
 fn extract_zip_to_dir(zip_path: &std::path::Path, dest: &std::path::Path) -> Result<(), String> {
+    let canonical_dest = dest
+        .canonicalize()
+        .map_err(|e| format!("Cannot resolve extraction dir: {}", e))?;
     let file = fs::File::open(zip_path).map_err(|e| format!("Failed to open ZIP: {}", e))?;
     let mut archive =
         zip::ZipArchive::new(file).map_err(|e| format!("Invalid ZIP archive: {}", e))?;
@@ -643,6 +675,15 @@ fn extract_zip_to_dir(zip_path: &std::path::Path, dest: &std::path::Path) -> Res
         };
 
         let out_path = dest.join(&entry_path);
+        // Defense-in-depth: `enclosed_name()` already rejects traversal, but
+        // re-verify against the canonical dest in case of symlink races.
+        let normalized = canonical_dest.join(&entry_path);
+        if !normalized.starts_with(&canonical_dest) {
+            return Err(format!(
+                "Archive entry escapes the destination: '{}'",
+                entry_path.display()
+            ));
+        }
 
         if entry.is_dir() {
             fs::create_dir_all(&out_path).map_err(|e| format!("Failed to create dir: {}", e))?;
@@ -682,10 +723,15 @@ fn find_7zip() -> Option<std::path::PathBuf> {
 
 fn extract_rar_to_dir(rar_path: &std::path::Path, dest: &std::path::Path) -> Result<(), String> {
     fs::create_dir_all(dest).map_err(|e| format!("Failed to create extraction dir: {}", e))?;
+    // Canonicalize once so external extractors (7-Zip) and `extract_to` both
+    // operate on the resolved destination (no `..`/symlink ambiguity).
+    let canonical_dest = dest
+        .canonicalize()
+        .map_err(|e| format!("Cannot resolve extraction dir: {}", e))?;
 
     // Prefer 7-Zip (reliable on Windows for RAR4 and RAR5)
     if let Some(sz) = find_7zip() {
-        let dest_arg = format!("-o{}", dest.to_string_lossy());
+        let dest_arg = format!("-o{}", canonical_dest.to_string_lossy());
         let out = std::process::Command::new(&sz)
             .args(["x", rar_path.to_str().unwrap_or(""), &dest_arg, "-y"])
             .output()
@@ -722,6 +768,25 @@ fn extract_rar_to_dir(rar_path: &std::path::Path, dest: &std::path::Path) -> Res
             Ok(Some(entry)) => {
                 idx += 1;
                 let fname = entry.entry().filename.clone();
+                // SECURITY: RAR entries are attacker-controlled paths. Reject
+                // absolute paths and `..` segments before handing them to the
+                // extractor (zip path is already covered by `enclosed_name`).
+                let fname_path = std::path::Path::new(&fname);
+                if fname_path.is_absolute()
+                    || fname_path.components().any(|c| {
+                        matches!(
+                            c,
+                            std::path::Component::ParentDir
+                                | std::path::Component::RootDir
+                                | std::path::Component::Prefix(_)
+                        )
+                    })
+                {
+                    return Err(format!(
+                        "RAR entry escapes the destination: '{}'",
+                        fname_path.display()
+                    ));
+                }
                 let parent = dest.join(&fname);
                 let parent = parent.parent().unwrap_or(dest);
                 fs::create_dir_all(parent).ok();
@@ -741,12 +806,17 @@ fn extract_rar_to_dir(rar_path: &std::path::Path, dest: &std::path::Path) -> Res
 
 /// Install an extension from a public git repository.
 /// Clones the repo, locates extension.json, installs into extensions dir, and records the git source.
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub async fn extension_install_git(
     repo_url: String,
     branch: Option<String>,
 ) -> Result<ExtensionMeta, String> {
-    let url = normalize_git_url(&repo_url);
+    let url = normalize_git_url(&repo_url)?;
+    if let Some(branch) = branch.as_deref().filter(|value| !value.trim().is_empty()) {
+        // `git clone -b` value position: full ref validation (leading-dash
+        // would become a clone flag).
+        super::git_backend::validate_git_ref(branch.trim())?;
+    }
 
     let clones_dir = git_clones_dir();
     fs::create_dir_all(&clones_dir)
@@ -788,7 +858,10 @@ pub async fn extension_install_git(
     let manifest_path =
         find_extension_json(&temp_clone_dir).ok_or("No extension.json found in repository.")?;
 
-    let _ext_root = manifest_path.parent().unwrap().to_path_buf();
+    let _ext_root = manifest_path
+        .parent()
+        .ok_or("extension.json has no parent directory")?
+        .to_path_buf();
 
     let manifest_str = fs::read_to_string(&manifest_path)
         .map_err(|e| format!("Failed to read extension.json: {}", e))?;
@@ -824,7 +897,10 @@ pub async fn extension_install_git(
     // Re-derive manifest path inside final location
     let final_manifest_path =
         find_extension_json(&final_clone_dir).ok_or("extension.json disappeared after move.")?;
-    let final_ext_root = final_manifest_path.parent().unwrap().to_path_buf();
+    let final_ext_root = final_manifest_path
+        .parent()
+        .ok_or("extension.json has no parent directory")?
+        .to_path_buf();
 
     // Get current commit SHA
     let sha_output = run_git(&["rev-parse", "HEAD"], Some(&final_clone_dir)).unwrap_or_default();
@@ -885,7 +961,7 @@ pub async fn extension_install_git(
 
 /// Check all git-sourced extensions for available updates.
 /// Runs `git ls-remote` to compare remote HEAD SHA with locally stored SHA.
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub async fn extension_check_git_updates() -> Result<Vec<GitUpdateInfo>, String> {
     let sources = load_git_sources();
     let mut results = Vec::new();
@@ -928,7 +1004,7 @@ pub async fn extension_check_git_updates() -> Result<Vec<GitUpdateInfo>, String>
 }
 
 /// Update a git-sourced extension by pulling the latest commit and re-installing.
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub async fn extension_update_git(extension_name: String) -> Result<ExtensionMeta, String> {
     // Validate name
     if !extension_name
@@ -968,7 +1044,10 @@ pub async fn extension_update_git(extension_name: String) -> Result<ExtensionMet
     // Find extension root inside clone (may be one folder deep)
     let manifest_path =
         find_extension_json(&clone_dir).ok_or("No extension.json found in cloned repository.")?;
-    let ext_root = manifest_path.parent().unwrap().to_path_buf();
+    let ext_root = manifest_path
+        .parent()
+        .ok_or("extension.json has no parent directory")?
+        .to_path_buf();
 
     // Re-install: copy to ~/.hyscode/extensions/{name}
     let dest = extensions_dir().join(&extension_name);
@@ -996,7 +1075,7 @@ pub async fn extension_update_git(extension_name: String) -> Result<ExtensionMet
 }
 
 /// Return all tracked git sources (so the frontend knows which extensions are git-sourced).
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub async fn extension_get_git_sources() -> Result<Vec<ExtensionGitSource>, String> {
     let sources = load_git_sources();
     Ok(sources.sources.into_values().collect())
@@ -1004,7 +1083,7 @@ pub async fn extension_get_git_sources() -> Result<Vec<ExtensionGitSource>, Stri
 
 /// Remove the git source record when an extension is uninstalled.
 /// Call this alongside extension_uninstall if the extension was git-sourced.
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub async fn extension_remove_git_source(extension_name: String) -> Result<(), String> {
     if !extension_name
         .chars()
@@ -1028,11 +1107,90 @@ pub async fn extension_remove_git_source(extension_name: String) -> Result<(), S
 
 // ── Store Install ─────────────────────────────────────────────────────────────
 
+/// Hosts allowed to serve extension store archives. Store metadata comes from
+/// the GitHub API, whose `download_url` values point at `raw.githubusercontent`.
+const STORE_ALLOWED_HOSTS: &[&str] = &[
+    "raw.githubusercontent.com",
+    "api.github.com",
+    "github.com",
+    "objects.githubusercontent.com",
+    "codeload.github.com",
+    "registry.hyscode.dev",
+];
+
+/// 50 MiB cap for a single store download (extracted extensions are small;
+/// anything larger is rejected before it can exhaust memory/disk).
+const MAX_STORE_DOWNLOAD_BYTES: usize = 50 * 1024 * 1024;
+
+/// Validate a store download URL: `https://` only, allowlisted host, no
+/// userinfo, no `..` segments, no control characters.
+fn validate_store_download_url(raw: &str) -> Result<url::Url, String> {
+    if raw.trim().is_empty() {
+        return Err("Validation: download URL cannot be empty".to_string());
+    }
+    if raw.contains("..") || raw.chars().any(|c| c.is_control()) {
+        return Err("Validation: download URL contains invalid characters".to_string());
+    }
+    let parsed =
+        url::Url::parse(raw).map_err(|e| format!("Validation: invalid download URL: {e}"))?;
+    if parsed.scheme() != "https" {
+        return Err("Validation: download URL must use https://".to_string());
+    }
+    if !parsed.username().is_empty() || parsed.password().is_some() {
+        return Err("Validation: download URL must not contain credentials".to_string());
+    }
+    let host = parsed
+        .host_str()
+        .ok_or_else(|| "Validation: download URL has no host".to_string())?;
+    let allowed = STORE_ALLOWED_HOSTS
+        .iter()
+        .any(|candidate| host.eq_ignore_ascii_case(candidate));
+    if !allowed {
+        return Err(format!("Validation: download host not allowed: '{host}'"));
+    }
+    Ok(parsed)
+}
+
+/// Verify an optional expected SHA-256 (hex, case-insensitive) against bytes.
+fn verify_sha256(bytes: &[u8], expected: &str) -> Result<(), String> {
+    let expected = expected.trim().to_lowercase();
+    if expected.len() != 64 || !expected.chars().all(|c| c.is_ascii_hexdigit()) {
+        return Err("Validation: expected_sha256 must be 64 hex characters".to_string());
+    }
+    let actual = format!("{:x}", Sha256::digest(bytes));
+    if actual != expected {
+        return Err("Download hash mismatch: expected_sha256 does not match".to_string());
+    }
+    Ok(())
+}
+
 /// Download and install an extension from the Hyscode Extensions store.
 /// Downloads the package from the given URL, detects the archive format
 /// (ZIP supported; RAR returns a clear error), extracts, and installs.
-#[tauri::command]
-pub async fn extension_install_from_store(download_url: String) -> Result<ExtensionMeta, String> {
+///
+/// SECURITY: the URL must be `https://` on an allowlisted host, the download
+/// is capped at 50 MiB with a 30 s timeout, and `expected_sha256` is verified
+/// before extraction whenever the store provides it. Installs without a hash
+/// emit a warning (the store API does not publish archive hashes yet — see
+/// `StoreItem.sha256` on the frontend); once the store publishes hashes the
+/// parameter must become mandatory.
+#[tauri::command(rename_all = "camelCase")]
+pub async fn extension_install_from_store(
+    download_url: String,
+    expected_sha256: Option<String>,
+) -> Result<ExtensionMeta, String> {
+    validate_store_download_url(&download_url)?;
+    let expected_sha256 = expected_sha256
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+    if let Some(expected) = expected_sha256 {
+        if expected.len() != 64 || !expected.chars().all(|c| c.is_ascii_hexdigit()) {
+            return Err("Validation: expected_sha256 must be 64 hex characters".to_string());
+        }
+    } else {
+        eprintln!("[extension] installing without expected_sha256 (store hash not published yet)");
+    }
     // Unique temp dir per install to avoid collisions
     let ts = chrono::Utc::now().timestamp_millis();
     let temp_dir = extensions_dir().join(format!("__temp_store_{}__", ts));
@@ -1043,9 +1201,10 @@ pub async fn extension_install_from_store(download_url: String) -> Result<Extens
 
     fs::create_dir_all(&temp_dir).map_err(|e| format!("Failed to create temp dir: {}", e))?;
 
-    // Download the archive
+    // Download the archive (30 s timeout, 50 MiB streaming cap)
     let client = reqwest::Client::builder()
         .user_agent("HysCode-ExtensionStore/1.0")
+        .timeout(std::time::Duration::from_secs(30))
         .build()
         .map_err(|e| format!("Failed to build HTTP client: {}", e))?;
 
@@ -1062,14 +1221,38 @@ pub async fn extension_install_from_store(download_url: String) -> Result<Extens
         ));
     }
 
-    let bytes = response.bytes().await.map_err(|e| {
+    if response
+        .content_length()
+        .is_some_and(|len| len > MAX_STORE_DOWNLOAD_BYTES as u64)
+    {
         cleanup(&temp_dir);
-        format!("Failed to read download: {}", e)
-    })?;
+        return Err("Download exceeds the 50 MiB limit.".to_string());
+    }
+
+    let mut bytes: Vec<u8> = Vec::new();
+    let mut stream = response.bytes_stream();
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|e| {
+            cleanup(&temp_dir);
+            format!("Failed to read download: {}", e)
+        })?;
+        if bytes.len().saturating_add(chunk.len()) > MAX_STORE_DOWNLOAD_BYTES {
+            cleanup(&temp_dir);
+            return Err("Download exceeds the 50 MiB limit.".to_string());
+        }
+        bytes.extend_from_slice(&chunk);
+    }
 
     if bytes.len() < 8 {
         cleanup(&temp_dir);
         return Err("Downloaded file is too small to be a valid archive.".to_string());
+    }
+
+    if let Some(expected) = expected_sha256 {
+        if let Err(e) = verify_sha256(&bytes, expected) {
+            cleanup(&temp_dir);
+            return Err(e);
+        }
     }
 
     // Save archive and extract (ZIP or RAR, auto-detected by magic bytes)
@@ -1096,7 +1279,10 @@ pub async fn extension_install_from_store(download_url: String) -> Result<Extens
         "No extension.json found in archive.".to_string()
     })?;
 
-    let ext_root = manifest_path.parent().unwrap().to_path_buf();
+    let ext_root = manifest_path
+        .parent()
+        .ok_or("extension.json has no parent directory")?
+        .to_path_buf();
 
     let manifest_str = fs::read_to_string(&manifest_path)
         .map_err(|e| format!("Failed to read extension.json: {}", e))?;
@@ -1142,4 +1328,53 @@ pub async fn extension_install_from_store(download_url: String) -> Result<Extens
     save_states(&states)?;
 
     Ok(meta)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn store_download_url_allows_github_hosts_only() {
+        for valid in [
+            "https://raw.githubusercontent.com/org/repo/main/ext.zip",
+            "https://api.github.com/repos/org/repo/zipball/main",
+            "https://github.com/org/repo/releases/download/v1/ext.zip",
+            "https://objects.githubusercontent.com/abc123",
+            "https://registry.hyscode.dev/ext.zip",
+        ] {
+            assert!(validate_store_download_url(valid).is_ok(), "{valid}");
+        }
+        for invalid in [
+            "",
+            "http://raw.githubusercontent.com/org/repo/ext.zip",
+            "https://evil.com/ext.zip",
+            "https://raw.githubusercontent.com.evil.com/ext.zip",
+            "https://user:pass@raw.githubusercontent.com/ext.zip",
+            "file:///tmp/ext.zip",
+            "https://raw.githubusercontent.com/../escape.zip",
+        ] {
+            assert!(validate_store_download_url(invalid).is_err(), "{invalid}");
+        }
+    }
+
+    #[test]
+    fn sha256_verification_accepts_matching_hex() {
+        let bytes = b"extension-bytes";
+        let expected = format!("{:x}", Sha256::digest(bytes));
+        assert!(verify_sha256(bytes, &expected).is_ok());
+        assert!(verify_sha256(bytes, &expected.to_uppercase()).is_ok());
+        assert!(verify_sha256(bytes, &"0".repeat(64)).is_err());
+        assert!(verify_sha256(bytes, "short").is_err());
+    }
+
+    #[test]
+    fn git_url_normalization_rejects_file_urls() {
+        assert!(normalize_git_url("https://github.com/org/repo.git").is_ok());
+        assert!(normalize_git_url("git@github.com:org/repo.git").is_ok());
+        assert!(normalize_git_url("github.com/org/repo").is_ok());
+        assert!(normalize_git_url("file:///tmp/repo.git").is_err());
+        assert!(normalize_git_url("/tmp/repo").is_err());
+        assert!(normalize_git_url("").is_err());
+    }
 }

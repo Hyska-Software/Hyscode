@@ -31,7 +31,7 @@ This project follows the [Contributor Covenant Code of Conduct](./CODE_OF_CONDUC
 | Tool | Version |
 |---|---|
 | Node.js | 18+ |
-| pnpm | 10+ |
+| npm | 10+ |
 | Rust | 1.70+ |
 | Git | any recent |
 
@@ -47,10 +47,10 @@ git clone https://github.com/YOUR_USERNAME/Hyscode.git
 cd Hyscode
 
 # 2. Install dependencies
-pnpm install
+npm ci
 
 # 3. Start dev server
-pnpm dev
+npm run dev
 ```
 
 The Tauri window will launch with hot reload for both the frontend and Rust backend.
@@ -58,12 +58,12 @@ The Tauri window will launch with hot reload for both the frontend and Rust back
 ### Useful Commands
 
 ```bash
-pnpm dev              # Start full dev environment
-pnpm build            # Build all packages
-pnpm lint             # Run ESLint across all packages
-pnpm typecheck        # Run TypeScript type checking
-pnpm format           # Format code with Prettier
-pnpm format:check     # Check formatting without writing
+npm run dev              # Start full dev environment
+npm run build            # Build all packages
+npm run lint             # Run ESLint across all packages
+npm run typecheck        # Run TypeScript type checking
+npm run format           # Format code with Prettier
+npm run format:check     # Check formatting without writing
 ```
 
 ---
@@ -121,7 +121,7 @@ docs/                 # Architecture docs and specs
    ```
 6. **Run checks** before pushing:
    ```bash
-   pnpm lint && pnpm typecheck && pnpm test
+   npm run lint && npm run typecheck && npm test
    # Plus for Rust changes:
    cd apps/desktop/src-tauri && cargo fmt && cargo clippy && cargo test
    ```
@@ -178,8 +178,8 @@ docs(architecture): update OVERVIEW with PTY model
 
 - **TypeScript**: strict mode, `noUnusedLocals`, `noUnusedParameters`
 - **Modules**: ESNext modules, bundler resolution
-- **Formatting**: Prettier with project config (run `pnpm format`)
-- **Linting**: ESLint with project config (run `pnpm lint`)
+- **Formatting**: Prettier with project config (run `npm run format`)
+- **Linting**: ESLint with project config (run `npm run lint`)
 - **Rust**: `cargo fmt` and `cargo clippy` before committing Rust changes
 
 ### Key Conventions
@@ -194,7 +194,7 @@ docs(architecture): update OVERVIEW with PTY model
 
 ```bash
 # TypeScript tests (when available)
-pnpm test
+npm test
 
 # Rust tests
 cd apps/desktop/src-tauri

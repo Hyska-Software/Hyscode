@@ -12,6 +12,16 @@ interface ActiveExtension {
   context: ExtensionContext;
 }
 
+const KNOWN_PERMISSIONS = new Set([
+  'commands',
+  'settings',
+  'workspace',
+  'terminal',
+  'process',
+  'network',
+  'ui',
+]);
+
 export class ExtensionSandbox {
   private active = new Map<string, ActiveExtension>();
 
@@ -21,10 +31,37 @@ export class ExtensionSandbox {
     mainSource: string,
     api: HyscodeAPI,
   ): Promise<void> {
+    if (!/^[a-z0-9-]+$/.test(manifest.name)) {
+      throw new Error(
+        `Invalid extension name "${manifest.name}": must match /^[a-z0-9-]+$/`,
+      );
+    }
     if (this.active.has(manifest.name)) {
       console.warn(`[ExtensionSandbox] Extension "${manifest.name}" already active.`);
       return;
     }
+    for (const permission of manifest.permissions ?? []) {
+      if (!KNOWN_PERMISSIONS.has(permission)) {
+        console.warn(
+          `[ExtensionSandbox] Extension "${manifest.name}" declares unknown permission "${permission}".`,
+        );
+      }
+    }
+
+    // SECURITY: no isolation — extension code runs in the host JS realm with
+    // full access to the passed `api` object. Execute only trusted extensions.
+    // Mitigations (not a sandbox): activation timeout + error containment so
+    // a hanging/failing extension can't wedge the host.
+    const ACTIVATION_TIMEOUT_MS = 10_000;
+    const withTimeout = <T>(promise: Promise<T>, label: string): Promise<T> =>
+      Promise.race([
+        promise,
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error(
+            `Extension "${manifest.name}" ${label} timed out after ${ACTIVATION_TIMEOUT_MS}ms`,
+          )), ACTIVATION_TIMEOUT_MS),
+        ),
+      ]);
 
     try {
       const blob = new Blob([mainSource], { type: 'application/javascript' });
@@ -33,8 +70,11 @@ export class ExtensionSandbox {
       let mod: ExtensionModule;
       try {
         console.log(`[ExtensionSandbox] Importing blob for "${manifest.name}"...`);
-        mod = await import(/* @vite-ignore */ blobUrl);
+        mod = await withTimeout(import(/* @vite-ignore */ blobUrl), 'import');
         console.log(`[ExtensionSandbox] Blob imported — exports:`, Object.keys(mod));
+      } catch (err) {
+        console.error(`[ExtensionSandbox] Failed to import "${manifest.name}":`, err);
+        throw err;
       } finally {
         URL.revokeObjectURL(blobUrl);
       }
@@ -44,9 +84,20 @@ export class ExtensionSandbox {
       }
 
       const context = createExtensionContext(manifest.name, extensionPath, api);
+      Object.freeze(context);
 
       console.log(`[ExtensionSandbox] Calling activate() for "${manifest.name}"...`);
-      await mod.activate(context, api);
+      try {
+        await withTimeout(Promise.resolve(mod.activate(context, api)), 'activate()');
+      } catch (err) {
+        console.error(`[ExtensionSandbox] activate() failed for "${manifest.name}":`, err);
+        try {
+          disposeContext(context);
+        } catch (disposeErr) {
+          console.error(`[ExtensionSandbox] Context cleanup failed for "${manifest.name}":`, disposeErr);
+        }
+        throw err;
+      }
       console.log(`[ExtensionSandbox] activate() returned for "${manifest.name}"`);
 
       this.active.set(manifest.name, { manifest, module: mod, context });
@@ -62,7 +113,12 @@ export class ExtensionSandbox {
     if (!ext) return;
 
     try {
-      await ext.module.deactivate?.();
+      await Promise.race([
+        Promise.resolve(ext.module.deactivate?.()),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error(`deactivate() timed out after 5000ms`)), 5_000),
+        ),
+      ]);
     } catch (err) {
       console.error(`[ExtensionSandbox] Error in deactivate() for "${name}":`, err);
     }

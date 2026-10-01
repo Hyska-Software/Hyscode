@@ -63,6 +63,7 @@ export interface StoreItem {
   downloadUrl: string; // raw GitHub download URL
   size: number;        // bytes
   sha: string;         // git blob sha for deduplication / update detection
+  sha256?: string;     // archive SHA-256 hex (when the store API publishes it)
 }
 
 const STORE_REPO_API = 'https://api.github.com/repos/Hyska-Software/Hyscode-Extensions/contents/';
@@ -556,6 +557,7 @@ export const useExtensionStore = create<ExtensionState>()(
       try {
         const ext = await invoke<InstalledExtension>('extension_install_from_store', {
           downloadUrl: item.downloadUrl,
+          expectedSha256: item.sha256 ?? null,
         });
         set((s) => {
           s.extensions = s.extensions.filter((e) => e.name !== ext.name);
@@ -580,6 +582,7 @@ export const useExtensionStore = create<ExtensionState>()(
       try {
         const ext = await invoke<InstalledExtension>('extension_install_from_store', {
           downloadUrl: item.downloadUrl,
+          expectedSha256: item.sha256 ?? null,
         });
         set((s) => {
           s.extensions = s.extensions.filter((e) => e.name !== ext.name);

@@ -59,6 +59,7 @@ import {
   getModePolicy,
   adjustPolicyForModel,
   getPerRequestIterationCap,
+  MAX_ITERATIONS_FUSE,
 } from './mode-policies';
 import type { MemoryManager } from './memory-manager';
 import { MemoryExtractor } from './memory-extractor';
@@ -87,7 +88,11 @@ export interface HarnessOptions {
   workspacePath: string;
   projectId: string;
   /** Tauri invoke function */
-  invoke: <T>(cmd: string, args?: Record<string, unknown>) => Promise<T>;
+  invoke: <T>(
+    cmd: string,
+    args?: Record<string, unknown>,
+    authorization?: import('./types').ToolInvocationAuthorization,
+  ) => Promise<T>;
   /** Tauri event listener function */
   listen?: (event: string, handler: (payload: unknown) => void) => Promise<() => void>;
   /** Event handler for UI updates */
@@ -156,7 +161,7 @@ export class Harness {
   private ruleLoader: RuleLoader | null;
   private sddEngine: SddEngine | null = null;
   private eventHandler: HarnessEventHandler | null;
-  private invoke: <T>(cmd: string, args?: Record<string, unknown>) => Promise<T>;
+  private invoke: HarnessOptions['invoke'];
   private listen:
     | ((event: string, handler: (payload: unknown) => void) => Promise<() => void>)
     | undefined;
@@ -318,7 +323,8 @@ export class Harness {
       this.sddEngine = new SddEngine({
         db: options.sddDb,
         eventHandler: this.eventHandler ?? undefined,
-        runAgentTurn: (addon, msg, typeOverride) => this.runSingleTurn(addon, msg, typeOverride),
+        runAgentTurn: (addon, msg, typeOverride, signal) =>
+          this.runSingleTurn(addon, msg, typeOverride, signal),
         savePlanFile: options.savePlanFile,
       });
     }
@@ -379,6 +385,7 @@ export class Harness {
         ...options.config,
       },
       ruleLoader: this.ruleLoader?.fork(),
+      skillLoader: this.skillLoader?.clone() ?? undefined,
       onEvent: options.onEvent,
       onApprovalRequest: options.onApprovalRequest ?? this.environment.onApprovalRequest,
       delegationLevel: this.delegationLevel + 1,
@@ -391,7 +398,7 @@ export class Harness {
 
     child.setAgentType(options.agentType);
     child.setConversationId(this.conversationId);
-    child.setActiveSkills(this.activeSkills);
+    child.setActiveSkills([...this.activeSkills]);
     child.setActiveRules(this.activeRules.map((rule) => ({ ...rule })));
     child.ruleTargetPaths = [...this.ruleTargetPaths];
     child.setDelegationChain(this.delegationChain);
@@ -549,8 +556,9 @@ export class Harness {
 
     try {
       this.onRulesResolved?.(rules, this.ruleLoader.getDiagnostics());
-    } catch {
+    } catch (e) {
       // A projection failure must never prevent the agent from executing.
+      console.warn('[harness] onRulesResolved failed', e);
     }
 
     return rules;
@@ -564,7 +572,11 @@ export class Harness {
   /**
    * Compute the effective policy for the current mode + model.
    * Merges the base mode policy with model-specific adjustments.
-   * Respects user-configured maxIterations from the HarnessConfig.
+   * Precedence: HarnessConfig > AgentDefinition > ModePolicy > built-in default.
+   * Iteration count: an explicit `null` in HarnessConfig means the host
+   * disabled the limit ("Infinite" in Settings) — it stays unlimited and only
+   * the per-request provider cost cap applies. Numeric limits are bounded by
+   * the fuse (default 50, hard fuse MAX_ITERATIONS_FUSE = Settings slider max).
    */
   getEffectivePolicy(): Omit<ModePolicy, 'maxIterations'> & { maxIterations: number | null } {
     if (!this._effectivePolicy || this._effectivePolicy.mode !== this.agentType) {
@@ -572,25 +584,33 @@ export class Harness {
       const providerAdjusted = this.config.modelId
         ? adjustPolicyForModel(base, this.config.modelId, this.config.providerId)
         : { ...base };
+      const agentDef = getAgentDefinition(this.agentType);
       const costCap = getPerRequestIterationCap(
         this.agentType,
         this.config.modelId,
         this.config.providerId,
       );
-      const requestedLimit = this.config.maxIterations;
+      // Precedence: explicit HarnessConfig > AgentDefinition > ModePolicy > built-in default.
+      // `null` is an explicit "no limit" (Settings → Limit Interactions off)
+      // and must NOT fall through the `??` chain into the agent definition
+      // default — that silently re-imposed plan=20/build=25 on unlimited runs.
+      const requestedLimit =
+        this.config.maxIterations === null
+          ? null
+          : (this.config.maxIterations ??
+            agentDef.maxIterations ??
+            providerAdjusted.maxIterations ??
+            50);
+      const bounded =
+        requestedLimit === null ? null : Math.min(requestedLimit, MAX_ITERATIONS_FUSE);
       const maxIterations =
-        costCap === null
-          ? requestedLimit
-          : requestedLimit === null
-            ? costCap
-            : Math.min(requestedLimit, costCap);
-      // Mode policies retain token/timeout ceilings. Iterations are unlimited
-      // unless the user opts in or a per-request provider has a cost cap.
+        bounded === null ? costCap : costCap === null ? bounded : Math.min(bounded, costCap);
+      const agentMaxOutput = agentDef.maxOutputTokens ?? providerAdjusted.maxOutputTokens;
       this._effectivePolicy = {
         ...providerAdjusted,
         maxIterations,
         maxInputTokens: Math.min(providerAdjusted.maxInputTokens, this.config.maxInputTokens),
-        maxOutputTokens: Math.min(providerAdjusted.maxOutputTokens, this.config.maxOutputTokens),
+        maxOutputTokens: Math.min(agentMaxOutput, this.config.maxOutputTokens),
         turnTimeoutMs: Math.min(providerAdjusted.turnTimeoutMs, this.config.turnTimeoutMs),
       };
     }
@@ -725,7 +745,14 @@ export class Harness {
     await this.refreshRules(ruleTargetPaths);
     const turnStart = Date.now();
 
-    // Resolve effective policy for this mode + model
+    // In chat mode, resolve the agent and its policy before building the trace
+    // or tool allow-list. Resolving policy first can accidentally reuse Build
+    // permissions on the first Chat turn.
+    if (this._mode === 'chat' && this.agentType !== 'chat') {
+      this.setAgentType('chat');
+    }
+
+    // Resolve effective policy for this mode + model.
     let policy = this.getEffectivePolicy();
 
     // Start tracing for this turn
@@ -735,11 +762,6 @@ export class Harness {
       this.config.providerId,
       this.config.modelId,
     );
-
-    // In chat mode, override to chat agent
-    if (this._mode === 'chat' && this.agentType !== 'chat') {
-      this.setAgentType('chat');
-    }
 
     // NOTE: Skill triggers are intentionally skipped here.
     // The skills store controls which skills are active. Trigger-based
@@ -770,8 +792,9 @@ export class Harness {
             expiresAfterTurn: this.contextManager.getTurnNumber(),
           });
         } else this.contextManager.removeSource('memory-context');
-      } catch {
+      } catch (e) {
         // Memory injection is non-critical — never block the turn
+        console.warn('[harness] memory context injection failed', e);
       }
     }
 
@@ -816,6 +839,13 @@ export class Harness {
       : policy.maxOutputTokens;
 
     while ((maxIter === null || iteration < maxIter) && !this.cancelled) {
+      // Hard fuse: never allow an unbounded or misconfigured loop to run forever.
+      if (iteration >= 200) {
+        terminalStatus = 'max_iterations';
+        finalResponse = finalResponse.trim()
+          || 'The agent reached the 200-iteration safety fuse before producing a final response. Review the completed tool calls before continuing.';
+        break;
+      }
       this.turnController.transition('streaming');
       iteration++;
       this.traceRecorder.startIteration(iteration);
@@ -840,10 +870,18 @@ export class Harness {
 
       // Build context snapshot (use policy-based limits)
       const goalToolsEnabled = this.agentType === 'build' && this.goalToolsEnabled?.() !== false;
+      const mergedOverrides = {
+        allow: [...(agentDef.toolOverrides?.allow ?? []), ...(policy.toolOverrides?.allow ?? [])],
+        deny: [...(agentDef.toolOverrides?.deny ?? []), ...(policy.toolOverrides?.deny ?? [])],
+      };
+      const effectiveOverrides = mergedOverrides.allow.length > 0 || mergedOverrides.deny.length > 0
+        ? mergedOverrides
+        : undefined;
       const availableTools = this.toolRouter.getToolDefinitionsFiltered(
         policy.allowedToolCategories,
-        agentDef.toolOverrides,
+        effectiveOverrides,
       ).filter((tool) => goalToolsEnabled || !this.goalToolNames.has(tool.name));
+      const policyAllowedToolNames = new Set(availableTools.map((tool) => tool.name));
       if (
         !selectedTools
         || selectedToolMode !== this.agentType
@@ -1032,7 +1070,8 @@ export class Harness {
                   if (tc && tc._rawInput) {
                     try {
                       tc.input = parseToolCallInput(tc._rawInput);
-                    } catch {
+                    } catch (e) {
+                      console.warn('[harness] failed to parse tool-call input', e);
                       invalidToolCall = tc.name;
                     }
                   }
@@ -1255,8 +1294,12 @@ export class Harness {
             input: tc.input,
             output: {
               success: true,
-              output: '',
-              metadata: { note: 'Executed by the agent internally' },
+              output: '[internal execution — no direct output]',
+              metadata: {
+                internal: true,
+                note: 'Executed by the agent internally',
+                tokenUsage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
+              },
             },
             durationMs: 0,
             approved: true,
@@ -1376,6 +1419,7 @@ export class Harness {
       const executionContext: ToolExecutionContext = {
         workspacePath: this.workspacePath,
         conversationId: this.conversationId,
+        policyAllowedToolNames,
         turnId: activeTurn.turnId,
         toolCallId: '', // set per-call below
         signal: activeTurn.signal,
@@ -1656,7 +1700,12 @@ export class Harness {
     );
     if (cancellationWasPartial) terminalStatus = 'cancelled_partial';
     else if (this.cancelled || activeTurn.signal.aborted) terminalStatus = 'cancelled';
-    else if (terminalStatus === 'complete' && maxIter !== null && iteration >= maxIter)
+    else if (
+      terminalStatus === 'complete' &&
+      !finalResponse.trim() &&
+      maxIter !== null &&
+      iteration >= maxIter
+    )
       terminalStatus = 'max_iterations';
     const stopReason: TurnRecord['stopReason'] = terminalStatus;
     if (!finalResponse.trim() && terminalStatus === 'max_iterations') {
@@ -1710,14 +1759,15 @@ export class Harness {
           this.projectId,
           this.conversationId,
         )
-        .then((count) => {
-          if (count > 0) {
-            const extractedMems: Array<{ title: string; type: import('./types').MemoryType }> = [];
-            this.emit({ type: 'memories_extracted', count, memories: extractedMems });
+        .then((saved) => {
+          if (saved.length > 0) {
+            const extractedMems = saved.slice(0, 5).map((m) => ({ title: m.title, type: m.type }));
+            this.emit({ type: 'memories_extracted', count: saved.length, memories: extractedMems });
           }
         })
-        .catch(() => {
+        .catch((e) => {
           // Non-critical — never surface memory failures
+          console.warn('[harness] memory extraction failed', e);
         });
     }
 
@@ -1862,7 +1912,9 @@ export class Harness {
     systemPromptAddon: string,
     userMessage: string,
     agentTypeOverride?: AgentType,
+    signal?: AbortSignal,
   ): Promise<TurnOutcome> {
+    if (signal?.aborted) throw new Error('SDD execution cancelled.');
     const originalType = this.agentType;
     const turnPrompt = agentTypeOverride
       ? getAgentDefinition(agentTypeOverride).basePrompt
@@ -1880,11 +1932,23 @@ export class Harness {
 
     // Temporarily modify system prompt
     this.contextManager.setSystemPrompt(turnPrompt + '\n\n' + systemPromptAddon);
+    // NOTE: run() resets `cancelled=false` in runInternal.begin(). If the outer
+    // SDD signal fires between listener attach and that reset, a single cancel()
+    // would be swallowed. Re-assert on a microtask so the cancellation survives.
+    const cancelForAbort = (): void => {
+      this.cancel();
+      queueMicrotask(() => {
+        if (signal?.aborted) this.cancel();
+      });
+    };
+    signal?.addEventListener('abort', cancelForAbort, { once: true });
 
     try {
+      if (signal?.aborted) throw new Error('SDD execution cancelled.');
       const result = await this.run(userMessage, this.contextManager.getHistory());
       return result;
     } finally {
+      signal?.removeEventListener('abort', cancelForAbort);
       // Restore state
       this._mode = originalMode;
       this.agentType = originalType;

@@ -274,7 +274,10 @@ jobs:
             return releaseData.id
 
 # ─────────────────────────────────────────────────────────────────────────────
-# JOB 2 — Build Windows x64
+# JOB 2 - Build Windows x64 (CI: Inno-only)
+# Builds the Tauri binary with --no-bundle, then produces the Inno Setup
+# desktop + VORTEX CLI installers. NSIS + MSI bundles are NOT built in CI —
+# use scripts/build-windows.ps1 locally for the full NSIS + MSI + Inno set.
 # ─────────────────────────────────────────────────────────────────────────────
   build-windows:
     needs: create-release

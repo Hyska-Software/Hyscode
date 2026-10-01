@@ -19,6 +19,6 @@ export default defineConfig({
   },
   test: {
     include: ['src/**/*.test.{ts,tsx}'],
-    exclude: ['dist/**', 'node_modules/**'],
+    exclude: ['**/.kilo/**', '**/.hyscode/**', 'dist/**', 'node_modules/**'],
   },
 });

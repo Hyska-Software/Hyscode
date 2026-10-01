@@ -5,8 +5,8 @@ import { OpenAIProvider } from './openai';
 // Reuses OpenAI adapter since OpenRouter is OpenAI-compatible.
 // Only overrides: base URL, extra headers, and dynamic model listing.
 // Static catalog mirrors docs/MODELS_REFERENCE.md §3: newest SOTA flagships
-// plus popular workhorses, verified Sep 2026 against the official
-// https://openrouter.ai/api/v1/models listing (424 models) + vendor docs.
+// plus popular workhorses, verified Oct 2026 against the official
+// https://openrouter.ai/api/v1/models listing + vendor docs.
 // Pricing below is the vendor Standard tier (OpenRouter may discount further
 // at request time); listModels() refreshes live pricing/availability hourly.
 
@@ -50,7 +50,7 @@ const OR_GEMINI_LM: ThinkingVariants = {
 };
 const OR_LMH: ThinkingVariants = {
   kind: 'openai',
-  levels: ['low', 'medium', 'high'],
+  levels: ['low', 'medium', 'high', 'xhigh'],
   defaultLevel: 'medium',
 };
 // Hy3 = Tencent Hunyuan 3: OpenAI reasoning_effort with none/low/medium/high.
@@ -115,6 +115,20 @@ const OPENROUTER_MODELS: AIModel[] = [
     thinkingVariants: OR_ADAPTIVE_XHIGH,
   },
   {
+    id: 'anthropic/claude-opus-5-5',
+    name: 'Claude Opus 5.5 (via OpenRouter)',
+    provider: 'openrouter',
+    contextWindow: 1_000_000,
+    maxOutputTokens: 128_000,
+    supportsTools: true,
+    supportsStreaming: true,
+    supportsVision: true,
+    inputPricePerMToken: 4,
+    outputPricePerMToken: 20,
+    cachedInputPricePerMToken: 0.2,
+    thinkingVariants: OR_ADAPTIVE_XHIGH,
+  },
+  {
     id: 'anthropic/claude-opus-5',
     name: 'Claude Opus 5 (via OpenRouter)',
     provider: 'openrouter',
@@ -151,6 +165,20 @@ const OPENROUTER_MODELS: AIModel[] = [
     supportsVision: true,
     inputPricePerMToken: 5,
     outputPricePerMToken: 25,
+    thinkingVariants: OR_ADAPTIVE_XHIGH,
+  },
+  {
+    id: 'anthropic/claude-sonnet-5-5',
+    name: 'Claude Sonnet 5.5 (via OpenRouter)',
+    provider: 'openrouter',
+    contextWindow: 1_000_000,
+    maxOutputTokens: 128_000,
+    supportsTools: true,
+    supportsStreaming: true,
+    supportsVision: true,
+    inputPricePerMToken: 2,
+    outputPricePerMToken: 10,
+    cachedInputPricePerMToken: 0.2,
     thinkingVariants: OR_ADAPTIVE_XHIGH,
   },
   {
@@ -207,6 +235,62 @@ const OPENROUTER_MODELS: AIModel[] = [
     thinkingVariants: OR_ADAPTIVE_MAX,
   },
   // ── OpenAI (reasoning.effort) ─────────────────────────────────────────────
+  {
+    id: 'openai/gpt-6.1-sol',
+    name: 'GPT-6.1 Sol (via OpenRouter)',
+    provider: 'openrouter',
+    contextWindow: 1_050_000,
+    maxOutputTokens: 128_000,
+    supportsTools: true,
+    supportsStreaming: true,
+    supportsVision: true,
+    inputPricePerMToken: 2,
+    outputPricePerMToken: 10,
+    cachedInputPricePerMToken: 0.1,
+    thinkingVariants: OR_OPENAI_FULL_PRO,
+  },
+  {
+    id: 'openai/gpt-6-sol',
+    name: 'GPT-6 Sol (via OpenRouter)',
+    provider: 'openrouter',
+    contextWindow: 1_050_000,
+    maxOutputTokens: 128_000,
+    supportsTools: true,
+    supportsStreaming: true,
+    supportsVision: true,
+    inputPricePerMToken: 2,
+    outputPricePerMToken: 10,
+    cachedInputPricePerMToken: 0.2,
+    thinkingVariants: OR_OPENAI_FULL_PRO,
+  },
+  {
+    id: 'openai/gpt-6-luna',
+    name: 'GPT-6 Luna (via OpenRouter)',
+    provider: 'openrouter',
+    contextWindow: 1_050_000,
+    maxOutputTokens: 128_000,
+    supportsTools: true,
+    supportsStreaming: true,
+    supportsVision: true,
+    inputPricePerMToken: 0.1,
+    outputPricePerMToken: 0.5,
+    cachedInputPricePerMToken: 0.01,
+    thinkingVariants: OR_OPENAI_FULL_PRO,
+  },
+  {
+    id: 'openai/gpt-6-astra',
+    name: 'GPT-6 Astra (via OpenRouter)',
+    provider: 'openrouter',
+    contextWindow: 1_050_000,
+    maxOutputTokens: 128_000,
+    supportsTools: true,
+    supportsStreaming: true,
+    supportsVision: true,
+    inputPricePerMToken: 10,
+    outputPricePerMToken: 50,
+    cachedInputPricePerMToken: 1,
+    thinkingVariants: OR_OPENAI_FULL_PRO,
+  },
   {
     id: 'openai/gpt-5.6-sol',
     name: 'GPT-5.6 Sol (via OpenRouter)',
@@ -298,9 +382,9 @@ const OPENROUTER_MODELS: AIModel[] = [
     supportsTools: true,
     supportsStreaming: true,
     supportsVision: true,
-    inputPricePerMToken: 1.5,
-    outputPricePerMToken: 7.5,
-    cachedInputPricePerMToken: 0.15,
+    inputPricePerMToken: 0.75, // intro through Dec 31 2026; standard $1.50 from Jan 01 2027
+    outputPricePerMToken: 3.75, // intro through Dec 31 2026; standard $7.50 from Jan 01 2027
+    cachedInputPricePerMToken: 0.075,
     thinkingVariants: OR_GEMINI_LMH,
   },
   {
@@ -312,9 +396,9 @@ const OPENROUTER_MODELS: AIModel[] = [
     supportsTools: true,
     supportsStreaming: true,
     supportsVision: true,
-    inputPricePerMToken: 1.5,
-    outputPricePerMToken: 7.5,
-    cachedInputPricePerMToken: 0.15,
+    inputPricePerMToken: 0.75, // intro through Dec 31 2026; standard $1.50 from Jan 01 2027
+    outputPricePerMToken: 3.75, // intro through Dec 31 2026; standard $7.50 from Jan 01 2027
+    cachedInputPricePerMToken: 0.075,
     thinkingVariants: OR_GEMINI_LMH,
   },
   {
@@ -326,9 +410,9 @@ const OPENROUTER_MODELS: AIModel[] = [
     supportsTools: true,
     supportsStreaming: true,
     supportsVision: true,
-    inputPricePerMToken: 1.5,
-    outputPricePerMToken: 7.5,
-    cachedInputPricePerMToken: 0.15,
+    inputPricePerMToken: 0.75, // intro through Dec 31 2026; standard $1.50 from Jan 01 2027
+    outputPricePerMToken: 3.75, // intro through Dec 31 2026; standard $7.50 from Jan 01 2027
+    cachedInputPricePerMToken: 0.075,
     thinkingVariants: OR_GEMINI_LMH,
   },
   {
@@ -385,6 +469,19 @@ const OPENROUTER_MODELS: AIModel[] = [
   },
   // ── xAI ───────────────────────────────────────────────────────────────────
   {
+    id: 'x-ai/grok-4.7',
+    name: 'Grok 4.7 (via OpenRouter)',
+    provider: 'openrouter',
+    contextWindow: 500_000,
+    maxOutputTokens: 16_384,
+    supportsTools: true,
+    supportsStreaming: true,
+    supportsVision: false,
+    inputPricePerMToken: 2,
+    outputPricePerMToken: 6,
+    thinkingVariants: OR_LMH,
+  },
+  {
     id: 'x-ai/grok-4.6',
     name: 'Grok 4.6 (via OpenRouter)',
     provider: 'openrouter',
@@ -423,6 +520,19 @@ const OPENROUTER_MODELS: AIModel[] = [
     outputPricePerMToken: 2,
   },
   // ── DeepSeek ──────────────────────────────────────────────────────────────
+  {
+    id: 'deepseek/deepseek-v4.1-flash',
+    name: 'DeepSeek V4.1 Flash (via OpenRouter)',
+    provider: 'openrouter',
+    contextWindow: 1_000_000,
+    maxOutputTokens: 8_192,
+    supportsTools: true,
+    supportsStreaming: true,
+    supportsVision: false,
+    inputPricePerMToken: 0.15,
+    outputPricePerMToken: 0.6,
+    thinkingVariants: OR_DEEPSEEK_LMH,
+  },
   {
     id: 'deepseek/deepseek-v4-pro',
     name: 'DeepSeek V4 Pro (via OpenRouter)',
@@ -663,6 +773,32 @@ const OPENROUTER_MODELS: AIModel[] = [
   },
   // ── Xiaomi MiMo ───────────────────────────────────────────────────────────
   {
+    id: 'xiaomi/mimo-v2.6-flash',
+    name: 'MiMo V2.6 Flash (via OpenRouter)',
+    provider: 'openrouter',
+    contextWindow: 1_000_000,
+    maxOutputTokens: 8_192,
+    supportsTools: true,
+    supportsStreaming: true,
+    supportsVision: false,
+    inputPricePerMToken: 0.14,
+    outputPricePerMToken: 0.28,
+    thinkingVariants: OR_KIMI_TOGGLE,
+  },
+  {
+    id: 'xiaomi/mimo-v2.6-pro',
+    name: 'MiMo V2.6 Pro (via OpenRouter)',
+    provider: 'openrouter',
+    contextWindow: 1_000_000,
+    maxOutputTokens: 8_192,
+    supportsTools: true,
+    supportsStreaming: true,
+    supportsVision: false,
+    inputPricePerMToken: 0.435,
+    outputPricePerMToken: 0.87,
+    thinkingVariants: OR_KIMI_TOGGLE,
+  },
+  {
     id: 'xiaomi/mimo-v2.5',
     name: 'MiMo V2.5 (via OpenRouter)',
     provider: 'openrouter',
@@ -775,32 +911,46 @@ export class OpenRouterProvider extends OpenAIProvider {
 
       if (data.data?.length) {
         const now = Date.now();
+        // Merge live data with the curated catalog so curated-only fields
+        // (thinkingVariants, hand-verified pricing) survive refreshes.
+        const curatedById = new Map(this.models.map((m) => [m.id, m]));
         this.models = data.data
           .filter((m) => {
             if (!m.id || !m.name) return false;
             if (!m.expiration_date) return true;
             return Date.parse(m.expiration_date) > now;
           })
-          .map((m) => ({
-            id: m.id,
-            name: m.name,
-            provider: 'openrouter',
-            contextWindow: m.context_length ?? 1_000_000,
-            maxOutputTokens: m.top_provider?.max_completion_tokens ?? 8_192,
-            supportsTools: m.supported_parameters?.includes('tools') ?? false,
-            supportsStreaming: true,
-            supportsVision: m.architecture?.input_modalities?.includes('image') ?? false,
-            inputPricePerMToken: m.pricing?.prompt
-              ? parseFloat(m.pricing.prompt) * 1_000_000
-              : undefined,
-            outputPricePerMToken: m.pricing?.completion
-              ? parseFloat(m.pricing.completion) * 1_000_000
-              : undefined,
-          }));
+          .map((m) => {
+            const curated = curatedById.get(m.id);
+            return {
+              id: m.id,
+              name: curated?.name ?? m.name,
+              provider: 'openrouter',
+              contextWindow: m.context_length ?? curated?.contextWindow ?? 1_000_000,
+              maxOutputTokens:
+                m.top_provider?.max_completion_tokens ?? curated?.maxOutputTokens ?? 8_192,
+              supportsTools:
+                m.supported_parameters?.includes('tools') ?? curated?.supportsTools ?? false,
+              supportsStreaming: true,
+              supportsVision:
+                m.architecture?.input_modalities?.includes('image') ??
+                curated?.supportsVision ??
+                false,
+              inputPricePerMToken: m.pricing?.prompt
+                ? parseFloat(m.pricing.prompt) * 1_000_000
+                : curated?.inputPricePerMToken,
+              outputPricePerMToken: m.pricing?.completion
+                ? parseFloat(m.pricing.completion) * 1_000_000
+                : curated?.outputPricePerMToken,
+              cachedInputPricePerMToken: curated?.cachedInputPricePerMToken,
+              thinkingVariants: curated?.thinkingVariants,
+            };
+          });
       }
 
       return this.models;
-    } catch {
+    } catch (err) {
+      console.warn('[OpenRouterProvider] live listModels failed, using curated catalog:', err);
       return this.models;
     }
   }

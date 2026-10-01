@@ -1475,7 +1475,8 @@ mod tests {
         let directory =
             std::env::temp_dir().join(format!("hyscode-kanban-test-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&directory).map_err(|error| error.to_string())?;
-        let mut connection = super::super::db::open_database(&directory);
+        let mut connection =
+            super::super::db::open_database(&directory).expect("test database should open");
         connection
             .execute(
                 "INSERT INTO projects (id, name, path) VALUES (?1, ?2, ?3)",

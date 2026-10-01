@@ -13,12 +13,35 @@ import {
   type ApprovalDecision,
   type HarnessEventHandler,
   type ToolRiskLevel,
+  type ToolInvocationAuthorization,
   SAFE_TOOLS,
   DESTRUCTIVE_TOOLS,
   CATEGORY_RISK,
   GIT_WORKTREE_SWEEPING_TOOLS,
 } from './types';
 import { ExternalPathAccessRegistry } from './external-path-access';
+import { authorizeToolInvocationArgs } from './tool-invocation-policy';
+
+function createAuthorizedInvoke(
+  invoke: ToolExecutionContext['invoke'],
+  workspacePath: string,
+  externalPathAccess: ToolExecutionContext['externalPathAccess'],
+  nativeGrantIds: readonly string[],
+  revokeNativeGrantIds: readonly string[],
+): ToolExecutionContext['invoke'] {
+  const authorization: ToolInvocationAuthorization = {
+    workspacePath,
+    externalPathAccess,
+    ...(nativeGrantIds.length > 0 ? { nativeGrantIds } : {}),
+    ...(revokeNativeGrantIds.length > 0 ? { revokeNativeGrantIds } : {}),
+  };
+  return <T>(command: string, args?: Record<string, unknown>): Promise<T> =>
+    invoke<T>(
+      command,
+      authorizeToolInvocationArgs(args, workspacePath, externalPathAccess),
+      authorization,
+    );
+}
 
 export class ToolRouter {
   private handlers = new Map<string, ToolHandler>();
@@ -149,6 +172,24 @@ export class ToolRouter {
       return record;
     }
 
+    if (context.policyAllowedToolNames && !context.policyAllowedToolNames.has(toolName)) {
+      const record: ToolCallRecord = {
+        id: toolCallId,
+        toolName,
+        input,
+        output: {
+          success: false,
+          output: '',
+          error: `Tool "${toolName}" is not allowed by the active agent policy.`,
+        },
+        durationMs: Date.now() - startTime,
+        approved: false,
+        timestamp: new Date().toISOString(),
+      };
+      this.emitResult(record);
+      return record;
+    }
+
     input = normalizeToolInput(handler.definition.inputSchema, input);
     const validationError = validateInput(handler.definition.inputSchema, input);
     if (validationError) {
@@ -219,7 +260,10 @@ export class ToolRouter {
     // External path approval is mandatory and independent of the configured
     // tool approval mode. A covered session grant still needs to be attached
     // to the execution context so the handler cannot escape its authorization.
-    const needsApproval = this.needsApproval(toolName, handler);
+    const explicitApprovalRequired =
+      handler.requiresExplicitApproval &&
+      !this.approvalConfig.sessionTrustedTools?.has(toolName);
+    const needsApproval = this.needsApproval(toolName, handler) || explicitApprovalRequired;
     const approvalRequired = needsApproval || externalApprovalRequired;
     let approvalDecision: ApprovalDecision = true;
 
@@ -255,20 +299,45 @@ export class ToolRouter {
       }
     }
 
+    const approvalDetails = normalizeApprovalDecision(approvalDecision);
     if (externalAccessRequest && externalApprovalRequired) {
-      const decision = normalizeApprovalDecision(approvalDecision);
-      this.externalPathAccess.grant(externalAccessRequest, decision.externalGrant ?? 'once');
+      this.externalPathAccess.grant(
+        externalAccessRequest,
+        approvalDetails.externalGrant ?? 'once',
+        approvalDetails.nativeGrantId,
+      );
     }
 
-    const executionContext = externalAccessRequest
-      ? {
-          ...context,
-          externalPathAccess: this.externalPathAccess.createAccess(
-            externalAccessRequest,
-            context.workspacePath,
-          ),
-        }
-      : context;
+    const nativeGrantIds = externalAccessRequest
+      ? [
+          ...(approvalDetails.nativeGrantId ? [approvalDetails.nativeGrantId] : []),
+          ...this.externalPathAccess.getSessionNativeGrantIds(externalAccessRequest.operation),
+        ].filter((grantId, index, grantIds) => grantIds.indexOf(grantId) === index)
+      : (context.externalPathAccess?.nativeGrantIds ?? []);
+    const revokeNativeGrantIds =
+      externalAccessRequest &&
+      approvalDetails.externalGrant !== 'session-directory' &&
+      approvalDetails.nativeGrantId
+        ? [approvalDetails.nativeGrantId]
+        : [];
+    const externalPathAccess = externalAccessRequest
+      ? this.externalPathAccess.createAccess(
+          externalAccessRequest,
+          context.workspacePath,
+          nativeGrantIds,
+        )
+      : context.externalPathAccess;
+    const executionContext: ToolExecutionContext = {
+      ...context,
+      externalPathAccess,
+      invoke: createAuthorizedInvoke(
+        context.invoke,
+        context.workspacePath,
+        externalPathAccess,
+        nativeGrantIds,
+        revokeNativeGrantIds,
+      ),
+    };
 
     if (this.approvalConfig.mode === 'notify') {
       this.eventHandler?.({
@@ -284,13 +353,34 @@ export class ToolRouter {
     try {
       result = context.signal.aborted
         ? { success: false, output: '', error: 'Tool call cancelled.' }
-        : await executeWithAbort(handler.execute(input, executionContext), context.signal);
+        : await executeWithAbort(
+            handler.execute(input, executionContext),
+            context.signal,
+            toolName,
+            handler.category,
+          );
     } catch (err) {
       result = {
         success: false,
         output: '',
         error: err instanceof Error ? err.message : String(err),
       };
+    }
+
+    const retainForEditReview =
+      result.success && externalAccessRequest?.operation === 'write' && revokeNativeGrantIds.length > 0;
+    if (revokeNativeGrantIds.length > 0 && !retainForEditReview) {
+      try {
+        await context.invoke<void>('workspace_revoke_external_grants', {
+          grantIds: revokeNativeGrantIds,
+        });
+      } catch (error) {
+        result = {
+          success: false,
+          output: result.output,
+          error: `${result.error ? `${result.error}; ` : ''}External-access cleanup failed; the native grant will expire automatically: ${error instanceof Error ? error.message : String(error)}`,
+        };
+      }
     }
 
     const durationMs = Date.now() - startTime;
@@ -338,8 +428,8 @@ export class ToolRouter {
   }
 
   /** Clear all external directory grants when a new session becomes active. */
-  clearExternalPathGrants(): void {
-    this.externalPathAccess.clear();
+  clearExternalPathGrants(): string[] {
+    return this.externalPathAccess.clear();
   }
 
   /** Get set of tools trusted in this session */
@@ -405,9 +495,9 @@ export class ToolRouter {
     externalAccess?: PendingToolCall['externalAccess'],
   ): Promise<ApprovalDecision> {
     if (!this.approvalCallback) {
-      // Existing normal approvals remain compatible with headless callers,
-      // but mandatory external access fails closed without a user callback.
-      return externalAccess ? { approved: false } : true;
+      // Approval-required operations fail closed in every embedding. Headless
+      // hosts must opt into an explicit auto-approval mode instead.
+      return { approved: false };
     }
 
     const handler = this.handlers.get(toolName);
@@ -423,7 +513,16 @@ export class ToolRouter {
           resolve(decision);
         }
       };
-      const onAbort = () => settle({ approved: false });
+      let pendingRef: PendingToolCall | null = null;
+      const onAbort = () => {
+        settle({ approved: false });
+        // Propagate cancellation to the UI callback so dialogs clean up.
+        try {
+          pendingRef?.onAbort?.();
+        } catch (e) {
+          console.warn('[tool-router] pending onAbort failed', e);
+        }
+      };
       if (signal.aborted) return settle(false);
       signal.addEventListener('abort', onAbort, { once: true });
 
@@ -436,6 +535,7 @@ export class ToolRouter {
         ...(externalAccess ? { externalAccess } : {}),
         resolve: settle,
       };
+      pendingRef = pending;
 
       // Emit event so UI can display and interact with the pending call
       this.eventHandler?.({
@@ -519,6 +619,7 @@ export class ToolRouter {
 function normalizeApprovalDecision(decision: ApprovalDecision): {
   approved: boolean;
   externalGrant?: 'once' | 'session-directory';
+  nativeGrantId?: string;
 } {
   if (typeof decision === 'boolean') return { approved: decision };
   return decision;
@@ -843,19 +944,70 @@ function escapeRawControlsInStrings(json: string): string {
   return out;
 }
 
+const TOOL_TIMEOUT_MS: Record<string, number> = {
+  default: 60_000,
+  terminal: 30_000,
+  mcp: 30_000,
+  fs: 15_000,
+  // A spawned sub-agent runs a full child LLM loop (multiple API requests),
+  // so it must never be bound by the 60s interactive default — observed
+  // `spawn_subagent (60005ms)` timeouts were this limit firing, not real
+  // failures. invoke_external_tool can wrap any tool (including a nested
+  // spawn_subagent dispatch), so it shares the same budget.
+  subagent: 600_000,
+};
+
+/** Per-tool execution budget in ms. Exported for tests and diagnostics. */
+export function timeoutForTool(toolName: string, category?: string): number {
+  const name = toolName.toLowerCase();
+  if (name === 'spawn_subagent' || name === 'invoke_external_tool')
+    return TOOL_TIMEOUT_MS.subagent;
+  if (name.startsWith('mcp__') || category === 'mcp') return TOOL_TIMEOUT_MS.mcp;
+  if (name.includes('terminal') || name === 'run_code' || category === 'terminal') {
+    return TOOL_TIMEOUT_MS.terminal;
+  }
+  if (category === 'filesystem') return TOOL_TIMEOUT_MS.fs;
+  return TOOL_TIMEOUT_MS.default;
+}
+
 async function executeWithAbort(
   execution: Promise<ToolResult>,
   signal: AbortSignal,
+  toolName = '',
+  category?: string,
 ): Promise<ToolResult> {
   if (signal.aborted) return { success: false, output: '', error: 'Tool call cancelled.' };
-  // Do not race an uncancellable native mutation. Returning early would tell the
-  // UI that cancellation completed while the operation could still mutate disk.
-  const result = await execution;
-  if (!signal.aborted || result.error?.toLowerCase().includes('cancel')) return result;
-  return {
-    success: false,
-    output: result.output,
-    error: 'Cancellation was requested, but the native operation completed before it could stop.',
-    metadata: { ...result.metadata, cancellationPartial: true, operationCompleted: true },
-  };
+  const timeoutMs = timeoutForTool(toolName, category);
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`Tool "${toolName || 'unknown'}" timed out after ${timeoutMs}ms.`)), timeoutMs);
+  });
+  const abortPromise = new Promise<never>((_, reject) => {
+    if (signal.aborted) reject(new Error('Tool call cancelled.'));
+    else signal.addEventListener('abort', () => reject(new Error('Tool call cancelled.')), { once: true });
+  });
+  try {
+    // Race the native execution against abort + per-tool timeout. The native
+    // promise is not cancelled — we only stop waiting for it — so a late
+    // disk mutation still resolves in the background without hanging the turn.
+    const result = await Promise.race([execution, abortPromise, timeoutPromise]);
+    if (!signal.aborted || result.error?.toLowerCase().includes('cancel')) return result;
+    return {
+      success: false,
+      output: result.output,
+      error: 'Cancellation was requested, but the native operation completed before it could stop.',
+      metadata: { ...result.metadata, cancellationPartial: true, operationCompleted: true },
+    };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (/timed out/i.test(message)) {
+      return { success: false, output: '', error: message, metadata: { timeoutMs, toolName } };
+    }
+    if (/cancel/i.test(message)) {
+      return { success: false, output: '', error: 'Tool call cancelled.' };
+    }
+    throw err;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }

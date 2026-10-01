@@ -71,10 +71,31 @@ export function StatusBar() {
   });
 
   // Resolve the GitHub auth state once on mount so the indicator is accurate.
+  // Retries once on failure; further errors stay silent with a tooltip title.
+  const [githubAuthError, setGithubAuthError] = useState<string | null>(null);
+  const githubAuthRetryRef = useRef(false);
   useEffect(() => {
-    if (githubAuthStatus === 'unknown') {
-      void githubCheckAuth();
-    }
+    if (githubAuthStatus !== 'unknown') return;
+    let cancelled = false;
+    void githubCheckAuth().catch((err: unknown) => {
+      if (cancelled) return;
+      const message = err instanceof Error ? err.message : String(err);
+      if (!githubAuthRetryRef.current) {
+        githubAuthRetryRef.current = true;
+        window.setTimeout(() => {
+          if (cancelled) return;
+          void githubCheckAuth().catch((retryErr: unknown) => {
+            if (cancelled) return;
+            setGithubAuthError(retryErr instanceof Error ? retryErr.message : String(retryErr));
+          });
+        }, 2000);
+      } else {
+        setGithubAuthError(message);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
   }, [githubAuthStatus, githubCheckAuth]);
 
   return (
@@ -141,7 +162,7 @@ export function StatusBar() {
               )}
             </button>
           )}
-          {githubAuthStatus === 'signed-out' && (
+          {githubAuthStatus === 'signed-out' && !githubAuthError && (
             <button
               ref={githubRef}
               className="flex items-center gap-1 text-muted-foreground hover:text-primary transition-colors"
@@ -151,6 +172,14 @@ export function StatusBar() {
               <Github className="h-2.5 w-2.5" />
               <span>Sign in</span>
             </button>
+          )}
+          {githubAuthError && githubAuthStatus !== 'signed-in' && (
+            <span
+              className="flex items-center gap-1 text-muted-foreground/60"
+              title={`GitHub auth check failed: ${githubAuthError}`}
+            >
+              <Github className="h-2.5 w-2.5" />
+            </span>
           )}
         </div>
         <div className="flex items-center gap-3 text-muted-foreground">
