@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -37,6 +37,35 @@ describe('CLI persistence adapter', () => {
     const loaded = reopened.loadSession(session.id);
     expect(loaded?.messages.map((message) => message.role)).toEqual(['user', 'assistant', 'tool']);
     expect(loaded?.messages[2]?.content[0]).toMatchObject({ type: 'tool_result', output: 'HYS_TUI_FIXTURE' });
+  });
+
+  it('refuses to replace a corrupt data file with an empty store', async () => {
+    const { store } = await dataStore();
+    const corruptContents = '{not valid JSON';
+    await writeFile(store.path, corruptContents, 'utf8');
+
+    await expect(store.createSession(path.dirname(store.path), 'chat', null, null))
+      .rejects.toThrow('Failed to parse TUI data store');
+    expect(await readFile(store.path, 'utf8')).toBe(corruptContents);
+  });
+
+  it('continues processing writes after one persistence failure', async () => {
+    const { directory } = await dataStore();
+    const dataDirectory = path.join(directory, 'data');
+    await mkdir(dataDirectory);
+    const store = new CliDataStore(path.join(dataDirectory, 'tui-data.json'));
+    await store.createSession(directory, 'chat', null, null);
+
+    await rm(dataDirectory, { recursive: true });
+    await writeFile(dataDirectory, 'temporary blocker', 'utf8');
+    await expect(store.createSession(directory, 'build', null, null)).rejects.toThrow();
+
+    await rm(dataDirectory);
+    await mkdir(dataDirectory);
+    await store.createSession(directory, 'review', null, null);
+
+    const persisted = JSON.parse(await readFile(store.path, 'utf8')) as { conversations: unknown[] };
+    expect(persisted.conversations).toHaveLength(3);
   });
 
   it('stores memory and SDD records through the same invoke contract used by the harness', async () => {

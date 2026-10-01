@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { SddEngine, type SddDatabase } from './sdd-engine';
 import type { SddSession, SddTask, TurnOutcome } from './types';
 
@@ -92,5 +92,49 @@ describe('SddEngine', () => {
     await engine.generateSpec(session.id);
     await engine.approveSpec(session.id);
     await expect(engine.generatePlan(session.id)).rejects.toThrow('requires a non-empty description');
+  });
+
+  it('rejects cyclic dependencies before persisting a plan', async () => {
+    const responses = [
+      outcome('# Spec'),
+      outcome(
+        '[{"title":"First","description":"First task","files":[],"dependencies":[1]},{"title":"Second","description":"Second task","files":[],"dependencies":[0]}]',
+      ),
+    ];
+    const engine = new SddEngine({ db: memoryDatabase(), runAgentTurn: async () => responses.shift()! });
+    const session = await engine.startSession('project', 'conversation', 'feature');
+    await engine.generateSpec(session.id);
+    await engine.approveSpec(session.id);
+
+    await expect(engine.generatePlan(session.id)).rejects.toThrow('dependency cycle');
+  });
+
+  it('aborts an active task turn and restores it to pending on cancellation', async () => {
+    let onSignal: AbortSignal | undefined;
+    const engine = new SddEngine({
+      db: memoryDatabase(),
+      runAgentTurn: async (_system, message, _mode, signal) => {
+        if (message.startsWith('Execute the following task:')) {
+          onSignal = signal;
+          return new Promise<TurnOutcome>((_resolve, reject) => {
+            signal?.addEventListener('abort', () => reject(new Error('aborted')), { once: true });
+          });
+        }
+        return outcome(message.startsWith('Generate a detailed specification') ? '# Spec' : '[{"title":"Task","description":"Do task","files":[],"dependencies":[]}]');
+      },
+    });
+    const session = await engine.startSession('project', 'conversation', 'feature');
+    await engine.generateSpec(session.id);
+    await engine.approveSpec(session.id);
+    const tasks = await engine.generatePlan(session.id);
+    await engine.approvePlan(session.id);
+
+    const execution = engine.execute(session.id);
+    await vi.waitFor(() => expect(onSignal).toBeDefined());
+    await engine.cancel(session.id);
+
+    await expect(execution).resolves.toBe('cancelled');
+    expect(onSignal?.aborted).toBe(true);
+    expect(tasks).toHaveLength(1);
   });
 });

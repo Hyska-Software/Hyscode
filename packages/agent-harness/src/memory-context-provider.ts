@@ -47,7 +47,7 @@ export class MemoryContextProvider {
         const normalizedTitle = m.title.trim().toLowerCase();
         const normalizedBody = body.trim().toLowerCase();
         if ((normalizedTitle && excludeText.includes(normalizedTitle)) || (normalizedBody.length > 40 && excludeText.includes(normalizedBody))) continue;
-        const entry = `  <memory id="${m.id}" type="${m.type}" relevance="${m.relevanceScore.toFixed(2)}">\n    <title>${escapeXml(m.title)}</title>\n    <content>${escapeXml(body)}</content>${m.tags.length ? `\n    <tags>${m.tags.join(', ')}</tags>` : ''}\n  </memory>`;
+        const entry = `  <memory id="${escapeXml(m.id)}" type="${escapeXml(m.type)}" relevance="${m.relevanceScore.toFixed(2)}">\n    <title>${escapeXml(m.title)}</title>\n    <content>${escapeXml(body)}</content>${m.tags.length ? `\n    <tags>${escapeXml(m.tags.join(', '))}</tags>` : ''}\n  </memory>`;
         if (usedChars + entry.length > charBudget) break;
         parts.push(entry);
         usedChars += entry.length;

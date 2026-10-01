@@ -335,6 +335,9 @@ export class TerminalCommandRunner {
           conversationId: ctx.conversationId,
           toolCallId: ctx.toolCallId,
           cwd,
+          ...(ctx.externalPathAccess?.nativeGrantIds?.length
+            ? { nativeGrantIds: ctx.externalPathAccess.nativeGrantIds }
+            : {}),
           forceNew: Boolean(input.forceNew) || background,
           sessionName: input.sessionName,
           background,
@@ -1352,4 +1355,3 @@ export function withTerminalDeadline<T>(
 function delay(milliseconds: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
-

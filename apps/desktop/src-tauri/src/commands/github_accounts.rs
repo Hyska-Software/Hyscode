@@ -9,7 +9,7 @@
 // Legacy single-account keys are migrated on first listing.
 
 use super::github_repos::fetch_github_user;
-use super::keychain::{persist_keychain_ref, KeychainState};
+use super::keychain::{update_keychain_ref, KeychainState};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -241,10 +241,12 @@ pub async fn migrate_legacy_accounts(
             added_at: now_ms(),
         };
         let mut store = keychain.lock().map_err(|e| e.to_string())?;
-        upsert_account(&mut store, account, &token)?;
-        store.remove(LEGACY_ACCESS_TOKEN_KEY);
-        store.remove(LEGACY_ACCESS_SCOPE_KEY);
-        persist_keychain_ref(&store);
+        update_keychain_ref(&mut store, |store| {
+            upsert_account(store, account, &token)?;
+            store.remove(LEGACY_ACCESS_TOKEN_KEY);
+            store.remove(LEGACY_ACCESS_SCOPE_KEY);
+            Ok(())
+        })?;
     }
 
     if let Some(token) = legacy_pat {
@@ -269,9 +271,11 @@ pub async fn migrate_legacy_accounts(
             added_at: now_ms(),
         };
         let mut store = keychain.lock().map_err(|e| e.to_string())?;
-        upsert_account(&mut store, account, &token)?;
-        store.remove(LEGACY_PAT_KEY);
-        persist_keychain_ref(&store);
+        update_keychain_ref(&mut store, |store| {
+            upsert_account(store, account, &token)?;
+            store.remove(LEGACY_PAT_KEY);
+            Ok(())
+        })?;
     }
 
     Ok(true)
@@ -336,11 +340,13 @@ pub async fn github_account_oauth_poll(
 
     let mut store = keychain.0.lock().map_err(|e| e.to_string())?;
     let had_active = active_account_id(&store).is_some();
-    upsert_account(&mut store, account.clone(), &response.access_token)?;
-    if !had_active {
-        set_active_account(&mut store, &account.id)?;
-    }
-    persist_keychain_ref(&store);
+    update_keychain_ref(&mut store, |store| {
+        upsert_account(store, account.clone(), &response.access_token)?;
+        if !had_active {
+            set_active_account(store, &account.id)?;
+        }
+        Ok(())
+    })?;
     Ok(account)
 }
 
@@ -387,11 +393,13 @@ pub async fn github_account_add_token(
 
     let mut store = keychain.0.lock().map_err(|e| e.to_string())?;
     let had_active = active_account_id(&store).is_some();
-    upsert_account(&mut store, account.clone(), &token)?;
-    if !had_active {
-        set_active_account(&mut store, &account.id)?;
-    }
-    persist_keychain_ref(&store);
+    update_keychain_ref(&mut store, |store| {
+        upsert_account(store, account.clone(), &token)?;
+        if !had_active {
+            set_active_account(store, &account.id)?;
+        }
+        Ok(())
+    })?;
     Ok(account)
 }
 
@@ -432,8 +440,10 @@ pub async fn github_account_refresh(
     }
 
     let mut store = keychain.0.lock().map_err(|e| e.to_string())?;
-    upsert_account(&mut store, account.clone(), &token)?;
-    persist_keychain_ref(&store);
+    update_keychain_ref(&mut store, |store| {
+        upsert_account(store, account.clone(), &token)?;
+        Ok(())
+    })?;
     Ok(account)
 }
 
@@ -444,9 +454,7 @@ pub async fn github_account_switch(
     account_id: String,
 ) -> Result<(), String> {
     let mut store = keychain.0.lock().map_err(|e| e.to_string())?;
-    set_active_account(&mut store, &account_id)?;
-    persist_keychain_ref(&store);
-    Ok(())
+    update_keychain_ref(&mut store, |store| set_active_account(store, &account_id))
 }
 
 /// Disconnect one account (token + metadata). When the active account is
@@ -457,9 +465,9 @@ pub async fn github_account_remove(
     account_id: String,
 ) -> Result<(), String> {
     let mut store = keychain.0.lock().map_err(|e| e.to_string())?;
-    remove_account(&mut store, &account_id)?;
-    persist_keychain_ref(&store);
-    Ok(())
+    update_keychain_ref(&mut store, |store| {
+        remove_account(store, &account_id).map(|_| ())
+    })
 }
 
 /// Return the scopes granted to an account, if known.

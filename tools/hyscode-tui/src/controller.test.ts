@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { BridgeRequest, BridgeResponse, RuntimeReadyPayload } from '@hyscode/tui-runtime';
+import type { BridgeRequest, BridgeResponse, RuntimeReadyPayload, SessionRecord, SddStatePayload } from '@hyscode/tui-runtime';
 import { CliUpdater } from '@hyscode/tui-runtime';
 import { TuiController, summarizeToolInput, type RuntimeClient } from './controller';
 import type { TerminalHandoffOutcome } from './terminal-handoff';
@@ -33,6 +33,7 @@ function readyPayload(workspacePath: string, includeThinkingModel = false): Runt
 
 class FakeRuntime implements RuntimeClient {
   readonly requests: BridgeRequest[] = [];
+  sessionLoadResult: unknown = { ok: true };
   private onRequest: ((request: BridgeRequest) => void) | null = null;
 
   constructor(private readonly createReadyPayload: (workspacePath: string) => RuntimeReadyPayload = readyPayload) {}
@@ -44,7 +45,19 @@ class FakeRuntime implements RuntimeClient {
   async handle(request: BridgeRequest): Promise<BridgeResponse> {
     this.requests.push(request);
     this.onRequest?.(request);
-    const result = request.method === 'initialize' || request.method === 'set_config' ? this.createReadyPayload(String(request.params?.workspacePath ?? 'C:/workspace')) : request.method === 'diagnostics' ? [] : request.method === 'shutdown' ? { shutdown: true } : request.method === 'resolve_interaction' ? { resolved: true } : request.method.startsWith('goal_') ? null : { ok: true };
+    const result = request.method === 'initialize' || request.method === 'set_config'
+      ? this.createReadyPayload(String(request.params?.workspacePath ?? 'C:/workspace'))
+      : request.method === 'session_load'
+        ? this.sessionLoadResult
+        : request.method === 'diagnostics'
+          ? []
+          : request.method === 'shutdown'
+            ? { shutdown: true }
+            : request.method === 'resolve_interaction'
+              ? { resolved: true }
+              : request.method.startsWith('goal_')
+                ? null
+                : { ok: true };
     return { type: 'response', id: request.id, ok: true, result };
   }
 }
@@ -66,6 +79,193 @@ describe('TUI controller', () => {
       { kind: 'assistant', text: 'resposta' },
     ]));
     expect(controller.state.running).toBe(false);
+  });
+
+  it('keeps transient work intact when runtime configuration refreshes the same session', async () => {
+    const session: SessionRecord = {
+      id: 'conversation-current',
+      title: 'Current conversation',
+      workspacePath: 'C:/workspace',
+      providerId: null,
+      modelId: null,
+      agentType: 'chat',
+      updatedAt: '2026-09-01T00:00:00.000Z',
+      messageCount: 0,
+      messages: [],
+      tokenUsage: { inputTokens: 2, outputTokens: 1, totalTokens: 3 },
+    };
+    const runtime = new FakeRuntime((workspacePath) => ({ ...readyPayload(workspacePath), session }));
+    const controller = new TuiController({ workspace: 'C:/workspace' }, runtime);
+    await controller.start();
+    controller.handleRuntimeMessage({
+      type: 'event',
+      event: 'harness_event',
+      payload: { type: 'turn_start', turnId: 'parent-turn', conversationId: session.id, iteration: 1 },
+    });
+    controller.handleRuntimeMessage({
+      type: 'event',
+      event: 'harness_event',
+      payload: { type: 'stream_chunk', chunk: { type: 'text_delta', text: 'Current live response' } },
+    });
+    controller.handleRuntimeMessage({
+      type: 'event',
+      event: 'harness_event',
+      payload: { type: 'stream_chunk', chunk: { type: 'usage', usage: { inputTokens: 90, outputTokens: 12, totalTokens: 102 } } },
+    });
+    controller.handleRuntimeMessage({
+      type: 'event',
+      event: 'harness_event',
+      payload: { type: 'tool_call_start', toolCallId: 'active-tool', toolName: 'read_file', input: { path: 'src/app.ts' } },
+    });
+    controller.handleRuntimeMessage({
+      type: 'event',
+      event: 'harness_event',
+      payload: {
+        type: 'file_change_pending',
+        change: { toolCallId: 'pending-change', toolName: 'write_file', filePath: 'src/app.ts', originalContent: 'old', newContent: 'new' },
+      },
+    });
+    controller.handleRuntimeMessage({
+      type: 'event',
+      event: 'harness_event',
+      payload: { type: 'tool_call_start', toolCallId: 'spawn-1', toolName: 'spawn_subagent', input: { task: 'Review current work', mode: 'review' } },
+    });
+    controller.handleRuntimeMessage({
+      type: 'event',
+      event: 'scoped_harness_event',
+      payload: { ownerId: 'spawn-1', event: { type: 'turn_start', conversationId: session.id, iteration: 1 } },
+    });
+    controller.state.status = 'Waiting for child review';
+    controller.state.terminals = [{
+      terminalId: 'stale-terminal',
+      ptyId: 'pty-stale',
+      name: 'Stale terminal',
+      alive: true,
+      sequence: 0,
+      outputPreview: '',
+      frameLanguage: 'bash',
+      role: 'user',
+      ownerConversationId: 'conversation-old',
+      failure: null,
+    }];
+
+    const refresh = {
+      ...readyPayload('C:/workspace'),
+      activeAgentType: 'build' as const,
+      session,
+      terminals: [
+        {
+          terminalId: 'current-terminal',
+          ptyId: 'pty-current',
+          name: 'Current terminal',
+          alive: true,
+          sequence: 0,
+          outputPreview: '',
+          frameLanguage: 'bash' as const,
+          role: 'user' as const,
+          ownerConversationId: session.id,
+          failure: null,
+        },
+        {
+          terminalId: 'other-terminal',
+          ptyId: 'pty-other',
+          name: 'Other terminal',
+          alive: true,
+          sequence: 0,
+          outputPreview: '',
+          frameLanguage: 'bash' as const,
+          role: 'user' as const,
+          ownerConversationId: 'conversation-old',
+          failure: null,
+        },
+      ],
+    };
+    controller.handleRuntimeMessage({ type: 'event', event: 'runtime_ready', payload: refresh });
+
+    expect(controller.state.currentSessionId).toBe(session.id);
+    expect(controller.state.mode).toBe('build');
+    expect(controller.state.running).toBe(true);
+    expect(controller.state.status).toBe('Waiting for child review');
+    expect(controller.state.transcript).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: 'assistant', text: 'Current live response' }),
+      expect.objectContaining({ kind: 'tool', toolId: 'active-tool' }),
+    ]));
+    expect(controller.state.tools.find((tool) => tool.id === 'active-tool')?.status).toBe('running');
+    expect(controller.state.fileChanges).toEqual(expect.arrayContaining([
+      expect.objectContaining({ toolCallId: 'pending-change', status: 'pending' }),
+    ]));
+    expect(controller.state.subagents[0]?.status).toBe('running');
+    expect(controller.state.usage.inputTokens).toBe(90);
+    expect(controller.state.terminals.map((terminal) => terminal.terminalId)).toEqual(['current-terminal']);
+  });
+
+  it('restores mode, cumulative usage, and available SDD state when loading a session', async () => {
+    const runtime = new FakeRuntime();
+    const controller = new TuiController({ workspace: 'C:/workspace' }, runtime);
+    await controller.start();
+    const session: SessionRecord = {
+      id: 'session-target',
+      title: 'Restored build session',
+      workspacePath: 'C:/workspace',
+      providerId: 'test-provider',
+      modelId: 'thinking-model',
+      agentType: 'build',
+      updatedAt: '2026-09-02T00:00:00.000Z',
+      messageCount: 1,
+      messages: [{
+        role: 'user',
+        content: [{ type: 'text', text: 'Resume this build session.' }],
+        id: 'message-1',
+        createdAt: '2026-09-02T00:00:00.000Z',
+      }],
+      tokenUsage: { inputTokens: 3200, outputTokens: 400, totalTokens: 3600, requestCount: 3, estimatedCostUsd: 0.42 },
+    };
+    const sddSession = {
+      id: 'sdd-session-target',
+      projectId: 'project',
+      conversationId: session.id,
+      description: 'Resume the plan',
+      spec: 'Restored spec',
+      specApproved: true,
+      tasks: [],
+      status: 'planning' as const,
+      createdAt: '2026-09-02T00:00:00.000Z',
+      updatedAt: '2026-09-02T01:00:00.000Z',
+    };
+    const sdd: SddStatePayload = {
+      sessionId: sddSession.id,
+      session: sddSession,
+      tasks: [],
+      phase: 'planning',
+      spec: sddSession.spec,
+      review: null,
+      failedTask: null,
+    };
+    runtime.sessionLoadResult = session;
+    runtime.setRequestObserver((request) => {
+      if (request.method === 'session_load') {
+        controller.handleRuntimeMessage({ type: 'event', event: 'sdd_updated', payload: sdd });
+      }
+    });
+
+    await controller.handleKey({ type: 'character', value: '/load session-target' });
+    await controller.handleKey({ type: 'enter' });
+
+    expect(controller.state.currentSessionId).toBe(session.id);
+    expect(controller.state.mode).toBe('build');
+    expect(controller.state.usage).toMatchObject({
+      current: null,
+      session: session.tokenUsage,
+      inputTokens: 3200,
+      outputTokens: 400,
+      totalTokens: 3600,
+      requestCount: 3,
+      estimatedCost: 0.42,
+    });
+    expect(controller.state.sdd).toMatchObject({ sessionId: sddSession.id, phase: 'planning', spec: 'Restored spec' });
+    expect(controller.state.transcript).toEqual(expect.arrayContaining([
+      { kind: 'user', text: 'Resume this build session.' },
+    ]));
   });
 
   it('projects terminal updates by id, normalizes framing, and ignores stale sequences', async () => {
@@ -923,6 +1123,98 @@ describe('TUI controller delegation and task surfaces', () => {
     expect(controller.state.transcript.filter((item) => item.toolId === 'child-tool-1')).toHaveLength(1);
     expect(controller.state.tools.filter((tool) => tool.id === 'child-tool-1')).toHaveLength(1);
     expect(controller.state.tools.find((tool) => tool.id === 'child-tool-1')).toMatchObject({ ownerId: 'spawn-1' });
+  });
+
+  it('projects scoped child file review and terminal progress independently of the parent turn id', async () => {
+    const controller = new TuiController({ workspace: 'C:/workspace' }, new FakeRuntime());
+    await controller.start();
+    controller.handleRuntimeMessage({
+      type: 'event',
+      event: 'harness_event',
+      payload: { type: 'turn_start', turnId: 'parent-turn', conversationId: 'conversation-current', iteration: 1 },
+    });
+    delegate(controller);
+
+    scoped(controller, 'spawn-1', {
+      type: 'file_change_pending',
+      change: {
+        toolCallId: 'child-file-change',
+        toolName: 'write_file',
+        filePath: 'src/child.ts',
+        originalContent: 'old child content',
+        newContent: 'new child content',
+      },
+    });
+    scoped(controller, 'spawn-1', {
+      type: 'tool_call_start',
+      toolCallId: 'child-terminal-tool',
+      toolName: 'run_terminal_command',
+      input: { command: 'npm test' },
+    });
+    scoped(controller, 'spawn-1', {
+      type: 'terminal_progress',
+      turnId: 'child-turn',
+      conversationId: 'conversation-current',
+      progress: {
+        toolCallId: 'child-terminal-tool',
+        terminalId: 'child-terminal',
+        sequence: 1,
+        chunk: 'child output',
+        state: 'running',
+      },
+    });
+
+    expect(controller.state.fileChanges).toEqual(expect.arrayContaining([
+      expect.objectContaining({ toolCallId: 'child-file-change', status: 'pending' }),
+    ]));
+    expect(controller.state.tools.find((tool) => tool.id === 'child-terminal-tool')).toMatchObject({
+      ownerId: 'spawn-1',
+      terminalId: 'child-terminal',
+      status: 'running',
+      liveOutput: 'child output',
+    });
+
+    controller.handleRuntimeMessage({
+      type: 'event',
+      event: 'terminal_updated',
+      payload: {
+        terminal: {
+          terminalId: 'child-terminal',
+          ptyId: 'pty-child-terminal',
+          name: 'Child terminal',
+          alive: true,
+          sequence: 1,
+          outputPreview: 'child output',
+          frameLanguage: 'bash',
+          role: 'agent',
+          ownerConversationId: 'conversation-current',
+          ownerId: 'spawn-1',
+          activeToolCallId: 'child-terminal-tool',
+          awaitingInput: false,
+          failure: null,
+        },
+        cause: 'output',
+        turnId: 'parent-turn',
+        conversationId: 'conversation-current',
+      },
+    });
+    controller.handleRuntimeMessage({
+      type: 'event',
+      event: 'file_change_updated',
+      payload: {
+        toolCallId: 'child-file-change',
+        toolName: 'write_file',
+        filePath: 'src/child.ts',
+        originalContent: 'old child content',
+        newContent: 'new child content',
+        status: 'accepted',
+      },
+    });
+
+    expect(controller.state.terminals).toEqual(expect.arrayContaining([
+      expect.objectContaining({ terminalId: 'child-terminal', ownerId: 'spawn-1', sequence: 1 }),
+    ]));
+    expect(controller.state.fileChanges.find((change) => change.toolCallId === 'child-file-change')?.status).toBe('accepted');
   });
 
   it('cancels an active sub-agent by list position and refuses finished ones', async () => {

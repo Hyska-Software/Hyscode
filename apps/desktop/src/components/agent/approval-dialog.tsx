@@ -77,11 +77,13 @@ interface ApprovalDialogProps {
 
 export function ApprovalDialog({ approval }: ApprovalDialogProps) {
   const [detailOpen, setDetailOpen] = useState(false);
+  const [confirmingExternalAccess, setConfirmingExternalAccess] = useState(false);
   // Two-click confirm for "Approve all": the first click arms the button and
   // explains the consequence instead of silently flipping global approval mode.
   const [approveAllArmed, setApproveAllArmed] = useState(false);
   useEffect(() => {
     setApproveAllArmed(false);
+    setConfirmingExternalAccess(false);
   }, [approval.id]);
   const approvalMode = useSettingsStore((s) => s.approvalMode);
   const risk = inferRiskLevel(approval.toolName);
@@ -96,18 +98,40 @@ export function ApprovalDialog({ approval }: ApprovalDialogProps) {
         ? 'execute a command with an external working directory'
         : 'read external files or directories';
 
+  const confirmExternalAccess = async (grantType: 'once' | 'session-directory') => {
+    if (!externalAccess || confirmingExternalAccess) return;
+    setConfirmingExternalAccess(true);
+    try {
+      const bridge = getActiveAgentBridge();
+      const nativeGrantId = await bridge.confirmExternalPathAccess(externalAccess, grantType);
+      bridge.resolveApproval(approval.id, {
+        approved: true,
+        externalGrant: grantType,
+        nativeGrantId,
+      });
+    } catch (error) {
+      useExtensionUiStore
+        .getState()
+        .showNotification(
+          'warning',
+          `External access was not approved by the native path picker: ${error instanceof Error ? error.message : String(error)}`,
+          'Approvals',
+        );
+    } finally {
+      setConfirmingExternalAccess(false);
+    }
+  };
+
   const handleApprove = () => {
-    getActiveAgentBridge().resolveApproval(
-      approval.id,
-      isExternal ? { approved: true, externalGrant: 'once' } : true,
-    );
+    if (isExternal) {
+      void confirmExternalAccess('once');
+      return;
+    }
+    getActiveAgentBridge().resolveApproval(approval.id, true);
   };
 
   const handleAllowDirectory = () => {
-    getActiveAgentBridge().resolveApproval(approval.id, {
-      approved: true,
-      externalGrant: 'session-directory',
-    });
+    void confirmExternalAccess('session-directory');
   };
 
   const handleApproveAll = () => {
@@ -261,6 +285,7 @@ export function ApprovalDialog({ approval }: ApprovalDialogProps) {
           <Button
             size="sm"
             onClick={handleApprove}
+            disabled={confirmingExternalAccess}
             className="h-7 gap-1.5 rounded-md bg-success px-3.5 text-[11px] font-medium hover:bg-success/90 transition-colors"
           >
             <Check className="h-3 w-3" />
@@ -272,6 +297,7 @@ export function ApprovalDialog({ approval }: ApprovalDialogProps) {
               size="sm"
               variant="ghost"
               onClick={handleAllowDirectory}
+              disabled={confirmingExternalAccess}
               className="h-7 gap-1.5 rounded-md px-3 text-[11px] text-warning/90 hover:bg-warning/10 hover:text-warning transition-colors"
             >
               Allow directory for this session

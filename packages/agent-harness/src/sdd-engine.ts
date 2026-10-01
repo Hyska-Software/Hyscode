@@ -38,7 +38,7 @@ function parsePlanTasks(response: string): RawPlanTask[] {
     throw new Error('Plan must be a non-empty JSON array.');
   }
 
-  return parsed.map((value, index) => {
+  const tasks = parsed.map((value, index) => {
     if (!value || typeof value !== 'object' || Array.isArray(value)) {
       throw new Error(`Plan task ${index} must be an object.`);
     }
@@ -66,6 +66,18 @@ function parsePlanTasks(response: string): RawPlanTask[] {
       dependencies,
     };
   });
+  const states = new Array<'unvisited' | 'visiting' | 'visited'>(tasks.length).fill('unvisited');
+  const visit = (index: number): void => {
+    if (states[index] === 'visiting') {
+      throw new Error(`Plan contains a dependency cycle involving task ${index}.`);
+    }
+    if (states[index] === 'visited') return;
+    states[index] = 'visiting';
+    for (const dependency of tasks[index].dependencies) visit(dependency);
+    states[index] = 'visited';
+  };
+  for (let index = 0; index < tasks.length; index++) visit(index);
+  return tasks;
 }
 
 // ─── Database Interface ─────────────────────────────────────────────────────
@@ -236,7 +248,12 @@ export interface SddEngineConfig {
   db: SddDatabase;
   eventHandler?: HarnessEventHandler;
   /** Called to run an agent turn (returns the text response) */
-  runAgentTurn: (systemPromptAddon: string, userMessage: string, agentTypeOverride?: import('./types').AgentType) => Promise<import('./types').TurnOutcome>;
+  runAgentTurn: (
+    systemPromptAddon: string,
+    userMessage: string,
+    agentTypeOverride?: import('./types').AgentType,
+    signal?: AbortSignal,
+  ) => Promise<import('./types').TurnOutcome>;
   /** Optional: called when the spec is approved to persist the plan to disk */
   savePlanFile?: (sessionId: string, spec: string, tasks: import('./types').SddTask[]) => Promise<void>;
 }
@@ -246,6 +263,7 @@ export class SddEngine {
   private config: SddEngineConfig;
   private _paused = false;
   private _failedTask: SddTask | null = null;
+  private executionController: AbortController | null = null;
 
   constructor(config: SddEngineConfig) {
     this.config = config;
@@ -270,6 +288,7 @@ export class SddEngine {
 
   async cancel(sessionId: string): Promise<void> {
     this._paused = true;
+    this.executionController?.abort();
     await this.planManager.cancelSession(sessionId);
     this.emitPhaseChange('cancelled');
   }
@@ -284,7 +303,7 @@ export class SddEngine {
 
   // ─── Phase 2: Spec ──────────────────────────────────────────────────
 
-  async generateSpec(sessionId: string, feedback?: string): Promise<string> {
+  async generateSpec(sessionId: string, feedback?: string, signal?: AbortSignal): Promise<string> {
     const session = await this.planManager.getSession(sessionId);
     if (!session) throw new Error(`Session ${sessionId} not found`);
 
@@ -310,6 +329,8 @@ Be specific and actionable. This spec will be used to generate an implementation
     const specOutcome = await this.config.runAgentTurn(
       'You are generating a specification document for a software feature. Be thorough and precise.',
       prompt,
+      undefined,
+      signal,
     );
     if (specOutcome.status !== 'complete') {
       throw new Error(specOutcome.response || `Specification generation stopped with status ${specOutcome.status}.`);
@@ -326,7 +347,7 @@ Be specific and actionable. This spec will be used to generate an implementation
 
   // ─── Phase 3: Plan ──────────────────────────────────────────────────
 
-  async generatePlan(sessionId: string): Promise<SddTask[]> {
+  async generatePlan(sessionId: string, signal?: AbortSignal): Promise<SddTask[]> {
     const session = await this.planManager.getSession(sessionId);
     if (!session || !session.spec) throw new Error('Session has no approved spec');
 
@@ -350,6 +371,8 @@ Order tasks so dependencies come first.`;
     const planOutcome = await this.config.runAgentTurn(
       'You are a project planner. Generate a precise, ordered task list as JSON.',
       prompt,
+      undefined,
+      signal,
     );
     if (planOutcome.status !== 'complete') {
       throw new Error(planOutcome.response || `Plan generation stopped with status ${planOutcome.status}.`);
@@ -405,6 +428,25 @@ Order tasks so dependencies come first.`;
     sessionId: string,
     options: { maxIterations?: number; signal?: AbortSignal; turnTimeoutMs?: number } = {},
   ): Promise<'completed' | 'paused' | 'failed' | 'cancelled'> {
+    if (this.executionController) throw new Error('SDD execution is already active.');
+    const controller = new AbortController();
+    this.executionController = controller;
+    const forwardAbort = (): void => controller.abort();
+    if (options.signal?.aborted) controller.abort();
+    else options.signal?.addEventListener('abort', forwardAbort, { once: true });
+    try {
+      return await this.executeWithSignal(sessionId, options, controller.signal);
+    } finally {
+      options.signal?.removeEventListener('abort', forwardAbort);
+      if (this.executionController === controller) this.executionController = null;
+    }
+  }
+
+  private async executeWithSignal(
+    sessionId: string,
+    options: { maxIterations?: number; signal?: AbortSignal; turnTimeoutMs?: number },
+    signal: AbortSignal,
+  ): Promise<'completed' | 'paused' | 'failed' | 'cancelled'> {
     const maxIterations = options.maxIterations ?? 100;
     const turnTimeoutMs = options.turnTimeoutMs ?? 5 * 60 * 1000;
     this.emitPhaseChange('executing');
@@ -416,7 +458,7 @@ Order tasks so dependencies come first.`;
 
     let iterations = 0;
     while (!this._paused) {
-      if (options.signal?.aborted) return 'cancelled';
+      if (signal.aborted) return 'cancelled';
       iterations++;
       if (iterations > maxIterations) {
         throw new Error(`SDD execution reached max_iterations (${maxIterations}).`);
@@ -467,7 +509,7 @@ Complete this task by using the available tools. Read files before modifying the
 When done, provide a brief summary of what you did.`;
 
       try {
-        if (options.signal?.aborted) {
+        if (signal.aborted) {
           await this.planManager.updateTaskStatus(task.id, 'pending');
           this._paused = true;
           return 'cancelled';
@@ -476,7 +518,7 @@ When done, provide a brief summary of what you did.`;
           systemAddon,
           taskPrompt,
           turnTimeoutMs,
-          options.signal,
+          signal,
         );
         if (outcome.status === 'cancelled') {
           await this.planManager.updateTaskStatus(task.id, 'pending');
@@ -498,6 +540,11 @@ When done, provide a brief summary of what you did.`;
         const refreshed = await this.planManager.getSession(sessionId);
         if (refreshed) session.tasks = refreshed.tasks;
       } catch (err) {
+        if (signal.aborted) {
+          await this.planManager.updateTaskStatus(task.id, 'pending');
+          this._paused = true;
+          return 'cancelled';
+        }
         const errorMsg = err instanceof Error ? err.message : String(err);
         await this.planManager.updateTaskStatus(task.id, 'failed', errorMsg);
 
@@ -528,7 +575,7 @@ When done, provide a brief summary of what you did.`;
 
   // ─── Phase 5: Review ───────────────────────────────────────────────
 
-  async review(sessionId: string): Promise<string> {
+  async review(sessionId: string, signal?: AbortSignal): Promise<string> {
     const session = await this.planManager.getSession(sessionId);
     if (!session) throw new Error(`Session ${sessionId} not found`);
     if (session.status === 'completed') throw new Error(`Session ${sessionId} has already been reviewed.`);
@@ -566,6 +613,7 @@ Provide a summary of the implementation and any issues found.`;
       'You are reviewing a completed implementation. Be thorough but fair.',
       prompt,
       'review',
+      signal,
     );
 
     if (reviewOutcome.status !== 'complete') {
@@ -586,19 +634,22 @@ Provide a summary of the implementation and any issues found.`;
     turnTimeoutMs: number,
     signal?: AbortSignal,
   ): Promise<import('./types').TurnOutcome> {
-    const run = this.config.runAgentTurn(systemAddon, taskPrompt);
+    const run = this.config.runAgentTurn(systemAddon, taskPrompt, undefined, signal);
     let timer: ReturnType<typeof setTimeout> | null = null;
     const timeout = new Promise<never>((_, reject) => {
       timer = setTimeout(() => reject(new Error(`SDD task turn timed out after ${turnTimeoutMs}ms.`)), turnTimeoutMs);
     });
+    let abortListener: (() => void) | null = null;
     const abort = new Promise<never>((_, reject) => {
-      if (signal?.aborted) reject(new Error('SDD execution cancelled.'));
-      else signal?.addEventListener('abort', () => reject(new Error('SDD execution cancelled.')), { once: true });
+      abortListener = () => reject(new Error('SDD execution cancelled.'));
+      if (signal?.aborted) abortListener();
+      else signal?.addEventListener('abort', abortListener, { once: true });
     });
     try {
       return await Promise.race([run, timeout, abort]);
     } finally {
       if (timer) clearTimeout(timer);
+      if (abortListener) signal?.removeEventListener('abort', abortListener);
     }
   }
 

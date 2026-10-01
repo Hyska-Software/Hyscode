@@ -81,6 +81,10 @@ export interface McpServerConfig {
   url?: string;
   /** For WebSocket: url */
   wsUrl?: string;
+  /** Non-secret keychain lookup for an HTTP authentication value. */
+  authSecretAccount?: string;
+  /** HTTP header name paired with authSecretAccount. */
+  authHeaderName?: string;
   enabled: boolean;
   /** Allow this server's tools to be exposed to delegated sub-agents. */
   agentSafe: boolean;

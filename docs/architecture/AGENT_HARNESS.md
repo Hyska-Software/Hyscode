@@ -411,13 +411,13 @@ same prefix fingerprint for later diagnosis.
 
 Each API attempt records a `PromptCacheObservation` with one of these states:
 
-| State | Meaning | Hit denominator |
-| --- | --- | --- |
-| `hit` | Native cache read was reported for an eligible prefix | yes |
-| `miss` | Native cache fields were reported but no read occurred | yes |
-| `not-reported` | Provider supports caching but omitted cache usage fields | no |
-| `ineligible` | Stable prefix is below the 1,024-token minimum | no |
-| `unsupported` | Provider/model does not expose prompt caching | no |
+| State          | Meaning                                                  | Hit denominator |
+| -------------- | -------------------------------------------------------- | --------------- |
+| `hit`          | Native cache read was reported for an eligible prefix    | yes             |
+| `miss`         | Native cache fields were reported but no read occurred   | yes             |
+| `not-reported` | Provider supports caching but omitted cache usage fields | no              |
+| `ineligible`   | Stable prefix is below the 1,024-token minimum           | no              |
+| `unsupported`  | Provider/model does not expose prompt caching            | no              |
 
 The trace and persisted turn record keep both token-weighted and request-weighted
 metrics. The weighted rate is bounded to the eligible prefix, so cached history or
@@ -505,7 +505,8 @@ Agent requests tool_call
       → Add one combined request to pendingToolCalls in agentStore
       → UI shows the tool and external path preview
       → User approves, grants the directory for this session, or rejects
-      → If approved: execute with an authorized per-call path resolver
+      → If approved: the Desktop host also requires an OS-native exact-path selection and passes an opaque, expiring native grant to Rust
+      → Execute with an authorized per-call path resolver; Rust independently validates the native grant and canonical path
       → If rejected: return a recoverable rejection reason to the agent
   → If no external approval is required and the tool is auto-approved:
       → Execute immediately
@@ -519,6 +520,15 @@ Agent requests tool_call
 - `session-trust`: approve a tool type once per session
 - `notify`: execute without blocking and emit a notification
 - `yolo`: execute without normal tool approval; external path access still requires explicit user approval
+
+The Rust filesystem boundary independently enforces native-selected workspace roots. External
+read/write/execute grants are operation-scoped and cannot be manufactured by passing a different
+workspace root in tool arguments. Project-controlled diagnostics require both Harness approval
+(unless that tool is trusted for the session) and a dedicated native confirmation token; direct
+diagnostics IPC without a valid token fails closed. One-call filesystem grants are revoked after the
+tool completes, except write grants retained until edit review is accepted or reverted. Session
+grants are revoked when the conversation/session changes or its Desktop bridge is disposed.
+
 - `custom`: tool overrides, then category overrides, then tool defaults
 
 ---
@@ -668,7 +678,7 @@ and the compatibility runtime entrypoint reuse the same serialized request/event
 automation, including `initialize`, `send_message`, approvals, terminal events, cancellation, and
 shutdown.
 
-Workspace-relative paths are normalized and checked by segment containment. Absolute paths outside the workspace are classified before the handler runs and require explicit user approval in every approval mode. `allow once` applies only to the current tool call; `allow directory for this session` stores an operation-specific, non-persistent directory grant. Read grants never authorize writes or terminal execution. The terminal command text is not parsed for paths; only its `cwd` field participates in this gate. If no approval callback exists, external access fails closed.
+Workspace-relative paths are normalized and checked by segment containment. Absolute paths outside the workspace are classified before the handler runs and require explicit user approval in every approval mode. `allow once` applies only to the current tool call; `allow directory for this session` stores an operation-specific, non-persistent directory grant. Rust independently validates OS-picker-derived native grants for external filesystem access and PTY working directories. Read grants never authorize writes or terminal execution. The terminal command text is not parsed for paths; only its `cwd` field participates in this gate. If no approval callback exists, external access fails closed. Project diagnostics are explicitly approval-sensitive and additionally require native confirmation before Rust can launch project-configured tooling.
 
 | Error Type                 | Handling                                                        |
 | -------------------------- | --------------------------------------------------------------- |

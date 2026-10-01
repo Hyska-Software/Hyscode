@@ -40,6 +40,23 @@ interface OpenAITool {
   function: { name: string; description: string; parameters: Record<string, unknown> };
 }
 
+type ParsedOpenAIChunk =
+  | StreamChunk
+  | {
+      type: 'tool_call_fragment';
+      index?: number;
+      id?: string;
+      name?: string;
+      arguments?: string;
+    };
+
+type OpenAIToolCallState = {
+  id?: string;
+  name?: string;
+  started: boolean;
+  pendingArguments: string;
+};
+
 export function toOpenAIMessages(
   messages: Message[],
   systemPrompt?: string,
@@ -155,7 +172,7 @@ export function toOpenAITools(tools: ToolDefinition[]): OpenAITool[] {
 
 // ─── SSE Parsing ────────────────────────────────────────────────────────────
 
-function parseOpenAIChunk(data: string): StreamChunk[] {
+function parseOpenAIChunk(data: string): ParsedOpenAIChunk[] {
   let parsed: Record<string, unknown>;
   try {
     parsed = JSON.parse(data);
@@ -171,11 +188,8 @@ function parseOpenAIChunk(data: string): StreamChunk[] {
     );
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const usage = parsed.usage as any;
-
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const choices = parsed.choices as any[];
+  const usage = parsed.usage as Record<string, unknown> | undefined;
+  const choices = parsed.choices as Array<Record<string, unknown>> | undefined;
   if (!choices?.length) {
     // Usage-only chunk (no choices).
     if (usage) {
@@ -190,8 +204,8 @@ function parseOpenAIChunk(data: string): StreamChunk[] {
   }
 
   const choice = choices[0];
-  const delta = choice.delta;
-  const finishReason = choice.finish_reason;
+  const delta = choice.delta as Record<string, unknown> | undefined;
+  const finishReason = choice.finish_reason as string | null | undefined;
 
   if (finishReason) {
     const reasonMap: Record<string, StopReason> = {
@@ -199,7 +213,7 @@ function parseOpenAIChunk(data: string): StreamChunk[] {
       tool_calls: 'tool_use',
       length: 'max_tokens',
     };
-    const chunks: StreamChunk[] = [];
+    const chunks: ParsedOpenAIChunk[] = [];
     // OpenAI may include usage in the same chunk as finish_reason — emit it first.
     if (usage) {
       chunks.push({
@@ -211,32 +225,38 @@ function parseOpenAIChunk(data: string): StreamChunk[] {
     return chunks;
   }
 
-  if (delta?.reasoning_content) {
-    return [{ type: 'thinking_delta', text: delta.reasoning_content }];
+  const chunks: ParsedOpenAIChunk[] = [];
+  if (typeof delta?.reasoning_content === 'string' && delta.reasoning_content) {
+    chunks.push({ type: 'thinking_delta', text: delta.reasoning_content });
+  } else if (typeof delta?.reasoning === 'string' && delta.reasoning) {
+    // Some proxies (e.g., Xiaomi/MiMo via OpenRouter) use delta.reasoning.
+    chunks.push({ type: 'thinking_delta', text: delta.reasoning });
+  } else if (typeof delta?.content === 'string' && delta.content) {
+    chunks.push({ type: 'text_delta', text: delta.content });
   }
 
-  // Some proxies (e.g., Xiaomi/MiMo via OpenRouter) return reasoning in delta.reasoning
-  // instead of the OpenAI-standard delta.reasoning_content.
-  if (delta?.reasoning) {
-    return [{ type: 'thinking_delta', text: delta.reasoning }];
+  const toolCalls = delta?.tool_calls as Array<Record<string, unknown>> | undefined;
+  for (const toolCall of toolCalls ?? []) {
+    const fn = toolCall.function as Record<string, unknown> | undefined;
+    const hasArguments = typeof fn?.arguments === 'string' && fn.arguments.length > 0;
+    const hasName = typeof fn?.name === 'string' && fn.name.length > 0;
+    const hasId = typeof toolCall.id === 'string' && toolCall.id.length > 0;
+    const hasIndex = typeof toolCall.index === 'number';
+    // Drop empty fragments that carry neither identity nor payload. Without
+    // this, index-less/identity-less heartbeats would create orphan states
+    // that never start and leak pending arguments.
+    if (!hasIndex && !hasId && !hasName && !hasArguments) continue;
+    const fragment = {
+      type: 'tool_call_fragment',
+      index: hasIndex ? (toolCall.index as number) : undefined,
+      id: hasId ? (toolCall.id as string) : undefined,
+      name: hasName ? (fn?.name as string) : undefined,
+      arguments: hasArguments ? (fn?.arguments as string) : undefined,
+    } as const;
+    chunks.push(fragment);
   }
 
-  if (delta?.content) {
-    return [{ type: 'text_delta', text: delta.content }];
-  }
-
-  if (delta?.tool_calls) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const tc = delta.tool_calls[0] as any;
-    if (tc.function?.name) {
-      return [{ type: 'tool_call_start', id: tc.id ?? '', name: tc.function.name }];
-    }
-    if (tc.function?.arguments) {
-      return [{ type: 'tool_call_delta', id: tc.id ?? '', input: tc.function.arguments }];
-    }
-  }
-
-  return [];
+  return chunks;
 }
 
 function normalizeOpenAIUsage(usage: Record<string, unknown>): import('../types').TokenUsage {
@@ -364,8 +384,7 @@ export class OpenAIProvider implements AIProvider {
         if (this.id !== 'openai') return 'automatic';
         return supportsExplicitPromptCaching(modelId) ? 'explicit-breakpoints' : 'automatic-keyed';
       },
-      acceptsPromptCacheKeyForModel: (modelId) =>
-        this.id === 'openai' && modelId.length > 0,
+      acceptsPromptCacheKeyForModel: (modelId) => this.id === 'openai' && modelId.length > 0,
     };
   }
 
@@ -499,64 +518,63 @@ export class OpenAIProvider implements AIProvider {
       );
     }
 
-    // Track tool call IDs across delta chunks.
-    // OpenAI never sends tool_call_end — we must synthesize it when a new
-    // tool starts or the stream finishes with stopReason 'tool_use'.
-    // Some proxies emit a `name` chunk with an empty id before the real id
-    // arrives: buffer the name + args until a non-empty id shows up so we
-    // never yield tool_call_* chunks with an empty id.
-    let currentToolCallId = '';
-    let pendingName: string | null = null;
-    let pendingArgs = '';
+    // Parallel tool-call deltas are interleaved by index. Keep their identity and
+    // any arguments that arrive before both ID and name are available.
+    const toolCallsByIndex = new Map<number, OpenAIToolCallState>();
+    const toolCallsById = new Map<string, OpenAIToolCallState>();
+    const toolCallStates = new Set<OpenAIToolCallState>();
+    // Fallback for providers that omit both `index` and `id` on continuation
+    // fragments: attach the payload to the most recently touched call instead
+    // of spawning an orphan state per chunk.
+    let mostRecentState: OpenAIToolCallState | undefined;
 
     for await (const data of parseSSEStream(response, params.signal)) {
       const chunks = parseOpenAIChunk(data);
 
       for (const chunk of chunks) {
-        if (chunk.type === 'tool_call_start') {
-          if (!chunk.id) {
-            // Id not assigned yet — hold the name until the id arrives.
-            pendingName = chunk.name;
-            continue;
+        if (chunk.type === 'tool_call_fragment') {
+          let state = chunk.index !== undefined ? toolCallsByIndex.get(chunk.index) : undefined;
+          if (!state && chunk.id) state = toolCallsById.get(chunk.id);
+          if (!state && chunk.index === undefined && chunk.id === undefined)
+            state = mostRecentState;
+          if (!state) {
+            state = { started: false, pendingArguments: '' };
+            toolCallStates.add(state);
           }
-          if (pendingName !== null || pendingArgs) {
-            // Flush buffered pre-id state under the now-known id.
-            if (currentToolCallId) {
-              yield { type: 'tool_call_end' as const, id: currentToolCallId };
+          mostRecentState = state;
+          if (chunk.index !== undefined) toolCallsByIndex.set(chunk.index, state);
+          if (chunk.id) {
+            state.id = chunk.id;
+            toolCallsById.set(chunk.id, state);
+          }
+          if (chunk.name) state.name = chunk.name;
+          if (chunk.arguments) state.pendingArguments += chunk.arguments;
+
+          if (!state.started && state.id && state.name) {
+            state.started = true;
+            yield { type: 'tool_call_start', id: state.id, name: state.name };
+          }
+          if (state.started && state.id && state.pendingArguments) {
+            yield {
+              type: 'tool_call_delta',
+              id: state.id,
+              input: state.pendingArguments,
+            };
+            state.pendingArguments = '';
+          }
+          continue;
+        }
+
+        if (chunk.type === 'done') {
+          for (const state of toolCallStates) {
+            if (state.started && state.id) {
+              yield { type: 'tool_call_end', id: state.id };
             }
-            currentToolCallId = chunk.id;
-            yield chunk;
-            if (pendingArgs) {
-              yield { type: 'tool_call_delta' as const, id: currentToolCallId, input: pendingArgs };
-              pendingArgs = '';
-            }
-            pendingName = null;
-            continue;
           }
-          // A new tool call starting means the previous one is done
-          if (currentToolCallId) {
-            yield { type: 'tool_call_end' as const, id: currentToolCallId };
-          }
-          currentToolCallId = chunk.id;
-        } else if (chunk.type === 'tool_call_delta') {
-          if (!chunk.id) {
-            if (!currentToolCallId) {
-              // No id yet — buffer args until the start chunk assigns one.
-              pendingArgs += chunk.input;
-              continue;
-            }
-            yield { ...chunk, id: currentToolCallId };
-            continue;
-          }
-          if (!currentToolCallId) currentToolCallId = chunk.id;
-        } else if (chunk.type === 'done' && chunk.stopReason === 'tool_use') {
-          // Emit tool_call_end for the last active tool before the done signal
-          if (currentToolCallId) {
-            yield { type: 'tool_call_end' as const, id: currentToolCallId };
-            currentToolCallId = '';
-          }
-          pendingName = null;
-          pendingArgs = '';
+          toolCallsByIndex.clear();
+          toolCallsById.clear();
+          toolCallStates.clear();
+          mostRecentState = undefined;
         }
 
         yield chunk;

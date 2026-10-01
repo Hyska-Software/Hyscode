@@ -69,7 +69,21 @@ pub fn run() {
                 }
             }
         })
+        .setup(|_app| {
+            if let Err(error) = commands::fs::restore_authorized_roots() {
+                // Fail closed on malformed or unavailable grant storage. The
+                // user can still select workspace folders again from the UI.
+                eprintln!("[workspace-authority] {error}");
+            }
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
+            commands::fs::workspace_confirm_external_access,
+            commands::fs::workspace_confirm_diagnostics,
+            commands::fs::workspace_revoke_external_grants,
+            commands::fs::workspace_pick_folder,
+            commands::fs::workspace_pick_file,
+            commands::fs::workspace_save_file,
             commands::fs::read_file,
             commands::fs::read_file_chunk,
             commands::fs::write_file,
@@ -81,6 +95,7 @@ pub fn run() {
             commands::fs::join_path,
             commands::fs::validate_name,
             commands::fs::stat_path,
+            commands::fs::path_exists,
             commands::fs::search_files,
             commands::fs::rename_path,
             commands::fs::create_directory,

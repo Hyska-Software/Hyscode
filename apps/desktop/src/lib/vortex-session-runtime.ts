@@ -154,10 +154,16 @@ export class VortexSessionRuntimeManager {
       taskRunId: request.run.id,
       taskTitle: request.task.title,
     });
+    if (!this.isCurrentRecord(record)) throw new Error('The task runtime was disposed.');
+    if (context.signal.aborted) {
+      record.cancelRequested = true;
+      record.status = 'cancelling';
+      this.finishRun(record);
+      throw new Error('Task execution was cancelled.');
+    }
     if (!record.bridge) throw new Error('The dedicated task runtime is not ready.');
 
     record.hasRun = true;
-    record.cancelRequested = false;
     record.status = 'queued';
     record.error = null;
     record.updatedAt = Date.now();
@@ -172,17 +178,32 @@ export class VortexSessionRuntimeManager {
         providerId,
         modelId,
       );
+      if (!this.isCurrentRecord(record)) throw new Error('The task runtime was disposed.');
+      if (context.signal.aborted || record.cancelRequested) {
+        this.finishRun(record);
+        throw new Error('Task execution was cancelled.');
+      }
       await kanbanService.updateTaskRun({
         projectId: context.projectId,
         runId: request.run.id,
         stateName: 'running',
         conversationId,
       });
+      if (!this.isCurrentRecord(record)) throw new Error('The task runtime was disposed.');
+      if (context.signal.aborted || record.cancelRequested) {
+        this.finishRun(record);
+        throw new Error('Task execution was cancelled.');
+      }
       await record.bridge.sendMessage(request.instructions, {
         providerId,
         modelId,
         taskContext: context.taskContext,
       });
+      if (!this.isCurrentRecord(record)) throw new Error('The task runtime was disposed.');
+      if (context.signal.aborted || record.cancelRequested) {
+        this.finishRun(record);
+        throw new Error('Task execution was cancelled.');
+      }
       this.finishRun(record);
       return {
         conversationId,
@@ -190,6 +211,12 @@ export class VortexSessionRuntimeManager {
         summary: `Task completed: ${request.task.title}`,
       };
     } catch (error) {
+      if (!this.isCurrentRecord(record)) throw error;
+      if (context.signal.aborted) record.cancelRequested = true;
+      if (record.cancelRequested || context.signal.aborted) {
+        this.finishRun(record);
+        throw error;
+      }
       record.status = 'error';
       record.error = error instanceof Error ? error.message : String(error);
       record.updatedAt = Date.now();
@@ -245,6 +272,9 @@ export class VortexSessionRuntimeManager {
     const focusGeneration = ++this.focusGeneration;
     const normalizedPath = normalizeProjectPath(projectPath);
     const record = await this.ensureRuntime(normalizedPath, conversationId, options);
+    if (!this.isCurrentRecord(record)) {
+      throw new Error('The VORTEX session runtime was disposed while it was loading.');
+    }
     if (focusGeneration !== this.focusGeneration) {
       if (!record.bridge) throw new Error('The VORTEX session runtime is not ready.');
       return record.bridge;
@@ -288,11 +318,15 @@ export class VortexSessionRuntimeManager {
     options: { hidden?: boolean; excludeLastAssistantFromHistory?: boolean } = {},
   ): Promise<void> {
     const record = await this.ensureFocusedRuntime();
+    if (!this.isCurrentRecord(record)) return;
     if (!record.bridge) throw new Error('The VORTEX session runtime is not ready.');
+    if (record.cancelRequested) {
+      this.finishRun(record);
+      return;
+    }
     if (isVortexRuntimeActive(record.status)) return;
 
     record.hasRun = true;
-    record.cancelRequested = false;
     record.error = null;
     record.status = 'queued';
     record.updatedAt = Date.now();
@@ -300,8 +334,9 @@ export class VortexSessionRuntimeManager {
 
     try {
       await record.bridge.sendMessage(userMessage, options);
-      this.finishRun(record);
+      if (this.isCurrentRecord(record)) this.finishRun(record);
     } catch (error) {
+      if (!this.isCurrentRecord(record)) return;
       record.status = 'error';
       record.error = error instanceof Error ? error.message : String(error);
       record.updatedAt = Date.now();
@@ -317,12 +352,12 @@ export class VortexSessionRuntimeManager {
 
   cancelSession(projectPath: string, conversationId: string): void {
     const record = this.records.get(getVortexRuntimeKey(projectPath, conversationId));
-    if (!record?.bridge || !['starting', 'queued', 'running', 'waiting'].includes(record.status)) return;
+    if (!record || !['starting', 'queued', 'running', 'waiting'].includes(record.status)) return;
     record.cancelRequested = true;
     record.status = 'cancelling';
     record.updatedAt = Date.now();
     this.publish(record);
-    record.bridge.cancel();
+    record.bridge?.cancel();
   }
 
   updateSessionTitle(projectPath: string, conversationId: string, title: string): void {
@@ -341,6 +376,7 @@ export class VortexSessionRuntimeManager {
     record.bridge?.dispose();
     record.unsubscribe();
     this.records.delete(key);
+    this.initialization.delete(key);
     useVortexRuntimeStore.setState((registry) => {
       const snapshots = { ...registry.snapshots };
       delete snapshots[key];
@@ -371,21 +407,31 @@ export class VortexSessionRuntimeManager {
 
   async continueFocusedSession(): Promise<void> {
     const record = await this.ensureFocusedRuntime();
+    if (!this.isCurrentRecord(record)) return;
     if (!record.bridge) throw new Error('The VORTEX session runtime is not ready.');
+    if (record.cancelRequested) {
+      this.finishRun(record);
+      return;
+    }
+    if (isVortexRuntimeActive(record.status)) return;
     const recovery = record.agentStore.getState().recoverableError;
     if (!recovery || recovery.action !== 'continue') {
       throw new Error('The VORTEX session has no partial response to continue.');
     }
     record.hasRun = true;
-    record.cancelRequested = false;
     record.status = 'queued';
     record.error = null;
     record.updatedAt = Date.now();
     this.publish(record);
     try {
       await record.bridge.continuePartialTurn();
-      this.finishRun(record);
+      if (this.isCurrentRecord(record)) this.finishRun(record);
     } catch (cause) {
+      if (!this.isCurrentRecord(record)) return;
+      if (record.cancelRequested) {
+        this.finishRun(record);
+        return;
+      }
       record.status = 'error';
       record.error = cause instanceof Error ? cause.message : 'The VORTEX continuation failed.';
       record.updatedAt = Date.now();
@@ -395,10 +441,14 @@ export class VortexSessionRuntimeManager {
   }
 
   private async retryRecord(record: RuntimeRecord): Promise<void> {
+    if (!this.isCurrentRecord(record)) return;
     if (!record.bridge) throw new Error('The VORTEX session runtime is not ready.');
+    if (record.cancelRequested) {
+      this.finishRun(record);
+      return;
+    }
     if (isVortexRuntimeActive(record.status)) return;
     record.hasRun = true;
-    record.cancelRequested = false;
     record.status = 'queued';
     record.error = null;
     record.updatedAt = Date.now();
@@ -414,8 +464,13 @@ export class VortexSessionRuntimeManager {
           excludeLastAssistantFromHistory: true,
         });
       }
-      this.finishRun(record);
+      if (this.isCurrentRecord(record)) this.finishRun(record);
     } catch (cause) {
+      if (!this.isCurrentRecord(record)) return;
+      if (record.cancelRequested) {
+        this.finishRun(record);
+        return;
+      }
       record.status = 'error';
       record.error = cause instanceof Error ? cause.message : 'The VORTEX session retry failed.';
       record.updatedAt = Date.now();
@@ -461,23 +516,18 @@ export class VortexSessionRuntimeManager {
   ): Promise<RuntimeRecord> {
     const key = getVortexRuntimeKey(projectPath, conversationId);
     const agentStore = createAgentStore();
-    const databaseConversation = options.initialData
-      ? null
-      : await this.hydrateStoreFromDatabase(agentStore, projectPath, conversationId, options.allowMissing === true);
-
     if (options.initialData) agentStore.setState(options.initialData);
     if (!agentStore.getState().conversationId) agentStore.getState().setConversationId(conversationId);
 
-    const storeState = agentStore.getState();
-    const title = resolveVortexSessionTitle({
+    const initialState = agentStore.getState();
+    const initialTitle = resolveVortexSessionTitle({
       explicitTitle: options.title,
-      persistedTitle: databaseConversation?.title,
-      tabTitle: storeState.openTabs.find((tab) => tab.id === storeState.activeTabId)?.title,
-      firstUserMessage: storeState.messages.find((message) => message.role === 'user')?.content,
+      tabTitle: initialState.openTabs.find((tab) => tab.id === initialState.activeTabId)?.title,
+      firstUserMessage: initialState.messages.find((message) => message.role === 'user')?.content,
     });
-    const mode = options.mode ?? storeState.mode ?? toAgentMode(databaseConversation?.mode);
-    agentStore.getState().setMode(mode);
-    agentStore.getState().updateTabTitle(agentStore.getState().activeTabId, title);
+    const initialMode = options.mode ?? initialState.mode ?? 'chat';
+    agentStore.getState().setMode(initialMode);
+    agentStore.getState().updateTabTitle(agentStore.getState().activeTabId, initialTitle);
 
     const now = Date.now();
     const record: RuntimeRecord = {
@@ -485,11 +535,11 @@ export class VortexSessionRuntimeManager {
       projectPath,
       projectName: projectNameFromPath(projectPath),
       conversationId,
-      title,
+      title: initialTitle,
       taskId: options.taskId ?? null,
       taskRunId: options.taskRunId ?? null,
       taskTitle: options.taskTitle ?? null,
-      mode,
+      mode: initialMode,
       status: 'starting',
       startedAt: now,
       updatedAt: now,
@@ -505,26 +555,62 @@ export class VortexSessionRuntimeManager {
     this.publish(record);
 
     try {
+      const databaseConversation = options.initialData
+        ? null
+        : await this.hydrateStoreFromDatabase(
+            record,
+            projectPath,
+            conversationId,
+            options.allowMissing === true,
+          );
+      this.requireCurrentRecord(record);
+
+      const hydratedState = agentStore.getState();
+      const title = resolveVortexSessionTitle({
+        explicitTitle: options.title,
+        persistedTitle: databaseConversation?.title,
+        tabTitle: hydratedState.openTabs.find((tab) => tab.id === hydratedState.activeTabId)?.title,
+        firstUserMessage: hydratedState.messages.find((message) => message.role === 'user')?.content,
+      });
+      const mode =
+        options.mode ??
+        (databaseConversation ? toAgentMode(databaseConversation.mode) : initialMode);
+      agentStore.getState().setMode(mode);
+      agentStore.getState().updateTabTitle(agentStore.getState().activeTabId, title);
+      record.title = title;
+      record.mode = mode;
+      this.publish(record);
+
       const bridge = await HarnessBridge.createSession(projectPath, projectPath, agentStore);
+      if (!this.isCurrentRecord(record)) {
+        bridge.dispose();
+        throw new Error('The VORTEX session runtime was disposed while it was loading.');
+      }
       record.bridge = bridge;
       await bridge.loadSkills();
+      this.requireCurrentRecord(record);
       await bridge.registerMcpTools();
+      this.requireCurrentRecord(record);
       bridge.restoreSession(conversationId);
-      record.status = 'idle';
+      this.requireCurrentRecord(record);
+      record.status = record.cancelRequested ? 'cancelling' : 'idle';
       record.updatedAt = Date.now();
       this.publish(record);
       return record;
     } catch (error) {
-      record.status = 'error';
-      record.error = error instanceof Error ? error.message : String(error);
-      record.updatedAt = Date.now();
-      this.publish(record);
+      if (this.isCurrentRecord(record)) {
+        record.bridge?.dispose();
+        record.status = 'error';
+        record.error = error instanceof Error ? error.message : String(error);
+        record.updatedAt = Date.now();
+        this.publish(record);
+      }
       throw error;
     }
   }
 
   private async hydrateStoreFromDatabase(
-    store: AgentStoreApi,
+    record: RuntimeRecord,
     projectPath: string,
     conversationId: string,
     allowMissing: boolean,
@@ -532,6 +618,7 @@ export class VortexSessionRuntimeManager {
     const conversation = await tauriInvoke('db_get_conversation', {
       conversationId,
     });
+    this.requireCurrentRecord(record);
     if (!conversation) {
       if (allowMissing) return null;
       throw new Error('The selected session is no longer available.');
@@ -539,15 +626,17 @@ export class VortexSessionRuntimeManager {
     if (conversation.project_id && projectPathKey(conversation.project_id) !== projectPathKey(projectPath)) {
       throw new Error('The selected session belongs to a different project.');
     }
-    store.getState().setMode(toAgentMode(conversation.mode));
-    store.getState().setConversationId(conversationId);
-    store.getState().updateTabTitle(store.getState().activeTabId, conversation.title || 'Conversation');
+    record.agentStore.getState().setMode(toAgentMode(conversation.mode));
+    record.agentStore.getState().setConversationId(conversationId);
+    record.agentStore.getState().updateTabTitle(record.agentStore.getState().activeTabId, conversation.title || 'Conversation');
     const rows = await tauriInvoke('db_list_messages', { conversationId });
+    this.requireCurrentRecord(record);
     for (const row of rows) {
+      this.requireCurrentRecord(record);
       const message = mapPersistedAgentMessage(row);
       if (!message) continue;
-      store.getState().addMessage(message);
-      if (message.turnSummary) store.getState().hydrateTurnSummary(message.turnSummary);
+      record.agentStore.getState().addMessage(message);
+      if (message.turnSummary) record.agentStore.getState().hydrateTurnSummary(message.turnSummary);
     }
     return conversation;
   }
@@ -569,6 +658,7 @@ export class VortexSessionRuntimeManager {
   }
 
   private finishRun(record: RuntimeRecord): void {
+    if (!this.isCurrentRecord(record)) return;
     const state = record.agentStore.getState();
     const terminalStatus = state.terminalStatus;
     if (record.cancelRequested || isTerminalStatus(terminalStatus)) record.status = 'cancelled';
@@ -579,6 +669,16 @@ export class VortexSessionRuntimeManager {
     record.cancelRequested = false;
     record.updatedAt = Date.now();
     this.publish(record);
+  }
+
+  private isCurrentRecord(record: RuntimeRecord): boolean {
+    return this.records.get(record.key) === record;
+  }
+
+  private requireCurrentRecord(record: RuntimeRecord): void {
+    if (!this.isCurrentRecord(record)) {
+      throw new Error('The VORTEX session runtime was disposed while it was loading.');
+    }
   }
 
   private publish(record: RuntimeRecord): void {

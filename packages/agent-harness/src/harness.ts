@@ -87,7 +87,11 @@ export interface HarnessOptions {
   workspacePath: string;
   projectId: string;
   /** Tauri invoke function */
-  invoke: <T>(cmd: string, args?: Record<string, unknown>) => Promise<T>;
+  invoke: <T>(
+    cmd: string,
+    args?: Record<string, unknown>,
+    authorization?: import('./types').ToolInvocationAuthorization,
+  ) => Promise<T>;
   /** Tauri event listener function */
   listen?: (event: string, handler: (payload: unknown) => void) => Promise<() => void>;
   /** Event handler for UI updates */
@@ -156,7 +160,7 @@ export class Harness {
   private ruleLoader: RuleLoader | null;
   private sddEngine: SddEngine | null = null;
   private eventHandler: HarnessEventHandler | null;
-  private invoke: <T>(cmd: string, args?: Record<string, unknown>) => Promise<T>;
+  private invoke: HarnessOptions['invoke'];
   private listen:
     | ((event: string, handler: (payload: unknown) => void) => Promise<() => void>)
     | undefined;
@@ -318,7 +322,8 @@ export class Harness {
       this.sddEngine = new SddEngine({
         db: options.sddDb,
         eventHandler: this.eventHandler ?? undefined,
-        runAgentTurn: (addon, msg, typeOverride) => this.runSingleTurn(addon, msg, typeOverride),
+        runAgentTurn: (addon, msg, typeOverride, signal) =>
+          this.runSingleTurn(addon, msg, typeOverride, signal),
         savePlanFile: options.savePlanFile,
       });
     }
@@ -728,7 +733,14 @@ export class Harness {
     await this.refreshRules(ruleTargetPaths);
     const turnStart = Date.now();
 
-    // Resolve effective policy for this mode + model
+    // In chat mode, resolve the agent and its policy before building the trace
+    // or tool allow-list. Resolving policy first can accidentally reuse Build
+    // permissions on the first Chat turn.
+    if (this._mode === 'chat' && this.agentType !== 'chat') {
+      this.setAgentType('chat');
+    }
+
+    // Resolve effective policy for this mode + model.
     let policy = this.getEffectivePolicy();
 
     // Start tracing for this turn
@@ -738,11 +750,6 @@ export class Harness {
       this.config.providerId,
       this.config.modelId,
     );
-
-    // In chat mode, override to chat agent
-    if (this._mode === 'chat' && this.agentType !== 'chat') {
-      this.setAgentType('chat');
-    }
 
     // NOTE: Skill triggers are intentionally skipped here.
     // The skills store controls which skills are active. Trigger-based
@@ -862,6 +869,7 @@ export class Harness {
         policy.allowedToolCategories,
         effectiveOverrides,
       ).filter((tool) => goalToolsEnabled || !this.goalToolNames.has(tool.name));
+      const policyAllowedToolNames = new Set(availableTools.map((tool) => tool.name));
       if (
         !selectedTools
         || selectedToolMode !== this.agentType
@@ -1399,6 +1407,7 @@ export class Harness {
       const executionContext: ToolExecutionContext = {
         workspacePath: this.workspacePath,
         conversationId: this.conversationId,
+        policyAllowedToolNames,
         turnId: activeTurn.turnId,
         toolCallId: '', // set per-call below
         signal: activeTurn.signal,
@@ -1679,7 +1688,12 @@ export class Harness {
     );
     if (cancellationWasPartial) terminalStatus = 'cancelled_partial';
     else if (this.cancelled || activeTurn.signal.aborted) terminalStatus = 'cancelled';
-    else if (terminalStatus === 'complete' && maxIter !== null && iteration >= maxIter)
+    else if (
+      terminalStatus === 'complete' &&
+      !finalResponse.trim() &&
+      maxIter !== null &&
+      iteration >= maxIter
+    )
       terminalStatus = 'max_iterations';
     const stopReason: TurnRecord['stopReason'] = terminalStatus;
     if (!finalResponse.trim() && terminalStatus === 'max_iterations') {
@@ -1886,7 +1900,9 @@ export class Harness {
     systemPromptAddon: string,
     userMessage: string,
     agentTypeOverride?: AgentType,
+    signal?: AbortSignal,
   ): Promise<TurnOutcome> {
+    if (signal?.aborted) throw new Error('SDD execution cancelled.');
     const originalType = this.agentType;
     const turnPrompt = agentTypeOverride
       ? getAgentDefinition(agentTypeOverride).basePrompt
@@ -1904,11 +1920,23 @@ export class Harness {
 
     // Temporarily modify system prompt
     this.contextManager.setSystemPrompt(turnPrompt + '\n\n' + systemPromptAddon);
+    // NOTE: run() resets `cancelled=false` in runInternal.begin(). If the outer
+    // SDD signal fires between listener attach and that reset, a single cancel()
+    // would be swallowed. Re-assert on a microtask so the cancellation survives.
+    const cancelForAbort = (): void => {
+      this.cancel();
+      queueMicrotask(() => {
+        if (signal?.aborted) this.cancel();
+      });
+    };
+    signal?.addEventListener('abort', cancelForAbort, { once: true });
 
     try {
+      if (signal?.aborted) throw new Error('SDD execution cancelled.');
       const result = await this.run(userMessage, this.contextManager.getHistory());
       return result;
     } finally {
+      signal?.removeEventListener('abort', cancelForAbort);
       // Restore state
       this._mode = originalMode;
       this.agentType = originalType;

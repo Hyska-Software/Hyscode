@@ -555,6 +555,135 @@ describe('Harness lifecycle', () => {
     expect(events.filter((event) => event.type === 'turn_end')).toHaveLength(1);
   });
 
+  it('enforces the initial Chat policy against a hidden terminal tool call', async () => {
+    let providerCalls = 0;
+    const restrictedProvider: AIProvider = {
+      ...provider('hidden_terminal_tool', {}),
+      async *chat(params: ChatParams): AsyncIterable<StreamChunk> {
+        providerCalls += 1;
+        if (providerCalls === 1) {
+          expect(params.tools?.some((tool) => tool.name === 'hidden_terminal_tool')).toBe(false);
+          yield { type: 'tool_call_start', id: 'hidden-call', name: 'hidden_terminal_tool' };
+          yield { type: 'tool_call_delta', id: 'hidden-call', input: '{}' };
+          yield { type: 'tool_call_end', id: 'hidden-call' };
+          yield { type: 'done', stopReason: 'tool_use' };
+          return;
+        }
+        yield { type: 'text_delta', text: 'The restricted tool was denied.' };
+        yield { type: 'done', stopReason: 'end_turn' };
+      },
+    };
+    getProviderRegistry().register(restrictedProvider);
+    const execute = vi.fn(async () => ({ success: true, output: 'must not execute' }));
+    const harness = new Harness({
+      workspacePath: 'C:/workspace',
+      projectId: 'project',
+      invoke: async () => undefined as never,
+      config: {
+        providerId: 'harness-test',
+        modelId: 'test-model',
+        maxIterations: 3,
+        approval: { mode: 'yolo' },
+      },
+    });
+    harness.registerExternalTool({
+      definition: {
+        name: 'hidden_terminal_tool',
+        description: 'A terminal-only test tool.',
+        inputSchema: { type: 'object', properties: {}, required: [] },
+      },
+      category: 'terminal',
+      requiresApproval: false,
+      execute,
+    });
+    harness.setMode('chat');
+    harness.setConversationId('conversation');
+
+    const result = await harness.run('inspect only', []);
+
+    expect(result.status).toBe('complete');
+    expect(execute).not.toHaveBeenCalled();
+    expect(result.turnRecord.toolCalls[0]?.output.error).toContain('active agent policy');
+  });
+
+  it('enforces the active policy when invoke_external_tool dispatches a nested handler', async () => {
+    let providerCalls = 0;
+    const nestedProvider: AIProvider = {
+      ...provider('invoke_external_tool', { name: 'hidden_terminal_tool', input: {} }),
+      async *chat(): AsyncIterable<StreamChunk> {
+        providerCalls += 1;
+        if (providerCalls === 1) {
+          yield { type: 'tool_call_start', id: 'nested-call', name: 'invoke_external_tool' };
+          yield {
+            type: 'tool_call_delta',
+            id: 'nested-call',
+            input: JSON.stringify({ name: 'hidden_terminal_tool', input: {} }),
+          };
+          yield { type: 'tool_call_end', id: 'nested-call' };
+          yield { type: 'done', stopReason: 'tool_use' };
+          return;
+        }
+        yield { type: 'text_delta', text: 'The nested tool was denied.' };
+        yield { type: 'done', stopReason: 'end_turn' };
+      },
+    };
+    getProviderRegistry().register(nestedProvider);
+    const execute = vi.fn(async () => ({ success: true, output: 'must not execute' }));
+    const harness = new Harness({
+      workspacePath: 'C:/workspace',
+      projectId: 'project',
+      invoke: async () => undefined as never,
+      config: {
+        providerId: 'harness-test',
+        modelId: 'test-model',
+        maxIterations: 3,
+        approval: { mode: 'yolo' },
+      },
+    });
+    harness.registerExternalTool({
+      definition: {
+        name: 'hidden_terminal_tool',
+        description: 'A terminal-only test tool.',
+        inputSchema: { type: 'object', properties: {}, required: [] },
+      },
+      category: 'terminal',
+      requiresApproval: false,
+      execute,
+    });
+    harness.setMode('chat');
+    harness.setConversationId('conversation');
+
+    const result = await harness.run('inspect only', []);
+
+    expect(result.status).toBe('complete');
+    expect(execute).not.toHaveBeenCalled();
+    expect(result.turnRecord.toolCalls[0]?.output.error).toContain('active agent policy');
+  });
+
+  it('keeps a successful final answer when it uses the last allowed iteration', async () => {
+    const finalProvider: AIProvider = {
+      ...provider('read_file', { path: 'unused.ts' }),
+      async *chat(): AsyncIterable<StreamChunk> {
+        yield { type: 'text_delta', text: 'Finished on the final permitted iteration.' };
+        yield { type: 'done', stopReason: 'end_turn' };
+      },
+    };
+    getProviderRegistry().register(finalProvider);
+    const harness = new Harness({
+      workspacePath: 'C:/workspace',
+      projectId: 'project',
+      invoke: async () => undefined as never,
+      config: { providerId: 'harness-test', modelId: 'test-model', maxIterations: 1 },
+    });
+    harness.setAgentType('build');
+    harness.setConversationId('conversation');
+
+    const result = await harness.run('finish', []);
+
+    expect(result.status).toBe('complete');
+    expect(result.response).toBe('Finished on the final permitted iteration.');
+  });
+
   it('cancels a turn waiting for tool approval', async () => {
     getProviderRegistry().register(provider('write_file', { path: 'a.ts', content: 'x' }));
     let approvalStarted!: () => void;

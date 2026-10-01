@@ -436,10 +436,13 @@ pub async fn pty_spawn(
     interactive: Option<bool>,
     app: AppHandle,
     state: State<'_, PtyState>,
+    native_grant_ids: Option<Vec<String>>,
 ) -> Result<String, String> {
     // `interactive` is accepted for frontend API compatibility; PTY sessions
     // are always interactive shells.
     let _ = interactive;
+    let cwd = cwd.ok_or_else(|| "PTY working directory is required".to_string())?;
+    let cwd = super::fs::resolve_authorized_execution_directory(&cwd, native_grant_ids.as_deref())?;
     let cols = normalize_dimension(cols, DEFAULT_PTY_COLS);
     let rows = normalize_dimension(rows, DEFAULT_PTY_ROWS);
     let pair = native_pty_system()
@@ -453,9 +456,7 @@ pub async fn pty_spawn(
 
     let shell_path = shell.unwrap_or_else(default_shell);
     let mut command = CommandBuilder::new(&shell_path);
-    if let Some(ref directory) = cwd {
-        command.cwd(directory);
-    }
+    command.cwd(cwd);
     let mut environment = env.unwrap_or_default();
     environment
         .entry("TERM".to_string())

@@ -12,6 +12,7 @@ import type {
 } from '../types';
 import { ProviderError } from '../types';
 import { withOpencodeHeaders } from '../opencode-headers';
+import { parseSSEStream } from '../retry';
 
 // ─── Thinking variant presets ────────────────────────────────────────────────
 // Per official Gemini docs — 3.8 Flash / 3.6 Flash / 3.5 Flash support
@@ -415,43 +416,12 @@ export class GeminiProvider implements AIProvider {
       );
     }
 
-    // Gemini streams SSE with JSON chunks containing candidates
-    const reader = response.body?.getReader();
-    if (!reader) throw new ProviderError('No response body', 'gemini');
+    if (!response.body) throw new ProviderError('No response body', 'gemini');
 
-    const decoder = new TextDecoder();
-    let buffer = '';
-
-    try {
-      while (true) {
-        if (params.signal?.aborted) {
-          await reader.cancel().catch(() => undefined);
-          break;
-        }
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop() ?? '';
-
-        for (const line of lines) {
-          const trimmed = line.trim();
-          if (!trimmed || trimmed.startsWith(':')) continue;
-          if (trimmed.startsWith('data: ')) {
-            const data = trimmed.slice(6);
-            if (data === '[DONE]') return;
-            for (const chunk of parseGeminiResponse(data)) {
-              yield chunk;
-            }
-          }
-        }
-      }
-    } finally {
-      try {
-        await reader.cancel().catch(() => undefined);
-      } finally {
-        reader.releaseLock();
+    // Gemini streams SSE with JSON chunks containing candidates.
+    for await (const data of parseSSEStream(response, params.signal)) {
+      for (const chunk of parseGeminiResponse(data)) {
+        yield chunk;
       }
     }
   }

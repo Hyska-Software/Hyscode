@@ -17,13 +17,18 @@ const handler: ToolHandler = {
   execute: vi.fn(async (input) => ({ success: true, output: String(input.value) })),
 };
 
-function context(signal: AbortSignal): ToolExecutionContext {
+function context(
+  signal: AbortSignal,
+  allowedToolNames: string[] = ['write_value', 'search_code', 'create_file', 'edit_file'],
+  invoke: ToolExecutionContext['invoke'] = vi.fn(),
+): ToolExecutionContext {
   return {
     workspacePath: 'C:/workspace',
     conversationId: 'conversation',
+    policyAllowedToolNames: new Set(allowedToolNames),
     toolCallId: 'call',
     signal,
-    invoke: vi.fn(),
+    invoke,
   };
 }
 
@@ -58,6 +63,171 @@ describe('ToolRouter', () => {
     );
     expect(record.output.error).toContain('cancelled');
     expect(handler.execute).not.toHaveBeenCalled();
+  });
+
+  it('rejects a registered tool that is absent from the effective policy', async () => {
+    const router = new ToolRouter();
+    const execute = vi.fn(async () => ({ success: true, output: 'should not run' }));
+    router.register({ ...handler, execute });
+
+    const record = await router.execute(
+      'write_value',
+      'filtered-call',
+      { value: 'x' },
+      context(new AbortController().signal, []),
+    );
+
+    expect(record.output).toMatchObject({
+      success: false,
+      error: 'Tool "write_value" is not allowed by the active agent policy.',
+    });
+    expect(record.approved).toBe(false);
+    expect(execute).not.toHaveBeenCalled();
+  });
+
+  it('allows execution when no policy allow-list is attached (legacy callers)', async () => {
+    const router = new ToolRouter();
+    const execute = vi.fn(async () => ({ success: true, output: 'ran' }));
+    router.register({ ...handler, execute });
+    const legacyContext: ToolExecutionContext = {
+      workspacePath: 'C:/workspace',
+      conversationId: 'conversation',
+      toolCallId: 'call',
+      signal: new AbortController().signal,
+      invoke: vi.fn(),
+    };
+
+    const record = await router.execute('write_value', 'legacy-call', { value: 'x' }, legacyContext);
+
+    expect(record.output.success).toBe(true);
+    expect(execute).toHaveBeenCalledTimes(1);
+  });
+
+  it('fails closed when an approval-required tool has no approval callback', async () => {
+    const router = new ToolRouter();
+    const execute = vi.fn(async () => ({ success: true, output: 'should not run' }));
+    router.register({ ...handler, requiresApproval: true, execute });
+
+    const record = await router.execute(
+      'write_value',
+      'approval-call',
+      { value: 'x' },
+      context(new AbortController().signal),
+    );
+
+    expect(record.output).toMatchObject({ success: false });
+    expect(record.output.error).toContain('rejected');
+    expect(record.approved).toBe(false);
+    expect(execute).not.toHaveBeenCalled();
+  });
+
+  it('requires explicit approval for project-controlled diagnostics even in yolo mode', async () => {
+    const router = new ToolRouter();
+    router.setApprovalConfig({ mode: 'yolo' });
+    const execute = vi.fn(async () => ({ success: true, output: 'diagnostics ran' }));
+    router.register({
+      ...handler,
+      definition: { ...handler.definition, name: 'get_diagnostics' },
+      requiresApproval: false,
+      requiresExplicitApproval: true,
+      execute,
+    });
+    const approval = vi.fn(async () => true);
+    router.setApprovalCallback(approval);
+
+    const record = await router.execute(
+      'get_diagnostics',
+      'diagnostics-call',
+      { value: 'inspect' },
+      context(new AbortController().signal, ['get_diagnostics']),
+    );
+
+    expect(approval).toHaveBeenCalledTimes(1);
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(record.output.success).toBe(true);
+  });
+
+  it('allows explicitly session-trusted project diagnostics without another prompt', async () => {
+    const router = new ToolRouter();
+    router.setApprovalConfig({ mode: 'yolo' });
+    const execute = vi.fn(async () => ({ success: true, output: 'diagnostics ran' }));
+    router.register({
+      ...handler,
+      definition: { ...handler.definition, name: 'get_diagnostics' },
+      requiresApproval: false,
+      requiresExplicitApproval: true,
+      execute,
+    });
+    const approval = vi.fn(async () => true);
+    router.setApprovalCallback(approval);
+    router.trustToolForSession('get_diagnostics');
+
+    const record = await router.execute(
+      'get_diagnostics',
+      'diagnostics-call',
+      { value: 'inspect' },
+      context(new AbortController().signal, ['get_diagnostics']),
+    );
+
+    expect(approval).not.toHaveBeenCalled();
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(record.output.success).toBe(true);
+  });
+
+  it('blocks direct invoke calls that escape the owning workspace', async () => {
+    const router = new ToolRouter();
+    const nativeInvoke = vi.fn(async () => 'must not be called') as unknown as ToolExecutionContext['invoke'];
+    router.register({
+      ...handler,
+      execute: async (_input, executionContext) => {
+        try {
+          await executionContext.invoke('write_file', {
+            path: '../outside.txt',
+            content: 'blocked',
+          });
+          return { success: true, output: 'unexpected invoke success' };
+        } catch (error) {
+          return { success: false, output: '', error: String(error) };
+        }
+      },
+    });
+
+    const record = await router.execute(
+      'write_value',
+      'direct-invoke-call',
+      { value: 'x' },
+      context(new AbortController().signal, ['write_value'], nativeInvoke),
+    );
+
+    expect(record.output.success).toBe(false);
+    expect(record.output.error).toContain('outside the workspace');
+    expect(nativeInvoke).not.toHaveBeenCalled();
+  });
+
+  it('normalizes in-workspace direct invoke paths before native dispatch', async () => {
+    const router = new ToolRouter();
+    const nativeInvoke = vi.fn(async () => 'read result') as unknown as ToolExecutionContext['invoke'];
+    router.register({
+      ...handler,
+      execute: async (_input, executionContext) => ({
+        success: true,
+        output: await executionContext.invoke<string>('read_file', { path: 'src/value.ts' }),
+      }),
+    });
+
+    const record = await router.execute(
+      'write_value',
+      'workspace-invoke-call',
+      { value: 'x' },
+      context(new AbortController().signal, ['write_value'], nativeInvoke),
+    );
+
+    expect(record.output.success).toBe(true);
+    expect(nativeInvoke).toHaveBeenCalledWith(
+      'read_file',
+      { path: 'c:/workspace/src/value.ts' },
+      { workspacePath: 'C:/workspace', externalPathAccess: undefined },
+    );
   });
 
   it('cancels promptly when abort fires before the native operation settles', async () => {

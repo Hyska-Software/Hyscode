@@ -47,6 +47,7 @@ const INLINE_COMPLETION_PROVIDERS = PROVIDERS.filter((provider) => provider.id !
 export function AiTab() {
   const store = useSettingsStore();
   const [showingMcpForm, setShowingMcpForm] = useState(false);
+  const [mcpError, setMcpError] = useState<string | null>(null);
   const [expandedProvider, setExpandedProvider] = useState<string | null>(null);
   const [customModelInput, setCustomModelInput] = useState('');
   const [setupGuide, setSetupGuide] = useState<'github-copilot' | 'codex' | null>(null);
@@ -666,6 +667,7 @@ export function AiTab() {
 
       {/* ─── MCP Servers ───────────────────────────────────────────────── */}
       <SettingSection title="MCP Servers">
+        {mcpError && <p className="text-[11px] text-destructive">{mcpError}</p>}
         {store.mcpServers.map((server) => (
           <div
             key={server.id}
@@ -690,7 +692,20 @@ export function AiTab() {
                 aria-label={`Allow ${server.name} for sub-agents`}
               />
               <button
-                onClick={() => store.removeMcpServer(server.id)}
+                onClick={async () => {
+                  setMcpError(null);
+                  try {
+                    if (server.authSecretAccount) {
+                      await tauriInvoke('keychain_delete', {
+                        service: 'hyscode',
+                        account: server.authSecretAccount,
+                      });
+                    }
+                    store.removeMcpServer(server.id);
+                  } catch (error) {
+                    setMcpError(error instanceof Error ? error.message : String(error));
+                  }
+                }}
                 className="ml-1 rounded p-1 text-muted-foreground hover:bg-muted hover:text-destructive"
               >
                 <Trash2 className="h-3 w-3" />
@@ -703,6 +718,7 @@ export function AiTab() {
             onSave={(server: McpServerConfig) => {
               store.addMcpServer(server);
               setShowingMcpForm(false);
+              setMcpError(null);
             }}
             onCancel={() => setShowingMcpForm(false)}
           />

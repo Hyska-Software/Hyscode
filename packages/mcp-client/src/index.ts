@@ -3,6 +3,7 @@ export type {
   McpTransportType,
   McpCapabilities,
   McpServerConfig,
+  McpRequestOptions,
   McpToolDefinition,
   McpResource,
   McpResourceContent,
@@ -13,5 +14,10 @@ export type {
 } from './types';
 
 // ─── Manager ────────────────────────────────────────────────────────────────
-export { McpClientManager, StdioTransport, SseTransport, WebSocketTransport } from './manager';
+export {
+  McpClientManager,
+  StdioTransport,
+  FetchSseTransport,
+  WebSocketTransport,
+} from './manager';
 export type { McpTransport } from './manager';;

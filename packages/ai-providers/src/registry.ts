@@ -177,8 +177,12 @@ export class ProviderRegistry {
     // (retrying mid-stream would break the protocol)
     let retryCount = 0;
     const stream = await withRetry(
-      async () => {
-        const iter = provider.chat({ ...chatParams, model });
+      async (attemptSignal) => {
+        const iter = provider.chat({
+          ...chatParams,
+          model,
+          signal: attemptSignal ?? chatParams.signal,
+        });
         // Get the iterator and try the first read to verify connection works
         const asyncIter = iter[Symbol.asyncIterator]();
         let first: IteratorResult<StreamChunk>;
@@ -188,6 +192,7 @@ export class ProviderRegistry {
           throw normalizeProviderError(error, provider.id, 'connecting');
         }
         if (!first.done && first.value.type === 'error' && first.value.retryable) {
+          await asyncIter.return?.();
           throw new ProviderError(first.value.error, provider.id, undefined, true);
         }
         return { asyncIter, first };

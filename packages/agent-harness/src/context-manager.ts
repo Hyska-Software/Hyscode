@@ -238,6 +238,12 @@ export class ContextManager {
     const systemPrompt = this.buildSystemPrompt(agenticExecution);
     const systemTokens = estimateSystemPromptTokens(systemPrompt);
     const toolTokens = estimateToolDefinitionTokens(tools);
+    const minimumFrameTokens = systemTokens + toolTokens + maxOutputTokens;
+    if (minimumFrameTokens > maxInputTokens) {
+      throw new Error(
+        `Context frame exceeds the configured input budget: system (${systemTokens}) + tools (${toolTokens}) + response reserve (${maxOutputTokens}) = ${minimumFrameTokens}, limit ${maxInputTokens}.`,
+      );
+    }
 
     const budget: TokenBudget = {
       maxInput: maxInputTokens,
@@ -255,6 +261,11 @@ export class ContextManager {
     const messages = plan.messages;
 
     const totalTokens = systemTokens + toolTokens + estimateMessageTokens(messages);
+    if (totalTokens + maxOutputTokens > maxInputTokens) {
+      throw new Error(
+        `Context frame exceeds the configured input budget after message selection: ${totalTokens} input tokens + ${maxOutputTokens} reserved output tokens, limit ${maxInputTokens}.`,
+      );
+    }
 
     return {
       systemPrompt,

@@ -1,10 +1,11 @@
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
+import { tauriInvoke } from '@/lib/tauri-invoke';
 import type { McpServerConfig } from '@/stores/settings-store';
 import { SettingInput, SettingSegmented, SettingToggle } from '../controls';
 
 interface McpServerFormProps {
-  onSave: (server: McpServerConfig) => void;
+  onSave: (server: McpServerConfig) => void | Promise<void>;
   onCancel: () => void;
 }
 
@@ -16,16 +17,32 @@ export function McpServerForm({ onSave, onCancel }: McpServerFormProps) {
   const [url, setUrl] = useState('');
   const [wsUrl, setWsUrl] = useState('');
   const [agentSafe, setAgentSafe] = useState(false);
+  const [authHeaderName, setAuthHeaderName] = useState('Authorization');
+  const [authSecret, setAuthSecret] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     if (!name.trim()) return;
+    if (authSecret && transport !== 'sse') {
+      setError('Secure HTTP header authentication is supported for SSE servers only.');
+      return;
+    }
+    if (authSecret && !authHeaderName.trim()) {
+      setError('Enter the HTTP header name for this credential.');
+      return;
+    }
 
+    const id = crypto.randomUUID();
+    const authSecretAccount = authSecret ? `mcp_${id.replaceAll('-', '')}` : undefined;
     const server: McpServerConfig = {
-      id: crypto.randomUUID(),
+      id,
       name: name.trim(),
       transport,
       enabled: true,
       agentSafe,
+      authSecretAccount,
+      authHeaderName: authSecret ? authHeaderName.trim() : undefined,
     };
 
     if (transport === 'stdio') {
@@ -40,7 +57,23 @@ export function McpServerForm({ onSave, onCancel }: McpServerFormProps) {
       server.wsUrl = wsUrl.trim();
     }
 
-    onSave(server);
+    setSaving(true);
+    setError(null);
+    try {
+      if (authSecret && authSecretAccount) {
+        await tauriInvoke('keychain_set', {
+          service: 'hyscode',
+          account: authSecretAccount,
+          password: authSecret,
+        });
+      }
+      await onSave(server);
+      setAuthSecret('');
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : String(saveError));
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -109,6 +142,31 @@ export function McpServerForm({ onSave, onCancel }: McpServerFormProps) {
           </Field>
         )}
 
+        {transport === 'sse' && (
+          <>
+            <Field label="Authentication header (optional)">
+              <SettingInput
+                value={authHeaderName}
+                onChange={(event) => setAuthHeaderName(event.target.value)}
+                placeholder="Authorization"
+                className="h-7 w-full"
+              />
+            </Field>
+            <Field label="Authentication secret (saved to OS credential store)">
+              <SettingInput
+                type="password"
+                autoComplete="new-password"
+                value={authSecret}
+                onChange={(event) => setAuthSecret(event.target.value)}
+                placeholder="Bearer token or API key"
+                className="h-7 w-full"
+              />
+            </Field>
+          </>
+        )}
+
+        {error && <p className="text-[11px] text-destructive">{error}</p>}
+
         <Field label="Sub-agent access">
           <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
             <SettingToggle checked={agentSafe} onChange={setAgentSafe} />
@@ -121,7 +179,7 @@ export function McpServerForm({ onSave, onCancel }: McpServerFormProps) {
           <Button
             size="sm"
             onClick={handleSubmit}
-            disabled={!name.trim()}
+            disabled={!name.trim() || saving}
             className="h-7 px-3 text-[11px]"
           >
             Add Server

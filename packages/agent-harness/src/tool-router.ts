@@ -13,12 +13,35 @@ import {
   type ApprovalDecision,
   type HarnessEventHandler,
   type ToolRiskLevel,
+  type ToolInvocationAuthorization,
   SAFE_TOOLS,
   DESTRUCTIVE_TOOLS,
   CATEGORY_RISK,
   GIT_WORKTREE_SWEEPING_TOOLS,
 } from './types';
 import { ExternalPathAccessRegistry } from './external-path-access';
+import { authorizeToolInvocationArgs } from './tool-invocation-policy';
+
+function createAuthorizedInvoke(
+  invoke: ToolExecutionContext['invoke'],
+  workspacePath: string,
+  externalPathAccess: ToolExecutionContext['externalPathAccess'],
+  nativeGrantIds: readonly string[],
+  revokeNativeGrantIds: readonly string[],
+): ToolExecutionContext['invoke'] {
+  const authorization: ToolInvocationAuthorization = {
+    workspacePath,
+    externalPathAccess,
+    ...(nativeGrantIds.length > 0 ? { nativeGrantIds } : {}),
+    ...(revokeNativeGrantIds.length > 0 ? { revokeNativeGrantIds } : {}),
+  };
+  return <T>(command: string, args?: Record<string, unknown>): Promise<T> =>
+    invoke<T>(
+      command,
+      authorizeToolInvocationArgs(args, workspacePath, externalPathAccess),
+      authorization,
+    );
+}
 
 export class ToolRouter {
   private handlers = new Map<string, ToolHandler>();
@@ -149,6 +172,24 @@ export class ToolRouter {
       return record;
     }
 
+    if (context.policyAllowedToolNames && !context.policyAllowedToolNames.has(toolName)) {
+      const record: ToolCallRecord = {
+        id: toolCallId,
+        toolName,
+        input,
+        output: {
+          success: false,
+          output: '',
+          error: `Tool "${toolName}" is not allowed by the active agent policy.`,
+        },
+        durationMs: Date.now() - startTime,
+        approved: false,
+        timestamp: new Date().toISOString(),
+      };
+      this.emitResult(record);
+      return record;
+    }
+
     input = normalizeToolInput(handler.definition.inputSchema, input);
     const validationError = validateInput(handler.definition.inputSchema, input);
     if (validationError) {
@@ -219,7 +260,10 @@ export class ToolRouter {
     // External path approval is mandatory and independent of the configured
     // tool approval mode. A covered session grant still needs to be attached
     // to the execution context so the handler cannot escape its authorization.
-    const needsApproval = this.needsApproval(toolName, handler);
+    const explicitApprovalRequired =
+      handler.requiresExplicitApproval &&
+      !this.approvalConfig.sessionTrustedTools?.has(toolName);
+    const needsApproval = this.needsApproval(toolName, handler) || explicitApprovalRequired;
     const approvalRequired = needsApproval || externalApprovalRequired;
     let approvalDecision: ApprovalDecision = true;
 
@@ -255,20 +299,45 @@ export class ToolRouter {
       }
     }
 
+    const approvalDetails = normalizeApprovalDecision(approvalDecision);
     if (externalAccessRequest && externalApprovalRequired) {
-      const decision = normalizeApprovalDecision(approvalDecision);
-      this.externalPathAccess.grant(externalAccessRequest, decision.externalGrant ?? 'once');
+      this.externalPathAccess.grant(
+        externalAccessRequest,
+        approvalDetails.externalGrant ?? 'once',
+        approvalDetails.nativeGrantId,
+      );
     }
 
-    const executionContext = externalAccessRequest
-      ? {
-          ...context,
-          externalPathAccess: this.externalPathAccess.createAccess(
-            externalAccessRequest,
-            context.workspacePath,
-          ),
-        }
-      : context;
+    const nativeGrantIds = externalAccessRequest
+      ? [
+          ...(approvalDetails.nativeGrantId ? [approvalDetails.nativeGrantId] : []),
+          ...this.externalPathAccess.getSessionNativeGrantIds(externalAccessRequest.operation),
+        ].filter((grantId, index, grantIds) => grantIds.indexOf(grantId) === index)
+      : (context.externalPathAccess?.nativeGrantIds ?? []);
+    const revokeNativeGrantIds =
+      externalAccessRequest &&
+      approvalDetails.externalGrant !== 'session-directory' &&
+      approvalDetails.nativeGrantId
+        ? [approvalDetails.nativeGrantId]
+        : [];
+    const externalPathAccess = externalAccessRequest
+      ? this.externalPathAccess.createAccess(
+          externalAccessRequest,
+          context.workspacePath,
+          nativeGrantIds,
+        )
+      : context.externalPathAccess;
+    const executionContext: ToolExecutionContext = {
+      ...context,
+      externalPathAccess,
+      invoke: createAuthorizedInvoke(
+        context.invoke,
+        context.workspacePath,
+        externalPathAccess,
+        nativeGrantIds,
+        revokeNativeGrantIds,
+      ),
+    };
 
     if (this.approvalConfig.mode === 'notify') {
       this.eventHandler?.({
@@ -296,6 +365,22 @@ export class ToolRouter {
         output: '',
         error: err instanceof Error ? err.message : String(err),
       };
+    }
+
+    const retainForEditReview =
+      result.success && externalAccessRequest?.operation === 'write' && revokeNativeGrantIds.length > 0;
+    if (revokeNativeGrantIds.length > 0 && !retainForEditReview) {
+      try {
+        await context.invoke<void>('workspace_revoke_external_grants', {
+          grantIds: revokeNativeGrantIds,
+        });
+      } catch (error) {
+        result = {
+          success: false,
+          output: result.output,
+          error: `${result.error ? `${result.error}; ` : ''}External-access cleanup failed; the native grant will expire automatically: ${error instanceof Error ? error.message : String(error)}`,
+        };
+      }
     }
 
     const durationMs = Date.now() - startTime;
@@ -343,8 +428,8 @@ export class ToolRouter {
   }
 
   /** Clear all external directory grants when a new session becomes active. */
-  clearExternalPathGrants(): void {
-    this.externalPathAccess.clear();
+  clearExternalPathGrants(): string[] {
+    return this.externalPathAccess.clear();
   }
 
   /** Get set of tools trusted in this session */
@@ -410,9 +495,9 @@ export class ToolRouter {
     externalAccess?: PendingToolCall['externalAccess'],
   ): Promise<ApprovalDecision> {
     if (!this.approvalCallback) {
-      // Existing normal approvals remain compatible with headless callers,
-      // but mandatory external access fails closed without a user callback.
-      return externalAccess ? { approved: false } : true;
+      // Approval-required operations fail closed in every embedding. Headless
+      // hosts must opt into an explicit auto-approval mode instead.
+      return { approved: false };
     }
 
     const handler = this.handlers.get(toolName);
@@ -534,6 +619,7 @@ export class ToolRouter {
 function normalizeApprovalDecision(decision: ApprovalDecision): {
   approved: boolean;
   externalGrant?: 'once' | 'session-directory';
+  nativeGrantId?: string;
 } {
   if (typeof decision === 'boolean') return { approved: decision };
   return decision;

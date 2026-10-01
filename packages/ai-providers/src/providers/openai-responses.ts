@@ -124,6 +124,13 @@ export interface ResponsesAPIConfig {
   supportsExplicitPromptCaching?: boolean;
 }
 
+type ResponsesToolCallIdentity = {
+  currentToolId: string;
+  byItemId: Map<string, string>;
+  byOutputIndex: Map<number, string>;
+  activeCallIds: Set<string>;
+};
+
 /**
  * Streams a chat request through the OpenAI Responses API endpoint.
  * The Responses API uses a different wire format from chat completions.
@@ -134,8 +141,7 @@ export async function* chatResponsesAPI(
 ): AsyncIterable<StreamChunk> {
   const explicitCacheRequested =
     params.cachePrompt === true || params.promptCacheOptions?.mode === 'explicit';
-  const explicitCache =
-    explicitCacheRequested && config.supportsExplicitPromptCaching === true;
+  const explicitCache = explicitCacheRequested && config.supportsExplicitPromptCaching === true;
   const { instructions, input } = toResponsesInput(params.messages, params.systemPrompt, {
     explicitCacheBreakpoint: explicitCache,
   });
@@ -212,20 +218,20 @@ export async function* chatResponsesAPI(
     );
   }
 
-  let currentToolCallId = '';
+  const toolCallIdentity: ResponsesToolCallIdentity = {
+    currentToolId: '',
+    byItemId: new Map(),
+    byOutputIndex: new Map(),
+    activeCallIds: new Set(),
+  };
   const completedToolCallIds = new Set<string>();
 
   for await (const data of parseSSEStream(response, params.signal)) {
-    const chunks = parseResponsesChunk(data, currentToolCallId, config.providerId);
+    const chunks = parseResponsesChunk(data, toolCallIdentity, config.providerId);
     for (const chunk of chunks) {
       if (chunk.type === 'tool_call_end') {
         if (completedToolCallIds.has(chunk.id)) continue;
         completedToolCallIds.add(chunk.id);
-      }
-      if (chunk.type === 'tool_call_start') {
-        currentToolCallId = chunk.id;
-      } else if (chunk.type === 'tool_call_end') {
-        currentToolCallId = '';
       }
       yield chunk;
     }
@@ -235,7 +241,11 @@ export async function* chatResponsesAPI(
 /**
  * Parse a single SSE data chunk from the OpenAI Responses API.
  */
-export function parseResponsesChunk(data: string, currentToolId: string, providerId: string): StreamChunk[] {
+export function parseResponsesChunk(
+  data: string,
+  currentTool: string | ResponsesToolCallIdentity,
+  providerId: string,
+): StreamChunk[] {
   let parsed: Record<string, unknown>;
   try {
     parsed = JSON.parse(data);
@@ -252,6 +262,24 @@ export function parseResponsesChunk(data: string, currentToolId: string, provide
   }
 
   const eventType = parsed.type as string;
+  const identity = typeof currentTool === 'string' ? undefined : currentTool;
+  const currentToolId = typeof currentTool === 'string' ? currentTool : currentTool.currentToolId;
+  const resolveCallId = (): string => {
+    const callId = parsed.call_id;
+    if (typeof callId === 'string' && callId) return callId;
+    const itemId = parsed.item_id;
+    if (typeof itemId === 'string') {
+      const mappedCallId = identity?.byItemId.get(itemId);
+      if (mappedCallId) return mappedCallId;
+    }
+    const outputIndex = parsed.output_index;
+    if (typeof outputIndex === 'number') {
+      const mappedCallId = identity?.byOutputIndex.get(outputIndex);
+      if (mappedCallId) return mappedCallId;
+    }
+    if (!identity || identity.activeCallIds.size <= 1) return currentToolId;
+    return '';
+  };
 
   switch (eventType) {
     case 'response.output_text.delta': {
@@ -276,7 +304,19 @@ export function parseResponsesChunk(data: string, currentToolId: string, provide
       const item = parsed.item as Record<string, unknown> | undefined;
       if (item?.type === 'function_call') {
         const name = (item.name as string) ?? '';
-        const callId = (item.call_id as string) ?? `call_${Date.now()}`;
+        const itemId = typeof item.id === 'string' ? item.id : undefined;
+        const outputIndex = parsed.output_index;
+        const callId =
+          (typeof item.call_id === 'string' && item.call_id) ||
+          itemId ||
+          `call_${typeof outputIndex === 'number' ? outputIndex : crypto.randomUUID()}`;
+        if (identity) {
+          identity.currentToolId = callId;
+          identity.activeCallIds.add(callId);
+          if (itemId) identity.byItemId.set(itemId, callId);
+          identity.byItemId.set(callId, callId);
+          if (typeof outputIndex === 'number') identity.byOutputIndex.set(outputIndex, callId);
+        }
         return [{ type: 'tool_call_start', id: callId, name }];
       }
       break;
@@ -286,23 +326,34 @@ export function parseResponsesChunk(data: string, currentToolId: string, provide
     case 'response.tool_call_arguments.delta': {
       const delta = parsed.delta as string | undefined;
       if (delta) {
-        return [{ type: 'tool_call_delta', id: currentToolId, input: delta }];
+        const callId = resolveCallId();
+        if (callId) return [{ type: 'tool_call_delta', id: callId, input: delta }];
       }
       break;
     }
     case 'response.function_call_arguments.done': {
-      const callId = (parsed.call_id as string | undefined) ?? currentToolId;
-      if (callId) return [{ type: 'tool_call_end', id: callId }];
+      const callId = resolveCallId();
+      if (callId) {
+        identity?.activeCallIds.delete(callId);
+        if (identity?.currentToolId === callId) identity.currentToolId = '';
+        return [{ type: 'tool_call_end', id: callId }];
+      }
       break;
     }
     case 'response.output_item.done': {
       const item = parsed.item as Record<string, unknown> | undefined;
       if (item?.type === 'function_call') {
+        const itemId = typeof item.id === 'string' ? item.id : undefined;
         const callId =
-          (item.call_id as string | undefined) ??
-          (item.id as string | undefined) ??
+          (typeof item.call_id === 'string' && item.call_id) ||
+          (itemId && identity?.byItemId.get(itemId)) ||
+          itemId ||
           currentToolId;
-        if (callId) return [{ type: 'tool_call_end', id: callId }];
+        if (callId) {
+          identity?.activeCallIds.delete(callId);
+          if (identity?.currentToolId === callId) identity.currentToolId = '';
+          return [{ type: 'tool_call_end', id: callId }];
+        }
       }
       break;
     }

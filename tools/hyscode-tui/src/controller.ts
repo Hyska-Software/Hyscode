@@ -477,6 +477,8 @@ export class TuiController {
   }
 
   private applyRuntimeReady(payload: RuntimeReadyPayload): void {
+    const sameSession = Boolean(payload.session && this.state.currentSessionId === payload.session.id);
+    const currentStatus = this.state.status;
     this.state.workspace = payload.workspacePath;
     this.state.projectId = payload.projectId;
     this.currentConversationId = payload.session?.id ?? this.currentConversationId;
@@ -506,7 +508,8 @@ export class TuiController {
     this.state.capabilities = payload.capabilities ?? null;
     if (payload.session) {
       this.state.connectionState = 'connected';
-      this.applySession(payload.session);
+      if (this.state.currentSessionId !== payload.session.id) this.applySession(payload.session);
+      else this.refreshSessionMetadata(payload.session);
     }
     if (payload.context) this.applyContext(payload.context);
     if (payload.sdd) this.applySdd(payload.sdd);
@@ -518,6 +521,7 @@ export class TuiController {
           this.append('error', 'Runtime terminal summary was invalid');
           continue;
         }
+        if (!this.belongsToCurrentConversation(terminal)) continue;
         this.mergeTerminal(merged, terminal);
         this.terminalOutputSequence.set(terminal.terminalId, terminal.sequence);
       }
@@ -525,17 +529,28 @@ export class TuiController {
       if (this.state.activeTerminalId && !merged.has(this.state.activeTerminalId)) this.state.activeTerminalId = null;
       if (!this.state.activeTerminalId) this.state.activeTerminalId = this.state.terminals[0]?.terminalId ?? null;
     }
-    this.state.status = this.state.provider ? `Ready · thinking ${this.thinkingLabel()}` : 'No configured provider';
+    this.state.status = sameSession
+      ? currentStatus
+      : this.state.provider ? `Ready · thinking ${this.thinkingLabel()}` : 'No configured provider';
   }
 
   private applySession(session: SessionRecord): void {
     if (!session?.id) return;
+    const sddBelongsToSession = this.state.sdd.session?.conversationId === session.id;
     this.state.currentSessionId = session.id;
     this.currentConversationId = session.id;
     this.currentTurnId = null;
     this.state.sessionTitle = session.title || 'Untitled session';
     this.state.sessionMessageCount = session.messageCount;
+    this.state.mode = session.agentType;
     this.state.goal = session.goal ?? null;
+    this.state.usage.current = null;
+    this.state.usage.session = session.tokenUsage ? { ...session.tokenUsage } : null;
+    this.state.usage.inputTokens = session.tokenUsage?.inputTokens ?? 0;
+    this.state.usage.outputTokens = session.tokenUsage?.outputTokens ?? 0;
+    this.state.usage.totalTokens = session.tokenUsage?.totalTokens ?? 0;
+    this.state.usage.requestCount = session.tokenUsage?.requestCount ?? 0;
+    this.state.usage.estimatedCost = session.tokenUsage?.estimatedCostUsd ?? 0;
     this.state.tabs = [
       ...this.state.tabs.filter((tab) => tab.sessionId !== session.id).map((tab) => ({ ...tab, active: false })),
       { id: `tab-${session.id}`, title: session.title || 'Untitled session', sessionId: session.id, active: true },
@@ -547,8 +562,9 @@ export class TuiController {
     this.state.selectedSubagent = 0;
     this.state.subagentDetail = null;
     this.state.agentTasks = [];
-    this.state.sdd = emptySdd();
+    this.state.sdd = sddBelongsToSession ? this.state.sdd : emptySdd();
     this.state.terminalInput = null;
+    this.state.terminals = this.state.terminals.filter((terminal) => this.belongsToCurrentConversation(terminal));
     this.terminalRawOutput.clear();
     this.terminalOutputSequence.clear();
     this.liveStreamStart = null;
@@ -567,6 +583,12 @@ export class TuiController {
     }
     if (this.state.tools.length > REPLAYED_TOOL_LIMIT) this.state.tools = this.state.tools.slice(-REPLAYED_TOOL_LIMIT);
     this.state.scroll = 0;
+  }
+
+  private refreshSessionMetadata(session: SessionRecord): void {
+    this.state.sessionTitle = session.title || 'Untitled session';
+    this.state.sessionMessageCount = session.messageCount;
+    this.state.goal = session.goal ?? null;
   }
 
   private contentItems(content: Message['content'], replayedToolIds?: Set<string>): TranscriptItem[] {
@@ -658,17 +680,22 @@ export class TuiController {
         this.append('error', 'Runtime terminal summary was invalid');
         continue;
       }
+      if (!this.belongsToCurrentConversation(terminal)) continue;
       terminals.push(terminal);
     }
     if (Array.isArray(result)) {
-      const merged = new Map(this.state.terminals.map((terminal) => [terminal.terminalId, terminal]));
+      const merged = new Map(this.state.terminals
+        .filter((terminal) => this.belongsToCurrentConversation(terminal))
+        .map((terminal) => [terminal.terminalId, terminal]));
       for (const terminal of terminals) this.mergeTerminal(merged, terminal);
       this.state.terminals = [...merged.values()];
     }
     else {
       const next = terminals[0];
       if (next) {
-        const merged = new Map(this.state.terminals.map((terminal) => [terminal.terminalId, terminal]));
+        const merged = new Map(this.state.terminals
+          .filter((terminal) => this.belongsToCurrentConversation(terminal))
+          .map((terminal) => [terminal.terminalId, terminal]));
         this.mergeTerminal(merged, next);
         this.state.terminals = [...merged.values()];
         this.state.activeTerminalId = next.terminalId;
@@ -1090,7 +1117,7 @@ export class TuiController {
         break;
       }
       case 'terminal_progress':
-        if (!this.acceptsCurrentTerminalEvent(event)) break;
+        if (!this.acceptsCurrentTerminalEvent(event, ownerId)) break;
         this.applyTerminalProgress(event.progress, ownerId);
         break;
       case 'api_request_sent':
@@ -1118,14 +1145,17 @@ export class TuiController {
         break;
       case 'turn_end':
         this.sweepUnfinalizedTerminalTools(ownerId);
-        this.applyUsage(event.tokenUsage);
         if (ownerId) {
           this.upsertSubAgent(ownerId, {
+            ...(!this.state.subagents.find((agent) => agent.ownerId === ownerId)?.tokenUsage
+              ? { usageMerge: event.tokenUsage }
+              : {}),
             status: event.reason === 'error' ? 'error' : event.reason === 'cancelled' || event.reason === 'cancelled_partial' ? 'cancelled' : 'done',
             stopReason: event.reason,
             endedAt: Date.now(),
           });
         } else {
+          this.applyUsage(event.tokenUsage);
           this.state.running = false;
           this.state.status = event.error ? `${event.reason}: ${event.error}` : event.reason;
           this.liveStreamStart = null;
@@ -1331,10 +1361,19 @@ export class TuiController {
     }
   }
 
-  private acceptsCurrentTerminalEvent(event: HarnessEvent): boolean {
-    if (event.turnId && this.currentTurnId && event.turnId !== this.currentTurnId) return false;
+  private acceptsCurrentTerminalEvent(event: HarnessEvent, ownerId: string | null): boolean {
+    // Scoped sub-agent events carry their own turn namespace; only the main
+    // turn (ownerId === null) is filtered by currentTurnId. Conversation
+    // filtering still applies to every owner.
+    if (!ownerId && event.turnId && this.currentTurnId && event.turnId !== this.currentTurnId) return false;
     if (event.conversationId && this.currentConversationId && event.conversationId !== this.currentConversationId) return false;
     return true;
+  }
+
+  private belongsToCurrentConversation(terminal: TerminalSummary): boolean {
+    return !terminal.ownerConversationId
+      || !this.currentConversationId
+      || terminal.ownerConversationId === this.currentConversationId;
   }
 
   private upsertFileChange(change: FileChangePending): void {

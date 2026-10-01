@@ -11,6 +11,7 @@ import type {
   McpResourceContent,
   McpPrompt,
   McpPromptResult,
+  McpRequestOptions,
 } from './types';
 
 // ─── JSON-RPC Types ─────────────────────────────────────────────────────────
@@ -38,11 +39,11 @@ interface JsonRpcNotification {
 // ─── Transport Interface ────────────────────────────────────────────────────
 
 export interface McpTransport {
-  connect(): Promise<void>;
+  connect(options?: McpRequestOptions): Promise<void>;
   disconnect(): Promise<void>;
-  send(message: JsonRpcRequest): Promise<JsonRpcResponse>;
+  send(message: JsonRpcRequest, options?: McpRequestOptions): Promise<JsonRpcResponse>;
   /** Fire-and-forget: send a JSON-RPC notification (no id, no response expected) */
-  sendNotification(notification: JsonRpcNotification): Promise<void>;
+  sendNotification(notification: JsonRpcNotification, options?: McpRequestOptions): Promise<void>;
   onNotification(handler: (notification: JsonRpcNotification) => void): void;
 }
 
@@ -50,150 +51,358 @@ export interface McpTransport {
 // Spawns a local process and communicates via JSON-RPC over stdin/stdout.
 
 export class StdioTransport implements McpTransport {
-  private config: McpServerConfig;
-  private invoke: <T>(cmd: string, args?: Record<string, unknown>) => Promise<T>;
-  private listen: ((event: string, handler: (payload: unknown) => void) => Promise<() => void>) | undefined;
-  private ptyId: string | null = null;
-  private pendingRequests = new Map<number | string, {
-    resolve: (value: JsonRpcResponse) => void;
-    reject: (reason: Error) => void;
-  }>();
-  private notificationHandler: ((n: JsonRpcNotification) => void) | null = null;
-  private buffer = '';
-  private unlistenPtyData: (() => void) | null = null;
-
   constructor(
-    config: McpServerConfig,
-    invoke: <T>(cmd: string, args?: Record<string, unknown>) => Promise<T>,
-    listen?: (event: string, handler: (payload: unknown) => void) => Promise<() => void>,
-  ) {
-    this.config = config;
-    this.invoke = invoke;
-    this.listen = listen;
-  }
+    _config: McpServerConfig,
+    _invoke: <T>(cmd: string, args?: Record<string, unknown>) => Promise<T>,
+    _listen?: (event: string, handler: (payload: unknown) => void) => Promise<() => void>,
+  ) {}
 
   async connect(): Promise<void> {
-    const command = this.config.command?.trim();
-    if (!command) throw new Error('stdio transport requires a non-empty command');
-    // Minimal injection guard: reject path traversal / absolute paths outside
-    // PATH lookup. Full allowlist enforcement lives in the host config layer.
-    if (command.includes('..') || /[/\\]/.test(command)) {
-      console.warn(`[StdioTransport] Suspicious stdio command "${command}" — allowing only bare binary names or validated paths.`);
-      if (command.includes('..')) throw new Error(`stdio command "${command}" contains forbidden ".."`);
-    }
-    console.log(`[StdioTransport] Spawning "${command}" for server "${this.config.id}"`);
-
-    this.ptyId = `mcp-${this.config.id}-${crypto.randomUUID()}`;
-    const spawnPromise = this.invoke('pty_spawn', {
-      id: this.ptyId,
-      shell: command,
-      args: this.config.args || [],
-      cwd: undefined,
-      cols: 80,
-      rows: 24,
-      env: this.config.env,
-    });
-    const timeoutMs = this.config.capabilities.timeoutMs ?? 10_000;
-    await Promise.race([
-      spawnPromise,
-      new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error(`stdio connect timeout (${timeoutMs}ms)`)), timeoutMs),
-      ),
-    ]);
-
-    // Wire up PTY data listener so JSON-RPC responses are received
-    if (this.listen) {
-      this.unlistenPtyData = await this.listen('pty:data', (payload: unknown) => {
-        const data = payload as { pty_id: string; data: string };
-        if (data.pty_id === this.ptyId) {
-          this.handleData(data.data);
-        }
-      });
-    }
+    throw new Error(
+      'MCP stdio servers are disabled in this build: PTYs do not provide a safe raw ' +
+        'stdin/stdout process contract. Migrate the server to SSE (http/https) or ' +
+        'WebSocket (wss, ws on localhost) in Settings → MCP, or wait for the safe ' +
+        'raw-process transport. Your existing stdio command/args were preserved and not executed.',
+    );
   }
 
   async disconnect(): Promise<void> {
-    if (this.unlistenPtyData) {
-      this.unlistenPtyData();
-      this.unlistenPtyData = null;
-    }
-    if (this.ptyId) {
-      try {
-        await this.invoke('pty_kill', { id: this.ptyId });
-      } catch (err) {
-        console.warn(`[StdioTransport] pty_kill failed for "${this.ptyId}":`, err);
-      }
-      this.ptyId = null;
-    }
-    // Reject pending requests
-    for (const [, pending] of this.pendingRequests) {
-      pending.reject(new Error('Transport disconnected'));
-    }
-    this.pendingRequests.clear();
+    return;
   }
 
-  async send(message: JsonRpcRequest): Promise<JsonRpcResponse> {
-    if (!this.ptyId) throw new Error('Transport not connected');
+  async send(_message: JsonRpcRequest): Promise<JsonRpcResponse> {
+    throw new Error(
+      'MCP stdio servers are disabled in this build. Migrate to SSE or WebSocket to re-enable this server.',
+    );
+  }
 
-    const data = JSON.stringify(message) + '\n';
-    await this.invoke('pty_write', { id: this.ptyId, data });
+  onNotification(_handler: (notification: JsonRpcNotification) => void): void {}
 
-    // Wait for response
-    return new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        this.pendingRequests.delete(message.id);
-        reject(new Error(`Request ${message.id} timed out`));
-      }, this.config.capabilities.timeoutMs || 30000);
+  async sendNotification(_notification: JsonRpcNotification): Promise<void> {
+    throw new Error(
+      'MCP stdio servers are disabled in this build. Migrate to SSE or WebSocket to re-enable this server.',
+    );
+  }
+}
 
-      this.pendingRequests.set(message.id, {
-        resolve: (resp) => {
-          clearTimeout(timeout);
-          resolve(resp);
-        },
-        reject: (err) => {
-          clearTimeout(timeout);
-          reject(err);
-        },
-      });
+type PendingHttpRequest = {
+  resolve: (response: JsonRpcResponse) => void;
+  reject: (reason: Error) => void;
+};
+
+function endpointUrl(value: string, base: string): string {
+  const endpoint = new URL(value, base);
+  const origin = new URL(base);
+  if (
+    endpoint.origin !== origin.origin ||
+    endpoint.username ||
+    endpoint.password ||
+    endpoint.hash
+  ) {
+    throw new Error('MCP SSE endpoint must remain on the authenticated server origin.');
+  }
+  return endpoint.toString();
+}
+
+/** Authenticated fetch-based SSE transport with bounded requests and cancellation. */
+export class FetchSseTransport implements McpTransport {
+  private readonly config: McpServerConfig;
+  private messagesUrl: string | null = null;
+  private connectionController: AbortController | null = null;
+  private reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
+  private notificationHandler: ((notification: JsonRpcNotification) => void) | null = null;
+  private readonly pendingRequests = new Map<number | string, PendingHttpRequest>();
+  private failure: Error | null = null;
+  private endpointPromise: Promise<string>;
+  private resolveEndpoint: ((url: string) => void) | null = null;
+  private rejectEndpoint: ((error: Error) => void) | null = null;
+  private disconnected = true;
+
+  constructor(config: McpServerConfig) {
+    this.config = config;
+    this.endpointPromise = this.createEndpointPromise();
+  }
+
+  private createEndpointPromise(): Promise<string> {
+    this.endpointPromise = new Promise<string>((resolve, reject) => {
+      this.resolveEndpoint = resolve;
+      this.rejectEndpoint = reject;
     });
+    void this.endpointPromise.catch(() => undefined);
+    return this.endpointPromise;
+  }
+
+  async connect(options: McpRequestOptions = {}): Promise<void> {
+    if (!this.config.url) throw new Error('SSE transport requires url');
+    const url = new URL(this.config.url);
+    if (
+      !['http:', 'https:'].includes(url.protocol) ||
+      url.username ||
+      url.password ||
+      url.hash
+    ) {
+      throw new Error('MCP SSE URL must use HTTP(S) and cannot contain credentials or fragments.');
+    }
+    const hasCredentials = Object.keys(this.config.headers ?? {}).length > 0;
+    const localHost = ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname);
+    if (hasCredentials && url.protocol !== 'https:' && !localHost) {
+      throw new Error('MCP authentication headers require HTTPS except for loopback development servers.');
+    }
+    for (const [name, value] of Object.entries(this.config.headers ?? {})) {
+      if (!/^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/.test(name) || /[\r\n]/.test(value)) {
+        throw new Error('MCP authentication headers contain an invalid name or value.');
+      }
+    }
+    if (this.config.capabilities.timeoutMs <= 0) {
+      throw new Error('MCP connection timeout must be greater than zero.');
+    }
+
+    const controller = new AbortController();
+    this.connectionController = controller;
+    this.disconnected = false;
+    this.failure = null;
+    this.createEndpointPromise();
+    let timedOut = false;
+    const timeoutMs = options.timeoutMs ?? this.config.capabilities.timeoutMs;
+    const timeout = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, timeoutMs);
+    const onAbort = (): void => controller.abort(options.signal?.reason);
+    options.signal?.addEventListener('abort', onAbort, { once: true });
+    if (options.signal?.aborted) onAbort();
+
+    try {
+      const response = await fetch(url, {
+        method: 'GET',
+        headers: {
+          Accept: 'text/event-stream',
+          ...this.config.headers,
+        },
+        redirect: 'error',
+        signal: controller.signal,
+      });
+      if (!response.ok) {
+        throw new Error(`MCP SSE connection failed with HTTP ${response.status}.`);
+      }
+      if (!response.body) throw new Error('MCP SSE response did not include a readable stream.');
+      this.reader = response.body.getReader();
+      clearTimeout(timeout);
+      options.signal?.removeEventListener('abort', onAbort);
+      void this.readStream(url.toString());
+    } catch (error) {
+      clearTimeout(timeout);
+      options.signal?.removeEventListener('abort', onAbort);
+      this.disconnected = true;
+      if (timedOut) throw new Error(`MCP SSE connection timed out after ${timeoutMs}ms.`);
+      if (options.signal?.aborted) throw new Error('MCP SSE connection was cancelled.');
+      throw error;
+    }
+  }
+
+  private async readStream(baseUrl: string): Promise<void> {
+    if (!this.reader) return;
+    const decoder = new TextDecoder();
+    let buffer = '';
+    try {
+      while (!this.disconnected) {
+        const { done, value } = await this.reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true }).replace(/\r\n/g, '\n');
+        let boundary = buffer.indexOf('\n\n');
+        while (boundary >= 0) {
+          const eventText = buffer.slice(0, boundary);
+          buffer = buffer.slice(boundary + 2);
+          this.handleSseEvent(eventText, baseUrl);
+          boundary = buffer.indexOf('\n\n');
+        }
+      }
+      if (!this.disconnected) this.fail(new Error('MCP SSE stream ended unexpectedly.'));
+    } catch (error) {
+      if (!this.disconnected) this.fail(error instanceof Error ? error : new Error(String(error)));
+    }
+  }
+
+  private handleSseEvent(text: string, baseUrl: string): void {
+    let event = 'message';
+    const data: string[] = [];
+    for (const line of text.split('\n')) {
+      if (!line || line.startsWith(':')) continue;
+      const separator = line.indexOf(':');
+      const field = separator < 0 ? line : line.slice(0, separator);
+      const value = separator < 0 ? '' : line.slice(separator + 1).replace(/^ /, '');
+      if (field === 'event') event = value;
+      if (field === 'data') data.push(value);
+    }
+    if (data.length === 0) return;
+    const payload = data.join('\n');
+    if (event === 'endpoint') {
+      try {
+        this.messagesUrl = endpointUrl(payload, baseUrl);
+        this.resolveEndpoint?.(this.messagesUrl);
+        this.resolveEndpoint = null;
+        this.rejectEndpoint = null;
+      } catch (error) {
+        this.fail(error instanceof Error ? error : new Error(String(error)));
+      }
+      return;
+    }
+    if (event !== 'message') return;
+    try {
+      const message = JSON.parse(payload) as JsonRpcResponse | JsonRpcNotification;
+      if ('id' in message && this.pendingRequests.has(message.id)) {
+        const pending = this.pendingRequests.get(message.id)!;
+        this.pendingRequests.delete(message.id);
+        pending.resolve(message as JsonRpcResponse);
+      } else if ('method' in message && !('id' in message)) {
+        this.notificationHandler?.(message as JsonRpcNotification);
+      }
+    } catch (error) {
+      console.warn('[MCP SSE] Ignoring malformed JSON event:', error);
+    }
+  }
+
+  private fail(error: Error): void {
+    this.failure = error;
+    this.rejectEndpoint?.(error);
+    this.rejectEndpoint = null;
+    this.resolveEndpoint = null;
+    for (const pending of this.pendingRequests.values()) pending.reject(error);
+    this.pendingRequests.clear();
+    this.disconnected = true;
+  }
+
+  async disconnect(): Promise<void> {
+    this.disconnected = true;
+    this.connectionController?.abort();
+    this.connectionController = null;
+    if (this.reader) {
+      await this.reader.cancel().catch(() => undefined);
+      this.reader = null;
+    }
+    this.rejectEndpoint?.(new Error('MCP transport disconnected.'));
+    this.rejectEndpoint = null;
+    this.resolveEndpoint = null;
+    for (const pending of this.pendingRequests.values()) {
+      pending.reject(new Error('MCP transport disconnected.'));
+    }
+    this.pendingRequests.clear();
+    this.messagesUrl = null;
+  }
+
+  async send(message: JsonRpcRequest, options: McpRequestOptions = {}): Promise<JsonRpcResponse> {
+    if (this.disconnected) throw this.failure ?? new Error('MCP transport not connected.');
+    if (options.signal?.aborted) throw new Error('MCP request was cancelled.');
+    const timeoutMs = options.timeoutMs ?? this.config.capabilities.timeoutMs;
+    const controller = new AbortController();
+    let timedOut = false;
+    const timeout = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, timeoutMs);
+    const onAbort = (): void => controller.abort(options.signal?.reason);
+    options.signal?.addEventListener('abort', onAbort, { once: true });
+    if (options.signal?.aborted) onAbort();
+
+    const pending = new Promise<JsonRpcResponse>((resolve, reject) => {
+      this.pendingRequests.set(message.id, { resolve, reject });
+    });
+    void pending.catch(() => undefined);
+    const onRequestAbort = (): void => {
+      const request = this.pendingRequests.get(message.id);
+      this.pendingRequests.delete(message.id);
+      const error = timedOut
+        ? new Error(`MCP request ${message.id} timed out after ${timeoutMs}ms.`)
+        : new Error('MCP request was cancelled.');
+      request?.reject(error);
+      if (!timedOut && !this.disconnected) {
+        void this.sendNotification({
+          jsonrpc: '2.0',
+          method: 'notifications/cancelled',
+          params: { requestId: message.id, reason: 'Request aborted by client.' },
+        }).catch(() => undefined);
+      }
+    };
+    controller.signal.addEventListener('abort', onRequestAbort, { once: true });
+
+    try {
+      const url = await Promise.race([
+        this.endpointPromise,
+        new Promise<never>((_, reject) => {
+          controller.signal.addEventListener(
+            'abort',
+            () => reject(timedOut ? new Error(`MCP endpoint wait timed out after ${timeoutMs}ms.`) : new Error('MCP request was cancelled.')),
+            { once: true },
+          );
+        }),
+      ]);
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...this.config.headers },
+        body: JSON.stringify(message),
+        redirect: 'error',
+        signal: controller.signal,
+      });
+      if (!response.ok) {
+        const request = this.pendingRequests.get(message.id);
+        this.pendingRequests.delete(message.id);
+        const error = new Error(`MCP HTTP ${response.status}: ${await response.text()}`);
+        request?.reject(error);
+        throw error;
+      }
+      const contentType = response.headers.get('content-type') ?? '';
+      if (contentType.includes('application/json')) {
+        const json = (await response.json()) as JsonRpcResponse;
+        if (json.id !== message.id) {
+          throw new Error('MCP HTTP response ID does not match the request ID.');
+        }
+        this.pendingRequests.delete(message.id);
+        return json;
+      }
+      return await pending;
+    } catch (error) {
+      this.pendingRequests.delete(message.id);
+      throw error;
+    } finally {
+      clearTimeout(timeout);
+      options.signal?.removeEventListener('abort', onAbort);
+      controller.signal.removeEventListener('abort', onRequestAbort);
+    }
   }
 
   onNotification(handler: (notification: JsonRpcNotification) => void): void {
     this.notificationHandler = handler;
   }
 
-  async sendNotification(notification: JsonRpcNotification): Promise<void> {
-    if (!this.ptyId) throw new Error('Transport not connected');
-    const data = JSON.stringify(notification) + '\n';
-    await this.invoke('pty_write', { id: this.ptyId, data });
-  }
-
-  /** Called when data is received from the process stdout */
-  handleData(data: string): void {
-    this.buffer += data;
-
-    // Process complete JSON lines
-    while (true) {
-      const newlineIdx = this.buffer.indexOf('\n');
-      if (newlineIdx === -1) break;
-
-      const line = this.buffer.slice(0, newlineIdx).trim();
-      this.buffer = this.buffer.slice(newlineIdx + 1);
-
-      if (!line) continue;
-
-      try {
-        const msg = JSON.parse(line);
-        if ('id' in msg && this.pendingRequests.has(msg.id)) {
-          const pending = this.pendingRequests.get(msg.id)!;
-          this.pendingRequests.delete(msg.id);
-          pending.resolve(msg as JsonRpcResponse);
-        } else if ('method' in msg && !('id' in msg)) {
-          this.notificationHandler?.(msg as JsonRpcNotification);
-        }
-      } catch (err) {
-        console.warn('[StdioTransport] Skipping invalid JSON line:', err);
-      }
+  async sendNotification(
+    notification: JsonRpcNotification,
+    options: McpRequestOptions = {},
+  ): Promise<void> {
+    if (this.disconnected) throw new Error('MCP transport not connected.');
+    const timeoutMs = options.timeoutMs ?? this.config.capabilities.timeoutMs;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+    const onAbort = (): void => controller.abort(options.signal?.reason);
+    options.signal?.addEventListener('abort', onAbort, { once: true });
+    if (options.signal?.aborted) onAbort();
+    try {
+      const url = await Promise.race([
+        this.endpointPromise,
+        new Promise<never>((_, reject) =>
+          controller.signal.addEventListener('abort', () => reject(new Error('MCP notification timed out or was cancelled.')), { once: true }),
+        ),
+      ]);
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...this.config.headers },
+        body: JSON.stringify(notification),
+        redirect: 'error',
+        signal: controller.signal,
+      });
+      if (!response.ok) throw new Error(`MCP HTTP ${response.status}: ${await response.text()}`);
+    } finally {
+      clearTimeout(timeout);
+      options.signal?.removeEventListener('abort', onAbort);
     }
   }
 }
@@ -202,148 +411,22 @@ export class StdioTransport implements McpTransport {
 // HTTP-based transport using POST for requests, SSE for server messages.
 
 export class SseTransport implements McpTransport {
-  private config: McpServerConfig;
-  private messagesUrl: string | null = null;
-  private endpointPromise: Promise<void> | null = null;
-  private eventSource: EventSource | null = null;
-  private pendingRequests = new Map<number | string, {
-    resolve: (value: JsonRpcResponse) => void;
-    reject: (reason: Error) => void;
-  }>();
-  private notificationHandler: ((n: JsonRpcNotification) => void) | null = null;
-
-  constructor(config: McpServerConfig) {
-    this.config = config;
-  }
+  constructor(_config: McpServerConfig) {}
 
   async connect(): Promise<void> {
-    if (!this.config.url) throw new Error('SSE transport requires url');
-
-    const baseUrl = this.config.url;
-    const timeoutMs = this.config.capabilities.timeoutMs ?? 10_000;
-
-    // Establish SSE connection
-    this.eventSource = new EventSource(baseUrl);
-
-    const endpointPromise = new Promise<void>((resolve) => {
-      this.eventSource!.addEventListener('endpoint', (event: MessageEvent) => {
-        // Server sends the messages endpoint URL
-        try {
-          this.messagesUrl = new URL(event.data, baseUrl).toString();
-        } catch (err) {
-          console.warn('[SseTransport] Invalid endpoint URL from server:', err);
-          return;
-        }
-        resolve();
-      });
-    });
-    this.endpointPromise = endpointPromise;
-
-    this.eventSource.addEventListener('message', (event: MessageEvent) => {
-      try {
-        const msg = JSON.parse(event.data);
-        if ('id' in msg && this.pendingRequests.has(msg.id)) {
-          const pending = this.pendingRequests.get(msg.id)!;
-          this.pendingRequests.delete(msg.id);
-          pending.resolve(msg as JsonRpcResponse);
-        } else if ('method' in msg && !('id' in msg)) {
-          this.notificationHandler?.(msg as JsonRpcNotification);
-        }
-      } catch (err) {
-        console.warn('[SseTransport] Skipping invalid SSE message:', err);
-      }
-    });
-
-    // Wait for connection to establish
-    await new Promise<void>((resolve, reject) => {
-      const timeout = setTimeout(() => reject(new Error(`SSE connection timeout (${timeoutMs}ms)`)), timeoutMs);
-      this.eventSource!.addEventListener('open', () => {
-        clearTimeout(timeout);
-        resolve();
-      });
-      this.eventSource!.addEventListener('error', () => {
-        clearTimeout(timeout);
-        reject(new Error('SSE connection failed'));
-      });
-    });
+    throw new Error('The legacy EventSource MCP transport is disabled; use FetchSseTransport.');
   }
 
-  async disconnect(): Promise<void> {
-    this.eventSource?.close();
-    this.eventSource = null;
-    this.messagesUrl = null;
-    this.endpointPromise = null;
-    for (const [, pending] of this.pendingRequests) {
-      pending.reject(new Error('Transport disconnected'));
-    }
-    this.pendingRequests.clear();
+  async disconnect(): Promise<void> {}
+
+  async send(_message: JsonRpcRequest): Promise<JsonRpcResponse> {
+    throw new Error('The legacy EventSource MCP transport is disabled; use FetchSseTransport.');
   }
 
-  async send(message: JsonRpcRequest): Promise<JsonRpcResponse> {
-    // The server announces its POST endpoint via the `endpoint` SSE event —
-    // never send before it arrives or the request has nowhere to go.
-    if (!this.messagesUrl) {
-      if (this.endpointPromise) {
-        const timeoutMs = this.config.capabilities.timeoutMs ?? 10_000;
-        await Promise.race([
-          this.endpointPromise,
-          new Promise<never>((_, reject) =>
-            setTimeout(() => reject(new Error('SSE send failed: not connected yet (no endpoint event)')), timeoutMs),
-          ),
-        ]);
-      }
-      if (!this.messagesUrl) throw new Error('SSE send failed: not connected yet (no endpoint event)');
-    }
-    const url = this.messagesUrl;
+  onNotification(_handler: (notification: JsonRpcNotification) => void): void {}
 
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...this.config.headers,
-      },
-      body: JSON.stringify(message),
-    });
-
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}: ${await response.text()}`);
-    }
-
-    // Response comes via SSE stream, wait for it
-    return new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        this.pendingRequests.delete(message.id);
-        reject(new Error(`Request ${message.id} timed out`));
-      }, this.config.capabilities.timeoutMs || 30000);
-
-      this.pendingRequests.set(message.id, {
-        resolve: (resp) => {
-          clearTimeout(timeout);
-          resolve(resp);
-        },
-        reject: (err) => {
-          clearTimeout(timeout);
-          reject(err);
-        },
-      });
-    });
-  }
-
-  onNotification(handler: (notification: JsonRpcNotification) => void): void {
-    this.notificationHandler = handler;
-  }
-
-  async sendNotification(notification: JsonRpcNotification): Promise<void> {
-    const url = this.messagesUrl || this.config.url;
-    if (!url) throw new Error('No messages endpoint');
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...this.config.headers },
-      body: JSON.stringify(notification),
-    });
-    if (!response.ok) {
-      console.warn(`[SseTransport] sendNotification failed: HTTP ${response.status}`);
-    }
+  async sendNotification(_notification: JsonRpcNotification): Promise<void> {
+    throw new Error('The legacy EventSource MCP transport is disabled; use FetchSseTransport.');
   }
 }
 
@@ -369,10 +452,24 @@ export class WebSocketTransport implements McpTransport {
 
   async connect(): Promise<void> {
     this.closed = false;
-    await this.openSocket(false);
+    if (Object.keys(this.config.headers ?? {}).length > 0) {
+      throw new Error('MCP WebSocket transport cannot securely apply custom authentication headers.');
+    }
+    const wsUrl = this.config.wsUrl;
+    if (!wsUrl) throw new Error('WebSocket transport requires wsUrl');
+    const url = new URL(wsUrl);
+    const local = ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname);
+    if (
+      !['wss:', ...(local ? ['ws:'] : [])].includes(url.protocol) ||
+      url.username ||
+      url.password
+    ) {
+      throw new Error('MCP WebSocket URL must use wss (or ws on localhost) and contain no credentials.');
+    }
+    await this.openSocket(false, this.config.capabilities.timeoutMs);
   }
 
-  private openSocket(isReconnect: boolean): Promise<void> {
+  private openSocket(isReconnect: boolean, timeoutMs = 10_000): Promise<void> {
     if (!this.config.wsUrl) return Promise.reject(new Error('WebSocket transport requires wsUrl'));
 
     this.ws = new WebSocket(this.config.wsUrl);
@@ -398,7 +495,7 @@ export class WebSocketTransport implements McpTransport {
       if (!this.closed && !this.reconnected && !isReconnect) {
         this.reconnected = true;
         console.warn('[WebSocketTransport] Connection closed — attempting one auto-reconnect…');
-        this.openSocket(true).catch((err) => {
+        this.openSocket(true, timeoutMs).catch((err) => {
           console.warn('[WebSocketTransport] Auto-reconnect failed:', err);
         });
       }
@@ -406,7 +503,7 @@ export class WebSocketTransport implements McpTransport {
 
     // Wait for open or error
     return new Promise<void>((resolve, reject) => {
-      const timeout = setTimeout(() => reject(new Error('WebSocket connection timeout')), 10000);
+      const timeout = setTimeout(() => reject(new Error(`WebSocket connection timeout after ${timeoutMs}ms`)), timeoutMs);
 
       this.ws!.addEventListener('open', () => {
         clearTimeout(timeout);
@@ -464,34 +561,69 @@ export class WebSocketTransport implements McpTransport {
     this.pendingRequests.clear();
   }
 
-  async send(message: JsonRpcRequest): Promise<JsonRpcResponse> {
+  async send(message: JsonRpcRequest, options: McpRequestOptions = {}): Promise<JsonRpcResponse> {
     const payload = JSON.stringify(message);
-    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-      this.ws.send(payload);
-    } else if (this.ws && this.ws.readyState === WebSocket.CONNECTING) {
-      // Queue while the socket finishes connecting; flushed on open.
-      console.warn('[WebSocketTransport] Socket connecting — queueing request', message.id);
-      this.messageQueue.push(payload);
-    } else {
+    if (
+      !this.ws ||
+      (this.ws.readyState !== WebSocket.OPEN && this.ws.readyState !== WebSocket.CONNECTING)
+    ) {
       throw new Error('WebSocket not connected');
     }
 
-    return new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => {
+    const timeoutMs = options.timeoutMs ?? this.config.capabilities.timeoutMs ?? 30_000;
+    return new Promise<JsonRpcResponse>((resolve, reject) => {
+      let settled = false;
+      const cleanup = (): void => {
+        clearTimeout(timeout);
+        options.signal?.removeEventListener('abort', onAbort);
+      };
+      const finish = (action: () => void): void => {
+        if (settled) return;
+        settled = true;
         this.pendingRequests.delete(message.id);
-        reject(new Error(`Request ${message.id} timed out`));
-      }, this.config.capabilities.timeoutMs || 30000);
-
+        cleanup();
+        action();
+      };
+      const onAbort = (): void => {
+        this.messageQueue = this.messageQueue.filter((queued) => {
+          try {
+            return JSON.parse(queued).id !== message.id;
+          } catch {
+            return true;
+          }
+        });
+        if (this.ws?.readyState === WebSocket.OPEN) {
+          try {
+            this.ws.send(JSON.stringify({
+              jsonrpc: '2.0',
+              method: 'notifications/cancelled',
+              params: { requestId: message.id, reason: 'Request aborted by client.' },
+            }));
+          } catch (error) {
+            console.warn('[WebSocketTransport] Could not send cancellation notification:', error);
+          }
+        }
+        finish(() => reject(new Error('MCP WebSocket request was cancelled.')));
+      };
+      const timeout = setTimeout(
+        () => finish(() => reject(new Error(`MCP WebSocket request ${message.id} timed out after ${timeoutMs}ms.`))),
+        timeoutMs,
+      );
+      options.signal?.addEventListener('abort', onAbort, { once: true });
       this.pendingRequests.set(message.id, {
-        resolve: (resp) => {
-          clearTimeout(timeout);
-          resolve(resp);
-        },
-        reject: (err) => {
-          clearTimeout(timeout);
-          reject(err);
-        },
+        resolve: (response) => finish(() => resolve(response)),
+        reject: (error) => finish(() => reject(error)),
       });
+      if (options.signal?.aborted) {
+        onAbort();
+        return;
+      }
+      try {
+        if (this.ws?.readyState === WebSocket.OPEN) this.ws.send(payload);
+        else this.messageQueue.push(payload);
+      } catch (error) {
+        finish(() => reject(error instanceof Error ? error : new Error(String(error))));
+      }
     });
   }
 
@@ -499,7 +631,11 @@ export class WebSocketTransport implements McpTransport {
     this.notificationHandler = handler;
   }
 
-  async sendNotification(notification: JsonRpcNotification): Promise<void> {
+  async sendNotification(
+    notification: JsonRpcNotification,
+    options: McpRequestOptions = {},
+  ): Promise<void> {
+    if (options.signal?.aborted) throw new Error('MCP WebSocket notification was cancelled.');
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
       throw new Error('WebSocket not connected');
     }
@@ -516,7 +652,10 @@ export class McpClientManager {
   /** Per-server in-flight call counts for maxConcurrentCalls gating. */
   private activeCalls = new Map<string, number>();
   /** Per-server FIFO waiters for the concurrency semaphore. */
-  private callWaiters = new Map<string, Array<() => void>>();
+  private callWaiters = new Map<
+    string,
+    Array<{ signal?: AbortSignal; onAbort: () => void; resolve: () => void; reject: (error: Error) => void }>
+  >();
 
   constructor(
     invoke: <T>(cmd: string, args?: Record<string, unknown>) => Promise<T>,
@@ -529,6 +668,17 @@ export class McpClientManager {
   // ─── Lifecycle ──────────────────────────────────────────────────────
 
   async connect(config: McpServerConfig): Promise<McpConnection> {
+    const timeoutMs = config.capabilities.timeoutMs;
+    if (!Number.isFinite(timeoutMs) || timeoutMs <= 0 || timeoutMs > 600_000) {
+      throw new Error('MCP timeoutMs must be between 1 and 600000 milliseconds.');
+    }
+    if (!Number.isFinite(config.capabilities.maxConcurrentCalls) || config.capabilities.maxConcurrentCalls < 1) {
+      throw new Error('MCP maxConcurrentCalls must be a positive integer.');
+    }
+    if (!Number.isInteger(config.capabilities.maxConcurrentCalls)) {
+      throw new Error('MCP maxConcurrentCalls must be a positive integer.');
+    }
+    await this.disconnect(config.id);
     // Create transport
     let transport: McpTransport;
     switch (config.transport) {
@@ -536,7 +686,7 @@ export class McpClientManager {
         transport = new StdioTransport(config, this.invoke, this.listen);
         break;
       case 'sse':
-        transport = new SseTransport(config);
+        transport = new FetchSseTransport(config);
         break;
       case 'websocket':
         transport = new WebSocketTransport(config);
@@ -558,7 +708,7 @@ export class McpClientManager {
 
     try {
       // Connect transport
-      await transport.connect();
+      await transport.connect({ timeoutMs: config.capabilities.timeoutMs });
 
       // Initialize MCP protocol
       await this.rpcCall(config.id, 'initialize', {
@@ -598,19 +748,20 @@ export class McpClientManager {
       }
 
       connection.status = 'connected';
-      return connection;
+      return this.publicConnection(connection);
     } catch (err) {
       connection.status = 'error';
       connection.error = err instanceof Error ? err.message : String(err);
       console.warn(`[McpClientManager] connect failed for "${config.id}":`, err);
       // Don't leave a broken entry in the map — callers must not route to it.
-      this.connections.delete(config.id);
+      // Preserve the failed connection record so callers can inspect and retry
+      // the actionable startup error instead of losing it during cleanup.
       try {
         await transport.disconnect();
       } catch (disconnectErr) {
         console.warn(`[McpClientManager] transport cleanup failed for "${config.id}":`, disconnectErr);
       }
-      return connection;
+      return this.publicConnection(connection);
     }
   }
 
@@ -618,6 +769,12 @@ export class McpClientManager {
     const conn = this.connections.get(serverId);
     if (!conn) return;
 
+    const waiters = this.callWaiters.get(serverId) ?? [];
+    this.callWaiters.delete(serverId);
+    for (const waiter of waiters) {
+      waiter.signal?.removeEventListener('abort', waiter.onAbort);
+      waiter.reject(new Error(`MCP server "${serverId}" disconnected while waiting for capacity.`));
+    }
     await conn.transport.disconnect();
     conn.status = 'disconnected';
     this.connections.delete(serverId);
@@ -634,7 +791,22 @@ export class McpClientManager {
   // ─── Discovery ──────────────────────────────────────────────────────
 
   listServers(): McpConnection[] {
-    return Array.from(this.connections.values()).map(({ transport: _transport, ...conn }) => conn);
+    return Array.from(this.connections.values()).map((connection) =>
+      this.publicConnection(connection),
+    );
+  }
+
+  private publicConnection(connection: McpConnection & { transport: McpTransport }): McpConnection {
+    const { transport: _transport, ...publicConnection } = connection;
+    return {
+      ...publicConnection,
+      config: {
+        ...connection.config,
+        headers: connection.config.headers
+          ? Object.fromEntries(Object.keys(connection.config.headers).map((name) => [name, '[redacted]']))
+          : undefined,
+      },
+    };
   }
 
   getServerTools(serverId: string): McpToolDefinition[] {
@@ -663,6 +835,7 @@ export class McpClientManager {
     serverId: string,
     toolName: string,
     args?: Record<string, unknown>,
+    options: McpRequestOptions = {},
   ): Promise<McpToolResult> {
     const conn = this.connections.get(serverId);
     if (!conn || conn.status !== 'connected') {
@@ -675,34 +848,47 @@ export class McpClientManager {
       throw new Error(`Tool "${toolName}" not allowed for server "${serverId}"`);
     }
 
-    await this.acquireSlot(serverId);
+    await this.acquireSlot(serverId, options.signal);
     try {
       const result = await this.rpcCall(serverId, 'tools/call', {
         name: toolName,
         arguments: args || {},
-      });
+      }, options);
       return result as McpToolResult;
     } finally {
       this.releaseSlot(serverId);
     }
   }
 
-  private async acquireSlot(serverId: string): Promise<void> {
+  private async acquireSlot(serverId: string, signal?: AbortSignal): Promise<void> {
     const conn = this.connections.get(serverId);
     const max = conn?.config.capabilities.maxConcurrentCalls ?? Infinity;
-    if (max <= 0) return;
+    if (signal?.aborted) throw new Error('MCP tool call was cancelled before dispatch.');
     const active = this.activeCalls.get(serverId) ?? 0;
     if (active < max) {
       this.activeCalls.set(serverId, active + 1);
       return;
     }
-    await new Promise<void>((resolve) => {
+    await new Promise<void>((resolve, reject) => {
       const waiters = this.callWaiters.get(serverId) ?? [];
-      waiters.push(() => {
-        this.activeCalls.set(serverId, (this.activeCalls.get(serverId) ?? 0) + 1);
-        resolve();
-      });
+      const waiter = {
+        signal,
+        resolve: () => {
+          signal?.removeEventListener('abort', waiter.onAbort);
+          this.activeCalls.set(serverId, (this.activeCalls.get(serverId) ?? 0) + 1);
+          resolve();
+        },
+        reject,
+        onAbort: (): void => {
+          const current = this.callWaiters.get(serverId) ?? [];
+          this.callWaiters.set(serverId, current.filter((candidate) => candidate !== waiter));
+          reject(new Error('MCP tool call was cancelled while waiting for capacity.'));
+        },
+      };
+      signal?.addEventListener('abort', waiter.onAbort, { once: true });
+      waiters.push(waiter);
       this.callWaiters.set(serverId, waiters);
+      if (signal?.aborted) waiter.onAbort();
     });
   }
 
@@ -710,8 +896,52 @@ export class McpClientManager {
     const active = this.activeCalls.get(serverId) ?? 1;
     this.activeCalls.set(serverId, Math.max(0, active - 1));
     const waiters = this.callWaiters.get(serverId);
-    const next = waiters?.shift();
-    if (next) next();
+    let next = waiters?.shift();
+    while (next?.signal?.aborted) {
+      next.reject(new Error('MCP tool call was cancelled while waiting for capacity.'));
+      next = waiters?.shift();
+    }
+    if (next) next.resolve();
+  }
+
+  private async rpcCall(
+    serverId: string,
+    method: string,
+    params?: Record<string, unknown>,
+    options: McpRequestOptions = {},
+  ): Promise<unknown> {
+    const conn = this.connections.get(serverId);
+    if (!conn || conn.status === 'error' || conn.status === 'disconnected') {
+      throw new Error(`Server "${serverId}" not connected`);
+    }
+
+    const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const request: JsonRpcRequest = { jsonrpc: '2.0', id, method, params };
+    let response: JsonRpcResponse;
+    try {
+      response = await conn.transport.send(request, {
+        ...options,
+        timeoutMs: options.timeoutMs ?? conn.config.capabilities.timeoutMs,
+      });
+    } catch (error) {
+      // Only poison the connection record for transport-level disconnects.
+      // Transient per-request failures (timeout, HTTP 5xx, cancel) must not
+      // flip a healthy connection to `error`: the SSE stream / WebSocket is
+      // still usable for the next call.
+      if (options.signal?.aborted) throw error;
+      const message = error instanceof Error ? error.message : String(error);
+      if (/not connected|disconnected|stream ended|connection (failed|closed)/i.test(message)) {
+        conn.status = 'error';
+        conn.error = message;
+      }
+      throw error;
+    }
+
+    if (response.error) {
+      throw new Error(`MCP error ${response.error.code}: ${response.error.message}`);
+    }
+
+    return response.result;
   }
 
   private assertResourceAllowed(serverId: string, uri: string): void {
@@ -762,21 +992,6 @@ export class McpClientManager {
   }
 
   // ─── Internal ─────────────────────────────────────────────────────
-
-  private async rpcCall(serverId: string, method: string, params?: Record<string, unknown>): Promise<unknown> {
-    const conn = this.connections.get(serverId);
-    if (!conn) throw new Error(`Server "${serverId}" not found`);
-
-    const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-    const request: JsonRpcRequest = { jsonrpc: '2.0', id, method, params };
-    const response = await conn.transport.send(request);
-
-    if (response.error) {
-      throw new Error(`MCP error ${response.error.code}: ${response.error.message}`);
-    }
-
-    return response.result;
-  }
 
   private async fetchTools(serverId: string): Promise<McpToolDefinition[]> {
     const result = await this.rpcCall(serverId, 'tools/list');

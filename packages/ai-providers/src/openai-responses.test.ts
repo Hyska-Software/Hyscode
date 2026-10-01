@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import type { FetchImpl, Message, StreamChunk } from './types';
-import { chatResponsesAPI, parseResponsesChunk, toResponsesInput } from './providers/openai-responses';
+import {
+  chatResponsesAPI,
+  parseResponsesChunk,
+  toResponsesInput,
+} from './providers/openai-responses';
 
 function sseResponse(events: string[]): Response {
   const body = events.map((event) => `data: ${event}\n\n`).join('');
@@ -242,7 +246,10 @@ describe('chatResponsesAPI', () => {
       },
     ]);
     const input = body.input as Array<Record<string, unknown>>;
-    expect(input[0]).toEqual({ role: 'user', content: [{ type: 'input_text', text: 'Add numbers' }] });
+    expect(input[0]).toEqual({
+      role: 'user',
+      content: [{ type: 'input_text', text: 'Add numbers' }],
+    });
     expect(input[1]).toEqual({
       type: 'function_call',
       call_id: 'call_1',
@@ -264,6 +271,80 @@ describe('chatResponsesAPI', () => {
     ]);
   });
 
+  it('associates interleaved Responses argument deltas with their call identities', async () => {
+    const fetchImpl: FetchImpl = async () =>
+      sseResponse([
+        JSON.stringify({
+          type: 'response.output_item.added',
+          output_index: 0,
+          item: { type: 'function_call', id: 'fc_a', call_id: 'call_a', name: 'alpha' },
+        }),
+        JSON.stringify({
+          type: 'response.output_item.added',
+          output_index: 1,
+          item: { type: 'function_call', id: 'fc_b', call_id: 'call_b', name: 'beta' },
+        }),
+        JSON.stringify({
+          type: 'response.function_call_arguments.delta',
+          output_index: 1,
+          delta: '{"b":',
+        }),
+        JSON.stringify({
+          type: 'response.function_call_arguments.delta',
+          item_id: 'fc_a',
+          delta: '{"a":',
+        }),
+        JSON.stringify({
+          type: 'response.function_call_arguments.delta',
+          item_id: 'fc_a',
+          delta: '1}',
+        }),
+        JSON.stringify({
+          type: 'response.function_call_arguments.delta',
+          output_index: 1,
+          delta: '"two"}',
+        }),
+        JSON.stringify({
+          type: 'response.function_call_arguments.done',
+          item_id: 'fc_a',
+        }),
+        JSON.stringify({
+          type: 'response.function_call_arguments.done',
+          output_index: 1,
+        }),
+        JSON.stringify({ type: 'response.completed', response: {} }),
+      ]);
+    const chunks: StreamChunk[] = [];
+
+    for await (const chunk of chatResponsesAPI(
+      {
+        model: 'gpt-5.6-luna',
+        messages: [{ role: 'user', content: [{ type: 'text', text: 'Call both tools' }] }],
+      },
+      {
+        providerId: 'opencode-go',
+        providerName: 'OpenCode Go',
+        apiKey: 'key',
+        baseUrl: 'https://opencode.ai/zen/go/v1',
+        fetchImpl,
+      },
+    )) {
+      chunks.push(chunk);
+    }
+
+    expect(chunks).toEqual([
+      { type: 'tool_call_start', id: 'call_a', name: 'alpha' },
+      { type: 'tool_call_start', id: 'call_b', name: 'beta' },
+      { type: 'tool_call_delta', id: 'call_b', input: '{"b":' },
+      { type: 'tool_call_delta', id: 'call_a', input: '{"a":' },
+      { type: 'tool_call_delta', id: 'call_a', input: '1}' },
+      { type: 'tool_call_delta', id: 'call_b', input: '"two"}' },
+      { type: 'tool_call_end', id: 'call_a' },
+      { type: 'tool_call_end', id: 'call_b' },
+      { type: 'done', stopReason: 'end_turn' },
+    ]);
+  });
+
   it('throws a classified ProviderError on HTTP 400 without reading the error body text', async () => {
     const fetchImpl: FetchImpl = async () =>
       new Response(
@@ -278,7 +359,10 @@ describe('chatResponsesAPI', () => {
 
     const consume = async () => {
       for await (const _ of chatResponsesAPI(
-        { model: 'gpt-5.6-luna', messages: [{ role: 'user', content: [{ type: 'text', text: 'hi' }] }] },
+        {
+          model: 'gpt-5.6-luna',
+          messages: [{ role: 'user', content: [{ type: 'text', text: 'hi' }] }],
+        },
         {
           providerId: 'opencode-go',
           providerName: 'OpenCode Go',

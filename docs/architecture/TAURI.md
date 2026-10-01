@@ -78,6 +78,7 @@ async fn pty_spawn(
     env: Option<HashMap<String, String>>,
     cols: Option<u16>,
     rows: Option<u16>,
+    native_grant_ids: Option<Vec<String>>,
 ) -> Result<PtyId, Error>;
 
 #[tauri::command]
@@ -278,14 +279,14 @@ Tauri v2 uses **capabilities** to restrict what IPC commands each window/webview
 
 Tauri events for real-time communication between Rust and frontend:
 
-| Event            | Direction | Payload                                                                                             |
-| ---------------- | --------- | --------------------------------------------------------------------------------------------------- |
-| `fs:changed`     | Rust → TS | `{ path, kind: "create" \| "modify" \| "delete" }`                                                  |
-| `pty:data`       | Rust → TS | `{ pty_id, sequence, data: string }`                                                                |
-| `pty:exit`       | Rust → TS | `{ pty_id, sequence, code: number \| null, failure: { operation, message } \| null }`                |
-| `sandbox:output` | Rust → TS | `{ sandbox_id, stdout, stderr }`                                                                    |
-| `sandbox:exit`   | Rust → TS | `{ sandbox_id, code, duration_ms }`                                                                 |
-| `db:migrated`    | Rust → TS | `{ version, applied: string[] }`                                                                    |
+| Event            | Direction | Payload                                                                               |
+| ---------------- | --------- | ------------------------------------------------------------------------------------- |
+| `fs:changed`     | Rust → TS | `{ path, kind: "create" \| "modify" \| "delete" }`                                    |
+| `pty:data`       | Rust → TS | `{ pty_id, sequence, data: string }`                                                  |
+| `pty:exit`       | Rust → TS | `{ pty_id, sequence, code: number \| null, failure: { operation, message } \| null }` |
+| `sandbox:output` | Rust → TS | `{ sandbox_id, stdout, stderr }`                                                      |
+| `sandbox:exit`   | Rust → TS | `{ sandbox_id, code, duration_ms }`                                                   |
+| `db:migrated`    | Rust → TS | `{ version, applied: string[] }`                                                      |
 
 ---
 
@@ -354,7 +355,9 @@ src-tauri/
 1. **No `unsafe-eval`**: CSP blocks dynamic code execution in WebView
 2. **No remote scripts**: all JavaScript is bundled locally
 3. **Capability-gated IPC**: each command requires explicit permission grant
-4. **Scoped FS access**: Rust validates paths are within allowed workspace directories
+4. **Native workspace authority**: `workspace_pick_folder` canonicalizes a folder selected by the OS picker and persists only that app-owned root list. Startup restores those roots; caller-supplied workspace paths never create authority. Filesystem commands canonicalize paths, reject filesystem/home roots, enforce containment, and refuse symlink escapes. Native file/save pickers grant exact selected files only.
 5. **PTY isolation**: each terminal session runs in its own process with user's shell
 6. **Sandbox limits**: `sandbox_run` enforces CPU timeout, memory limit, no network access
-7. **API keys in keychain**: OS-level secure storage, never persisted in app data files
+7. **Operation-scoped external grants**: Harness approval alone does not broaden Rust path access. A native OS picker must confirm the exact external target; Rust returns an opaque, expiring grant limited to the requested operation and exact path/directory. Session grants are non-persistent and are revoked on session changes. PTY working directories are validated by Rust.
+8. **Project diagnostics approval**: project-configured diagnostics require a dedicated native confirmation token. The command rejects arbitrary workspace paths and invalid, expired, or wrong-purpose tokens; the Desktop bridge revokes a one-call token after use.
+9. **Credentials and redirects**: provider and MCP authentication secrets are read from the OS credential store. The provider proxy validates provider origin, route, method, and headers before loading credentials and disables redirects. Authenticated MCP HTTP connections require HTTPS except for loopback and reject redirects and cross-origin SSE endpoints.

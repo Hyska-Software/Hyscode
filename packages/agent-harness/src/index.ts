@@ -4,6 +4,7 @@ export type {
   ToolResult,
   ToolHandler,
   ToolExecutionContext,
+  ToolInvocationAuthorization,
   TerminalRuntimeAdapter,
   TerminalAccess,
   TerminalAcquireRequest,
@@ -190,6 +191,7 @@ export type {
 } from './task-integration';
 export { resolveAuthorizedPath, resolveWorkspacePath } from './path-policy';
 export type { WorkspacePathOptions } from './path-policy';
+export { authorizeToolInvocationArgs } from './tool-invocation-policy';
 export { ExternalPathAccessRegistry } from './external-path-access';
 export type {
   ExternalPathAccess,
