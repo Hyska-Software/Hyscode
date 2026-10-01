@@ -1,5 +1,5 @@
 {
-  "asOf": "2026-09-03T14:50:19.577Z",
+  "asOf": "2026-10-01T13:00:02.881Z",
   "models": [
     {
       "id": "glm-5.3",
@@ -68,27 +68,6 @@
           "max"
         ],
         "defaultLevel": "max"
-      }
-    },
-    {
-      "id": "glm-5.1",
-      "name": "GLM 5.1 (Go)",
-      "provider": "opencode-go",
-      "contextWindow": 200000,
-      "maxOutputTokens": 128000,
-      "supportsTools": true,
-      "supportsStreaming": true,
-      "supportsVision": false,
-      "inputPricePerMToken": 1.4,
-      "outputPricePerMToken": 4.4,
-      "cachedInputPricePerMToken": 0.26,
-      "thinkingVariants": {
-        "kind": "kimi",
-        "levels": [
-          "enabled",
-          "disabled"
-        ],
-        "defaultLevel": "enabled"
       }
     },
     {
@@ -175,6 +154,60 @@
       }
     },
     {
+      "id": "longcat-2.5-preview-free",
+      "name": "LongCat 2.5 Preview Free (Go)",
+      "provider": "opencode-go",
+      "contextWindow": 128000,
+      "maxOutputTokens": 8192,
+      "supportsTools": true,
+      "supportsStreaming": true,
+      "supportsVision": false,
+      "inputPricePerMToken": 0,
+      "outputPricePerMToken": 0
+    },
+    {
+      "id": "mimo-v2.6-flash",
+      "name": "MiMo V2.6 Flash (Go)",
+      "provider": "opencode-go",
+      "contextWindow": 1000000,
+      "maxOutputTokens": 8192,
+      "supportsTools": true,
+      "supportsStreaming": true,
+      "supportsVision": false,
+      "inputPricePerMToken": 0.14,
+      "outputPricePerMToken": 0.28,
+      "cachedInputPricePerMToken": 0.0028,
+      "thinkingVariants": {
+        "kind": "kimi",
+        "levels": [
+          "enabled",
+          "disabled"
+        ],
+        "defaultLevel": "enabled"
+      }
+    },
+    {
+      "id": "mimo-v2.6-pro",
+      "name": "MiMo V2.6 Pro (Go)",
+      "provider": "opencode-go",
+      "contextWindow": 1000000,
+      "maxOutputTokens": 8192,
+      "supportsTools": true,
+      "supportsStreaming": true,
+      "supportsVision": false,
+      "inputPricePerMToken": 0.435,
+      "outputPricePerMToken": 0.87,
+      "cachedInputPricePerMToken": 0.003625,
+      "thinkingVariants": {
+        "kind": "kimi",
+        "levels": [
+          "enabled",
+          "disabled"
+        ],
+        "defaultLevel": "enabled"
+      }
+    },
+    {
       "id": "mimo-v2.5",
       "name": "MiMo V2.5 (Go)",
       "provider": "opencode-go",
@@ -217,6 +250,27 @@
       }
     },
     {
+      "id": "deepseek-v4.1-flash",
+      "name": "DeepSeek V4.1 Flash (Go)",
+      "provider": "opencode-go",
+      "contextWindow": 1000000,
+      "maxOutputTokens": 8192,
+      "supportsTools": true,
+      "supportsStreaming": true,
+      "supportsVision": false,
+      "inputPricePerMToken": 0.15,
+      "outputPricePerMToken": 0.6,
+      "cachedInputPricePerMToken": 0.003,
+      "thinkingVariants": {
+        "kind": "openai",
+        "levels": [
+          "high",
+          "max"
+        ],
+        "defaultLevel": "max"
+      }
+    },
+    {
       "id": "deepseek-v4-pro",
       "name": "DeepSeek V4 Pro (Go)",
       "provider": "opencode-go",
@@ -246,9 +300,9 @@
       "supportsTools": true,
       "supportsStreaming": true,
       "supportsVision": false,
-      "inputPricePerMToken": 0.22,
-      "outputPricePerMToken": 0.66,
-      "cachedInputPricePerMToken": 0.007,
+      "inputPricePerMToken": 0.15,
+      "outputPricePerMToken": 0.6,
+      "cachedInputPricePerMToken": 0.003,
       "thinkingVariants": {
         "kind": "openai",
         "levels": [
@@ -267,9 +321,9 @@
       "supportsTools": true,
       "supportsStreaming": true,
       "supportsVision": true,
-      "inputPricePerMToken": 0.22,
-      "outputPricePerMToken": 0.66,
-      "cachedInputPricePerMToken": 0.007,
+      "inputPricePerMToken": 0.15,
+      "outputPricePerMToken": 0.6,
+      "cachedInputPricePerMToken": 0.003,
       "thinkingVariants": {
         "kind": "openai",
         "levels": [
@@ -326,6 +380,48 @@
       }
     },
     {
+      "id": "space-bunny-free",
+      "name": "Space Bunny Free (Go)",
+      "provider": "opencode-go",
+      "contextWindow": 128000,
+      "maxOutputTokens": 8192,
+      "supportsTools": true,
+      "supportsStreaming": true,
+      "supportsVision": false,
+      "inputPricePerMToken": 0,
+      "outputPricePerMToken": 0
+    },
+    {
+      "id": "gpt-6-luna",
+      "name": "GPT 6 Luna (Go)",
+      "provider": "opencode-go",
+      "contextWindow": 1050000,
+      "maxOutputTokens": 128000,
+      "supportsTools": true,
+      "supportsStreaming": true,
+      "supportsVision": true,
+      "inputPricePerMToken": 0.1,
+      "outputPricePerMToken": 0.5,
+      "cachedInputPricePerMToken": 0.01,
+      "thinkingVariants": {
+        "kind": "openai",
+        "levels": [
+          "none",
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ],
+        "defaultLevel": "medium",
+        "modes": [
+          "standard",
+          "pro"
+        ],
+        "defaultMode": "standard"
+      }
+    },
+    {
       "id": "gpt-5.6-luna",
       "name": "GPT 5.6 Luna (Go)",
       "provider": "opencode-go",
@@ -356,6 +452,29 @@
       }
     },
     {
+      "id": "grok-4.7",
+      "name": "Grok 4.7 (Go)",
+      "provider": "opencode-go",
+      "contextWindow": 500000,
+      "maxOutputTokens": 16384,
+      "supportsTools": true,
+      "supportsStreaming": true,
+      "supportsVision": false,
+      "inputPricePerMToken": 2,
+      "outputPricePerMToken": 6,
+      "cachedInputPricePerMToken": 0.5,
+      "thinkingVariants": {
+        "kind": "openai",
+        "levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh"
+        ],
+        "defaultLevel": "high"
+      }
+    },
+    {
       "id": "grok-4.6",
       "name": "Grok 4.6 (Go)",
       "provider": "opencode-go",
@@ -372,7 +491,8 @@
         "levels": [
           "low",
           "medium",
-          "high"
+          "high",
+          "xhigh"
         ],
         "defaultLevel": "high"
       }
@@ -469,26 +589,6 @@
       }
     },
     {
-      "id": "minimax-m2.5",
-      "name": "MiniMax M2.5 (Go)",
-      "provider": "opencode-go",
-      "contextWindow": 1000000,
-      "maxOutputTokens": 16384,
-      "supportsTools": true,
-      "supportsStreaming": true,
-      "supportsVision": false,
-      "inputPricePerMToken": 0.3,
-      "outputPricePerMToken": 1.2,
-      "cachedInputPricePerMToken": 0.06,
-      "thinkingVariants": {
-        "kind": "kimi",
-        "levels": [
-          "enabled"
-        ],
-        "defaultLevel": "enabled"
-      }
-    },
-    {
       "id": "qwen3.8-max",
       "name": "Qwen3.8 Max (Go)",
       "provider": "opencode-go",
@@ -533,28 +633,6 @@
       }
     },
     {
-      "id": "qwen3.7-max",
-      "name": "Qwen3.7 Max (Go)",
-      "provider": "opencode-go",
-      "contextWindow": 1000000,
-      "maxOutputTokens": 32768,
-      "supportsTools": true,
-      "supportsStreaming": true,
-      "supportsVision": false,
-      "inputPricePerMToken": 2.5,
-      "outputPricePerMToken": 7.5,
-      "cachedInputPricePerMToken": 0.5,
-      "thinkingVariants": {
-        "kind": "openai",
-        "levels": [
-          "default",
-          "high",
-          "max"
-        ],
-        "defaultLevel": "max"
-      }
-    },
-    {
       "id": "qwen3.7-plus",
       "name": "Qwen3.7 Plus (Go)",
       "provider": "opencode-go",
@@ -566,28 +644,6 @@
       "inputPricePerMToken": 0.4,
       "outputPricePerMToken": 1.6,
       "cachedInputPricePerMToken": 0.04,
-      "thinkingVariants": {
-        "kind": "openai",
-        "levels": [
-          "default",
-          "high",
-          "max"
-        ],
-        "defaultLevel": "max"
-      }
-    },
-    {
-      "id": "qwen3.6-plus",
-      "name": "Qwen3.6 Plus (Go)",
-      "provider": "opencode-go",
-      "contextWindow": 1000000,
-      "maxOutputTokens": 32768,
-      "supportsTools": true,
-      "supportsStreaming": true,
-      "supportsVision": false,
-      "inputPricePerMToken": 0.5,
-      "outputPricePerMToken": 3,
-      "cachedInputPricePerMToken": 0.05,
       "thinkingVariants": {
         "kind": "openai",
         "levels": [

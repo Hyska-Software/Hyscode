@@ -35,7 +35,8 @@ describe('canonical provider catalog', () => {
       for (const model of entry.models) {
         expect(model.name, `${entry.id}:${model.id}`).toBeTruthy();
         expect(model.provider, `${entry.id}:${model.id}`).toBe(entry.id);
-        if (entry.id !== 'ollama') expect(model.contextWindow, `${entry.id}:${model.id}`).toBeGreaterThan(0);
+        if (entry.id !== 'ollama')
+          expect(model.contextWindow, `${entry.id}:${model.id}`).toBeGreaterThan(0);
       }
     }
   });
@@ -52,11 +53,15 @@ describe('canonical provider catalog', () => {
   });
 
   it('carries thinking metadata used by both UI surfaces', () => {
-    const sol = catalog.find((entry) => entry.id === 'openai')?.models.find((model) => model.id === 'gpt-5.6-sol');
+    const sol = catalog
+      .find((entry) => entry.id === 'openai')
+      ?.models.find((model) => model.id === 'gpt-6.1-sol');
     expect(sol?.thinkingVariants?.modes).toContain('pro');
     expect(sol?.thinkingVariants?.levels).toContain('xhigh');
 
-    const sonnet = catalog.find((entry) => entry.id === 'anthropic')?.models.find((model) => model.id === 'claude-sonnet-5');
+    const sonnet = catalog
+      .find((entry) => entry.id === 'anthropic')
+      ?.models.find((model) => model.id === 'claude-sonnet-5-5');
     expect(sonnet?.thinkingVariants?.levels).toEqual(['low', 'medium', 'high', 'xhigh', 'max']);
   });
 });

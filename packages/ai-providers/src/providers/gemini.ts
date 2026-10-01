@@ -15,15 +15,16 @@ import { withOpencodeHeaders } from '../opencode-headers';
 import { parseSSEStream } from '../retry';
 
 // ─── Thinking variant presets ────────────────────────────────────────────────
-// Per official Gemini docs — 3.8 Flash / 3.6 Flash / 3.5 Flash support
-// thinking levels low/medium/high; 3.5 Flash Lite supports low/medium.
+// Per official Gemini docs (ai.google.dev/gemini-api/docs/pricing, Oct 2026):
+// 3.8 / 3.7 / 3.6 Flash + 3.5 Flash support thinking levels low/medium/high
+// (3.8 default medium); 3.5 Flash Lite + 3 Flash support low/medium.
 // The Gemini API uses a numeric thinkingBudget; map the level to a token count.
 
-/** low/medium/high — Gemini 3.6 Flash, 3.5 Flash, 3.1 Pro */
+/** low/medium/high — Gemini 3.8 Flash (default medium), 3.7/3.6/3.5 Flash, 3.1 Pro */
 export const GEMINI_THINKING_LMH_VARIANTS: ThinkingVariants = {
   kind: 'gemini',
   levels: ['low', 'medium', 'high'],
-  defaultLevel: 'high',
+  defaultLevel: 'medium',
 };
 
 /** low/medium — Gemini 3.5 Flash Lite, 3 Flash */
@@ -252,11 +253,11 @@ function* parseGeminiResponse(data: string): Iterable<StreamChunk> {
 
 // ─── Provider Implementation ────────────────────────────────────────────────
 
-// SOTA-only direct catalog (verified Sep 2026 against
-// https://ai.google.dev/gemini-api/docs/models + DeepMind model cards): GA
-// stable models only — 3.8 Flash (newest iteration), 3.6 Flash (stable
-// flagship), 3.5 Flash (stable), 3.5 Flash-Lite (fastest). Preview models
-// (3.1 Pro, 3 Flash) are excluded until GA.
+// SOTA-only direct catalog (verified Oct 2026 against
+// https://ai.google.dev/gemini-api/docs/pricing): GA text models —
+// 3.8 / 3.7 / 3.6 Flash at introductory pricing ($0.75/$3.75, cache $0.075)
+// through Dec 31 2026 (standard $1.50/$7.50 from Jan 01 2027),
+// 3.5 Flash ($1.50/$9.00) and 3.5 Flash-Lite ($0.30/$2.50).
 const GEMINI_MODELS: AIModel[] = [
   {
     id: 'gemini-3.8-flash',
@@ -267,9 +268,23 @@ const GEMINI_MODELS: AIModel[] = [
     supportsTools: true,
     supportsStreaming: true,
     supportsVision: true,
-    inputPricePerMToken: 1.5,
-    outputPricePerMToken: 7.5,
-    cachedInputPricePerMToken: 0.15,
+    inputPricePerMToken: 0.75, // intro through Dec 31 2026; standard $1.50 from Jan 01 2027
+    outputPricePerMToken: 3.75, // intro through Dec 31 2026; standard $7.50 from Jan 01 2027
+    cachedInputPricePerMToken: 0.075,
+    thinkingVariants: GEMINI_THINKING_LMH_VARIANTS,
+  },
+  {
+    id: 'gemini-3.7-flash',
+    name: 'Gemini 3.7 Flash',
+    provider: 'gemini',
+    contextWindow: 1_048_576,
+    maxOutputTokens: 65_536,
+    supportsTools: true,
+    supportsStreaming: true,
+    supportsVision: true,
+    inputPricePerMToken: 0.75, // intro through Dec 31 2026; standard $1.50 from Jan 01 2027
+    outputPricePerMToken: 3.75, // intro through Dec 31 2026; standard $7.50 from Jan 01 2027
+    cachedInputPricePerMToken: 0.075,
     thinkingVariants: GEMINI_THINKING_LMH_VARIANTS,
   },
   {
@@ -281,9 +296,9 @@ const GEMINI_MODELS: AIModel[] = [
     supportsTools: true,
     supportsStreaming: true,
     supportsVision: true,
-    inputPricePerMToken: 1.5,
-    outputPricePerMToken: 7.5,
-    cachedInputPricePerMToken: 0.15,
+    inputPricePerMToken: 0.75, // intro through Dec 31 2026; standard $1.50 from Jan 01 2027
+    outputPricePerMToken: 3.75, // intro through Dec 31 2026; standard $7.50 from Jan 01 2027
+    cachedInputPricePerMToken: 0.075,
     thinkingVariants: GEMINI_THINKING_LMH_VARIANTS,
   },
   {

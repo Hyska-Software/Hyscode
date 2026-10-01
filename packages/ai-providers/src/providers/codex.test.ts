@@ -50,17 +50,14 @@ describe('CodexProvider chat', () => {
     const { calls, invoke } = captureInvoke();
     const provider = new CodexProvider('key', invoke);
 
-    await consume(
-      provider,
-      {
-        model: 'gpt-5.6-sol',
-        systemPrompt: 'You are helpful.',
-        messages: [
-          { role: 'user', content: [{ type: 'text', text: 'hello' }] },
-          { role: 'assistant', content: [{ type: 'text', text: 'hi there' }] },
-        ],
-      },
-    );
+    await consume(provider, {
+      model: 'gpt-5.6-sol',
+      systemPrompt: 'You are helpful.',
+      messages: [
+        { role: 'user', content: [{ type: 'text', text: 'hello' }] },
+        { role: 'assistant', content: [{ type: 'text', text: 'hi there' }] },
+      ],
+    });
 
     expect(calls).toHaveLength(1);
     expect(calls[0].model).toBe('gpt-5.6-sol');
@@ -85,7 +82,7 @@ describe('CodexProvider chat', () => {
     await consume(provider, { ...params(), model: '' });
 
     // The SDK treats '' as "no --model flag" — never forward it.
-    expect(calls[0].model).toBe('gpt-5.6-sol');
+    expect(calls[0].model).toBe('gpt-6-astra');
   });
 
   it('forwards the abort signal so stop cancels the sidecar process', async () => {
@@ -131,13 +128,10 @@ describe('CodexProvider chat', () => {
     const { calls, invoke } = captureInvoke();
     const provider = new CodexProvider('key', invoke);
 
-    await consume(
-      provider,
-      {
-        ...params(),
-        thinking: { enabled: true, level: 'high' },
-      },
-    );
+    await consume(provider, {
+      ...params(),
+      thinking: { enabled: true, level: 'high' },
+    });
 
     expect(calls[0].reasoningEffort).toBe('high');
   });
@@ -146,19 +140,16 @@ describe('CodexProvider chat', () => {
     const { calls, invoke } = captureInvoke();
     const provider = new CodexProvider('key', invoke);
 
-    await consume(
-      provider,
-      {
-        ...params(),
-        sessionId: 'conversation-1',
-        sessionFingerprint: 'prefix-1',
-        messages: [
-          { role: 'user', content: [{ type: 'text', text: 'first request' }] },
-          { role: 'assistant', content: [{ type: 'text', text: 'previous answer' }] },
-          { role: 'user', content: [{ type: 'text', text: 'latest request' }] },
-        ],
-      },
-    );
+    await consume(provider, {
+      ...params(),
+      sessionId: 'conversation-1',
+      sessionFingerprint: 'prefix-1',
+      messages: [
+        { role: 'user', content: [{ type: 'text', text: 'first request' }] },
+        { role: 'assistant', content: [{ type: 'text', text: 'previous answer' }] },
+        { role: 'user', content: [{ type: 'text', text: 'latest request' }] },
+      ],
+    });
 
     expect(calls[0]).toMatchObject({
       sessionId: 'conversation-1',
@@ -172,13 +163,10 @@ describe('CodexProvider chat', () => {
     const { calls, invoke } = captureInvoke();
     const provider = new CodexProvider('key', invoke);
 
-    await consume(
-      provider,
-      {
-        ...params(),
-        thinking: { enabled: true, level: 'enabled' },
-      },
-    );
+    await consume(provider, {
+      ...params(),
+      thinking: { enabled: true, level: 'enabled' },
+    });
 
     expect(calls[0].reasoningEffort).toBeUndefined();
   });

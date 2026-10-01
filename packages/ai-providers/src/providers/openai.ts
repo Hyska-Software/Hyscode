@@ -288,7 +288,7 @@ export const OPENAI_THINKING_FULL: ThinkingVariants = {
   defaultLevel: 'medium',
 };
 
-/** Full ladder + standard/pro reasoning mode — GPT-5.6 Sol/Terra/Luna */
+/** Full ladder + standard/pro reasoning mode — GPT-6 Astra / 6.1 Sol / 6 Sol / 6 Luna (and 5.6 Sol/Terra/Luna via gateways) */
 export const OPENAI_THINKING_FULL_PRO: ThinkingVariants = {
   kind: 'openai',
   levels: ['none', 'low', 'medium', 'high', 'xhigh', 'max'],
@@ -320,29 +320,32 @@ export const OPENAI_THINKING_LOW: ThinkingVariants = {
 
 // ─── Provider Implementation ────────────────────────────────────────────────
 
-// SOTA-only direct catalog (verified Sep 2026 against
-// https://developers.openai.com/api/docs/models + /pricing, short-context
-// Standard tier): the GPT-5.6 flagship family is the current generation —
-// Sol (flagship), Terra (balanced), Luna (high-volume). Legacy generations
-// (5.5, 5.4, 5.3-codex, …) remain available via gateways, not direct.
+// SOTA-only direct catalog (verified Oct 2026 against
+// https://openai.com/index/introducing-gpt-6-sol-and-luna +
+// /introducing-gpt-6-1-sol + Zen pricing, Standard tier short-context
+// ≤272K): the GPT-6 current generation — Astra (flagship, $10/$50,
+// cache $1.00), 6.1 Sol (near-Astra, $2/$10, cache $0.10 = 95% off),
+// 6 Sol (frontier efficiency, $2/$10, cache $0.20), 6 Luna
+// (high-volume, $0.10/$0.50, cache $0.01). Legacy GPT-5.x remains
+// available via gateways, not direct.
 const OPENAI_MODELS: AIModel[] = [
   {
-    id: 'gpt-5.6-sol',
-    name: 'GPT-5.6 Sol',
+    id: 'gpt-6-astra',
+    name: 'GPT-6 Astra',
     provider: 'openai',
     contextWindow: 1_050_000,
     maxOutputTokens: 128_000,
     supportsTools: true,
     supportsStreaming: true,
     supportsVision: true,
-    inputPricePerMToken: 4,
-    outputPricePerMToken: 20,
-    cachedInputPricePerMToken: 0.4,
+    inputPricePerMToken: 10,
+    outputPricePerMToken: 50,
+    cachedInputPricePerMToken: 1,
     thinkingVariants: OPENAI_THINKING_FULL_PRO,
   },
   {
-    id: 'gpt-5.6-terra',
-    name: 'GPT-5.6 Terra',
+    id: 'gpt-6.1-sol',
+    name: 'GPT-6.1 Sol',
     provider: 'openai',
     contextWindow: 1_050_000,
     maxOutputTokens: 128_000,
@@ -350,22 +353,36 @@ const OPENAI_MODELS: AIModel[] = [
     supportsStreaming: true,
     supportsVision: true,
     inputPricePerMToken: 2,
-    outputPricePerMToken: 12,
-    cachedInputPricePerMToken: 0.2,
+    outputPricePerMToken: 10,
+    cachedInputPricePerMToken: 0.1,
     thinkingVariants: OPENAI_THINKING_FULL_PRO,
   },
   {
-    id: 'gpt-5.6-luna',
-    name: 'GPT-5.6 Luna',
+    id: 'gpt-6-sol',
+    name: 'GPT-6 Sol',
     provider: 'openai',
     contextWindow: 1_050_000,
     maxOutputTokens: 128_000,
     supportsTools: true,
     supportsStreaming: true,
     supportsVision: true,
-    inputPricePerMToken: 0.2,
-    outputPricePerMToken: 1.2,
-    cachedInputPricePerMToken: 0.02,
+    inputPricePerMToken: 2,
+    outputPricePerMToken: 10,
+    cachedInputPricePerMToken: 0.2,
+    thinkingVariants: OPENAI_THINKING_FULL_PRO,
+  },
+  {
+    id: 'gpt-6-luna',
+    name: 'GPT-6 Luna',
+    provider: 'openai',
+    contextWindow: 1_050_000,
+    maxOutputTokens: 128_000,
+    supportsTools: true,
+    supportsStreaming: true,
+    supportsVision: true,
+    inputPricePerMToken: 0.1,
+    outputPricePerMToken: 0.5,
+    cachedInputPricePerMToken: 0.01,
     thinkingVariants: OPENAI_THINKING_FULL_PRO,
   },
 ];
@@ -584,5 +601,5 @@ export class OpenAIProvider implements AIProvider {
 }
 
 export function supportsExplicitPromptCaching(modelId: string): boolean {
-  return /^gpt-5\.6(?:-|$)/.test(modelId);
+  return /^gpt-(5\.6|6(?:\.1)?)(?:-|$)/.test(modelId);
 }

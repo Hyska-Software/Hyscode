@@ -1,5 +1,6 @@
 import type { AIProvider, AIModel, ChatParams, StreamChunk } from '../types';
 import {
+  ADAPTIVE_CLAUDE_XHIGH_MEDIUM_VARIANTS,
   ADAPTIVE_CLAUDE_XHIGH_VARIANTS,
   ADAPTIVE_CLAUDE_VARIANTS,
   BUDGET_CLAUDE_VARIANTS,
@@ -12,7 +13,22 @@ import {
 // through the normal transport — the sidecar is only invoked when tools are
 // requested by the harness layer.
 
+// Current + recent lineup (Oct 2026, platform.claude.com/docs/en/models/overview).
 const CLAUDE_AGENT_MODELS: AIModel[] = [
+  {
+    id: 'claude-fable-5-1',
+    name: 'Claude Fable 5.1 (Agent)',
+    provider: 'claude-agent',
+    contextWindow: 1_000_000,
+    maxOutputTokens: 128_000,
+    supportsTools: true,
+    supportsStreaming: true,
+    supportsVision: true,
+    inputPricePerMToken: 10,
+    outputPricePerMToken: 50,
+    cachedInputPricePerMToken: 0.25,
+    thinkingVariants: ADAPTIVE_CLAUDE_XHIGH_VARIANTS,
+  },
   {
     id: 'claude-fable-5',
     name: 'Claude Fable 5 (Agent)',
@@ -24,7 +40,22 @@ const CLAUDE_AGENT_MODELS: AIModel[] = [
     supportsVision: true,
     inputPricePerMToken: 10,
     outputPricePerMToken: 50,
+    cachedInputPricePerMToken: 1,
     thinkingVariants: ADAPTIVE_CLAUDE_XHIGH_VARIANTS,
+  },
+  {
+    id: 'claude-opus-5-5',
+    name: 'Claude Opus 5.5 (Agent)',
+    provider: 'claude-agent',
+    contextWindow: 1_000_000,
+    maxOutputTokens: 128_000,
+    supportsTools: true,
+    supportsStreaming: true,
+    supportsVision: true,
+    inputPricePerMToken: 4,
+    outputPricePerMToken: 20,
+    cachedInputPricePerMToken: 0.2,
+    thinkingVariants: ADAPTIVE_CLAUDE_XHIGH_MEDIUM_VARIANTS,
   },
   {
     id: 'claude-opus-5',
@@ -37,6 +68,7 @@ const CLAUDE_AGENT_MODELS: AIModel[] = [
     supportsVision: true,
     inputPricePerMToken: 5,
     outputPricePerMToken: 25,
+    cachedInputPricePerMToken: 0.5,
     thinkingVariants: ADAPTIVE_CLAUDE_XHIGH_VARIANTS,
   },
   {
@@ -50,6 +82,21 @@ const CLAUDE_AGENT_MODELS: AIModel[] = [
     supportsVision: true,
     inputPricePerMToken: 5,
     outputPricePerMToken: 25,
+    cachedInputPricePerMToken: 0.5,
+    thinkingVariants: ADAPTIVE_CLAUDE_XHIGH_VARIANTS,
+  },
+  {
+    id: 'claude-sonnet-5-5',
+    name: 'Claude Sonnet 5.5 (Agent)',
+    provider: 'claude-agent',
+    contextWindow: 1_000_000,
+    maxOutputTokens: 128_000,
+    supportsTools: true,
+    supportsStreaming: true,
+    supportsVision: true,
+    inputPricePerMToken: 2,
+    outputPricePerMToken: 10,
+    cachedInputPricePerMToken: 0.2,
     thinkingVariants: ADAPTIVE_CLAUDE_XHIGH_VARIANTS,
   },
   {
@@ -63,6 +110,7 @@ const CLAUDE_AGENT_MODELS: AIModel[] = [
     supportsVision: true,
     inputPricePerMToken: 2,
     outputPricePerMToken: 10,
+    cachedInputPricePerMToken: 0.2,
     thinkingVariants: ADAPTIVE_CLAUDE_XHIGH_VARIANTS,
   },
   {
@@ -76,6 +124,7 @@ const CLAUDE_AGENT_MODELS: AIModel[] = [
     supportsVision: true,
     inputPricePerMToken: 3,
     outputPricePerMToken: 15,
+    cachedInputPricePerMToken: 0.3,
     thinkingVariants: ADAPTIVE_CLAUDE_VARIANTS,
   },
   {
@@ -89,6 +138,7 @@ const CLAUDE_AGENT_MODELS: AIModel[] = [
     supportsVision: true,
     inputPricePerMToken: 1,
     outputPricePerMToken: 5,
+    cachedInputPricePerMToken: 0.1,
     thinkingVariants: BUDGET_CLAUDE_VARIANTS,
   },
 ];
