@@ -14,6 +14,8 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { ModelInfoTooltipContent } from './model-info-tooltip';
 import { cn } from '@/lib/utils';
 import { useSettingsStore } from '@/stores/settings-store';
 import { getEnabledModelsForProvider, getAllEnabledModelsGrouped } from '@/lib/provider-catalog';
@@ -181,23 +183,36 @@ export function ModelSelector() {
     const isActive = activeModelId === model.id && activeProviderId === providerId;
     const isHighlighted = index === safeIdx;
     return (
-      <DropdownMenuItem
-        key={`${providerId}::${model.id}`}
-        ref={(el) => {
-          itemRefs.current[index] = el;
-        }}
-        onClick={() => select(providerId, model.id)}
-        onMouseMove={() => setHighlightIdx(index)}
-        className={cn(
-          isActive && 'bg-primary/10 text-primary',
-          isHighlighted && 'bg-primary/15 text-primary hover:bg-primary/20',
-        )}
-      >
-        <div className="flex flex-col">
-          <span className="text-[11px]">{model.name}</span>
-          <span className="text-[9px] text-muted-foreground">{model.id}</span>
-        </div>
-      </DropdownMenuItem>
+      <Tooltip key={`${providerId}::${model.id}`}>
+        <TooltipTrigger
+          render={
+            <DropdownMenuItem
+              ref={(el) => {
+                itemRefs.current[index] = el;
+              }}
+              onClick={() => select(providerId, model.id)}
+              onMouseMove={() => setHighlightIdx(index)}
+              className={cn(
+                isActive && 'bg-primary/10 text-primary',
+                isHighlighted && 'bg-primary/15 text-primary hover:bg-primary/20',
+              )}
+            />
+          }
+        >
+          <div className="flex flex-col">
+            <span className="text-[11px]">{model.name}</span>
+            <span className="text-[9px] text-muted-foreground">{model.id}</span>
+          </div>
+        </TooltipTrigger>
+        <TooltipContent
+          side="right"
+          align="start"
+          showArrow={false}
+          className="w-64 border border-border/50 bg-popover p-2.5 text-popover-foreground shadow-lg"
+        >
+          <ModelInfoTooltipContent providerId={providerId} modelId={model.id} name={model.name} />
+        </TooltipContent>
+      </Tooltip>
     );
   };
 

@@ -30,7 +30,7 @@ import type { TokenUsage } from '@/stores/agent-store';
 import { useSettingsStore } from '@/stores/settings-store';
 import { useKanbanStore } from '@/stores/kanban-store';
 import { AgentTaskContextCard } from './agent-task-context-card';
-import { GoalCard } from './goal-card';
+import { EmptyGoalState } from './goal-card-controls';
 import { getProviderRegistry } from '@hyscode/ai-providers';
 import { TerminalPanel } from '@/components/terminal';
 import type { AIModel } from '@hyscode/ai-providers';
@@ -387,6 +387,7 @@ export function AgentPanel() {
   const closeTab = useAgentStore((s) => s.closeTab);
   const openNewTab = useAgentStore((s) => s.openNewTab);
   const conversationId = useAgentStore((s) => s.conversationId);
+  const goal = useAgentStore((s) => s.goal);
   const [goalModeEnabled, setGoalModeEnabled] = useState(false);
   const kanbanTasks = useKanbanStore((s) => s.tasks);
 
@@ -642,8 +643,9 @@ export function AgentPanel() {
           {/* Messages */}
           <AgentMessages />
 
-          {/* Goal dock appears above the composer only while Goal mode is enabled in Build */}
-          <GoalCard enabled={goalModeEnabled && agentMode === 'build'} />
+          {/* Goal creation dock: only while Goal mode is enabled in Build and no goal exists yet.
+              Once a goal exists, GoalBar (inside AgentInput) takes over in any mode. */}
+          {goalModeEnabled && agentMode === 'build' && !goal && <EmptyGoalState />}
 
           {/* Input + selectors at the bottom */}
           <AgentInput

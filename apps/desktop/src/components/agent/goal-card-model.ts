@@ -25,6 +25,31 @@ export type GoalEditorState = {
   value: string;
 };
 
+/**
+ * Shared action/state contract passed from `GoalBar` (which owns the state)
+ * down to the presentational `GoalDetails` body.
+ */
+export type GoalDetailsActions = {
+  busy: boolean;
+  pendingAction: GoalActionKey | 'editor' | null;
+  notice: GoalNotice | null;
+  dismissNotice: () => void;
+  runAction: (
+    action: GoalActionKey,
+    task: () => Promise<unknown>,
+    successMessage: string,
+  ) => Promise<void>;
+  stopGoal: () => Promise<void>;
+  editor: GoalEditorState | null;
+  editorError: string | null;
+  openEditor: (mode: GoalEditorMode) => void;
+  changeEditorValue: (value: string) => void;
+  cancelEditor: () => void;
+  saveEditor: () => Promise<void>;
+  showAllCriteria: boolean;
+  toggleShowAllCriteria: () => void;
+};
+
 export type StatusMeta = {
   label: string;
   description: string;
@@ -99,6 +124,27 @@ export function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : 'The goal action could not be completed.';
 }
 
+export function barStatusLabel(status: GoalStatus): string {
+  switch (status) {
+    case 'active':
+      return 'Goal in progress';
+    case 'paused':
+      return 'Goal paused';
+    case 'blocked':
+      return 'Goal blocked';
+    case 'usage_limited':
+      return 'Goal usage limited';
+    case 'budget_limited':
+      return 'Goal budget limited';
+    case 'complete':
+      return 'Goal complete';
+    case 'cancelled':
+      return 'Goal stopped';
+    default:
+      return 'Goal in progress';
+  }
+}
+
 export function formatCompactNumber(value: number): string {
   return Intl.NumberFormat(undefined, { notation: 'compact', maximumFractionDigits: 1 }).format(value);
 }
@@ -118,6 +164,17 @@ export function formatRelativeTime(value: string): string {
   if (elapsedSeconds < 3_600) return `${Math.floor(elapsedSeconds / 60)}m`;
   if (elapsedSeconds < 86_400) return `${Math.floor(elapsedSeconds / 3_600)}h`;
   return `${Math.floor(elapsedSeconds / 86_400)}d`;
+}
+
+export function formatElapsed(milliseconds: number): string {
+  const totalSeconds = Math.max(0, Math.floor(milliseconds / 1000));
+  if (totalSeconds < 60) return `${totalSeconds}s`;
+  const totalMinutes = Math.floor(totalSeconds / 60);
+  if (totalMinutes < 60) return `${totalMinutes}m ${totalSeconds % 60}s`;
+  const totalHours = Math.floor(totalMinutes / 60);
+  if (totalHours < 24) return `${totalHours}h ${totalMinutes % 60}m`;
+  const totalDays = Math.floor(totalHours / 24);
+  return `${totalDays}d ${totalHours % 24}h`;
 }
 
 export function getProgress(state: GoalState): { percentage: number; passed: number; total: number } {

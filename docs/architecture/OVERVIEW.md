@@ -69,7 +69,8 @@ validated after the turn, and a request without criteria is denied. A repeated
 blocker is promoted to `blocked` only after three distinct turns with the same
 fingerprint.
 
-Desktop renders the goal card in the agent panel and supports `/goal` controls;
+Desktop renders a compact goal bar docked directly above the composer (with an
+inline expansion for full details) and supports `/goal` controls;
 the TUI renders a dedicated Goal panel and supports the equivalent lifecycle
 commands. Both clients restore the goal with the session and receive the same
 additive `goal_updated` bridge event. Goal tools are exposed only in Build mode;
