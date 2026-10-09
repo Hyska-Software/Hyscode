@@ -45,6 +45,16 @@ vi.mock('@hyscode/agent-harness', () => ({
   validateTerminalExitEvent: vi.fn(),
   validateTerminalFailure: vi.fn(),
   createGoalTools: vi.fn(() => []),
+  GoalOrchestrator: class {
+    beginTurn = vi.fn(async () => null);
+    startUserTurn = vi.fn(async () => undefined);
+    scheduleContinuation = vi.fn();
+    clearContinuation = vi.fn();
+    dispose = vi.fn();
+    goalsAllowed = vi.fn(() => false);
+  },
+  GOAL_CONTINUATION_MESSAGE: 'Continue the active persistent goal.',
+  budgetLimitFor: vi.fn(() => null),
   authorizeToolInvocationArgs: vi.fn((args: Record<string, unknown> | undefined) => args),
 }));
 
@@ -65,6 +75,8 @@ type HarnessDouble = {
   getConversationId: () => string;
   getSkillLoader: () => { getActive: () => [] };
   getRuleLoader: () => { getActive: () => [] };
+  getAgentType: ReturnType<typeof vi.fn>;
+  getPartialTurnMetrics: ReturnType<typeof vi.fn>;
   addContextSource: (source: { id: string; content: string }) => void;
   injectEnvironmentContext: ReturnType<typeof vi.fn>;
   getContextTurnNumber: () => number;
@@ -135,6 +147,8 @@ function createBridge(options: { isolatedRuntime?: boolean; workspacePath?: stri
     getConversationId: () => store.getState().conversationId ?? '',
     getSkillLoader: () => ({ getActive: () => [] }),
     getRuleLoader: () => ({ getActive: () => [] }),
+    getAgentType: vi.fn(() => 'chat'),
+    getPartialTurnMetrics: vi.fn(() => null),
     addContextSource: (source) => harness.sources.push(source),
     injectEnvironmentContext: vi.fn(),
     getContextTurnNumber: () => 1,
@@ -169,8 +183,14 @@ function createBridge(options: { isolatedRuntime?: boolean; workspacePath?: stri
     taskTargetUnregister: null,
     ptyExitUnsubscribe: null,
     goalService: { getState: vi.fn(async () => null) },
-    goalContinuationTimers: new Map(),
-    goalContinuationInFlight: new Set(),
+    goalOrchestrator: {
+      beginTurn: vi.fn(async () => null),
+      startUserTurn: vi.fn(async () => undefined),
+      scheduleContinuation: vi.fn(),
+      clearContinuation: vi.fn(),
+      dispose: vi.fn(),
+      goalsAllowed: vi.fn(() => false),
+    },
     _lastTerminalCommands: new Map(),
     turnSequence: 0,
     activeTurn: null,
@@ -632,6 +652,75 @@ describe('HarnessBridge Desktop turn boundaries', () => {
       .find((message) => message.role === 'assistant');
     expect(assistant?.content).toBe('Assistant answer');
     expect(assistant?.isError).not.toBe(true);
+  });
+
+  it('accounts the goal turn exactly once on success', async () => {
+    const { bridge, harness, store } = createBridge();
+    store.getState().setConversationId('conversation-goal');
+    store.setState({ mode: 'build' });
+    (harness.getAgentType as ReturnType<typeof vi.fn>).mockReturnValue('build');
+    const scope = {
+      state: null,
+      run: null,
+      goalContext: '<persistent_goal/>',
+      report: vi.fn(),
+      reportError: vi.fn(),
+      settle: vi.fn(async () => null),
+    };
+    const orchestrator = (bridge as unknown as { goalOrchestrator: typeof scope & { beginTurn: ReturnType<typeof vi.fn>; startUserTurn: ReturnType<typeof vi.fn> } }).goalOrchestrator;
+    (orchestrator.beginTurn as ReturnType<typeof vi.fn>).mockResolvedValue(scope);
+
+    await bridge.sendMessage('Work the goal');
+
+    expect(orchestrator.beginTurn).toHaveBeenCalledWith('conversation-goal', 'user');
+    expect(harness.run).toHaveBeenCalledWith(expect.objectContaining({ goalContext: '<persistent_goal/>' }));
+    expect(scope.report).toHaveBeenCalledTimes(1);
+    expect(scope.reportError).not.toHaveBeenCalled();
+    expect(scope.settle).toHaveBeenCalledTimes(1);
+  });
+
+  it('accounts partial usage when the harness run throws', async () => {
+    const { bridge, harness, store } = createBridge();
+    store.getState().setConversationId('conversation-goal');
+    store.setState({ mode: 'build' });
+    (harness.getAgentType as ReturnType<typeof vi.fn>).mockReturnValue('build');
+    harness.run.mockRejectedValueOnce(new Error('provider exploded'));
+    (harness.getPartialTurnMetrics as ReturnType<typeof vi.fn>).mockReturnValue({
+      turnId: 'turn-partial',
+      tokenUsage: { inputTokens: 40, outputTokens: 10, totalTokens: 50 },
+      toolCalls: [],
+      durationMs: 120,
+    });
+    const scope = {
+      state: null,
+      run: null,
+      goalContext: '<persistent_goal/>',
+      report: vi.fn(),
+      reportError: vi.fn(),
+      settle: vi.fn(async () => null),
+    };
+    const orchestrator = (bridge as unknown as { goalOrchestrator: typeof scope & { beginTurn: ReturnType<typeof vi.fn> } }).goalOrchestrator;
+    (orchestrator.beginTurn as ReturnType<typeof vi.fn>).mockResolvedValue(scope);
+
+    await expect(bridge.sendMessage('Fail the goal')).resolves.toBeNull();
+
+    expect(scope.report).not.toHaveBeenCalled();
+    expect(scope.reportError).toHaveBeenCalledWith(
+      expect.objectContaining({ status: 'error', error: 'provider exploded', turnId: 'turn-partial' }),
+    );
+    expect(scope.settle).toHaveBeenCalledTimes(1);
+  });
+
+  it('starts goal execution through the orchestrator without pre-starting a run', async () => {
+    const { bridge, harness, store } = createBridge();
+    store.getState().setConversationId('conversation-goal');
+    store.setState({ mode: 'build' });
+    (harness.getAgentType as ReturnType<typeof vi.fn>).mockReturnValue('build');
+    const orchestrator = (bridge as unknown as { goalOrchestrator: { startUserTurn: ReturnType<typeof vi.fn> } }).goalOrchestrator;
+
+    await bridge.startGoalExecution();
+
+    expect(orchestrator.startUserTurn).toHaveBeenCalledWith('conversation-goal');
   });
 });
 

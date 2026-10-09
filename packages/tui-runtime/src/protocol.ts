@@ -342,7 +342,6 @@ export type SendMessageParams = {
   ruleTargetPaths?: string[];
   contextAttachments?: ContextAttachment[];
   goalContext?: string;
-  goalRunId?: string;
   goalSource?: GoalRunSource;
 };
 

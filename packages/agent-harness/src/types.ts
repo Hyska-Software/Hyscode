@@ -16,6 +16,7 @@ import type {
   ExternalPathAccessRequest,
   ExternalPathGrant,
 } from './external-path-access';
+import type { GoalCompletionRequest } from './goal-types';
 
 // ─── Tool System ────────────────────────────────────────────────────────────
 
@@ -652,6 +653,8 @@ export type TurnOutcome = {
   response: string;
   toolCalls: ToolCallRecord[];
   turnRecord: TurnRecord;
+  /** Typed completion request when the agent called `complete_goal` this turn. */
+  goalCompletionRequest?: GoalCompletionRequest | null;
 };
 
 export const DEFAULT_HARNESS_CONFIG: HarnessConfig = {

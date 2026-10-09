@@ -70,3 +70,19 @@ export const pausedGoalState: GoalState = {
   ...goalState,
   goal: { ...goalState.goal, status: 'paused' },
 };
+
+export const budgetLimitedGoalState: GoalState = {
+  ...goalState,
+  goal: {
+    ...goalState.goal,
+    status: 'budget_limited',
+    budget: {
+      maxTokens: null,
+      maxTurns: 50,
+      maxDurationMs: 300_000,
+      maxToolCalls: 200,
+      maxCostUsd: null,
+      maxConsecutiveErrors: null,
+    },
+  },
+};

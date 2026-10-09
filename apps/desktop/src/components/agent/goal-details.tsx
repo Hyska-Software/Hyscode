@@ -49,6 +49,9 @@ export function GoalDetails({ goal, progress, actions }: GoalDetailsProps) {
     status === 'budget_limited';
   const canPause = status === 'active';
   const canEdit = status === 'paused';
+  // Budget edits are safe while the goal is not running to completion: the
+  // user can raise a limit on a budget-limited goal and resume right away.
+  const canEditBudget = canEdit || canResume || canPause;
   const unresolvedBlocker = [...goal.blockers].reverse().find((blocker) => !blocker.resolvedAt);
   const visibleCriteria = actions.showAllCriteria ? goal.criteria : goal.criteria.slice(0, 4);
   const updatedAgo = formatRelativeTime(goal.goal.updatedAt);
@@ -220,6 +223,7 @@ export function GoalDetails({ goal, progress, actions }: GoalDetailsProps) {
             error={actions.editorError}
             busy={actions.pendingAction === 'editor'}
             onChange={actions.changeEditorValue}
+            onBudgetChange={actions.changeBudgetValue}
             onCancel={actions.cancelEditor}
             onSave={() => void actions.saveEditor()}
           />
@@ -303,6 +307,15 @@ export function GoalDetails({ goal, progress, actions }: GoalDetailsProps) {
               onClick={() => actions.openEditor('objective')}
               disabled={actions.busy || !canEdit}
               disabledReason="Pause the goal to edit its objective."
+            />
+          )}
+          {status !== 'complete' && status !== 'cancelled' && (
+            <GoalActionButton
+              label="Edit budget"
+              icon={canEditBudget ? Pencil : LockKeyhole}
+              onClick={() => actions.openEditor('budget')}
+              disabled={actions.busy || !canEditBudget}
+              disabledReason="Budget editing is unavailable once the goal is finished."
             />
           )}
         </div>

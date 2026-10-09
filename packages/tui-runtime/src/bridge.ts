@@ -5,8 +5,12 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import {
   Harness,
+  budgetLimitFor,
   createDefaultGoalValidator,
   createGoalTools,
+  createInvokeGoalRepository,
+  GOAL_CONTINUATION_MESSAGE,
+  GoalOrchestrator,
   GoalService,
   MemoryManager,
   asTerminalRuntimeFailure,
@@ -53,10 +57,9 @@ import {
   type Trace,
   type GoalChangeEvent,
   type GoalEditInput,
-  type GoalCompletionRequest,
-  type GoalRun,
-  type GoalRepository,
+  type GoalLiveMetrics,
   type GoalState,
+  type GoalTurnScope,
 } from '@hyscode/agent-harness';
 import {
   getProviderRegistry,
@@ -178,8 +181,7 @@ export class TuiBridge {
   private readonly childAgents = new Map<string, Harness>();
   private output: BridgeOutput | null = null;
   private goalService: GoalService | null = null;
-  private readonly goalContinuationTimers = new Map<string, ReturnType<typeof setTimeout>>();
-  private readonly goalContinuationInFlight = new Set<string>();
+  private goalOrchestrator: GoalOrchestrator | null = null;
 
   constructor(output?: BridgeOutput) {
     this.output = output ?? null;
@@ -395,8 +397,9 @@ export class TuiBridge {
       onModeSwitchRequest: (request) => this.requestModeSwitch(request),
       onUserQuestionRequest: (id, questions, title) => this.requestUserQuestions(id, questions, title),
       terminalRuntime,
-      goalTools: createGoalTools(this.requireGoalService(), this.projectId, () => this.requireHarness().getAgentType() === 'build'),
-      goalToolsEnabled: () => this.requireHarness().getAgentType() === 'build',
+      goalTools: createGoalTools(this.requireGoalService(), this.projectId, () => this.isGoalAllowed()),
+      goalToolsEnabled: () => this.isGoalAllowed(),
+      goalBudgetGuard: (live) => this.checkGoalBudgetGuard(live),
       memoryManager: new MemoryManager((command, args) => this.requireHost().invoke(command, args)),
       sddDb,
       savePlanFile: async (sessionId, spec, tasks) => this.savePlanFile(sessionId, spec, tasks),
@@ -427,6 +430,21 @@ export class TuiBridge {
 
     this.harness.setAgentType(activeAgentType);
     this.harness.setMode(this.harness.getAgentType() === 'chat' ? 'chat' : 'agent');
+    this.goalOrchestrator = new GoalOrchestrator({
+      service: this.requireGoalService(),
+      isGoalAllowed: () => this.isGoalAllowed(),
+      isConversationCurrent: (conversationId) => this.session?.id === conversationId,
+      isTurnRunning: () => this.activeRun !== null,
+      startTurn: async (conversationId, source) => {
+        if (this.session?.id !== conversationId) return;
+        await this.sendMessage({
+          message: GOAL_CONTINUATION_MESSAGE,
+          hidden: true,
+          goalSource: source,
+        });
+      },
+      onDiagnostic: (message) => this.emitDiagnostic({ level: 'error', message: `[Goal] ${message}` }),
+    });
     await this.harness.loadSkills();
     this.harness.setActiveSkills(this.activeSkillsFor(this.harness.getAgentType(), skillLoader));
     await this.harness.refreshRules([workspacePath]);
@@ -470,19 +488,19 @@ export class TuiBridge {
     // isolated from the persisted session array so persistTurn can append the
     // completed turn exactly once.
     const history = [...(params.history ?? this.session?.messages ?? [])];
-    let goalRun: GoalRun | null = null;
-    let goalState: GoalState | null = null;
+    // Owned by the goal orchestrator: reported as soon as the harness result
+    // exists and settled exactly once from `finally`, so no control path can
+    // leak a started run.
+    let goalTurn: GoalTurnScope | null = null;
     const conversationId = this.session?.id;
-    if (conversationId && this.requireHarness().getAgentType() === 'build') {
-      goalState = await this.requireGoalService().getState(conversationId);
-      if (goalState?.goal.status === 'active') {
-        if (effectiveParams.goalRunId) {
-          goalRun = goalState.runs.find((candidate) => candidate.id === effectiveParams.goalRunId) ?? null;
-          if (!goalRun) throw new Error(`Goal run ${effectiveParams.goalRunId} was not found.`);
-        } else {
-          goalRun = await this.requireGoalService().startRun(conversationId, params.goalSource ?? 'user');
-        }
-      }
+    try {
+      goalTurn = await this.requireGoalOrchestrator().beginTurn(
+        conversationId ?? null,
+        params.goalSource ?? 'user',
+      );
+    } catch (goalError) {
+      this.emitDiagnostic({ level: 'error', message: `Goal turn refused: ${goalError instanceof Error ? goalError.message : String(goalError)}` });
+      throw goalError;
     }
     this.activeTurnId = null;
     this.activeTurnMessages = [];
@@ -491,55 +509,32 @@ export class TuiBridge {
       history,
       images: effectiveParams.images,
       ruleTargetPaths: effectiveParams.ruleTargetPaths,
-      goalContext: effectiveParams.goalContext ?? (goalState ? this.requireGoalService().buildContext(goalState) : undefined),
+      goalContext: effectiveParams.goalContext ?? goalTurn?.goalContext,
     });
     this.activeRun = run;
     try {
       const outcome = await run;
+      goalTurn?.report(outcome);
       await this.persistTurn(
         effectiveParams,
         outcome.response,
         outcome.turnRecord.tokenUsage,
         outcome.turnRecord.trace,
       );
-      if (goalRun && goalState) {
-        try {
-          const decision = await this.requireGoalService().finishTurn(goalState.goal.conversationId, {
-            runId: goalRun.id,
-            turnId: outcome.turnId,
-            status: outcome.status,
-            response: outcome.response,
-            tokenUsage: outcome.turnRecord.tokenUsage,
-            toolCalls: outcome.turnRecord.toolCalls,
-            durationMs: outcome.turnRecord.durationMs,
-            completionRequest: extractGoalCompletionRequest(outcome.turnRecord, outcome.turnId),
-          });
-          this.emit({ type: 'event', event: 'goal_updated', payload: decision.state });
-          if (decision.shouldContinue) this.scheduleGoalContinuation(decision.state.goal.conversationId);
-        } catch (goalError) {
-          this.emitDiagnostic({ level: 'error', message: `Failed to persist goal turn: ${goalError instanceof Error ? goalError.message : String(goalError)}` });
-        }
-      }
       return outcome;
     } catch (error) {
-      if (goalRun && goalState) {
-        try {
-          const decision = await this.requireGoalService().finishTurn(goalState.goal.conversationId, {
-            runId: goalRun.id,
-            turnId: this.activeTurnId ?? crypto.randomUUID(),
-            status: 'error',
-            tokenUsage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
-            toolCalls: [],
-            durationMs: 0,
-            error: error instanceof Error ? error.message : String(error),
-          });
-          this.emit({ type: 'event', event: 'goal_updated', payload: decision.state });
-        } catch (goalError) {
-          this.emitDiagnostic({ level: 'error', message: `Failed to account goal error: ${goalError instanceof Error ? goalError.message : String(goalError)}` });
-        }
-      }
+      const partial = this.requireHarness().getPartialTurnMetrics();
+      goalTurn?.reportError({
+        status: 'error',
+        turnId: this.activeTurnId ?? partial?.turnId ?? null,
+        error: error instanceof Error ? error.message : String(error),
+        tokenUsage: partial?.tokenUsage,
+        toolCalls: partial?.toolCalls ?? [],
+        durationMs: partial?.durationMs ?? 0,
+      });
       throw error;
     } finally {
+      await goalTurn?.settle();
       this.activeRun = null;
       this.activeTurnId = null;
       this.activeTurnMessages = [];
@@ -1087,9 +1082,8 @@ export class TuiBridge {
       firstFailure ??= asTerminalRuntimeFailure(error, operation);
     };
     const activeRun = this.activeRun;
-    for (const timer of this.goalContinuationTimers.values()) clearTimeout(timer);
-    this.goalContinuationTimers.clear();
-    this.goalContinuationInFlight.clear();
+    this.goalOrchestrator?.dispose();
+    this.goalOrchestrator = null;
     this.cancel();
     await activeRun?.catch((error: unknown) => capture(error, 'event'));
     for (const pending of this.hostRequests.values()) pending.reject(new Error('Runtime host was shut down.'));
@@ -1209,27 +1203,16 @@ export class TuiBridge {
   }
 
   private createGoalService(): GoalService {
-    const repository: GoalRepository = {
-      load: async (conversationId) => {
-        const raw = await this.dataStore.invoke<string | null>('db_goal_load_state', { conversationId });
-        return raw ? JSON.parse(raw) as GoalState : null;
-      },
-      save: async (state, expectedVersion) => {
-        const raw = await this.dataStore.invoke<string>('db_goal_save_state', {
-          stateJson: JSON.stringify(state),
-          expectedVersion,
-        });
-        return JSON.parse(raw) as GoalState;
-      },
-      clear: async (conversationId) => {
-        await this.dataStore.invoke('db_goal_clear_state', { conversationId });
-      },
-    };
     return new GoalService(
-      repository,
+      createInvokeGoalRepository(
+        <T>(command: string, args?: Record<string, unknown>) => this.dataStore.invoke<T>(command, args ?? {}),
+      ),
       (event: GoalChangeEvent) => {
         this.emit({ type: 'event', event: 'goal_updated', payload: event.state });
-        if (this.session && this.session.id === event.state?.goal.conversationId) {
+        // Route strictly by the event's own conversation so a clear for
+        // another session never wipes this session's goal (and a null state
+        // actually clears it instead of being dropped).
+        if (this.session && this.session.id === event.conversationId) {
           this.session = { ...this.session, goal: event.state };
         }
       },
@@ -1250,8 +1233,14 @@ export class TuiBridge {
     this.requireBuildGoalMode();
     const updates: GoalEditInput = {};
     if (typeof rawParams.objective === 'string') updates.objective = rawParams.objective;
-    if ('criteria' in rawParams || 'budget' in rawParams) {
-      throw new Error('Goal criteria and budget are defined by the agent after the objective is created.');
+    if ('criteria' in rawParams) {
+      throw new Error('Goal criteria are defined by the agent after the objective is created.');
+    }
+    if (rawParams.budget !== undefined) {
+      if (!rawParams.budget || typeof rawParams.budget !== 'object' || Array.isArray(rawParams.budget)) {
+        throw new Error('Goal budget must be an object like {"maxTurns": 100, "maxDurationMs": null}.');
+      }
+      updates.budget = rawParams.budget as GoalEditInput['budget'];
     }
     return this.requireGoalService().editGoal(this.requireSession().id, updates);
   }
@@ -1260,22 +1249,16 @@ export class TuiBridge {
     this.requireBuildGoalMode();
     const session = this.requireSession();
     if (this.activeRun) return;
-    const state = await this.requireGoalService().getState(session.id);
-    if (!state || state.goal.status !== 'active') return;
-    const run = await this.requireGoalService().startRun(session.id, 'user');
-    await this.sendMessage({
-      message: 'Continue the active persistent goal from its current checkpoint. Take the next concrete step and keep working until the goal is complete or a real blocker is reached.',
-      hidden: true,
-      goalRunId: run.id,
-      goalSource: 'user',
-    });
+    // Runs are never pre-started: the turn itself begins its run, so a
+    // send that throws (e.g. a turn already running) cannot leak an active run.
+    await this.requireGoalOrchestrator().startUserTurn(session.id);
   }
 
   private async pauseGoal(): Promise<GoalState> {
     this.requireBuildGoalMode();
     const session = this.requireSession();
     const state = await this.requireGoalService().pauseGoal(session.id);
-    this.clearGoalContinuationTimer(session.id);
+    this.requireGoalOrchestrator().clearContinuation(session.id);
     if (this.activeRun) this.cancel();
     return state;
   }
@@ -1292,7 +1275,7 @@ export class TuiBridge {
     this.requireBuildGoalMode();
     const session = this.requireSession();
     const state = await this.requireGoalService().cancelGoal(session.id);
-    this.clearGoalContinuationTimer(session.id);
+    this.requireGoalOrchestrator().clearContinuation(session.id);
     if (this.activeRun) this.cancel();
     return state;
   }
@@ -1300,49 +1283,9 @@ export class TuiBridge {
   private async clearGoal(): Promise<void> {
     this.requireBuildGoalMode();
     const session = this.requireSession();
-    this.clearGoalContinuationTimer(session.id);
+    this.requireGoalOrchestrator().clearContinuation(session.id);
     if (this.activeRun) this.cancel();
     await this.requireGoalService().clearGoal(session.id);
-  }
-
-  private scheduleGoalContinuation(conversationId: string): void {
-    if (this.goalContinuationTimers.has(conversationId) || this.goalContinuationInFlight.has(conversationId)) return;
-    const timer = setTimeout(() => {
-      this.goalContinuationTimers.delete(conversationId);
-      void this.runGoalContinuation(conversationId).catch((error) => {
-        this.emitDiagnostic({ level: 'error', message: `Goal continuation stopped: ${error instanceof Error ? error.message : String(error)}` });
-      });
-    }, 100);
-    this.goalContinuationTimers.set(conversationId, timer);
-  }
-
-  private async runGoalContinuation(conversationId: string): Promise<void> {
-    if (this.goalContinuationInFlight.has(conversationId) || this.session?.id !== conversationId) return;
-    if (this.requireHarness().getAgentType() !== 'build') return;
-    if (this.activeRun) {
-      this.scheduleGoalContinuation(conversationId);
-      return;
-    }
-    const state = await this.requireGoalService().getState(conversationId);
-    if (!state || state.goal.status !== 'active') return;
-    this.goalContinuationInFlight.add(conversationId);
-    try {
-      const run = await this.requireGoalService().startRun(conversationId, 'continuation');
-      await this.sendMessage({
-        message: 'Continue the active persistent goal from its current checkpoint. Take the next concrete step and keep working until the goal is complete or a real blocker is reached.',
-        hidden: true,
-        goalRunId: run.id,
-        goalSource: 'continuation',
-      });
-    } finally {
-      this.goalContinuationInFlight.delete(conversationId);
-    }
-  }
-
-  private clearGoalContinuationTimer(conversationId: string): void {
-    const timer = this.goalContinuationTimers.get(conversationId);
-    if (timer) clearTimeout(timer);
-    this.goalContinuationTimers.delete(conversationId);
   }
 
   private async connectMcpServers(): Promise<void> {
@@ -1835,10 +1778,44 @@ export class TuiBridge {
     return this.goalService;
   }
 
+  private requireGoalOrchestrator(): GoalOrchestrator {
+    if (!this.goalOrchestrator) throw new Error('Goal orchestrator is not initialized.');
+    return this.goalOrchestrator;
+  }
+
+  /**
+   * Single build-mode gate for goal tools, actions, and continuations. The
+   * harness agent type is the canonical source: it is also what exposes or
+   * hides the goal tools inside the turn loop.
+   */
+  private isGoalAllowed(): boolean {
+    return this.requireHarness().getAgentType() === 'build';
+  }
+
   private requireBuildGoalMode(): void {
-    if (this.requireHarness().getAgentType() !== 'build') {
+    if (!this.isGoalAllowed()) {
       throw new Error('Goal mode is available in Build mode only.');
     }
+  }
+
+  /**
+   * Mid-turn budget projection wired into the harness loop. Projects the
+   * live turn metrics onto the stored goal usage so the model gets one
+   * wrap-up advisory per turn instead of starting new work past the limit.
+   */
+  private async checkGoalBudgetGuard(live: GoalLiveMetrics): Promise<string | null> {
+    const sessionId = this.session?.id;
+    if (!sessionId || !this.isGoalAllowed()) return null;
+    const state = await this.requireGoalService().getState(sessionId).catch(() => null);
+    if (!state || state.goal.status !== 'active') return null;
+    const limit = budgetLimitFor(state.goal.budget, {
+      ...state.goal.usage,
+      totalTokens: state.goal.usage.totalTokens + (live.tokenUsage.totalTokens ?? 0),
+      toolCalls: state.goal.usage.toolCalls + live.toolCalls.length,
+      durationMs: state.goal.usage.durationMs + Math.max(0, live.durationMs),
+    });
+    if (!limit) return null;
+    return `Goal budget advisory: ${limit.reason}. Stop starting new work, summarize what remains, and end your turn so the runtime can pause the goal cleanly. Do not mark the goal complete.`;
   }
 
   private async pauseActiveGoalBeforeLeavingBuild(): Promise<void> {
@@ -1848,7 +1825,7 @@ export class TuiBridge {
     const state = await goalService.getState(session.id);
     if (!state || state.goal.status !== 'active') return;
     await goalService.pauseGoal(session.id);
-    this.clearGoalContinuationTimer(session.id);
+    this.requireGoalOrchestrator().clearContinuation(session.id);
     if (this.activeRun) this.cancel();
   }
 
@@ -2944,24 +2921,6 @@ function mergeTokenUsage(previous: TokenUsage | undefined, current: TokenUsage):
   return merged;
 }
 
-function extractGoalCompletionRequest(
-  record: import('@hyscode/agent-harness').TurnRecord,
-  turnId: string,
-): GoalCompletionRequest | undefined {
-  for (let index = record.toolCalls.length - 1; index >= 0; index -= 1) {
-    const metadata = record.toolCalls[index].output.metadata;
-    if (!metadata || metadata.action !== 'goal_completion_requested') continue;
-    const summary = typeof metadata.summary === 'string' ? metadata.summary.trim() : '';
-    if (!summary) return undefined;
-    return {
-      summary,
-      evidence: typeof metadata.evidence === 'string' ? metadata.evidence : undefined,
-      turnId,
-    };
-  }
-  return undefined;
-}
-
 function sumOptional(left: number | undefined, right: number | undefined): number | undefined {
   if (left === undefined && right === undefined) return undefined;
   return (left ?? 0) + (right ?? 0);
@@ -3110,7 +3069,6 @@ function normalizeSendParams(raw: Record<string, unknown>): SendMessageParams {
     ruleTargetPaths,
     contextAttachments,
     goalContext: typeof raw.goalContext === 'string' ? raw.goalContext : undefined,
-    goalRunId: typeof raw.goalRunId === 'string' ? raw.goalRunId : undefined,
     goalSource: raw.goalSource === 'continuation' || raw.goalSource === 'resume' || raw.goalSource === 'user'
       ? raw.goalSource
       : undefined,

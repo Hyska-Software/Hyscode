@@ -23,10 +23,13 @@ import { cn } from '@/lib/utils';
 import { GoalDetails } from './goal-details';
 import {
   barStatusLabel,
+  budgetDraftFromGoal,
   errorMessage,
   formatElapsed,
   getProgress,
+  parseBudgetDraft,
   type GoalActionKey,
+  type GoalBudgetField,
   type GoalDetailsActions,
   type GoalEditorMode,
   type GoalEditorState,
@@ -144,8 +147,11 @@ export function GoalBar() {
 
   const openEditor = (mode: GoalEditorMode): void => {
     if (!goal) return;
-    const valueByMode: Record<GoalEditorMode, string> = { objective: goal.goal.objective };
-    setEditor({ mode, value: valueByMode[mode] });
+    setEditor(
+      mode === 'budget'
+        ? { mode, values: budgetDraftFromGoal(goal) }
+        : { mode, value: goal.goal.objective },
+    );
     setEditorError(null);
     setNotice(null);
     setExpanded(true);
@@ -153,6 +159,21 @@ export function GoalBar() {
 
   const saveEditor = async (): Promise<void> => {
     if (!editor || busy) return;
+    if (editor.mode === 'budget') {
+      setPendingAction('editor');
+      setEditorError(null);
+      setNotice(null);
+      try {
+        await editActiveGoal({ budget: parseBudgetDraft(editor.values) });
+        setEditor(null);
+        setNotice({ tone: 'success', message: 'Goal budget updated.' });
+      } catch (actionError) {
+        setEditorError(errorMessage(actionError));
+      } finally {
+        setPendingAction(null);
+      }
+      return;
+    }
     const value = editor.value.trim();
     if (!value) {
       setEditorError('This field cannot be empty.');
@@ -203,7 +224,11 @@ export function GoalBar() {
     editorError,
     openEditor,
     changeEditorValue: (value) =>
-      setEditor((current) => (current ? { ...current, value } : current)),
+      setEditor((current) => (current?.mode === 'objective' ? { ...current, value } : current)),
+    changeBudgetValue: (field: GoalBudgetField, value: string) =>
+      setEditor((current) =>
+        current?.mode === 'budget' ? { ...current, values: { ...current.values, [field]: value } } : current,
+      ),
     cancelEditor: () => {
       setEditor(null);
       setEditorError(null);

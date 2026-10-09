@@ -144,20 +144,32 @@ contracts over its isolated `CliDataStore` JSON file. Both clients restore the
 goal with the session and emit `goal_updated`. Goal creation accepts only the
 user objective. The main agent then owns the acceptance criteria, checkpoint,
 evidence, and blocker metadata through its goal tools; user-facing controls
-are limited to create, edit the objective while paused, pause, resume, cancel,
-and clear.
+cover create, edit the objective while paused, edit the execution budget from
+any non-terminal state, pause, resume, cancel, and clear.
 Goal tools are exposed and executable only when the owning agent is in Build
 mode; switching away from Build pauses active execution and hides the tools.
 
-For each goal turn, the bridge starts a `GoalRun`, injects a fresh goal
-context into the Harness without writing it as a user message, and accounts the
-canonical Harness `turnId`, token usage, tool calls, duration, completion
-request, and errors. A successful turn schedules a queued continuation while
-the goal remains active; the queue stops when the goal is complete, paused,
-cancelled, or blocked. Goal token, turn, duration, tool-call, cost, and error
-budgets are unlimited. The Harness exposes `get_goal`, `create_goal`,
-`edit_goal`, `report_goal_progress`, `report_goal_blocker`, and `complete_goal`
-to the main Build agent; delegated children cannot mutate its control plane.
+For each goal turn, a `GoalOrchestrator` in `@hyscode/agent-harness` begins one
+`GoalRun` as late as possible, injects a fresh goal context into the Harness
+without writing it as a user message, and settles the run exactly once from a
+`finally` block — reported outcomes, error reports with partial usage, and
+unreported early returns (settled as cancelled) all flow through the same
+idempotent `settle()`, so no control path can leak an active run. The harness
+surfaces `complete_goal` as a typed `goalCompletionRequest` on `TurnOutcome`,
+and a mid-turn budget guard projects live turn metrics onto the stored budget
+to emit one wrap-up advisory per turn. A successful turn schedules a queued
+continuation while the goal remains active; continuations requested while a
+turn is in flight are remembered as pending and flushed when it ends, so the
+chain survives across auto-continued turns. The queue stops when the goal is
+complete, paused, cancelled, blocked, or limited. Goals run against a bounded
+default budget (50 turns, 5 minutes, 200 tool calls; tokens, cost, and error
+streak unlimited unless configured). Reaching a limit transitions the goal to
+`budget_limited` (or `usage_limited` for the error streak); the user can raise
+any limit — including from a limited state without pausing first — and resume.
+The Harness exposes `get_goal`, `create_goal`, `edit_goal`,
+`report_goal_progress`, `report_goal_blocker`, and `complete_goal` to the main
+Build agent; delegated children fail a single shared gate for every goal tool,
+including reads.
 
 Completion is evidence-aware. The agent must define at least one required
 criterion with `edit_goal`, and deterministic criteria (`file_exists`,

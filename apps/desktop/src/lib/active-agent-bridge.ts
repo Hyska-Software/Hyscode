@@ -56,12 +56,12 @@ export function cancelActiveAgentRun(): void {
   HarnessBridge.get().cancel();
 }
 
-export function setActiveAgentType(mode: AgentMode): void {
+export async function setActiveAgentType(mode: AgentMode): Promise<void> {
   if (isVortexLayout()) {
-    void vortexSessionRuntimeManager.setFocusedAgentType(mode);
+    await vortexSessionRuntimeManager.setFocusedAgentType(mode);
     return;
   }
-  HarnessBridge.get().setAgentType(mode);
+  await HarnessBridge.get().setAgentType(mode);
 }
 
 export async function createActiveGoal(objective: string): Promise<GoalState> {

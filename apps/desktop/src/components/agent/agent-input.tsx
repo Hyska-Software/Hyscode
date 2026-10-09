@@ -58,6 +58,7 @@ import { PROVIDERS } from '@/lib/provider-catalog';
 import type { ModelInfo } from '@/lib/provider-catalog';
 import { getProviderRegistry } from '@hyscode/ai-providers';
 import type { AIModel } from '@hyscode/ai-providers';
+import { parseGoalBudgetInput } from '@hyscode/agent-harness';
 
 // ─── Vision helpers ─────────────────────────────────────────────────────────
 
@@ -359,6 +360,14 @@ export function AgentInput({ goalModeEnabled = false, onGoalModeChange }: AgentI
       case 'edit':
         if (remainder) await editActiveGoal({ objective: remainder });
         break;
+      case 'budget':
+        if (!remainder) {
+          throw new Error(
+            'Usage: /goal budget turns=100 duration=10 tools=none — duration is in minutes, none clears a limit.',
+          );
+        }
+        await editActiveGoal({ budget: parseGoalBudgetInput(remainder) });
+        break;
       case 'pause':
         await pauseActiveGoal();
         break;
@@ -373,7 +382,6 @@ export function AgentInput({ goalModeEnabled = false, onGoalModeChange }: AgentI
         await clearActiveGoal();
         break;
       case 'criteria':
-      case 'budget':
       case 'progress':
       case 'evidence':
       case 'blocker':
@@ -390,7 +398,9 @@ export function AgentInput({ goalModeEnabled = false, onGoalModeChange }: AgentI
   };
 
   const handleModeChange = (newMode: AgentMode) => {
-    setActiveAgentType(newMode);
+    setActiveAgentType(newMode).catch(() => {
+      setMode(newMode);
+    });
     setMode(newMode);
     if (newMode !== 'build') {
       onGoalModeChange?.(false);

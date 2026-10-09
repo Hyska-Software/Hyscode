@@ -1,8 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import type { ToolCallRecord, ToolExecutionContext } from './types';
 import {
+  budgetLimitFor,
   createGoalTools,
+  extractGoalCompletionRequest,
+  GOAL_COMPLETION_ACTION,
   GoalService,
+  goalToolError,
+  parseGoalBudgetInput,
   type GoalRepository,
   type GoalState,
 } from './goal';
@@ -40,13 +45,14 @@ function successfulTool(toolName: string): ToolCallRecord {
   };
 }
 
-function goalToolContext(conversationId: string): ToolExecutionContext {
+function goalToolContext(conversationId: string, overrides: Partial<ToolExecutionContext> = {}): ToolExecutionContext {
   return {
     workspacePath: 'D:/workspace',
     conversationId,
     toolCallId: 'goal-tool-call',
     signal: new AbortController().signal,
     invoke: async <T>() => undefined as T,
+    ...overrides,
   };
 }
 
@@ -63,6 +69,21 @@ describe('GoalService', () => {
     expect(editTool?.definition.inputSchema.required).toEqual(['criteria']);
     expect(editProperties.criteria).toBeDefined();
     expect(editProperties.budget).toBeUndefined();
+  });
+
+  it('rejects every goal tool for sub-agents, including reads', async () => {
+    const tools = createGoalTools(new GoalService(createMemoryRepository()));
+    const subAgentContext = goalToolContext('conversation-delegation', { agentType: 'build', delegationLevel: 1 });
+
+    for (const tool of tools) {
+      const result = await tool.execute({}, subAgentContext);
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('Only the main agent');
+    }
+
+    expect(goalToolError({ agentType: 'build', delegationLevel: 1 })).toContain('Only the main agent');
+    expect(goalToolError({ agentType: 'chat', delegationLevel: 0 })).toContain('Build mode only');
+    expect(goalToolError({ agentType: 'build', delegationLevel: 0 })).toBeNull();
   });
 
   it('rejects goal tools outside Build mode', async () => {
@@ -306,5 +327,129 @@ describe('GoalService', () => {
     expect(decision.state.goal.status).toBe('paused');
     expect(decision.shouldContinue).toBe(false);
     expect(decision.state.events.at(-1)?.type).toBe('completion_denied');
+  });
+
+  it('lets the user edit the execution budget without pausing first', async () => {
+    const service = new GoalService(createMemoryRepository());
+    await service.createGoal('conversation-budget', 'project-1', 'Stay within limits');
+
+    const edited = await service.editGoal('conversation-budget', {
+      budget: { maxTurns: 100, maxDurationMs: 600_000, maxCostUsd: null },
+    });
+
+    expect(edited.goal.budget.maxTurns).toBe(100);
+    expect(edited.goal.budget.maxDurationMs).toBe(600_000);
+    // Untouched fields keep their defaults.
+    expect(edited.goal.budget.maxToolCalls).toBe(200);
+    expect(edited.events.at(-1)?.type).toBe('updated');
+  });
+
+  it('recovers a budget-limited goal through a budget edit and resume', async () => {
+    const service = new GoalService(createMemoryRepository());
+    await service.createGoal('conversation-recover', 'project-1', 'Recover the budget');
+    const run = await service.startRun('conversation-recover', 'user');
+    const limited = await service.finishTurn('conversation-recover', {
+      runId: run.id,
+      turnId: 'turn-1',
+      status: 'complete',
+      tokenUsage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
+      toolCalls: [],
+      durationMs: 400_000,
+    });
+    expect(limited.state.goal.status).toBe('budget_limited');
+
+    await expect(service.resumeGoal('conversation-recover')).rejects.toThrow('Edit the goal budget');
+
+    const edited = await service.editGoal('conversation-recover', { budget: { maxDurationMs: 3_600_000 } });
+    expect(edited.goal.status).toBe('budget_limited');
+    const resumed = await service.resumeGoal('conversation-recover');
+    expect(resumed.goal.status).toBe('active');
+    // A fresh run can start again after the budget was raised.
+    await expect(service.startRun('conversation-recover', 'user')).resolves.toBeDefined();
+  });
+
+  it('validates budget edits and keeps objective edits pause-gated', async () => {
+    const service = new GoalService(createMemoryRepository());
+    await service.createGoal('conversation-budget-rules', 'project-1', 'Validate edits');
+
+    await expect(service.editGoal('conversation-budget-rules', {
+      budget: { maxTurns: -5 },
+    })).rejects.toThrow('non-negative');
+    await expect(service.editGoal('conversation-budget-rules', {
+      budget: { maxTurns: Number.NaN },
+    })).rejects.toThrow('non-negative');
+    await expect(service.editGoal('conversation-budget-rules', {
+      budget: { unknownField: 1 } as never,
+    })).rejects.toThrow('Unknown budget field');
+
+    // Objective edits still require a paused goal.
+    await expect(service.editGoal('conversation-budget-rules', {
+      objective: 'Changed while running',
+    })).rejects.toThrow('expected paused');
+    await expect(service.editGoal('conversation-budget-rules', {})).rejects.toThrow(
+      'At least one goal field must be changed',
+    );
+  });
+
+  it('maps budget exhaustion to budget_limited and error storms to usage_limited', async () => {
+    const service = new GoalService(createMemoryRepository());
+    const created = await service.createGoal('conversation-limits', 'project-1', 'Classify limits');
+
+    expect(budgetLimitFor(created.goal.budget, created.goal.usage)).toBeNull();
+    expect(budgetLimitFor(created.goal.budget, { ...created.goal.usage, turns: 50 }))
+      .toMatchObject({ status: 'budget_limited', reason: 'turn budget reached' });
+    // The consecutive-error budget defaults to unlimited: error storms alone
+    // do not trip a limit unless the user configures one.
+    expect(budgetLimitFor(created.goal.budget, { ...created.goal.usage, consecutiveErrors: 10 })).toBeNull();
+    expect(budgetLimitFor(
+      { ...created.goal.budget, maxConsecutiveErrors: 3 },
+      { ...created.goal.usage, consecutiveErrors: 3 },
+    )).toMatchObject({ status: 'usage_limited', reason: 'consecutive error limit reached' });
+  });
+
+  it('parses user budget edits with minute durations and unlimited sentinels', () => {
+    expect(parseGoalBudgetInput('turns=100 duration=10 tools=none')).toEqual({
+      maxTurns: 100,
+      maxDurationMs: 600_000,
+      maxToolCalls: null,
+    });
+    expect(parseGoalBudgetInput('tokens=off, cost=unlimited errors=2')).toEqual({
+      maxTokens: null,
+      maxCostUsd: null,
+      maxConsecutiveErrors: 2,
+    });
+    expect(() => parseGoalBudgetInput('')).toThrow('Provide budget edits');
+    expect(() => parseGoalBudgetInput('turns')).toThrow('key=value');
+    expect(() => parseGoalBudgetInput('bogus=3')).toThrow('Unknown budget field');
+    expect(() => parseGoalBudgetInput('turns=-2')).toThrow('positive number');
+  });
+
+  it('extracts the newest completion request onto the real turn id', () => {
+    const stale = {
+      id: 'call-1',
+      toolName: 'complete_goal',
+      input: {},
+      output: {
+        success: true,
+        output: 'ok',
+        metadata: { action: GOAL_COMPLETION_ACTION, summary: 'Stale claim.', evidence: 'stale', toolCallId: 'wrong-id' },
+      },
+      durationMs: 1,
+      approved: true,
+      timestamp: new Date().toISOString(),
+    };
+    const fresh = {
+      ...stale,
+      id: 'call-2',
+      output: {
+        success: true,
+        output: 'ok',
+        metadata: { action: GOAL_COMPLETION_ACTION, summary: 'Fresh claim.', evidence: 'fresh', toolCallId: 'wrong-id' },
+      },
+    };
+    const request = extractGoalCompletionRequest('turn-real', [stale, fresh]);
+
+    expect(request).toEqual({ summary: 'Fresh claim.', evidence: 'fresh', turnId: 'turn-real' });
+    expect(extractGoalCompletionRequest('turn-real', [successfulTool('write_file')])).toBeNull();
   });
 });

@@ -197,11 +197,9 @@ function ModeSection() {
   const currentMode = useAgentStore((s) => s.mode);
 
   const handleSelect = useCallback((mode: AgentMode) => {
-    try {
-      getActiveAgentBridge().setAgentType(mode);
-    } catch {
+    getActiveAgentBridge().setAgentType(mode).catch(() => {
       useAgentStore.getState().setMode(mode);
-    }
+    });
   }, []);
 
   return (

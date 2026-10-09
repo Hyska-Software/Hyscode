@@ -13,6 +13,8 @@ import { createActiveGoal } from '@/lib/active-agent-bridge';
 import { cn } from '@/lib/utils';
 import {
   errorMessage,
+  GOAL_BUDGET_FIELDS,
+  type GoalBudgetField,
   type GoalEditorMode,
   type GoalEditorState,
 } from './goal-card-model';
@@ -123,6 +125,7 @@ export function EditorPanel({
   error,
   busy,
   onChange,
+  onBudgetChange,
   onCancel,
   onSave,
 }: {
@@ -130,6 +133,7 @@ export function EditorPanel({
   error: string | null;
   busy: boolean;
   onChange: (value: string) => void;
+  onBudgetChange: (field: GoalBudgetField, value: string) => void;
   onCancel: () => void;
   onSave: () => void;
 }) {
@@ -138,6 +142,11 @@ export function EditorPanel({
       title: 'Edit objective',
       description: 'Keep the outcome concrete so the agent can make progress without guessing.',
       placeholder: 'Describe the result you want…',
+    },
+    budget: {
+      title: 'Edit budget',
+      description: 'Raise a limit to recover a budget-limited goal, or clear a field for unlimited. Applies immediately.',
+      placeholder: '',
     },
   };
   const copy = config[editor.mode];
@@ -161,25 +170,59 @@ export function EditorPanel({
           <X className="h-3.5 w-3.5" />
         </button>
       </div>
-      <Textarea
-        id="goal-editor-value"
-        autoFocus
-        value={editor.value}
-        onChange={(event) => onChange(event.target.value)}
-        onKeyDown={(event) => {
-          if (event.key === 'Escape') onCancel();
-          if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
-            event.preventDefault();
-            onSave();
-          }
-        }}
-        placeholder={copy.placeholder}
-        aria-label={copy.title}
-        aria-invalid={Boolean(error)}
-        className={cn(
-          'mt-3 min-h-[76px] resize-y bg-background text-[11px] leading-relaxed',
-        )}
-      />
+      {editor.mode === 'objective' ? (
+        <Textarea
+          id="goal-editor-value"
+          autoFocus
+          value={editor.value}
+          onChange={(event) => onChange(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === 'Escape') onCancel();
+            if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
+              event.preventDefault();
+              onSave();
+            }
+          }}
+          placeholder={copy.placeholder}
+          aria-label={copy.title}
+          aria-invalid={Boolean(error)}
+          className={cn(
+            'mt-3 min-h-[76px] resize-y bg-background text-[11px] leading-relaxed',
+          )}
+        />
+      ) : (
+        <div className="mt-3 grid grid-cols-2 gap-1.5" role="group" aria-label="Goal budget limits">
+          {GOAL_BUDGET_FIELDS.map(({ field, label, hint }) => (
+            <label
+              key={field}
+              className="rounded-md border border-border/40 bg-background px-2 py-1.5"
+              title={hint}
+            >
+              <span className="block text-[9px] font-medium uppercase tracking-wide text-muted-foreground">
+                {label}
+              </span>
+              <input
+                type="number"
+                min={0}
+                step="any"
+                value={editor.values[field]}
+                onChange={(event) => onBudgetChange(field, event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Escape') onCancel();
+                  if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
+                    event.preventDefault();
+                    onSave();
+                  }
+                }}
+                placeholder="∞"
+                aria-label={`${label} budget limit, empty for unlimited`}
+                aria-invalid={Boolean(error)}
+                className="mt-0.5 w-full bg-transparent font-mono text-[11px] tabular-nums text-foreground outline-none placeholder:text-muted-foreground/50"
+              />
+            </label>
+          ))}
+        </div>
+      )}
       {error && (
         <p className="mt-2 flex items-start gap-1.5 text-[10px] leading-relaxed text-destructive" role="alert">
           <CircleAlert className="mt-0.5 h-3 w-3 shrink-0" />
@@ -271,7 +314,7 @@ export function EmptyGoalState() {
             aria-invalid={Boolean(error)}
           />
           <p className="mt-1.5 text-[9px] leading-relaxed text-muted-foreground">
-            The agent will define the acceptance criteria, checkpoint, evidence, and execution metadata after you start. Goal tokens and turns are unlimited.
+            The agent will define the acceptance criteria, checkpoint, evidence, and execution metadata after you start. Execution runs against a bounded budget (50 turns, 5 minutes, 200 tool calls by default) that you can edit at any time.
           </p>
           {error && (
             <p className="mt-2 flex items-start gap-1.5 text-[10px] text-destructive" role="alert">

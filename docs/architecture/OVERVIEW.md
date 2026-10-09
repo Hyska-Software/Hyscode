@@ -59,11 +59,13 @@ usage accounting, and a bounded event timeline. Desktop persists it through
 SQLite migration `017_goals.sql`; the TUI persists the same state shape in its
 isolated JSON data store.
 
-The bridge starts one `GoalRun` at a time, injects the current goal context into
-the shared Harness, and schedules follow-up turns while the goal remains active.
-Goal creation accepts only the user objective; the main agent defines the
-criteria, checkpoint, evidence, and blocker metadata with its goal tools.
-Tokens, turns, tools, duration, cost, and error budgets are unlimited.
+The bridge delegates execution to a shared `GoalOrchestrator`: one `GoalRun` at
+a time, the current goal context injected into the shared Harness, and
+follow-up turns scheduled while the goal remains active. Goal creation accepts
+only the user objective; the main agent defines the criteria, checkpoint,
+evidence, and blocker metadata with its goal tools. Execution budgets default
+to bounded (50 turns, 5 minutes, 200 tool calls) and are user-editable, so a
+budget-limited goal recovers by raising the limit and resuming.
 `complete_goal` is a request, not an assertion: deterministic criteria are
 validated after the turn, and a request without criteria is denied. A repeated
 blocker is promoted to `blocked` only after three distinct turns with the same
@@ -75,9 +77,10 @@ the TUI renders a dedicated Goal panel and supports the equivalent lifecycle
 commands. Both clients restore the goal with the session and receive the same
 additive `goal_updated` bridge event. Goal tools are exposed only in Build mode;
 switching away from Build pauses active execution. User controls can create,
-edit the objective only while the goal is paused, pause, resume, cancel, or
-clear without encoding control state into the visible chat transcript;
-completion and progress metadata remain agent-owned.
+edit the objective only while the goal is paused, edit the budget from any
+non-terminal state, pause, resume, cancel, or clear without encoding control
+state into the visible chat transcript; completion and progress metadata
+remain agent-owned.
 
 ## Desktop diagnostics contract
 

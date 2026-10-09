@@ -347,7 +347,7 @@ export class VortexSessionRuntimeManager {
 
   async setFocusedAgentType(mode: AgentMode): Promise<void> {
     const record = await this.ensureFocusedRuntime();
-    record.bridge?.setAgentType(mode);
+    await record.bridge?.setAgentType(mode);
   }
 
   cancelSession(projectPath: string, conversationId: string): void {

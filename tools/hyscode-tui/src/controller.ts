@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import {
   isSensitiveTerminalPrompt,
   normalizeTerminalOutput,
+  parseGoalBudgetInput,
   projectTerminalProgress,
   projectTerminalRuntimeSummary,
   validateTerminalFailure,
@@ -1737,7 +1738,23 @@ export class TuiController {
       await this.request('goal_edit', { objective: text });
       return;
     }
-    if (['criteria', 'budget', 'progress', 'evidence', 'blocker', 'complete'].includes(normalized)) {
+    if (normalized === 'budget') {
+      if (!this.state.goal) {
+        this.state.status = 'No persistent goal is active.';
+        return;
+      }
+      if (!text) {
+        this.state.status = 'Usage: /goal budget turns=100 duration=10 tools=none — duration is in minutes, none clears a limit.';
+        return;
+      }
+      try {
+        await this.request('goal_edit', { budget: parseGoalBudgetInput(text) });
+      } catch (error) {
+        this.state.status = error instanceof Error ? error.message : 'The goal budget could not be updated.';
+      }
+      return;
+    }
+    if (['criteria', 'progress', 'evidence', 'blocker', 'complete'].includes(normalized)) {
       this.state.status = 'Goal criteria, progress, evidence, blockers, and completion are managed by the agent.';
       return;
     }

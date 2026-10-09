@@ -71,6 +71,7 @@ import { ExternalPathAccessRegistry } from './external-path-access';
 import { ReadLoopMiddleware } from './read-loop';
 import { createKanbanTools } from './task-integration';
 import type { KanbanTaskIntegration } from './task-integration';
+import { extractGoalCompletionRequest } from './goal-tools';
 import {
   RequestPreparation,
   estimateActualCost,
@@ -148,10 +149,25 @@ export interface HarnessOptions {
   goalTools?: ToolHandler[];
   /** Goal tools are available only while the host is in Build mode. */
   goalToolsEnabled?: () => boolean;
+  /**
+   * Mid-turn budget projection for persistent goals. Called with the live
+   * turn metrics before each iteration; when it returns text, the harness
+   * injects it once per turn as a wrap-up advisory. Sync or async.
+   */
+  goalBudgetGuard?: (metrics: GoalLiveMetrics) => string | null | Promise<string | null>;
   /** 0 = main agent (default), >0 = nested delegation depth. Exposed to tools
    *  via ToolExecutionContext.delegationLevel. */
   delegationLevel?: number;
 }
+
+/** Live turn metrics surfaced to the goal budget guard and error accounting. */
+export type GoalLiveMetrics = {
+  turnId: string;
+  tokenUsage: TokenUsage;
+  /** Live reference to the turn's tool-call history. */
+  toolCalls: readonly ToolCallRecord[];
+  durationMs: number;
+};
 
 export class Harness {
   private config: HarnessConfig;
@@ -216,6 +232,11 @@ export class Harness {
   private ownerId: string | null = null;
   private readonly goalToolNames: ReadonlySet<string>;
   private readonly goalToolsEnabled: (() => boolean) | undefined;
+  private readonly goalBudgetGuard: HarnessOptions['goalBudgetGuard'];
+  /** Live metrics for the in-progress turn; read by error accounting and the
+   *  budget guard. Reset at each turn start, overwritten by the next turn. */
+  private liveTurnMetrics: { turnId: string; startedAt: number; usage: TokenUsage } | null = null;
+  private budgetAdvisoryInjected = false;
   private environment: HarnessEnvironment;
   private readCache = new Map<string, string>();
   private externalPathAccess: ExternalPathAccessRegistry;
@@ -237,6 +258,7 @@ export class Harness {
     this.externalPathAccess = options.externalPathAccess ?? new ExternalPathAccessRegistry();
     this.goalToolNames = new Set((options.goalTools ?? []).map((tool) => tool.definition.name));
     this.goalToolsEnabled = options.goalToolsEnabled;
+    this.goalBudgetGuard = options.goalBudgetGuard;
     this.environment = {
       workspacePath: options.workspacePath,
       projectId: options.projectId,
@@ -360,6 +382,23 @@ export class Harness {
   /** Return the nesting depth used to constrain child-only tools. */
   getDelegationLevel(): number {
     return this.delegationLevel;
+  }
+
+  /**
+   * Live metrics for the in-progress turn (or the just-finished turn until
+   * the next one starts). Bridges use this for goal accounting when a turn
+   * throws instead of returning an outcome, so partial usage is preserved
+   * instead of zeroed.
+   */
+  getPartialTurnMetrics(): GoalLiveMetrics | null {
+    const live = this.liveTurnMetrics;
+    if (!live) return null;
+    return {
+      turnId: live.turnId,
+      tokenUsage: { ...live.usage },
+      toolCalls: this.toolCallHistory,
+      durationMs: Date.now() - live.startedAt,
+    };
   }
 
   /** Set the stable owner id (sub-agent id) used to isolate per-owner resources. */
@@ -693,7 +732,7 @@ export class Harness {
         this.traceRecorder.recordError(message);
         this.finishTurn(
           'error',
-          {
+          this.liveTurnMetrics ? { ...this.liveTurnMetrics.usage } : {
             inputTokens: 0,
             outputTokens: 0,
             totalTokens: 0,
@@ -725,6 +764,10 @@ export class Harness {
     const activeTurn = this.turnController.begin();
     this.cancelled = false;
     this.toolCallHistory = [];
+    // No live metrics yet: anything thrown before the usage tracker below is
+    // set up has consumed nothing.
+    this.liveTurnMetrics = null;
+    this.budgetAdvisoryInjected = false;
     this.loopDetection.resetCounts();
     this.contextManager.clearGatheredFiles();
     this.readCache.clear();
@@ -828,6 +871,9 @@ export class Harness {
       cacheReadTokens: 0,
       cacheWriteTokens: 0,
     };
+    // Track the live usage object in place so a thrown error can still be
+    // accounted with its partial metrics instead of zeros.
+    this.liveTurnMetrics = { turnId: activeTurn.turnId, startedAt: turnStart, usage: tokenUsage };
     /** Middleware-injected context messages for the next iteration */
     let middlewareInjections: string[] = [];
     let selectedTools: import('@hyscode/ai-providers').ToolDefinition[] | null = null;
@@ -851,6 +897,25 @@ export class Harness {
       this.traceRecorder.startIteration(iteration);
       this.currentIteration = iteration;
       this.emit({ type: 'turn_start', conversationId: this.conversationId, iteration });
+
+      // Persistent-goal budget advisory: once per turn, project the live
+      // metrics onto the stored budget and tell the model to wrap up instead
+      // of starting new work when a limit is already crossed.
+      if (this.goalBudgetGuard && !this.budgetAdvisoryInjected) {
+        const advisory = await this.goalBudgetGuard({
+          turnId: activeTurn.turnId,
+          tokenUsage,
+          toolCalls: this.toolCallHistory,
+          durationMs: Date.now() - turnStart,
+        });
+        if (advisory?.trim()) {
+          this.budgetAdvisoryInjected = true;
+          this.contextManager.addMessage({
+            role: 'user',
+            content: [{ type: 'text', text: advisory.trim() }],
+          });
+        }
+      }
 
       // Inject any middleware-generated context from the previous iteration
       if (middlewareInjections.length > 0) {
@@ -1777,6 +1842,9 @@ export class Harness {
       response: finalResponse,
       toolCalls: this.toolCallHistory,
       turnRecord,
+      // First-class completion signal: the orchestrator reads this instead of
+      // scraping tool-output metadata on every bridge.
+      goalCompletionRequest: extractGoalCompletionRequest(activeTurn.turnId, this.toolCallHistory),
     };
   }
 

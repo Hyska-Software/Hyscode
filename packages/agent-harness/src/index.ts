@@ -82,6 +82,7 @@ export type {
   GoalBlocker,
   GoalBudget,
   GoalBudgetInput,
+  GoalBudgetLimit,
   GoalChangeEvent,
   GoalCompletionRequest,
   GoalCriterion,
@@ -93,6 +94,8 @@ export type {
   GoalEvidenceSource,
   GoalEvent,
   GoalEventType,
+  GoalInvoke,
+  GoalOrchestratorDeps,
   GoalRepository,
   GoalRun,
   GoalRunSource,
@@ -102,6 +105,8 @@ export type {
   GoalToolRuntime,
   GoalTurnAccounting,
   GoalTurnDecision,
+  GoalTurnErrorReport,
+  GoalTurnScope,
   GoalValidationContext,
   GoalValidationResult,
   GoalValidator,
@@ -118,7 +123,7 @@ export {
 
 // ─── Core Modules ───────────────────────────────────────────────────────────
 export { Harness } from './harness';
-export type { HarnessOptions } from './harness';
+export type { GoalLiveMetrics, HarnessOptions } from './harness';
 export type { ChildHarnessOptions, HarnessEnvironment } from './environment';
 export {
   DelegatedRunner,
@@ -177,8 +182,18 @@ export {
   createDefaultGoalBudget,
   createDefaultGoalValidator,
   createGoalTools,
+  createInvokeGoalRepository,
   DEFAULT_GOAL_BUDGET,
+  extractGoalCompletionRequest,
+  GOAL_COMPLETION_ACTION,
+  GOAL_CONTINUATION_MESSAGE,
+  GoalOrchestrator,
   GoalService,
+  goalToolError,
+  isGoalState,
+  mergeGoalBudget,
+  parseGoalBudgetInput,
+  budgetLimitFor,
 } from './goal';
 export { createKanbanTools } from './task-integration';
 export type {

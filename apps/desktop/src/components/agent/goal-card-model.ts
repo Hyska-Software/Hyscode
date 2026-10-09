@@ -1,4 +1,4 @@
-import type { GoalState } from '@hyscode/agent-harness';
+import type { GoalBudgetInput, GoalState } from '@hyscode/agent-harness';
 import {
   CircleAlert,
   CircleCheck,
@@ -12,18 +12,77 @@ import {
 } from 'lucide-react';
 
 export type GoalStatus = GoalState['goal']['status'];
-export type GoalEditorMode = 'objective';
+export type GoalEditorMode = 'objective' | 'budget';
 export type GoalActionKey = 'pause' | 'resume' | 'stop' | 'clear';
+
+export type GoalBudgetField =
+  | 'turns'
+  | 'durationMinutes'
+  | 'toolCalls'
+  | 'tokens'
+  | 'costUsd'
+  | 'consecutiveErrors';
+
+/** Form draft for the budget editor: every field is a raw string, empty means unlimited. */
+export type GoalBudgetDraft = Record<GoalBudgetField, string>;
+
+export const GOAL_BUDGET_FIELDS: Array<{ field: GoalBudgetField; label: string; hint: string }> = [
+  { field: 'turns', label: 'Turns', hint: 'Max agent turns' },
+  { field: 'durationMinutes', label: 'Minutes', hint: 'Max total runtime' },
+  { field: 'toolCalls', label: 'Tool calls', hint: 'Max tool executions' },
+  { field: 'tokens', label: 'Tokens', hint: 'Max total tokens' },
+  { field: 'costUsd', label: 'Cost (USD)', hint: 'Max estimated cost' },
+  { field: 'consecutiveErrors', label: 'Error streak', hint: 'Max consecutive errors' },
+];
+
+/** Prefills the budget draft from the live goal; null limits render empty (unlimited). */
+export function budgetDraftFromGoal(goal: GoalState): GoalBudgetDraft {
+  const numberOrEmpty = (value: number | null): string => (value === null ? '' : String(value));
+  const minutesOrEmpty = (value: number | null): string =>
+    value === null ? '' : String(Number((value / 60_000).toFixed(2)));
+  return {
+    turns: numberOrEmpty(goal.goal.budget.maxTurns),
+    durationMinutes: minutesOrEmpty(goal.goal.budget.maxDurationMs),
+    toolCalls: numberOrEmpty(goal.goal.budget.maxToolCalls),
+    tokens: numberOrEmpty(goal.goal.budget.maxTokens),
+    costUsd: numberOrEmpty(goal.goal.budget.maxCostUsd),
+    consecutiveErrors: numberOrEmpty(goal.goal.budget.maxConsecutiveErrors),
+  };
+}
+
+/**
+ * Converts a budget draft into a validated budget patch. Empty fields clear
+ * the limit (unlimited); every other field must be a positive number.
+ */
+export function parseBudgetDraft(draft: GoalBudgetDraft): GoalBudgetInput {
+  const parseField = (field: GoalBudgetField, label: string): number | null => {
+    const raw = draft[field].trim();
+    if (!raw) return null;
+    const value = Number(raw);
+    if (!Number.isFinite(value) || value <= 0) {
+      throw new Error(`Budget "${label}" must be a positive number or empty for unlimited.`);
+    }
+    return value;
+  };
+  const durationMinutes = parseField('durationMinutes', 'Minutes');
+  return {
+    maxTurns: parseField('turns', 'Turns'),
+    maxDurationMs: durationMinutes === null ? null : Math.round(durationMinutes * 60_000),
+    maxToolCalls: parseField('toolCalls', 'Tool calls'),
+    maxTokens: parseField('tokens', 'Tokens'),
+    maxCostUsd: parseField('costUsd', 'Cost (USD)'),
+    maxConsecutiveErrors: parseField('consecutiveErrors', 'Error streak'),
+  };
+}
 
 export type GoalNotice = {
   tone: 'success' | 'error';
   message: string;
 };
 
-export type GoalEditorState = {
-  mode: GoalEditorMode;
-  value: string;
-};
+export type GoalEditorState =
+  | { mode: 'objective'; value: string }
+  | { mode: 'budget'; values: GoalBudgetDraft };
 
 /**
  * Shared action/state contract passed from `GoalBar` (which owns the state)
@@ -44,6 +103,7 @@ export type GoalDetailsActions = {
   editorError: string | null;
   openEditor: (mode: GoalEditorMode) => void;
   changeEditorValue: (value: string) => void;
+  changeBudgetValue: (field: GoalBudgetField, value: string) => void;
   cancelEditor: () => void;
   saveEditor: () => Promise<void>;
   showAllCriteria: boolean;
@@ -87,7 +147,7 @@ export function statusMeta(status: GoalStatus): StatusMeta {
     case 'budget_limited':
       return {
         label: 'Budget limited',
-        description: 'Execution stopped after reaching the configured budget.',
+        description: 'Execution stopped after reaching the configured budget. Edit the budget, then resume.',
         className: 'text-warning',
         badgeClassName: 'border-warning/30 bg-warning/10 text-warning',
         Icon: Gauge,
